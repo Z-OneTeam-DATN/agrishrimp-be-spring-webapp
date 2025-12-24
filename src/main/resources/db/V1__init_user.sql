@@ -1,0 +1,13 @@
+-- =============================================
+-- Migration: V1__init_user.sql
+-- Mô tả    : Khởi tạo bảng users cho hệ thống
+-- Mục đích :
+--   - Lưu thông tin tài khoản người dùng
+--   - Đây là migration KHỞI ĐẦU, không được sửa
+--
+-- Lưu ý team:
+--   Không chỉnh sửa file này sau khi đã chạy
+--   Nếu cần thay đổi cấu trúc users
+--      → tạo migration mới (V2, V3, ...)
+-- =============================================
+
