@@ -9,8 +9,10 @@ services:
     environment:
       MYSQL_DATABASE: ${MYSQL_DATABASE}
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
     ports:
-      - "${DB_LOCAL_PORT}:${DB_DOCKER_PORT}"  # Map 14331:3306
+      - "${DB_LOCAL_PORT}:3306"
     volumes:
       - mysql_data:/var/lib/mysql
     networks:
@@ -20,7 +22,6 @@ services:
       "--collation-server=utf8_general_ci",
       "--init-connect=SET NAMES utf8"
     ]
-
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-p${MYSQL_ROOT_PASSWORD}"]
       interval: 10s
@@ -28,11 +29,11 @@ services:
       retries: 5
 
   # 2. BACKEND SERVICE
-  be_minizaloapp:
+  be_agrishrimp:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: be_minizaloapp
+    container_name: be_agrishrimp
     restart: always
     depends_on:
       mysql_db:
@@ -41,9 +42,10 @@ services:
       - .env
 
     environment:
-      - SPRING_DATASOURCE_URL=jdbc:mysql://mysql_db:${DB_DOCKER_PORT}/${MYSQL_DATABASE}?useSSL=false&allowPublicKeyRetrieval=true&characterEncoding=UTF-8
+      - SPRING_DATASOURCE_URL=jdbc:mysql://mysql_db:3306/${MYSQL_DATABASE}?useSSL=false&allowPublicKeyRetrieval=true&characterEncoding=UTF-8
       - SPRING_DATASOURCE_USERNAME=${MYSQL_USER}
       - SPRING_DATASOURCE_PASSWORD=${MYSQL_PASSWORD}
+      - SPRING_DATASOURCE_HIKARI_CONNECTION_TIMEOUT=20000
 
     ports:
       - "${APP_PORT}:8080"
