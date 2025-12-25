@@ -1,49 +1,58 @@
 version: "3.9"
 
-services:       # Định nghĩa các container
-  mysql_db:     #1: Database
-    image: mysql:5.7           # Tải image MySQL bản 5.7 từ Docker Hub.
-    container_name: mysql_db   # Đặt tên container là 'mysql_db'.
-    restart: always            # Nếu DB bị lỗi tắt, Docker sẽ tự bật lại.
-    environment:               # Thiết lập biến môi trường cho MySQL.
-      MYSQL_DATABASE: DB_ShrimpDATN      # Tự động tạo database khi chạy lần đầu.
-      MYSQL_ROOT_PASSWORD: 1234567
+services:
+  # 1. DATABASE SERVICE
+  mysql_db:
+    image: mysql:5.7
+    container_name: mysql_db
+    restart: always
+    environment:
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
     ports:
-      - "14331:3306"           # Ánh xạ: Máy vào 14331 -> Container nhận 3306.
+      - "${DB_LOCAL_PORT}:${DB_DOCKER_PORT}"  # Map 14331:3306
     volumes:
-      - mysql_data:/var/lib/mysql # Kỹ thuật Named Volume: Lưu dữ liệu ra ổ cứng máy thật để không bị mất khi xóa container.
+      - mysql_data:/var/lib/mysql
     networks:
-      - app_network            # Gắn vào mạng nội bộ 'app_network'.
-    command: [                 # (UTF-8)
+      - app_network
+    command: [
       "--character-set-server=utf8",
       "--collation-server=utf8_general_ci",
       "--init-connect=SET NAMES utf8"
     ]
-    healthcheck:               # Kiểm tra container.
-      test: [ "CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-p1234567" ]
-      interval: 10s            # Cứ 10s hỏi 1 lần.
-      timeout: 5s              # Chờ 5s không trả lời coi như lỗi.
-      retries: 5               # Thử 5 lần thất bại thì coi như container chết.
 
-  be_minizaloapp: #2: Backend Spring Boot
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-p${MYSQL_ROOT_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # 2. BACKEND SERVICE
+  be_minizaloapp:
     build:
-      context: .              # Build từ thư mục hiện tại.
-      dockerfile: Dockerfile  # Dùng file tên là 'Dockerfile'.
+      context: .
+      dockerfile: Dockerfile
     container_name: be_minizaloapp
     restart: always
-    depends_on:               # Quy định thứ tự chạy.
+    depends_on:
       mysql_db:
-        condition: service_healthy # Chỉ chạy App khi MySQL trạng thái "healthy".
+        condition: service_healthy
     env_file:
-      - .env                  # Lấy cấu hình từ file .env.
-    ports:
-      - "3001:8080"           # Máy thật vào 3001 -> Container App 8080.
-    networks:
-      - app_network           # Chung mạng với DB để gọi nhau được.
+      - .env
 
-volumes:       # Khai báo volume dùng chung.
+    environment:
+      - SPRING_DATASOURCE_URL=jdbc:mysql://mysql_db:${DB_DOCKER_PORT}/${MYSQL_DATABASE}?useSSL=false&allowPublicKeyRetrieval=true&characterEncoding=UTF-8
+      - SPRING_DATASOURCE_USERNAME=${MYSQL_USER}
+      - SPRING_DATASOURCE_PASSWORD=${MYSQL_PASSWORD}
+
+    ports:
+      - "${APP_PORT}:8080"
+    networks:
+      - app_network
+
+volumes:
   mysql_data:
 
-networks:      # Khai báo mạng dùng chung.
+networks:
   app_network:
     driver: bridge
