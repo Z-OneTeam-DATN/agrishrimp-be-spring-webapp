@@ -1,12 +1,13 @@
 package com.agrishrimp.agrishrimpbe.dto.auth;
 
+import jakarta.validation.constraints.NotBlank;
 import lombok.Data;
 
 @Data
 public class SocialLoginRequest {
-    // Token mà Frontend nhận được từ Google/Facebook
+    @NotBlank(message = "Token không được để trống")
     private String token;
 
-    // Loại mạng xã hội: "GOOGLE" hoặc "FACEBOOK"
+    @NotBlank(message = "Provider không được để trống")
     private String provider;
 }
