@@ -36,8 +36,14 @@ public class AuthController {
 
     @PostMapping("/social-login")
     @Operation(summary = "Đăng nhập Mạng xã hội", description = "Đăng nhập bằng Google/Facebook Token.")
-    // SỬA: Đổi ApiResponse -> ResponseEntity cho chuẩn RESTful
     public ResponseEntity<LoginResponse> socialLogin(@Valid @RequestBody SocialLoginRequest request) {
         return ResponseEntity.ok(authService.loginSocial(request));
+    }
+
+    @PostMapping("/forgot-password")
+    @Operation(summary = "Quên mật khẩu", description = "Gửi yêu cầu đặt lại mật khẩu kèm Captcha.")
+    public ResponseEntity<String> forgotPassword(@Valid @RequestBody ForgotPasswordRequest request) {
+        authService.forgotPassword(request);
+        return ResponseEntity.ok("Yêu cầu thành công. Vui lòng kiểm tra Email hoặc SMS để đặt lại mật khẩu.");
     }
 }

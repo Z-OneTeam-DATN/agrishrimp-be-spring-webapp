@@ -4,6 +4,7 @@ import com.agrishrimp.agrishrimpbe.dto.auth.*;
 import com.agrishrimp.agrishrimpbe.exception.BadRequestException;
 import com.agrishrimp.agrishrimpbe.model.User;
 import com.agrishrimp.agrishrimpbe.repository.UserRepository;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -18,7 +19,7 @@ import org.springframework.util.MultiValueMap;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
-
+import com.agrishrimp.agrishrimpbe.service.EmailService;
 @Service
 @RequiredArgsConstructor
 public class AuthService {
@@ -26,6 +27,7 @@ public class AuthService {
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
     private final RestTemplate restTemplate;
+    private final EmailService emailService;
 
     // --- Cấu hình Social ---
     @Value("${social.google.user-info-uri}")
@@ -256,5 +258,38 @@ public class AuthService {
         } catch (Exception e) {
             throw new BadRequestException("Lỗi kết nối đến dịch vụ xác thực Captcha: " + e.getMessage());
         }
+    }
+
+    /**
+     * FORGOT PASSWORD
+     */
+    public void forgotPassword(ForgotPasswordRequest request) {
+        // 1. Verify Captcha
+        verifyCaptcha(request.getCaptchaToken());
+
+        // 2. Tìm User
+        User user;
+        if (request.getIdentifier().contains("@")) {
+            user = userRepository.findByEmailAndIsDeletedFalse(request.getIdentifier()).orElse(null);
+        } else {
+            user = userRepository.findByPhoneNumberAndIsDeletedFalse(request.getIdentifier()).orElse(null);
+        }
+
+        if (user == null) {
+            throw new BadRequestException("Không tìm thấy tài khoản nào với thông tin này.");
+        }
+
+        // 3. Kiểm tra user có email không (Nếu đăng ký bằng SĐT mà chưa có email thì ko gửi được)
+        if (user.getEmail() == null || user.getEmail().isEmpty()) {
+            throw new BadRequestException("Tài khoản này chưa cập nhật Email, không thể gửi link khôi phục.");
+        }
+
+        // 4. Tạo token
+        String resetToken = UUID.randomUUID().toString();
+
+        // TODO: Nhớ lưu token vào DB ở bước này nhé
+
+        // 5. Gửi Email thật
+        emailService.sendResetPasswordEmail(user.getEmail(), resetToken);
     }
 }
