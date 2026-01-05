@@ -11,6 +11,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 
+import java.time.LocalDateTime;
 import java.util.Map;
 import java.util.UUID;
 import java.util.regex.Pattern;
@@ -272,24 +273,58 @@ public class AuthService {
         if (request.getIdentifier().contains("@")) {
             user = userRepository.findByEmailAndIsDeletedFalse(request.getIdentifier()).orElse(null);
         } else {
+
             user = userRepository.findByPhoneNumberAndIsDeletedFalse(request.getIdentifier()).orElse(null);
         }
 
         if (user == null) {
-            throw new BadRequestException("Không tìm thấy tài khoản nào với thông tin này.");
+
+            throw new BadRequestException("Không tìm thấy tài khoản.");
         }
 
-        // 3. Kiểm tra user có email không (Nếu đăng ký bằng SĐT mà chưa có email thì ko gửi được)
         if (user.getEmail() == null || user.getEmail().isEmpty()) {
-            throw new BadRequestException("Tài khoản này chưa cập nhật Email, không thể gửi link khôi phục.");
+            throw new BadRequestException("Tài khoản chưa có email để khôi phục.");
         }
 
-        // 4. Tạo token
+        // 3. Tạo token & Thời gian hết hạn (ví dụ: 15 phút)
         String resetToken = UUID.randomUUID().toString();
 
-        // TODO: Nhớ lưu token vào DB ở bước này nhé
 
-        // 5. Gửi Email thật
+        user.setResetPasswordToken(resetToken);
+        user.setResetPasswordTokenExpiry(LocalDateTime.now().plusMinutes(15));
+        userRepository.save(user);
+
+
+        // 4. Gửi Email
+        // Link gửi đi thường dạng: https://your-frontend.com/reset-password?token=...
         emailService.sendResetPasswordEmail(user.getEmail(), resetToken);
+    }
+
+    /**
+     * MỚI: RESET PASSWORD (Xử lý form tạo mật khẩu mới)
+     */
+    public void resetPassword(ResetPasswordRequest request) {
+        // 1. Kiểm tra mật khẩu xác nhận
+        if (!request.getNewPassword().equals(request.getConfirmPassword())) {
+            throw new BadRequestException("Mật khẩu xác nhận không khớp.");
+        }
+
+        // 2. Tìm User bằng token
+        User user = userRepository.findByResetPasswordToken(request.getToken())
+                .orElseThrow(() -> new BadRequestException("Token không hợp lệ hoặc đường dẫn đã thay đổi."));
+
+        // 3. Kiểm tra hạn sử dụng Token
+        if (user.getResetPasswordTokenExpiry().isBefore(LocalDateTime.now())) {
+            throw new BadRequestException("Đường dẫn khôi phục mật khẩu đã hết hạn. Vui lòng yêu cầu lại.");
+        }
+
+        // 4. Cập nhật mật khẩu mới
+        user.setPasswordHash(passwordEncoder.encode(request.getNewPassword()));
+
+        // 5. Xóa token để không dùng lại được nữa
+        user.setResetPasswordToken(null);
+        user.setResetPasswordTokenExpiry(null);
+
+        userRepository.save(user);
     }
 }

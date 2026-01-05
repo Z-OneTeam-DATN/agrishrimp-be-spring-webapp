@@ -46,4 +46,10 @@ public class AuthController {
         authService.forgotPassword(request);
         return ResponseEntity.ok("Yêu cầu thành công. Vui lòng kiểm tra Email hoặc SMS để đặt lại mật khẩu.");
     }
+    @PostMapping("/reset-password")
+    @Operation(summary = "Đặt lại mật khẩu", description = "Dùng token từ email để thiết lập mật khẩu mới.")
+    public ResponseEntity<String> resetPassword(@Valid @RequestBody ResetPasswordRequest request) {
+        authService.resetPassword(request);
+        return ResponseEntity.ok("Đặt lại mật khẩu thành công. Bạn có thể đăng nhập ngay bây giờ.");
+    }
 }
