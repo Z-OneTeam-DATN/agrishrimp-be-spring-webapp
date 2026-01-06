@@ -1,5 +1,5 @@
 package com.agrishrimp.agrishrimpbe.service;
-
+import com.agrishrimp.agrishrimpbe.model.enums.Status;
 import com.agrishrimp.agrishrimpbe.dto.auth.*;
 import com.agrishrimp.agrishrimpbe.exception.BadRequestException;
 import com.agrishrimp.agrishrimpbe.model.User;
@@ -71,7 +71,7 @@ public class AuthService {
             throw new BadRequestException(genericErrorMsg);
         }
 
-        if (user.getStatus() != User.Status.ACTIVE) {
+        if (user.getStatus() != Status.ACTIVE) {
             throw new BadRequestException("Tài khoản đã bị khóa hoặc không khả dụng.");
         }
 
@@ -127,7 +127,7 @@ public class AuthService {
         newUser.setIsNewsletterSubscribed(request.getIsNewsletterSubscribed());
 
         // Set ACTIVE luôn (Bỏ qua OTP theo yêu cầu cũ)
-        newUser.setStatus(User.Status.ACTIVE);
+        newUser.setStatus(Status.ACTIVE);
         newUser.setIsDeleted(false);
         newUser.setAuthProvider("LOCAL");
         newUser.setPasswordHash(passwordEncoder.encode(request.getPassword()));
@@ -201,7 +201,7 @@ public class AuthService {
             user.setAvatarUrl(avatarUrl);
             user.setAuthProvider(request.getProvider().toUpperCase());
             user.setProviderId(providerId);
-            user.setStatus(User.Status.ACTIVE);
+            user.setStatus(Status.ACTIVE);
             user.setIsDeleted(false);
             user.setIsNewsletterSubscribed(false);
             user.setPasswordHash(passwordEncoder.encode(UUID.randomUUID().toString()));

@@ -7,6 +7,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.mail.javamail.MimeMessageHelper;
 import org.springframework.stereotype.Service;
+import org.thymeleaf.TemplateEngine;
+import org.thymeleaf.context.Context;
 
 import java.nio.charset.StandardCharsets;
 
@@ -16,20 +18,19 @@ import java.nio.charset.StandardCharsets;
 public class EmailService {
 
     private final JavaMailSender javaMailSender;
+    private final TemplateEngine templateEngine; // Inject TemplateEngine của Thymeleaf
 
     public void sendResetPasswordEmail(String toEmail, String resetToken) {
-        // Link frontend (ví dụ chạy localhost port 3000)
-        String resetLink = "http://localhost:3000/reset-password?token=" + resetToken;
 
+        String resetLink = "http://localhost:3000/reset-password?token=" + resetToken;
         String subject = "AgriShrimp - Yêu cầu đặt lại mật khẩu";
 
-        // Nội dung Email (HTML)
-        String content = "<p>Xin chào,</p>"
-                + "<p>Bạn vừa yêu cầu đặt lại mật khẩu cho tài khoản AgriShrimp.</p>"
-                + "<p>Vui lòng nhấn vào link bên dưới để thiết lập mật khẩu mới:</p>"
-                + "<p><a href=\"" + resetLink + "\">Đặt lại mật khẩu ngay</a></p>"
-                + "<br>"
-                + "<p>Nếu bạn không yêu cầu, vui lòng bỏ qua email này.</p>";
+
+        Context context = new Context();
+        context.setVariable("resetLink", resetLink);
+
+        // Render file HTML từ templates/email/reset-password.html
+        String content = templateEngine.process("email/reset-password", context);
 
         try {
             MimeMessage message = javaMailSender.createMimeMessage();
