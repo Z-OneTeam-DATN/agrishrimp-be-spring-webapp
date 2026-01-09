@@ -23,7 +23,6 @@ public class AuthController {
 
     @PostMapping("/login")
     @Operation(summary = "Đăng nhập", description = "Đăng nhập bằng Email/SĐT và Mật khẩu.")
-    // SỬA: Đổi ApiResponse -> ResponseEntity cho chuẩn RESTful
     public ResponseEntity<LoginResponse> login(@Valid @RequestBody LoginRequest request) {
         return ResponseEntity.ok(authService.login(request));
     }
