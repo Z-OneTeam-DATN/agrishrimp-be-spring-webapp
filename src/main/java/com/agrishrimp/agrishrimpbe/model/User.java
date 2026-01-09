@@ -8,7 +8,7 @@ import org.hibernate.annotations.UpdateTimestamp;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
-
+import com.agrishrimp.agrishrimpbe.model.enums.Status;
 @Entity
 @Table(name = "users")
 @Getter
@@ -70,15 +70,6 @@ public class User {
     @UpdateTimestamp
     @Column(name = "updated_at")
     private LocalDateTime updatedAt;
-
-
-    public enum Status {
-        ACTIVE,
-        INACTIVE,
-        BANNED,
-        UNVERIFIED
-    }
-
 
     @Column(name = "reset_password_token")
     private String resetPasswordToken;
