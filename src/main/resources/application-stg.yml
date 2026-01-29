@@ -1,0 +1,57 @@
+server:
+  port: 8080
+
+spring:
+  servlet:
+    multipart:
+      max-file-size: 100MB
+      max-request-size: 100MB
+  datasource:
+    driver-class-name: org.postgresql.Driver
+    url: '${DBMS_CONNECTION:}'
+    username: '${DBMS_USERNAME:}'
+    password: '${DBMS_PASSWORD:}'
+  jpa:
+    show-sql: true
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+    hibernate:
+      format_sql: true
+      ddl-auto: validate
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      password:
+      timeout: 60000
+cloud:
+  aws:
+    accessKey: ${AWS_ACCESS_KEY_ID:}
+    secretKey: ${AWS_SECRET_ACCESS_KEY:}
+    region: ${AWS_REGION:ap-southeast-1}
+  s3:
+    bucket-name: chat-webapp-nghiadev
+    upload-dir: webapp
+    region: ${AWS_REGION:ap-southeast-1}
+
+# Security configuration related to JWT
+security:
+  jwt:
+    secret-key: '${SECURITY_JWT_SECRET_KEY:1TjXchw5FloESb63Kc+DFhTARvpWL4jUGCwfGWxuG5SIf/1y/LgJxHnMqaF6A/ij}'
+    issuer: '${DOMAIN:localhost}'
+    expiry-time-in-seconds: 86400 # 1 day
+    refreshable-duration: 604800 # 7 day
+
+app:
+  cors:
+    allowed-origins: ${CORS_ALLOWED-ORIGINS:}
+  websocket:
+    allowed-origins: ${websocket_ALLOWED-ORIGINS:}
+
+mnl:
+  tmp-dir: mnt/
+
+logging:
+  level:
+    org.springframework.web.filter.CorsFilter: DEBUG

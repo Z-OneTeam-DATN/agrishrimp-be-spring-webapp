@@ -1,61 +1,45 @@
-version: "3.9"
+version: '3.8'
 
 services:
-  # 1. DATABASE SERVICE
-  mysql_db:
-    image: mysql:5.7
-    container_name: mysql_db
+  # Dịch vụ MySQL
+  db_agrishrimp:
+    image: mysql:8.0
+    container_name: mysql_agrishrimp
     restart: always
     environment:
-      MYSQL_DATABASE: ${MYSQL_DATABASE}
-      MYSQL_ROOT_PASSWORD: 1234567
-      MYSQL_USER: ${MYSQL_USER}
-      MYSQL_PASSWORD: "Ngoisao360@"
-
+      MYSQL_DATABASE: agri_shrimp_db
+      MYSQL_ROOT_PASSWORD: your_password_here
     ports:
-      - "${DB_LOCAL_PORT}:3306"
+      - "3306:3306"
     volumes:
       - mysql_data:/var/lib/mysql
-    networks:
-      - app_network
-    command: [
-      "--character-set-server=utf8",
-      "--collation-server=utf8_general_ci",
-      "--init-connect=SET NAMES utf8"
-    ]
-    healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-p${MYSQL_ROOT_PASSWORD}"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
 
-  # 2. BACKEND SERVICE
+  # Dịch vụ Redis
+  redis_agrishrimp:
+    image: redis:alpine
+    container_name: redis_agrishrimp
+    restart: always
+    ports:
+      - "6379:6379"
+
+  # Dịch vụ Backend Spring Boot
   be_agrishrimp:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: be_agrishrimp
+    container_name: backend_agrishrimp
     restart: always
-    depends_on:
-      mysql_db:
-        condition: service_healthy
-    env_file:
-      - .env
-
-    environment:
-      - SPRING_DATASOURCE_URL=jdbc:mysql://mysql_db:3306/${MYSQL_DATABASE}?useSSL=false&allowPublicKeyRetrieval=true&characterEncoding=UTF-8
-      - SPRING_DATASOURCE_USERNAME=${MYSQL_USER}
-      - SPRING_DATASOURCE_PASSWORD=${MYSQL_PASSWORD}
-      - SPRING_DATASOURCE_HIKARI_CONNECTION_TIMEOUT=20000
-
     ports:
-      - "${APP_PORT}:8080"
-    networks:
-      - app_network
+      - "8001:8001"
+    depends_on:
+      - db_agrishrimp
+      - redis_agrishrimp
+    environment:
+      # Ghi đè cấu hình để Backend gọi đúng tên Container thay vì localhost
+      DBMS_CONNECTION: jdbc:mysql://db_agrishrimp:3306/agri_shrimp_db?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
+      DBMS_USERNAME: root
+      DBMS_PASSWORD: your_password_here
+      SPRING_DATA_REDIS_HOST: redis_agrishrimp
 
 volumes:
   mysql_data:
-
-networks:
-  app_network:
-    driver: bridge

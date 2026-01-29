@@ -1,30 +1,48 @@
-# ==================== STAGE 1: BUILD ====================
-FROM maven:3.9-sapmachine-21 AS build
+# Stage 1: Build the application
+FROM maven:3.9-eclipse-temurin-21 AS build
+
+# Set working directory
 WORKDIR /app
 
-# Cache dependency (Kỹ thuật Layer Caching)
-COPY pom.xml ./
+# Copy Maven files for dependency caching
+COPY pom.xml .
+COPY .mvn .mvn
+COPY mvnw .
+COPY mvnw.cmd .
 
-# Tải trước toàn bộ thư viện về máy.
-RUN mvn dependency:go-offline
+# Download dependencies (cached if pom.xml hasn't changed)
+RUN ./mvnw dependency:go-offline -B
 
-# Copy source code & build
+# Copy source code
 COPY src ./src
 
-# Lệnh build: Xóa sạch (clean), đóng gói (package), dùng profile (prod or dev ), bỏ qua test unit (skipTests).
-RUN mvn clean package -Pdev -DskipTests
+# Build the application
+RUN ./mvnw clean package -DskipTests -B
 
-# ==================== STAGE 2: RUNTIME ====================
-FROM eclipse-temurin:21-jdk-jammy
+# Stage 2: Run the application
+FROM eclipse-temurin:21-jre-alpine
+
+# Set working directory
 WORKDIR /app
 
-# Lấy file .jar đã tạo ra ở giai đoạn 'build'.
+# Create a non-root user for security
+RUN addgroup -S spring && adduser -S spring -G spring
+
+# Copy the JAR from build stage
 COPY --from=build /app/target/*.jar app.jar
 
+# Change ownership to spring user
+RUN chown -R spring:spring /app
+
+# Switch to non-root user
+USER spring:spring
+
+# Expose the default Spring Boot port
 EXPOSE 8080
 
-# Cấu hình bộ nhớ cho Java trong container.
-ENV JAVA_OPTS="-XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0"
+# Health check
+HEALTHCHECK --interval=30s --timeout=3s --start-period=40s --retries=3 \
+  CMD wget --no-verbose --tries=1 --spider http://localhost:8080/actuator/health || exit 1
 
-# Lệnh chạy cuối:
-ENTRYPOINT ["sh", "-c", "java $JAVA_OPTS -jar app.jar"]
+# Run the application
+ENTRYPOINT ["java", "-jar", "/app/app.jar"]

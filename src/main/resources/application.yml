@@ -1,0 +1,23 @@
+spring:
+  application:
+    name: agri-shrimp
+  profiles:
+    active:
+      dev
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+      base-path: /actuator
+  endpoint:
+    health:
+      show-details: when-authorized
+      probes:
+        enabled: true
+  health:
+    livenessState:
+      enabled: true
+    readinessState:
+      enabled: true
