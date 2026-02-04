@@ -13,8 +13,8 @@ import java.util.Collections;
 public class CustomUserDetail extends User {
    private final UserDetail userDetail;
 
-    public CustomUserDetail(String userName, String password, UserDetail userDetail) {
-        super(userName, password, Collections.emptyList());
+    public CustomUserDetail(String userName, String password, boolean enabled, boolean accountNonLocked, UserDetail userDetail) {
+        super(userName, password, enabled, true, true, accountNonLocked, Collections.emptyList());
         this.userDetail = userDetail;
     }
 }

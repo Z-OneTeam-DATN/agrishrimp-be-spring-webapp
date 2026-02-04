@@ -11,13 +11,20 @@ import lombok.experimental.FieldDefaults;
 @NoArgsConstructor
 public class RoleDto {
 
-  String name;
-  boolean saveFlag;
-  boolean deleteFlag;
+    Long id;
+    String slug;
+    String displayName;
+    String description;
+    Boolean isSystem;
 
-  public RoleDto(Role role) {
-    this.name = role.getName();
-    this.saveFlag = role.isSaveFlag();
-    this.deleteFlag = role.isDeleteFlag();
-  }
+    // Constructor map từ Entity sang DTO
+    public RoleDto(Role role) {
+        if (role != null) {
+            this.id = role.getId();
+            this.slug = role.getSlug();
+            this.displayName = role.getDisplayName();
+            this.description = role.getDescription();
+            this.isSystem = role.getIsSystem();
+        }
+    }
 }

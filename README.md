@@ -15,7 +15,7 @@ Nền tảng API cho dự án **agri-shrimp** sử dụng **JWT authentication**
 
 - Java 24 (JDK)
 - Maven 3.8+ (hoặc sử dụng `./mvnw`)
-- PostgreSQL
+- MySql
 - Redis (token blacklist khi logout)
 
 ## Cấu trúc thư mục chính
@@ -111,27 +111,24 @@ Mở `src/main/resources/application-dev.yml` và cập nhật đúng thông tin
 ```yaml
 spring:
   datasource:
-    url: jdbc:postgresql://localhost:5432/agri_shrimp_db
-    username: your_db_user
-    password: your_db_password
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: ${DBMS_CONNECTION:jdbc:mysql://localhost:3306/agri_shrimp_db?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true}
+    username: ${DBMS_USERNAME:root}
+    password: ${DBMS_PASSWORD:your_password_here}
+
   jpa:
-    hibernate:
-      ddl-auto: update
     show-sql: true
+    hibernate:
+      ddl-auto: update 
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.MySQL8Dialect
+        format_sql: true
 
-security:
-  jwt:
-    secret-key: ${SECURITY_JWT_SECRET_KEY}
-    issuer: ${DOMAIN:localhost}
-    expiry-time-in-seconds: 86400
-    refreshable-duration: 604800
-
-spring:
   data:
     redis:
-      host: localhost
+      host: ${SPRING_DATA_REDIS_HOST:localhost}
       port: 6379
-      password:
       timeout: 60000
 ```
 

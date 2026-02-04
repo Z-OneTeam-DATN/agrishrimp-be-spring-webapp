@@ -34,4 +34,5 @@ public class BaseEntity {
   Long createdByUserId;
   @LastModifiedBy
   Long updatedByUserId;
+
 }

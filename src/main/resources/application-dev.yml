@@ -1,29 +1,112 @@
-server:
-  port: 8001
+#server:
+#  port: 8001
+#
+#spring:
+#  datasource:
+#    driver-class-name: com.mysql.cj.jdbc.Driver
+#    # Ưu tiên lấy từ biến môi trường của Docker, nếu không có thì dùng localhost
+#    url: ${DBMS_CONNECTION:jdbc:mysql://localhost:3306/agri_shrimp_db?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true}
+#    username: ${DBMS_USERNAME:root}
+#    password: ${DBMS_PASSWORD:123456zoneteam}
+#
+#  jpa:
+#    show-sql: true
+#    hibernate:
+#      ddl-auto: update
+#    properties:
+#      hibernate:
+#        dialect: org.hibernate.dialect.MySQL8Dialect
+#        format_sql: true
+#
+#  data:
+#    redis:
+#      host: ${SPRING_DATA_REDIS_HOST:localhost}
+#      port: 6379
+#      timeout: 60000
+#
+#cloud:
+#  aws:
+#    accessKey: ${AWS_ACCESS_KEY_ID:}
+#    secretKey: ${AWS_SECRET_ACCESS_KEY:}
+#    region: ${AWS_REGION:ap-southeast-1}
+#  s3:
+#    bucket-name: agri-shrimp-storage
+#    upload-dir: webapp
+#    region: ${AWS_REGION:ap-southeast-1}
+#
+#security:
+#  jwt:
+#    secret-key: '${SECURITY_JWT_SECRET_KEY:1TjXchw5FloESb63Kc+DFhTARvpWL4jUGCwfGWxuG5SIf/1y/LgJxHnMqaF6A/ij}'
+#    issuer: '${DOMAIN:localhost}'
+#    expiry-time-in-seconds: 86400
+#    refreshable-duration: 604800
+#
+#app:
+#  cors:
+#    allowed-origins: "http://localhost:3000,http://127.0.0.1:3000,http://192.168.1.12:3000/"
+#  websocket:
+#    allowed-origins: "http://localhost:3000,http://127.0.0.1:3000,http://192.168.1.12:3000/"
+#
+#mnl:
+#  tmp-dir: mnt/
+#
+#logging:
+#  level:
+#    org.springframework.web.filter.CorsFilter: DEBUG
 
 spring:
-  datasource:
-    driver-class-name: com.mysql.cj.jdbc.Driver
-    # Ưu tiên lấy từ biến môi trường của Docker, nếu không có thì dùng localhost
-    url: ${DBMS_CONNECTION:jdbc:mysql://localhost:3306/agri_shrimp_db?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true}
-    username: ${DBMS_USERNAME:root}
-    password: ${DBMS_PASSWORD:your_password_here}
+  application:
+    name: agri-shrimp
 
+  # 1. CẤU HÌNH DATABASE (MYSQL)
+  datasource:
+    url: jdbc:mysql://localhost:3307/agri_shrimp_db?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
+    username: root
+    password: 123456zoneteam
+    driver-class-name: com.mysql.cj.jdbc.Driver
+
+  # 2. CẤU HÌNH JPA
   jpa:
-    show-sql: true
     hibernate:
-      ddl-auto: update # Tự tạo bảng khi Docker dựng xong DB trống
+      ddl-auto: update
+    show-sql: true
     properties:
       hibernate:
-        dialect: org.hibernate.dialect.MySQL8Dialect
         format_sql: true
+        dialect: org.hibernate.dialect.MySQLDialect
 
+  # 3. CẤU HÌNH REDIS
   data:
     redis:
-      host: ${SPRING_DATA_REDIS_HOST:localhost}
+      host: localhost
       port: 6379
-      timeout: 60000
 
+  # 4. CẤU HÌNH MAIN
+  main:
+    allow-bean-definition-overriding: true
+
+
+# 5. CẤU HÌNH JWT
+security:
+  jwt:
+    secret-key: 404E635266556A586E3272357538782F413F4428472B4B6250645367566B5970
+    issuer: agri-shrimp
+    expiry-time-in-seconds: 3600 # 1 giờ
+    refreshable-duration: 604800 # 7 ngày
+
+# 6. CẤU HÌNH APP (CORS)
+app:
+  cors:
+    allowed-origins: "http://localhost:3000,http://localhost:8080"
+  turnstile:
+    secret-key: "0x4AAAAAACWEfgMhY3lG-CqER4Ayl1OtWOY"
+    url: "https://challenges.cloudflare.com/turnstile/v0/siteverify"
+  google:
+    client-id: "716238456770-avu71bkjh5nngpq1j5gs7euull9kn663.apps.googleusercontent.com"
+  cookie:
+    secure: false     # true khi deploy HTTPS
+    same-site: Lax
+# 7. CẤU HÌNH AWS
 cloud:
   aws:
     accessKey: ${AWS_ACCESS_KEY_ID:}
@@ -33,23 +116,3 @@ cloud:
     bucket-name: agri-shrimp-storage
     upload-dir: webapp
     region: ${AWS_REGION:ap-southeast-1}
-
-security:
-  jwt:
-    secret-key: '${SECURITY_JWT_SECRET_KEY:1TjXchw5FloESb63Kc+DFhTARvpWL4jUGCwfGWxuG5SIf/1y/LgJxHnMqaF6A/ij}'
-    issuer: '${DOMAIN:localhost}'
-    expiry-time-in-seconds: 86400
-    refreshable-duration: 604800
-
-app:
-  cors:
-    allowed-origins: "http://localhost:3000,http://127.0.0.1:3000,http://192.168.1.12:3000/"
-  websocket:
-    allowed-origins: "http://localhost:3000,http://127.0.0.1:3000,http://192.168.1.12:3000/"
-
-mnl:
-  tmp-dir: mnt/
-
-logging:
-  level:
-    org.springframework.web.filter.CorsFilter: DEBUG

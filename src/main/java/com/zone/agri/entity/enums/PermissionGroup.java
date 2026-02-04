@@ -1,0 +1,18 @@
+package com.zone.agri.entity.enums;
+
+public enum PermissionGroup {
+
+    SYSTEM_ACCOUNT,
+    USER_PROFILE,
+
+    PRODUCT_CATALOG,
+    ORDER_TRANSACTION,
+
+    FARM_MANAGEMENT_AI,
+    WAREHOUSE_LOGISTICS,
+
+    PROMOTION_VOUCHER,
+    REPORT_DASHBOARD,
+
+    NOTIFICATION_MANAGEMENT
+}

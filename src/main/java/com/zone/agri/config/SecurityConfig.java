@@ -23,6 +23,8 @@ import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 import org.springframework.web.filter.CorsFilter;
 
+import java.util.List;
+
 @Configuration
 @EnableWebSecurity
 @RequiredArgsConstructor
@@ -42,13 +44,20 @@ public class SecurityConfig {
         .sessionManagement(
             session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
         .addFilterBefore(new JWTFilter(jwtUtils), UsernamePasswordAuthenticationFilter.class)
-        .authorizeHttpRequests(request -> request
-            .requestMatchers(
-                "/api/auth/login",
-                "/api/auth/refresh",
-                "/api/auth/signup").permitAll()
-            .anyRequest().authenticated()
-        )
+//        .authorizeHttpRequests(request -> request
+//            .requestMatchers(
+//                    "/api/auth/**",
+//                    "/swagger-ui/**",
+//                    "/swagger-ui.html",
+//                    "/v3/api-docs/**",
+//                    "/swagger-resources/**",
+//                    "/configuration/**",
+//                    "/api-docs/**").permitAll()
+//            .anyRequest().authenticated()
+//        )
+            .authorizeHttpRequests(request -> request
+                            .requestMatchers("/**").permitAll()
+                )
         .exceptionHandling(exception -> exception
             .accessDeniedHandler(accessDeniedHandler)
             .authenticationEntryPoint(jwtAuthenticationEntryPoint))
@@ -68,17 +77,24 @@ public class SecurityConfig {
     return config.getAuthenticationManager();
   }
 
-  @Bean
-  public CorsFilter corsFilter() {
-    CorsConfiguration config = new CorsConfiguration();
-    config.addAllowedOrigin(allowedOriginPatterns);
-    config.addAllowedHeader("*");
-    config.addAllowedMethod("*");
-    config.setAllowCredentials(true);
+    @Bean
+    public CorsFilter corsFilter() {
+        CorsConfiguration config = new CorsConfiguration();
 
-    UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
-    source.registerCorsConfiguration("/**", config);
-    return new CorsFilter(source);
-  }
+
+        // FE của bạn
+        config.setAllowedOriginPatterns(List.of(
+                "http://localhost:3000",
+                "https://*.trycloudflare.com"
+        ));
+        config.addAllowedHeader("*");
+        config.addAllowedMethod("*");
+        config.setAllowCredentials(true);
+
+        UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
+        source.registerCorsConfiguration("/**", config);
+
+        return new CorsFilter(source);
+    }
 
 }

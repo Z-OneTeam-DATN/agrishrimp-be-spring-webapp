@@ -8,9 +8,9 @@ services:
     restart: always
     environment:
       MYSQL_DATABASE: agri_shrimp_db
-      MYSQL_ROOT_PASSWORD: your_password_here
+      MYSQL_ROOT_PASSWORD: 123456zoneteam
     ports:
-      - "3306:3306"
+      - "3307:3306"
     volumes:
       - mysql_data:/var/lib/mysql
 
@@ -38,8 +38,9 @@ services:
       # Ghi đè cấu hình để Backend gọi đúng tên Container thay vì localhost
       DBMS_CONNECTION: jdbc:mysql://db_agrishrimp:3306/agri_shrimp_db?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
       DBMS_USERNAME: root
-      DBMS_PASSWORD: your_password_here
+      DBMS_PASSWORD: 123456zoneteam
       SPRING_DATA_REDIS_HOST: redis_agrishrimp
+      SPRING_JPA_HIBERNATE_DDL_AUTO: update
 
 volumes:
   mysql_data:

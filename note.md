@@ -1,0 +1,1 @@
+docker-compose up -d db_agrishrimp redis_agrishrimp
