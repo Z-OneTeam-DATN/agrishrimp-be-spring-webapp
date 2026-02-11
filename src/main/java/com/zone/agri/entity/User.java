@@ -9,6 +9,7 @@ import lombok.experimental.FieldDefaults;
 import lombok.experimental.SuperBuilder;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.List;
 
 @Entity
 @Table(name = "users")
@@ -70,4 +71,38 @@ public class User extends BaseEntity {
     @Enumerated(EnumType.STRING)
     @Column(name = "auth_provider")
     private AuthProvider provider;
+
+    @OneToMany(mappedBy = "user", fetch = FetchType.LAZY)
+    @ToString.Exclude
+    private List<CartItem> cartItems;
+
+    @OneToMany(mappedBy = "user", fetch = FetchType.LAZY)
+    @ToString.Exclude
+    private List<Review> reviews;
+
+    @OneToMany(mappedBy = "user", fetch = FetchType.LAZY)
+    @ToString.Exclude
+    private List<UserVoucher> userVouchers;
+
+    @OneToMany(mappedBy = "user", fetch = FetchType.LAZY, cascade = CascadeType.ALL)
+    @ToString.Exclude
+    @EqualsAndHashCode.Exclude
+    private List<UserAddress> addresses;
+
+    @OneToMany(mappedBy = "user", fetch = FetchType.LAZY)
+    @ToString.Exclude
+    @EqualsAndHashCode.Exclude
+    private List<Pond> ponds;
+
+    // 1. Danh sách phiếu do User này TẠO/GỬI
+    @OneToMany(mappedBy = "sender", fetch = FetchType.LAZY)
+    @ToString.Exclude
+    @EqualsAndHashCode.Exclude
+    private List<InventoryTransfer> sentTransfers;
+
+    // 2. Danh sách phiếu do User này NHẬN
+    @OneToMany(mappedBy = "receiver", fetch = FetchType.LAZY)
+    @ToString.Exclude
+    @EqualsAndHashCode.Exclude
+    private List<InventoryTransfer> receivedTransfers;
 }
