@@ -80,9 +80,6 @@ public class SecurityConfig {
     @Bean
     public CorsFilter corsFilter() {
         CorsConfiguration config = new CorsConfiguration();
-
-
-        // FE của bạn
         config.setAllowedOriginPatterns(List.of(
                 "http://localhost:3000",
                 "https://*.trycloudflare.com"
