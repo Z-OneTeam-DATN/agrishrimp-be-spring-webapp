@@ -11,9 +11,6 @@ import java.time.format.DateTimeFormatter;
 @Component
 @Getter
 public class CommonProperties {
-//        @Value("${ssc.hostname}")
-//        private String hostname;
-
     @Value("${mnl.tmp-dir:}")
     private String tmpDir;
 
@@ -22,13 +19,6 @@ public class CommonProperties {
         new File(userTmpDir).mkdirs();
         return userTmpDir;
     }
-
-//        public String createUserTmpDirHostThread() {
-//            String userTmpDir =
-//                    createUserTmpDirString() + getHostname() + "/" + Thread.currentThread().getName() + "/";
-//            new File(userTmpDir).mkdirs();
-//            return userTmpDir;
-//        }
 
     private String createUserTmpDirString() {
         LocalDateTime now = LocalDateTime.now();
