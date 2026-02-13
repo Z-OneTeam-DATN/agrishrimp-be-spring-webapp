@@ -1,5 +1,7 @@
 package com.zone.agri.entity;
 
+import com.fasterxml.jackson.annotation.JsonBackReference;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.zone.agri.entity.enums.AuthProvider;
 import com.zone.agri.entity.enums.Gender;
 import com.zone.agri.entity.enums.UserStatus;
@@ -56,53 +58,67 @@ public class User extends BaseEntity {
 
     // --- KHÓA NGOẠI ---
 
+    @OneToOne(mappedBy = "user")
+    @JsonBackReference
+    private Customer customer;
+
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "branch_id")
     @ToString.Exclude
     @EqualsAndHashCode.Exclude
+    @JsonIgnore
     private Branch branch;
 
     @ManyToOne(fetch = FetchType.EAGER)
     @JoinColumn(name = "role_id")
     @ToString.Exclude
     @EqualsAndHashCode.Exclude
+    @JsonIgnore
     private Role role;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "auth_provider")
+    @JsonIgnore
     private AuthProvider provider;
 
     @OneToMany(mappedBy = "user", fetch = FetchType.LAZY)
     @ToString.Exclude
+    @JsonIgnore
     private List<CartItem> cartItems;
 
     @OneToMany(mappedBy = "user", fetch = FetchType.LAZY)
     @ToString.Exclude
+    @JsonIgnore
     private List<Review> reviews;
 
     @OneToMany(mappedBy = "user", fetch = FetchType.LAZY)
     @ToString.Exclude
+    @JsonIgnore
     private List<UserVoucher> userVouchers;
 
     @OneToMany(mappedBy = "user", fetch = FetchType.LAZY, cascade = CascadeType.ALL)
     @ToString.Exclude
     @EqualsAndHashCode.Exclude
+    @JsonIgnore
     private List<UserAddress> addresses;
 
     @OneToMany(mappedBy = "user", fetch = FetchType.LAZY)
     @ToString.Exclude
     @EqualsAndHashCode.Exclude
+    @JsonIgnore
     private List<Pond> ponds;
 
     // 1. Danh sách phiếu do User này TẠO/GỬI
     @OneToMany(mappedBy = "sender", fetch = FetchType.LAZY)
     @ToString.Exclude
     @EqualsAndHashCode.Exclude
+    @JsonIgnore
     private List<InventoryTransfer> sentTransfers;
 
     // 2. Danh sách phiếu do User này NHẬN
     @OneToMany(mappedBy = "receiver", fetch = FetchType.LAZY)
     @ToString.Exclude
     @EqualsAndHashCode.Exclude
+    @JsonIgnore
     private List<InventoryTransfer> receivedTransfers;
 }

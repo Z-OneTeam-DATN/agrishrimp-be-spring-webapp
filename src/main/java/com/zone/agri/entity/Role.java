@@ -1,5 +1,6 @@
 package com.zone.agri.entity;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.persistence.*;
 import lombok.*;
 import lombok.experimental.FieldDefaults;
@@ -45,5 +46,6 @@ public class Role extends BaseEntity {
     )
     @ToString.Exclude
     @EqualsAndHashCode.Exclude
+    @JsonIgnore
             Set<Permission> permissions;
 }

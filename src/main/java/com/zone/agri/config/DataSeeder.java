@@ -128,6 +128,13 @@ public class DataSeeder implements CommandLineRunner {
         ));
         Role userRole = createRole("USER", "Người Dùng", false, userPerms);
 
+        Set<Permission> customerPerms = new HashSet<>(List.of(
+                pUserView,      // Xem hồ sơ cá nhân
+                pProductView,   // Xem sản phẩm để mua
+                pOrderView      // Xem đơn hàng đã mua
+        ));
+        Role customerRole = createRole("CUSTOMER", "Khách hàng", true, customerPerms);
+        log.info(">>> Đã khởi tạo Role CUSTOMER");
         // ==========================================
         // 3. TẠO BRANCH (CHI NHÁNH MẪU)
         // ==========================================
