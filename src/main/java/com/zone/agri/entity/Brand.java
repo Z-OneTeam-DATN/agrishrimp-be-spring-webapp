@@ -37,15 +37,4 @@ public class Brand {
     @EqualsAndHashCode.Exclude
     List<Product> products;
 
-    // 1. Danh sách phiếu chuyển ĐI từ chi nhánh này
-    @OneToMany(mappedBy = "fromBranch", fetch = FetchType.LAZY)
-    @ToString.Exclude
-    @EqualsAndHashCode.Exclude
-    private List<InventoryTransfer> sentTransfers;
-
-    // 2. Danh sách phiếu chuyển ĐẾN chi nhánh này
-    @OneToMany(mappedBy = "toBranch", fetch = FetchType.LAZY)
-    @ToString.Exclude
-    @EqualsAndHashCode.Exclude
-    private List<InventoryTransfer> receivedTransfers;
 }

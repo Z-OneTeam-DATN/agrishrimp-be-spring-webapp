@@ -32,6 +32,9 @@ public class Category {
     @Column(columnDefinition = "ENUM('ACTIVE', 'INACTIVE')")
     CategoryStatus status;
 
+    @Column(name = "description", columnDefinition = "TEXT")
+    private String description;
+
     // parent_id trỏ về chính bảng category
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "parent_id")

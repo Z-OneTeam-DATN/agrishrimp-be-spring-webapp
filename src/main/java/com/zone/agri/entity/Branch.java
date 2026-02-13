@@ -29,7 +29,7 @@ public class Branch extends BaseEntity {
     @Column(name = "name")
     String name;
 
-    @Column(name = "phone", length = 15, unique = true) // Có đánh dấu UNI trong hình
+    @Column(name = "phone", length = 15, unique = true)
     String phone;
 
     @Column(name = "email", length = 100)
@@ -48,10 +48,21 @@ public class Branch extends BaseEntity {
     @Column(length = 20)
     BranchStatus status;
 
-
-//  KHÓA NGOẠI
     @OneToMany(mappedBy = "branch", fetch = FetchType.LAZY)
     @JsonIgnore
     private List<User> users;
 
+    // 1. Danh sách phiếu chuyển ĐI từ chi nhánh này
+    @OneToMany(mappedBy = "fromBranch", fetch = FetchType.LAZY)
+    @ToString.Exclude
+    @EqualsAndHashCode.Exclude
+    @JsonIgnore
+    private List<InventoryTransfer> sentTransfers;
+
+    // 2. Danh sách phiếu chuyển ĐẾN chi nhánh này
+    @OneToMany(mappedBy = "toBranch", fetch = FetchType.LAZY)
+    @ToString.Exclude
+    @EqualsAndHashCode.Exclude
+    @JsonIgnore
+    private List<InventoryTransfer> receivedTransfers;
 }
