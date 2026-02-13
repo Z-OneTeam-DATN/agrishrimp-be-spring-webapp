@@ -1,59 +1,3 @@
-#server:
-#  port: 8001
-#
-#spring:
-#  datasource:
-#    driver-class-name: com.mysql.cj.jdbc.Driver
-#    # Ưu tiên lấy từ biến môi trường của Docker, nếu không có thì dùng localhost
-#    url: ${DBMS_CONNECTION:jdbc:mysql://localhost:3306/agri_shrimp_db?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true}
-#    username: ${DBMS_USERNAME:root}
-#    password: ${DBMS_PASSWORD:123456zoneteam}
-#
-#  jpa:
-#    show-sql: true
-#    hibernate:
-#      ddl-auto: update
-#    properties:
-#      hibernate:
-#        dialect: org.hibernate.dialect.MySQL8Dialect
-#        format_sql: true
-#
-#  data:
-#    redis:
-#      host: ${SPRING_DATA_REDIS_HOST:localhost}
-#      port: 6379
-#      timeout: 60000
-#
-#cloud:
-#  aws:
-#    accessKey: ${AWS_ACCESS_KEY_ID:}
-#    secretKey: ${AWS_SECRET_ACCESS_KEY:}
-#    region: ${AWS_REGION:ap-southeast-1}
-#  s3:
-#    bucket-name: agri-shrimp-storage
-#    upload-dir: webapp
-#    region: ${AWS_REGION:ap-southeast-1}
-#
-#security:
-#  jwt:
-#    secret-key: '${SECURITY_JWT_SECRET_KEY:1TjXchw5FloESb63Kc+DFhTARvpWL4jUGCwfGWxuG5SIf/1y/LgJxHnMqaF6A/ij}'
-#    issuer: '${DOMAIN:localhost}'
-#    expiry-time-in-seconds: 86400
-#    refreshable-duration: 604800
-#
-#app:
-#  cors:
-#    allowed-origins: "http://localhost:3000,http://127.0.0.1:3000,http://192.168.1.12:3000/"
-#  websocket:
-#    allowed-origins: "http://localhost:3000,http://127.0.0.1:3000,http://192.168.1.12:3000/"
-#
-#mnl:
-#  tmp-dir: mnt/
-#
-#logging:
-#  level:
-#    org.springframework.web.filter.CorsFilter: DEBUG
-
 spring:
   application:
     name: agri-shrimp
@@ -85,6 +29,21 @@ spring:
   main:
     allow-bean-definition-overriding: true
 
+  # 8. CẤU HÌNH MAIL SERVER (ĐÃ SỬA: PHẢI NẰM DƯỚI SPRING)
+  mail:
+    host: smtp.gmail.com
+    port: 587
+    username: nguyenvanbinhkg1586@gmail.com
+    password: xrkbakmtostrtqia
+    properties:
+      mail:
+        smtp:
+          auth: true
+          starttls:
+            enable: true
+          connectiontimeout: 5000
+          timeout: 3000
+          writetimeout: 5000
 
 # 5. CẤU HÌNH JWT
 security:
@@ -106,7 +65,8 @@ app:
   cookie:
     secure: false     # true khi deploy HTTPS
     same-site: Lax
-# 7. CẤU HÌNH AWS
+
+# 7. CẤU HÌNH AWS (ĐỂ RIÊNG RA KHỎI SPRING)
 cloud:
   aws:
     accessKey: ${AWS_ACCESS_KEY_ID:}
