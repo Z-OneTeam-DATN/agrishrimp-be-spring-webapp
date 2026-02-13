@@ -1,0 +1,92 @@
+package com.zone.agri.entity;
+
+import com.zone.agri.entity.enums.OrderStatus;
+import com.zone.agri.entity.enums.PaymentMethod;
+import com.zone.agri.entity.enums.PaymentStatus;
+import jakarta.persistence.*;
+import lombok.*;
+import lombok.experimental.FieldDefaults;
+import java.math.BigDecimal;
+import java.time.LocalDateTime;
+import java.util.List;
+
+@Entity
+@Table(name = "orders") // "order" là từ khóa SQL, nên để số nhiều hoặc thêm ngoặc kép nếu cần
+@Getter
+@Setter
+@NoArgsConstructor
+@AllArgsConstructor
+@Builder
+@FieldDefaults(level = AccessLevel.PRIVATE)
+public class Order {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    Long id;
+
+    @Column(name = "code", length = 20, unique = true)
+    String code;
+
+    @Column(name = "shipping_code", length = 50)
+    String shippingCode;
+
+    @Column(name = "total_amount", precision = 38, scale = 2)
+    BigDecimal totalAmount;
+
+    @Column(name = "discount_amount", precision = 38, scale = 2)
+    BigDecimal discountAmount;
+
+    @Column(name = "final_amount", precision = 38, scale = 2)
+    BigDecimal finalAmount;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "payment_method", columnDefinition = "ENUM('CASH', 'TRANSFER', 'COD')")
+    PaymentMethod paymentMethod;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "payment_status", columnDefinition = "ENUM('UNPAID', 'PAID')")
+    PaymentStatus paymentStatus;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "status", columnDefinition = "ENUM('PENDING', 'CONFIRMED', 'SHIPPING', 'COMPLETED', 'CANCELLED', 'RETURNED')")
+    OrderStatus status;
+
+    @Column(name = "created_at")
+    LocalDateTime createdAt;
+
+    @Column(name = "shipping_address", columnDefinition = "TEXT")
+    String shippingAddress;
+
+    // --- KHÓA NGOẠI ---
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "branch_id")
+    @ToString.Exclude
+    @EqualsAndHashCode.Exclude
+    Branch branch;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "user_id")
+    @ToString.Exclude
+    @EqualsAndHashCode.Exclude
+    User user; // Entity User (đã có)
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "voucher_id")
+    @ToString.Exclude
+    @EqualsAndHashCode.Exclude
+    Voucher voucher;
+
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "pond_id")
+    @ToString.Exclude
+    @EqualsAndHashCode.Exclude
+    Pond pond; // Nếu chưa có class Pond, bạn có thể comment dòng này hoặc tạo class Pond placeholder.
+
+
+    @OneToMany(mappedBy = "order", fetch = FetchType.LAZY, cascade = CascadeType.ALL)
+    @ToString.Exclude
+    @EqualsAndHashCode.Exclude
+    List<OrderItem> orderItems;
+}
