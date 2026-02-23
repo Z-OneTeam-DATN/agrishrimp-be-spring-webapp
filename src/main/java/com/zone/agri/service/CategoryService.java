@@ -2,11 +2,11 @@ package com.zone.agri.service;
 
 import com.zone.agri.dto.admin.CategoryDTO;
 import com.zone.agri.entity.Category;
-import com.zone.agri.entity.enums.CategoryStatus;
 import com.zone.agri.repository.CategoryRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -15,9 +15,14 @@ import java.util.stream.Collectors;
 public class CategoryService {
 
     private final CategoryRepository categoryRepository;
+    private final CloudinaryService cloudinaryService; // Thêm service này
 
     public List<CategoryDTO> getAllCategories() {
-        return categoryRepository.findAll().stream().map(this::convertToDTO).collect(Collectors.toList());
+        List<Category> categories = categoryRepository.findAll();
+        if (categories == null || categories.isEmpty()) {
+            return new ArrayList<>();
+        }
+        return categories.stream().map(this::convertToDTO).collect(Collectors.toList());
     }
 
     public CategoryDTO getCategoryById(Long id) {
@@ -26,20 +31,50 @@ public class CategoryService {
         return convertToDTO(category);
     }
 
-    public Category createCategory(CategoryDTO dto) {
+    public CategoryDTO createCategory(CategoryDTO dto) {
         Category category = new Category();
         category.setName(dto.getName());
         category.setDescription(dto.getDescription());
-        category.setImageUrl(dto.getImageUrl());
         category.setStatus(dto.getStatus());
+        String imageUrl = dto.getImageUrl();
+        if (imageUrl != null && imageUrl.startsWith("data:image")) {
+            imageUrl = cloudinaryService.uploadImage(imageUrl);
+        }
+        category.setImageUrl(imageUrl);
 
-        // Xử lý Parent
+
         if (dto.getParentId() != null) {
             Category parent = categoryRepository.findById(dto.getParentId()).orElse(null);
             category.setParent(parent);
         }
 
-        return categoryRepository.save(category);
+        Category savedCategory = categoryRepository.save(category);
+        return convertToDTO(savedCategory);
+    }
+
+    public CategoryDTO updateCategory(Long id, CategoryDTO dto) {
+        Category category = categoryRepository.findById(id)
+                .orElseThrow(() -> new RuntimeException("Không tìm thấy danh mục"));
+
+        category.setName(dto.getName());
+        category.setDescription(dto.getDescription());
+        category.setStatus(dto.getStatus());
+
+        String imageUrl = dto.getImageUrl();
+        if (imageUrl != null && imageUrl.startsWith("data:image")) {
+            imageUrl = cloudinaryService.uploadImage(imageUrl);
+        }
+        category.setImageUrl(imageUrl);
+
+        if (dto.getParentId() != null) {
+            Category parent = categoryRepository.findById(dto.getParentId()).orElse(null);
+            category.setParent(parent);
+        } else {
+            category.setParent(null);
+        }
+
+        Category savedCategory = categoryRepository.save(category);
+        return convertToDTO(savedCategory);
     }
 
     public void deleteCategory(Long id) {
@@ -54,31 +89,11 @@ public class CategoryService {
         dto.setDescription(entity.getDescription());
         dto.setImageUrl(entity.getImageUrl());
         dto.setStatus(entity.getStatus());
-        dto.setDescription(entity.getDescription()); // Đừng quên dòng này!
 
         if (entity.getParent() != null) {
             dto.setParentId(entity.getParent().getId());
             dto.setParentName(entity.getParent().getName());
         }
         return dto;
-    }
-    public Category updateCategory(Long id, CategoryDTO dto) {
-        Category category = categoryRepository.findById(id)
-                .orElseThrow(() -> new RuntimeException("Không tìm thấy danh mục"));
-
-        category.setName(dto.getName());
-        category.setDescription(dto.getDescription());
-        category.setImageUrl(dto.getImageUrl());
-        category.setStatus(dto.getStatus());
-
-        // Cập nhật cha
-        if (dto.getParentId() != null) {
-            Category parent = categoryRepository.findById(dto.getParentId()).orElse(null);
-            category.setParent(parent);
-        } else {
-            category.setParent(null);
-        }
-
-        return categoryRepository.save(category);
     }
 }
