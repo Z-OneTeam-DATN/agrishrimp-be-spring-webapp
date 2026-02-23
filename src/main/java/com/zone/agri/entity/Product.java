@@ -66,10 +66,12 @@ public class Product {
     @EqualsAndHashCode.Exclude
     Category category;
 
-    // Trong file Product.java
 
-    @OneToMany(mappedBy = "product", cascade = CascadeType.ALL, fetch = FetchType.EAGER)
-    private Set<ProductImage> productImages = new LinkedHashSet<>(); // Đổi List thành Set
+    @OneToMany(mappedBy = "product", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
+    @ToString.Exclude
+    @EqualsAndHashCode.Exclude
+    Set<ProductImage> productImages;
+
 
     @OneToMany(mappedBy = "product", cascade = CascadeType.ALL, fetch = FetchType.EAGER)
     private Set<ProductVariant> variants = new LinkedHashSet<>(); // Đổi List thành Set

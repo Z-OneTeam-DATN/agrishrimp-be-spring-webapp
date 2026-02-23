@@ -6,6 +6,8 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.util.Optional;
+
 @Repository
 public interface BranchRepository extends JpaRepository<Branch, Long> {
 
@@ -29,4 +31,7 @@ public interface BranchRepository extends JpaRepository<Branch, Long> {
             "LEFT JOIN b.receivedTransfers r " +
             "WHERE b.id = :id")
     long countRelatedTransactions(@Param("id") Long id);
+
+    @Query("SELECT b FROM Branch b WHERE b.name = :name")
+    Optional<Branch> findByName(@Param("name") String name);
 }

@@ -1,11 +1,13 @@
 package com.zone.agri.controller;
 
 import com.zone.agri.dto.common.ApiResponse;
+import com.zone.agri.dto.admin.AttributeDTO;
 import com.zone.agri.dto.product.CreateProductRequest;
 import com.zone.agri.dto.product.ProductResponse;
 import com.zone.agri.dto.product.ProductRequest;
 import com.zone.agri.entity.*;
 import com.zone.agri.repository.*;
+import com.zone.agri.service.AttributeService;
 import com.zone.agri.service.ProductService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -31,7 +33,7 @@ public class ProductController {
     private final ProductService productService;
     private final CategoryRepository categoryRepository;
     private final BrandRepository brandRepository;
-    private final AttributeRepository attributeRepository;
+    private final AttributeService attributeService;
 
     // =========================================================================
     // POST /api/products — Tạo sản phẩm mới (multipart/form-data)
@@ -110,11 +112,21 @@ public class ProductController {
     @Operation(summary = "Xóa sản phẩm")
     @SecurityRequirement(name = "bearerAuth")
     @DeleteMapping("/{id}")
-    public ResponseEntity<Void> delete(
+    public ResponseEntity<ApiResponse<Void>> delete(
             @Parameter(description = "ID của sản phẩm cần xóa", example = "1", required = true)
             @PathVariable Long id) {
-        productService.delete(id);
-        return ResponseEntity.noContent().build();
+        productService.deleteProduct(id);
+        return ResponseEntity.ok(ApiResponse.success(null, "Xóa sản phẩm thành công"));
+    }
+
+    @Operation(summary = "Ngừng kinh doanh sản phẩm")
+    @SecurityRequirement(name = "bearerAuth")
+    @PutMapping("/{id}/disable")
+    public ResponseEntity<ApiResponse<Void>> disable(
+            @Parameter(description = "ID của sản phẩm", example = "1", required = true)
+            @PathVariable Long id) {
+        productService.disableProduct(id);
+        return ResponseEntity.ok(ApiResponse.success(null, "Ngừng kinh doanh sản phẩm thành công"));
     }
 
     // =========================================================================
@@ -138,7 +150,7 @@ public class ProductController {
     @Operation(summary = "Lấy danh sách Từ điển Thuộc tính động")
     @SecurityRequirement(name = "bearerAuth")
     @GetMapping("/attributes")
-    public ResponseEntity<List<Attribute>> getAllAttributes() {
-        return ResponseEntity.ok(attributeRepository.findAll());
+    public ResponseEntity<List<AttributeDTO>> getAllAttributes() {
+        return ResponseEntity.ok(attributeService.getAll());
     }
 }

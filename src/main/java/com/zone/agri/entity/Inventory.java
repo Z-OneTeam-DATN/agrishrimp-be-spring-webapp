@@ -31,6 +31,9 @@ public class Inventory {
     @Column(name = "last_checked_at")
     LocalDateTime lastCheckedAt;
 
+    @Column(name = "last_receipt_date")
+    LocalDateTime lastReceiptDate;
+
     // --- KHÓA NGOẠI ---
 
     @ManyToOne(fetch = FetchType.LAZY)

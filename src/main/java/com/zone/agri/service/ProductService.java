@@ -7,6 +7,7 @@ import com.zone.agri.dto.product.*;
 import com.zone.agri.entity.*;
 import com.zone.agri.entity.enums.*;
 import com.zone.agri.exception.BadRequestException;
+import com.zone.agri.exception.ConflictException;
 import com.zone.agri.exception.NotFoundException;
 import com.zone.agri.repository.*;
 import lombok.RequiredArgsConstructor;
@@ -33,6 +34,13 @@ public class ProductService {
     private final AttributeRepository attributeRepository;
     private final VariantAttributeRepository variantAttributeRepository;
     private final UnitConversionRepository unitConversionRepository;
+    private final OrderRepository orderRepository;
+    private final OrderItemRepository orderItemRepository;
+    private final InventoryNoteRepository inventoryNoteRepository;
+    private final InventoryNoteDetailRepository inventoryNoteDetailRepository;
+    private final InventoryTransactionRepository inventoryTransactionRepository;
+    private final InventoryRepository inventoryRepository;
+    private final InventoryTransferRepository inventoryTransferRepository;
     private final CloudinaryService cloudinaryService;
     private final ObjectMapper objectMapper;
 
@@ -154,13 +162,14 @@ public class ProductService {
                     .netWeightUnit(vDto.getNetWeightUnit())
                     .shippingWeight(vDto.getShippingWeight())
                     .imageUrl(vDto.getImage())
+                    .customSpecs(serializeCustomSpecs(vDto.getAttributes()))
                     .status(VariantStatus.ACTIVE)
                     .build();
 
             ProductVariant savedVariant = variantRepository.save(variant);
 
             if (vDto.getAttributes() != null) {
-                for (ProductRequest.AttributeDto attrDto : vDto.getAttributes()) {
+                for (AttributeDto attrDto : vDto.getAttributes()) {
                     if (attrDto.getName() == null || attrDto.getName().isBlank()) continue;
                     Attribute attribute = getOrCreateAttribute(attrDto.getName());
                     variantAttributeRepository.save(VariantAttribute.builder()
@@ -176,19 +185,70 @@ public class ProductService {
     }
 
     // =========================================================================
-    // DELETE
+    // DELETE & DISABLE
     // =========================================================================
 
     @Transactional
-    public void delete(Long id) {
+    public void deleteProduct(Long id) {
         Product product = productRepository.findById(id)
                 .orElseThrow(() -> new NotFoundException("Sản phẩm không tồn tại với ID: " + id));
-        
-        productRepository.deleteVariantAttributesByProduct(product);
-        productRepository.deleteUnitConversionsByProduct(product);
-        productRepository.deleteVariantsByProduct(product);
-        productRepository.deleteImagesByProduct(product);
+
+        // 1. Kiểm tra phát sinh giao dịch
+        boolean hasOrder = orderItemRepository.existsByProductVariantProductId(id);
+        boolean hasInventoryNote = inventoryNoteDetailRepository.existsByProductVariantProductId(id);
+        boolean hasTransaction = inventoryTransactionRepository.existsByInventoryProductVariantProductId(id);
+
+        if (hasOrder || hasInventoryNote || hasTransaction) {
+            throw new ConflictException("Sản phẩm đã phát sinh giao dịch, không thể xóa. Vui lòng ngừng kinh doanh.");
+        }
+
+        // 2. Kiểm tra tồn kho
+        Integer totalStock = inventoryRepository.sumQuantityByProductId(id);
+        if (totalStock != null && totalStock > 0) {
+            throw new ConflictException("Sản phẩm vẫn còn tồn kho, không thể xóa.");
+        }
+
+        // 3. Xóa ảnh trên Cloudinary
+        if (product.getProductImages() != null) {
+            product.getProductImages().forEach(img -> cloudinaryService.delete(img.getPublicId()));
+        }
+        if (product.getVariants() != null) {
+            product.getVariants().forEach(variant -> cloudinaryService.delete(variant.getImagePublicId()));
+        }
+
+        // 4. Xóa từ DB (Sử dụng cơ chế Cascade đã cấu hình trong Entity)
         productRepository.delete(product);
+        
+        log.info("Xóa sản phẩm thành công: id={}", id);
+    }
+
+    @Transactional
+    public void disableProduct(Long id) {
+        Product product = productRepository.findById(id)
+                .orElseThrow(() -> new NotFoundException("Sản phẩm không tồn tại với ID: " + id));
+
+        // 1. Kiểm tra đơn hàng đang xử lý
+        boolean hasPendingOrder = orderRepository.existsByStatusInAndProductId(
+                Arrays.asList(OrderStatus.PENDING, OrderStatus.PROCESSING, OrderStatus.SHIPPING), id);
+
+        // 2. Kiểm tra giao dịch kho đang mở (InventoryNote PENDING hoặc InventoryTransfer PENDING/SHIPPING)
+        boolean hasPendingNote = inventoryNoteRepository.existsByStatusInAndProductId(
+                Collections.singletonList(InventoryNoteStatus.PENDING), id);
+        
+        boolean hasPendingTransfer = inventoryTransferRepository.existsByStatusInAndProductId(
+                Arrays.asList(InventoryTransferStatus.PENDING, InventoryTransferStatus.SHIPPING), id);
+
+        if (hasPendingOrder || hasPendingNote || hasPendingTransfer) {
+            throw new ConflictException("Không thể ngừng kinh doanh vì còn giao dịch chưa hoàn tất.");
+        }
+
+        product.setStatus(ProductStatus.INACTIVE);
+        if (product.getVariants() != null) {
+            product.getVariants().forEach(v -> v.setStatus(VariantStatus.INACTIVE));
+        }
+        productRepository.save(product);
+        
+        log.info("Ngừng kinh doanh sản phẩm thành công: id={}", id);
     }
 
     // =========================================================================
@@ -229,6 +289,13 @@ public class ProductService {
                         .build()).collect(Collectors.toList()) :
                 Collections.emptyList();
 
+        List<AttributeDto> attributeDtos = variant.getAttributes() != null ?
+                variant.getAttributes().stream().map(va -> AttributeDto.builder()
+                        .name(va.getAttribute().getName())
+                        .value(va.getValue())
+                        .build()).collect(Collectors.toList()) :
+                Collections.emptyList();
+
         return ProductVariantResponse.builder()
                 .id(variant.getId())
                 .sku(variant.getSku())
@@ -236,7 +303,7 @@ public class ProductService {
                 .formulation(variant.getFormulation())
                 .packaging(variant.getPackaging())
                 .unit(variant.getUnit())
-                .importPrice(variant.getImportPrice())
+                .costPrice(variant.getImportPrice())
                 .price(variant.getPrice())
                 .wholesalePrice(variant.getWholesalePrice())
                 .quantity(variant.getQuantity())
@@ -245,6 +312,7 @@ public class ProductService {
                 .shippingWeight(variant.getShippingWeight())
                 .imageUrl(variant.getImageUrl())
                 .status(variant.getStatus())
+                .attributes(attributeDtos)
                 .unitConversions(conversions)
                 .build();
     }
@@ -327,11 +395,24 @@ public class ProductService {
                     .shippingWeight(vReq.getShippingWeight())
                     .imageUrl(imageUrl)
                     .imagePublicId(imagePublicId)
-                    .customSpecs(serializeCustomSpecs(vReq.getCustomSpecs()))
+                    .customSpecs(serializeCustomSpecs(vReq.getAttributes()))
                     .status(VariantStatus.ACTIVE)
                     .build();
 
             ProductVariant savedVariant = variantRepository.save(variant);
+
+            // Save Variant Attributes
+            if (vReq.getAttributes() != null) {
+                for (AttributeDto attrDto : vReq.getAttributes()) {
+                    if (attrDto.getName() == null || attrDto.getName().isBlank()) continue;
+                    Attribute attribute = getOrCreateAttribute(attrDto.getName());
+                    variantAttributeRepository.save(VariantAttribute.builder()
+                            .variant(savedVariant)
+                            .attribute(attribute)
+                            .value(attrDto.getValue())
+                            .build());
+                }
+            }
 
             // Save Unit Conversions
             if (vReq.getUnitConversions() != null) {
@@ -347,7 +428,7 @@ public class ProductService {
         }
     }
 
-    private String serializeCustomSpecs(List<VariantRequest.CustomSpecDto> specs) {
+    private String serializeCustomSpecs(List<AttributeDto> specs) {
         if (specs == null || specs.isEmpty()) return null;
         try {
             return objectMapper.writeValueAsString(specs);
