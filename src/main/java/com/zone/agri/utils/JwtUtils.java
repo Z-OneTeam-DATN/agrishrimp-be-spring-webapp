@@ -8,7 +8,6 @@ import io.jsonwebtoken.JwtException;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;
 import java.nio.charset.StandardCharsets;
-import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap; // Thêm import
 import java.util.Map;     // Thêm import
@@ -66,7 +65,7 @@ public class JwtUtils {
         String username = payload.getSubject();
         CustomUserDetail customUserDetail = (CustomUserDetail) userDetailsService.loadUserByUsername(username);
 
-        return new UsernamePasswordAuthenticationToken(customUserDetail, "", Collections.emptyList());
+        return new UsernamePasswordAuthenticationToken(customUserDetail, "", customUserDetail.getAuthorities());
     }
 
     public boolean validateToken(String token) {

@@ -128,6 +128,9 @@ public class DataSeeder implements CommandLineRunner {
         ).collect(Collectors.toSet());
         createRole("SALES", "Nhân viên Bán hàng", false, salesPerms);
 
+        // --- Role USER: Người dùng mặc định (đăng ký từ web/app) ---
+        createRole("USER", "Người dùng", false, Set.of());
+
         // ==========================================
         // 3. TẠO BRANCH (CHI NHÁNH MẪU)
         // ==========================================
