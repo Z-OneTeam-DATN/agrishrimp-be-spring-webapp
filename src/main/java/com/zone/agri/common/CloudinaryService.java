@@ -63,5 +63,31 @@ public class CloudinaryService {
         }
     }
 
+    /**
+     * Upload ảnh từ URL hoặc chuỗi base64 lên Cloudinary.
+     * Dùng cho CategoryService (legacy – ảnh từ FE gửi dưới dạng data URI hoặc URL).
+     *
+     * @param imageData URL hoặc chuỗi base64 (data:image/...)
+     * @return secure_url của ảnh sau khi upload
+     */
+    public String uploadImage(String imageData) {
+        try {
+            String fullFolder = defaultFolder + "/categories";
+            Map<?, ?> result = cloudinary.uploader().upload(
+                imageData,
+                ObjectUtils.asMap(
+                    "folder",        fullFolder,
+                    "resource_type", "image"
+                )
+            );
+            String secureUrl = (String) result.get("secure_url");
+            log.info("Uploaded image (url/base64) to Cloudinary: {}", result.get("public_id"));
+            return secureUrl;
+        } catch (IOException e) {
+            log.error("Cloudinary uploadImage failed: {}", e.getMessage());
+            throw new RuntimeException("Không thể upload ảnh lên Cloudinary: " + e.getMessage(), e);
+        }
+    }
+
     public record UploadResult(String secureUrl, String publicId) {}
 }
