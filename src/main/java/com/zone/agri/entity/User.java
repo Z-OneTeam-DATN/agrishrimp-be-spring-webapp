@@ -39,8 +39,11 @@ public class User extends BaseEntity {
     @Column(name = "phone_number", length = 10, unique = true)
     private String phoneNumber;
 
+    @Column(name = "citizen_id", length = 12, unique = true)
+    private String citizenId;
+
     @Column(name = "date_of_birth")
-    private LocalDate dateOfBirth;
+    private java.time.LocalDate dateOfBirth;
 
     @Column(name = "avatar_url")
     private String avatarUrl;

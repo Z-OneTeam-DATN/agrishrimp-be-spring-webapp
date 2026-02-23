@@ -3,10 +3,14 @@ package com.zone.agri.controller;
 import com.zone.agri.dto.common.MessageResponse;
 import com.zone.agri.dto.supplier.SupplierRequest;
 import com.zone.agri.dto.supplier.SupplierResponse;
-import com.zone.agri.entity.Supplier;
 import com.zone.agri.service.SupplierService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
+import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -20,52 +24,75 @@ import org.springframework.web.bind.annotation.*;
 @RestController
 @RequestMapping("/api/suppliers")
 @RequiredArgsConstructor
-@Tag(name = "2. Supplier Management", description = "API quản lý nhà cung cấp: Thêm, sửa, xóa, tìm kiếm và phân trang")
+@Tag(name = "Supplier Management", description = "Quản lý đối tác cung cấp, nhà phân phối và lịch sử nhập hàng")
 public class SupplierController {
 
     private final SupplierService supplierService;
 
-    // --- 1. TẠO MỚI ---
-    @Operation(summary = "Thêm mới nhà cung cấp", description = "Tạo mới một nhà cung cấp với đầy đủ thông tin pháp nhân, liên hệ, tài chính.")
+    @Operation(summary = "Thêm nhà cung cấp mới", description = "Tạo hồ sơ nhà cung cấp với đầy đủ thông tin pháp lý, liên hệ và tài chính.")
+    @SecurityRequirement(name = "bearerAuth")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Tạo thành công", content = @Content(schema = @Schema(implementation = SupplierResponse.class))),
+            @ApiResponse(responseCode = "400", description = "Mã số thuế hoặc Email đã tồn tại")
+    })
     @PostMapping
     public ResponseEntity<SupplierResponse> createSupplier(@Valid @RequestBody SupplierRequest request) {
         return ResponseEntity.ok(supplierService.createSupplier(request));
     }
 
-    // --- 2. LẤY DANH SÁCH (TÌM KIẾM + PHÂN TRANG) ---
-    // --- 2. LẤY DANH SÁCH (TÌM KIẾM + PHÂN TRANG + LỌC) ---
-    @Operation(summary = "Lấy danh sách nhà cung cấp", description = "Hỗ trợ tìm kiếm, lọc theo danh mục, trạng thái và phân trang.")
+    @Operation(summary = "Danh sách nhà cung cấp", description = "Tìm kiếm, lọc theo trạng thái/danh mục và phân trang danh sách nhà cung cấp.")
+    @SecurityRequirement(name = "bearerAuth")
     @GetMapping
     public ResponseEntity<Page<SupplierResponse>> getAllSuppliers(
-            @Parameter(description = "Từ khóa tìm kiếm") @RequestParam(required = false) String keyword,
-            @Parameter(description = "Lọc theo danh mục") @RequestParam(required = false) String category, // 👈 Thêm cái này
-            @Parameter(description = "Lọc theo trạng thái") @RequestParam(required = false) String status,     // 👈 Thêm cái này
+            @Parameter(description = "Từ khóa tìm kiếm (Tên, MST, SĐT)", example = "Công ty TNHH A")
+            @RequestParam(required = false) String keyword,
+
+            @Parameter(description = "Lọc theo nhóm hàng cung cấp", example = "THUC_AN")
+            @RequestParam(required = false) String category,
+
+            @Parameter(description = "Trạng thái hoạt động", example = "ACTIVE")
+            @RequestParam(required = false) String status,
+
+            @Parameter(hidden = true)
             @PageableDefault(size = 10, sort = "createdAt", direction = Sort.Direction.DESC) Pageable pageable
     ) {
         return ResponseEntity.ok(supplierService.getAllSuppliers(keyword, category, status, pageable));
     }
 
-    // --- 3. CHI TIẾT ---
-    @Operation(summary = "Lấy chi tiết nhà cung cấp", description = "Lấy toàn bộ thông tin của một nhà cung cấp theo ID.")
+    @Operation(summary = "Chi tiết nhà cung cấp", description = "Xem hồ sơ chi tiết của một đối tác.")
+    @SecurityRequirement(name = "bearerAuth")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Tìm thấy hồ sơ", content = @Content(schema = @Schema(implementation = SupplierResponse.class))),
+            @ApiResponse(responseCode = "404", description = "Không tìm thấy ID nhà cung cấp")
+    })
     @GetMapping("/{id}")
-    public ResponseEntity<SupplierResponse> getSupplierById(@PathVariable Long id) {
+    public ResponseEntity<SupplierResponse> getSupplierById(
+            @Parameter(description = "ID nhà cung cấp", example = "1", required = true)
+            @PathVariable Long id) {
         return ResponseEntity.ok(supplierService.getSupplierById(id));
     }
 
-    // --- 4. CẬP NHẬT ---
-    @Operation(summary = "Cập nhật thông tin", description = "Cập nhật thông tin nhà cung cấp dựa trên ID.")
+    @Operation(summary = "Cập nhật thông tin", description = "Chỉnh sửa thông tin liên hệ, người đại diện hoặc trạng thái hợp tác.")
+    @SecurityRequirement(name = "bearerAuth")
     @PutMapping("/{id}")
     public ResponseEntity<SupplierResponse> updateSupplier(
+            @Parameter(description = "ID nhà cung cấp cần sửa", example = "1", required = true)
             @PathVariable Long id,
             @Valid @RequestBody SupplierRequest request
     ) {
         return ResponseEntity.ok(supplierService.updateSupplier(id, request));
     }
 
-    // --- 5. XÓA ---
-    @Operation(summary = "Xóa nhà cung cấp", description = "Xóa nhà cung cấp khỏi hệ thống (Lưu ý: Cần kiểm tra ràng buộc dữ liệu trước khi xóa).")
+    @Operation(summary = "Xóa nhà cung cấp", description = "Xóa hoặc vô hiệu hóa nhà cung cấp khỏi danh sách đối tác.")
+    @SecurityRequirement(name = "bearerAuth")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Xóa thành công"),
+            @ApiResponse(responseCode = "400", description = "Không thể xóa do có đơn nhập hàng liên quan")
+    })
     @DeleteMapping("/{id}")
-    public ResponseEntity<MessageResponse> deleteSupplier(@PathVariable Long id) {
+    public ResponseEntity<MessageResponse> deleteSupplier(
+            @Parameter(description = "ID nhà cung cấp cần xóa", example = "1", required = true)
+            @PathVariable Long id) {
         supplierService.deleteSupplier(id);
         return ResponseEntity.ok(new MessageResponse("Đã xóa nhà cung cấp thành công!"));
     }

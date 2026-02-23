@@ -1,28 +1,32 @@
 package com.zone.agri.repository;
 
 import com.zone.agri.entity.Branch;
-import com.zone.agri.entity.enums.BranchStatus;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
-
-import java.util.List;
-import java.util.Optional;
 
 @Repository
 public interface BranchRepository extends JpaRepository<Branch, Long> {
 
-    // 1. Tìm kiếm chính xác (Dùng để lấy chi tiết hoặc validate)
-    Optional<Branch> findByBranchCode(String branchCode);
+    java.util.Optional<Branch> findByBranchCode(String branchCode);
+    java.util.Optional<Branch> findByPhone(String phone);
 
-    // 2. Kiểm tra tồn tại (Dùng để chặn trùng lặp khi Tạo/Sửa)
-    boolean existsByBranchCode(String branchCode);
-    boolean existsByPhone(String phone);
-    boolean existsByEmail(String email);
+    @Query("SELECT COUNT(b) > 0 FROM Branch b WHERE b.branchCode = :branchCode")
+    boolean existsByBranchCode(@Param("branchCode") String branchCode);
 
-    // 3. Lọc danh sách (Dùng cho trang danh sách chi nhánh)
-    // Lấy tất cả chi nhánh đang hoạt động (ACTIVE)
-    List<Branch> findByStatus(BranchStatus status);
+    @Query("SELECT COUNT(b) > 0 FROM Branch b WHERE b.phone = :phone")
+    boolean existsByPhone(@Param("phone") String phone);
 
-    // Lấy danh sách chi nhánh theo Tỉnh/Thành (Ví dụ: Lấy hết chi nhánh ở Cần Thơ)
-    List<Branch> findByProvinceId(Integer provinceId);
+    @Query("SELECT COUNT(b) > 0 FROM Branch b WHERE b.branchCode = :branchCode AND b.id <> :id")
+    boolean existsByBranchCodeForUpdate(@Param("branchCode") String branchCode, @Param("id") Long id);
+
+    @Query("SELECT COUNT(b) > 0 FROM Branch b WHERE b.phone = :phone AND b.id <> :id")
+    boolean existsByPhoneForUpdate(@Param("phone") String phone, @Param("id") Long id);
+
+    @Query("SELECT (COUNT(s) + COUNT(r)) FROM Branch b " +
+            "LEFT JOIN b.sentTransfers s " +
+            "LEFT JOIN b.receivedTransfers r " +
+            "WHERE b.id = :id")
+    long countRelatedTransactions(@Param("id") Long id);
 }

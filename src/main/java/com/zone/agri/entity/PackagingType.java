@@ -28,10 +28,10 @@ public class PackagingType {
     @Column(columnDefinition = "ENUM('ACTIVE', 'INACTIVE')")
     PackagingTypeStatus status;
 
-    // --- KHÓA NGOẠI (ONE-TO-MANY) ---
-
-    @OneToMany(mappedBy = "packagingType", fetch = FetchType.LAZY)
-    @ToString.Exclude
-    @EqualsAndHashCode.Exclude
-    List<ProductVariant> productVariants;
+//    // --- KHÓA NGOẠI (ONE-TO-MANY) ---
+//
+//    @OneToMany(mappedBy = "packagingType", fetch = FetchType.LAZY)
+//    @ToString.Exclude
+//    @EqualsAndHashCode.Exclude
+//    List<ProductVariant> productVariants;
 }

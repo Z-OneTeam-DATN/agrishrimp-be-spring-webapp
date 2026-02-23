@@ -37,8 +37,8 @@ public class ProductForm {
 
     // --- KHÓA NGOẠI (ONE-TO-MANY) ---
 
-    @OneToMany(mappedBy = "productForm", fetch = FetchType.LAZY)
-    @ToString.Exclude
-    @EqualsAndHashCode.Exclude
-    List<ProductVariant> productVariants;
+//    @OneToMany(mappedBy = "productForm", fetch = FetchType.LAZY)
+//    @ToString.Exclude
+//    @EqualsAndHashCode.Exclude
+//    List<ProductVariant> productVariants;
 }

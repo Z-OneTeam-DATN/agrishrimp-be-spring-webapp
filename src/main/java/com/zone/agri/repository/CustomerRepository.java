@@ -9,11 +9,15 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.util.Optional;
+
 @Repository
 public interface CustomerRepository extends JpaRepository<Customer, Long> {
 
     // Kiểm tra số điện thoại đã tồn tại chưa (tránh trùng lặp)
     boolean existsByPhone(String phone);
+
+    Optional<Customer> findByUserId(Long userId);
 
     // Tìm kiếm khách hàng theo tên hoặc SĐT, lọc theo trạng thái
     @Query("SELECT c FROM Customer c WHERE " +

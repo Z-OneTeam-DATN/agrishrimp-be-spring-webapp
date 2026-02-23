@@ -26,6 +26,9 @@ public class Branch extends BaseEntity {
     @Column(name = "branch_code", length = 20)
     String branchCode;
 
+    @Column(name = "branch_type", length = 20) // <--- THÊM MỚI
+    String branchType;
+
     @Column(name = "name")
     String name;
 
@@ -44,6 +47,9 @@ public class Branch extends BaseEntity {
     @Column(name = "district_id")
     Integer districtId;
 
+    @Column(name = "ward_id")
+    Integer wardId;
+
     @Enumerated(EnumType.STRING)
     @Column(length = 20)
     BranchStatus status;
@@ -53,5 +59,13 @@ public class Branch extends BaseEntity {
     @OneToMany(mappedBy = "branch", fetch = FetchType.LAZY)
     @JsonIgnore
     private List<User> users;
+
+    @OneToMany(mappedBy = "fromBranch", fetch = FetchType.LAZY)
+    @JsonIgnore
+    private List<InventoryTransfer> sentTransfers;
+
+    @OneToMany(mappedBy = "toBranch", fetch = FetchType.LAZY)
+    @JsonIgnore
+    private List<InventoryTransfer> receivedTransfers;
 
 }

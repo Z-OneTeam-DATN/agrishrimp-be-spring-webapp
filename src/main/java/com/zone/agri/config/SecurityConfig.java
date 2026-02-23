@@ -10,6 +10,7 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
+import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
@@ -27,55 +28,61 @@ import java.util.List;
 
 @Configuration
 @EnableWebSecurity
+@EnableMethodSecurity          // Bật @PreAuthorize / @PostAuthorize / @Secured
 @RequiredArgsConstructor
 public class SecurityConfig {
 
-  private final CustomAccessDeniedHandler accessDeniedHandler;
-  private final JwtUtils jwtUtils;
-  private final JwtAuthenticationEntryPoint jwtAuthenticationEntryPoint;
-  @Value("${app.cors.allowed-origins}")
-  private String allowedOriginPatterns;
+    private final CustomAccessDeniedHandler accessDeniedHandler;
+    private final JwtUtils jwtUtils;
+    private final JwtAuthenticationEntryPoint jwtAuthenticationEntryPoint;
 
-  @Bean
-  public SecurityFilterChain defaultSecurityFilterChain(HttpSecurity http) throws Exception {
-    http
-        .csrf(AbstractHttpConfigurer::disable)
-        .cors(Customizer.withDefaults())
-        .sessionManagement(
-            session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-        .addFilterBefore(new JWTFilter(jwtUtils), UsernamePasswordAuthenticationFilter.class)
-//        .authorizeHttpRequests(request -> request
-//            .requestMatchers(
-//                    "/api/auth/**",
-//                    "/swagger-ui/**",
-//                    "/swagger-ui.html",
-//                    "/v3/api-docs/**",
-//                    "/swagger-resources/**",
-//                    "/configuration/**",
-//                    "/api-docs/**").permitAll()
-//            .anyRequest().authenticated()
-//        )
-            .authorizeHttpRequests(request -> request
-                            .requestMatchers("/**").permitAll()
+    @Value("${app.cors.allowed-origins}")
+    private String allowedOriginPatterns;
+
+    /** Các endpoint công khai — không cần token */
+    private static final String[] PUBLIC_MATCHERS = {
+            "/api/auth/**",
+            "/swagger-ui/**",
+            "/swagger-ui.html",
+            "/v3/api-docs/**",
+            "/swagger-resources/**",
+            "/configuration/**",
+            "/api-docs/**",
+            "/actuator/health",
+            "/actuator/info",
+    };
+
+    @Bean
+    public SecurityFilterChain defaultSecurityFilterChain(HttpSecurity http) throws Exception {
+        http
+                .csrf(AbstractHttpConfigurer::disable)
+                .cors(Customizer.withDefaults())
+                .sessionManagement(session ->
+                        session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                .addFilterBefore(new JWTFilter(jwtUtils), UsernamePasswordAuthenticationFilter.class)
+                .authorizeHttpRequests(auth -> auth
+                        .requestMatchers(PUBLIC_MATCHERS).permitAll()
+                        .anyRequest().authenticated()
                 )
-        .exceptionHandling(exception -> exception
-            .accessDeniedHandler(accessDeniedHandler)
-            .authenticationEntryPoint(jwtAuthenticationEntryPoint))
-        .logout(
-            logout -> logout.logoutSuccessHandler(new HttpStatusReturningLogoutSuccessHandler()));
-    return http.build();
-  }
+                .exceptionHandling(ex -> ex
+                        .accessDeniedHandler(accessDeniedHandler)
+                        .authenticationEntryPoint(jwtAuthenticationEntryPoint))
+                .logout(logout ->
+                        logout.logoutSuccessHandler(new HttpStatusReturningLogoutSuccessHandler()));
 
-  @Bean
-  public PasswordEncoder defaultPasswordEncoder() {
-    return new BCryptPasswordEncoder();
-  }
+        return http.build();
+    }
 
-  @Bean
-  public AuthenticationManager defaultAuthenticationManager(AuthenticationConfiguration config)
-      throws Exception {
-    return config.getAuthenticationManager();
-  }
+    @Bean
+    public PasswordEncoder defaultPasswordEncoder() {
+        return new BCryptPasswordEncoder();
+    }
+
+    @Bean
+    public AuthenticationManager defaultAuthenticationManager(AuthenticationConfiguration config)
+            throws Exception {
+        return config.getAuthenticationManager();
+    }
 
     @Bean
     public CorsFilter corsFilter() {
@@ -90,8 +97,6 @@ public class SecurityConfig {
 
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", config);
-
         return new CorsFilter(source);
     }
-
 }

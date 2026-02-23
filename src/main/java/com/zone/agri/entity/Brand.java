@@ -15,7 +15,6 @@ import java.util.List;
 @Builder
 @FieldDefaults(level = AccessLevel.PRIVATE)
 public class Brand {
-
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     Long id;
@@ -30,11 +29,8 @@ public class Brand {
     @Column(columnDefinition = "ENUM('ACTIVE', 'INACTIVE')")
     BrandStatus status;
 
-    // --- QUAN HỆ NGƯỢC (ONE-TO-MANY) ---
-
     @OneToMany(mappedBy = "brand", fetch = FetchType.LAZY)
     @ToString.Exclude
     @EqualsAndHashCode.Exclude
     List<Product> products;
-
 }

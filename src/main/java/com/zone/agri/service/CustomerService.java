@@ -1,6 +1,7 @@
 package com.zone.agri.service;
 
 import com.zone.agri.dto.customer.CustomerRequest;
+import com.zone.agri.dto.customer.CustomerResponse;
 import com.zone.agri.entity.Customer;
 import com.zone.agri.entity.Role;
 import com.zone.agri.entity.User;
@@ -99,23 +100,39 @@ public class CustomerService {
         return customerRepository.save(customer);
     }
 
-    // 3. Lấy danh sách (Search & Filter)
-    public Page<Customer> getCustomers(String keyword, String statusStr, Pageable pageable) {
-        CustomerStatus status = null;
-        if (statusStr != null && !statusStr.isEmpty() && !"all".equalsIgnoreCase(statusStr)) {
-            try {
-                status = CustomerStatus.valueOf(statusStr.toUpperCase());
-            } catch (IllegalArgumentException e) {
-                // Ignore invalid status
-            }
-        }
-        return customerRepository.searchCustomers(keyword, status, pageable);
+    public Page<CustomerResponse> getCustomers(String keyword, String statusStr, Pageable pageable) {
+        // Tạm thời bỏ qua filter status chi tiết, tập trung search keyword trước
+        // Lấy tất cả User có role là CUSTOMER kết hợp (LEFT JOIN) với bảng Customer
+        return userRepository.findAllCustomers(keyword, pageable);
     }
 
-    // 4. Lấy chi tiết
-    public Customer getCustomerById(Long id) {
-        return customerRepository.findById(id)
-                .orElseThrow(() -> new RuntimeException("Không tìm thấy khách hàng"));
+    // 4. Lấy chi tiết (SỬA LẠI ĐỂ TÌM THEO USER_ID)
+    public CustomerResponse getCustomerById(Long userId) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new RuntimeException("Không tìm thấy tài khoản người dùng"));
+
+        // Tìm thông tin Customer (có thể null nếu là user Google chưa có hồ sơ)
+        Customer customer = customerRepository.findByUserId(userId).orElse(null);
+
+        // Map dữ liệu ra DTO
+        CustomerResponse dto = new CustomerResponse();
+        dto.setUserId(user.getId());
+        dto.setFullName(user.getFullName());
+        dto.setEmail(user.getEmail());
+        dto.setPhone(user.getPhoneNumber());
+        dto.setProvider(user.getProvider());
+        dto.setUserStatus(user.getStatus());
+        dto.setCreatedAt(user.getCreatedAt());
+
+        if (customer != null) {
+            dto.setCustomerId(customer.getId());
+            dto.setCustomerStatus(customer.getStatus());
+            dto.setAddressDetail(customer.getAddressDetail());
+            // Lấy SĐT từ Customer nếu có
+            if (customer.getPhone() != null) dto.setPhone(customer.getPhone());
+        }
+
+        return dto;
     }
 
     // Hàm map dữ liệu

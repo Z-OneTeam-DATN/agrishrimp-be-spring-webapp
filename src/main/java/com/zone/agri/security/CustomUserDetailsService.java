@@ -1,15 +1,21 @@
 package com.zone.agri.security;
 
+import com.zone.agri.dto.user.RoleDto;
 import com.zone.agri.dto.user.UserDetail;
 import com.zone.agri.entity.User;
 import com.zone.agri.entity.enums.UserStatus;
 import com.zone.agri.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.core.GrantedAuthority;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+
+import java.util.HashSet;
+import java.util.Set;
 
 @Service
 @RequiredArgsConstructor
@@ -21,38 +27,57 @@ public class CustomUserDetailsService implements UserDetailsService {
     @Transactional(readOnly = true)
     public UserDetails loadUserByUsername(String username) throws UsernameNotFoundException {
 
-        // 1. TÌM KIẾM THÔNG MINH (Email hoặc SĐT)
+        // 1. Tìm user theo email hoặc SĐT
         User user = userRepository.findByEmail(username)
                 .or(() -> userRepository.findByPhoneNumber(username))
                 .orElseThrow(() -> new UsernameNotFoundException("Tài khoản không tồn tại hoặc mật khẩu sai"));
 
-        // 2. MAP DỮ LIỆU SANG DTO (UserDetail)
+        // 2. Build danh sách quyền từ Role
+        Set<GrantedAuthority> authorities = buildAuthorities(user);
+
+        // 3. Map user sang DTO
         UserDetail userDetailDto = UserDetail.builder()
                 .id(user.getId())
                 .email(user.getEmail())
                 .phoneNumber(user.getPhoneNumber())
+                .contact(user.getEmail() != null ? user.getEmail() : user.getPhoneNumber()) // Linh động email hoặc sđt
                 .fullName(user.getFullName())
+                .avatarUrl(user.getAvatarUrl())
+                .status(user.getStatus())
                 .createdAt(user.getCreatedAt())
                 .updatedAt(user.getUpdatedAt())
-
-                // Xử lý Branch (tránh NullPointerException nếu user chưa có chi nhánh)
                 .branchId(user.getBranch() != null ? user.getBranch().getId() : null)
-
-                // Role xử lý bên UserDetail.getAuthorities(), không cần map list ở đây nữa
+                .role(user.getRole() != null ? new RoleDto(user.getRole()) : null)
                 .build();
 
-        // 3. XỬ LÝ TRẠNG THÁI (Status)
-        UserStatus status = user.getStatus();
-        boolean enabled = (status == UserStatus.ACTIVE);
-        boolean accountNonLocked = (status != UserStatus.BANNED);
+        // 4. Xử lý trạng thái tài khoản
+        boolean enabled = (user.getStatus() == UserStatus.ACTIVE);
+        boolean accountNonLocked = (user.getStatus() != UserStatus.BANNED);
 
-        // 4. TRẢ VỀ ĐỐI TƯỢNG CHO SPRING SECURITY
-        return new CustomUserDetail(
-                username,
-                user.getPasswordHash(),
-                enabled,
-                accountNonLocked,
-                userDetailDto
-        );
+        return new CustomUserDetail(username, user.getPasswordHash(), enabled, accountNonLocked, userDetailDto, authorities);
+    }
+
+    /**
+     * Chuyển đổi Role + Permissions sang Spring Security GrantedAuthority.
+     * <ul>
+     *   <li>{@code ROLE_<SLUG>} — dùng với {@code hasRole()} / {@code @PreAuthorize("hasRole('ADMIN')")}</li>
+     *   <li>{@code <PERMISSION_CODE>} — dùng với {@code hasAuthority()} / {@code @RequirePermission}</li>
+     * </ul>
+     */
+    private Set<GrantedAuthority> buildAuthorities(User user) {
+        Set<GrantedAuthority> authorities = new HashSet<>();
+        if (user.getRole() == null) return authorities;
+
+        // Role-level authority: "ROLE_ADMIN", "ROLE_USER", ...
+        authorities.add(new SimpleGrantedAuthority("ROLE_" + user.getRole().getSlug()));
+
+        // Permission-level authorities: "PRODUCT_CREATE", "IMPORT_APPROVE", ...
+        if (user.getRole().getPermissions() != null) {
+            user.getRole().getPermissions().forEach(permission ->
+                    authorities.add(new SimpleGrantedAuthority(permission.getCode()))
+            );
+        }
+
+        return authorities;
     }
 }
