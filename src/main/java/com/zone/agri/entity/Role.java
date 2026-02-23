@@ -30,6 +30,9 @@ public class Role extends BaseEntity {
     @Column(name = "display_name", length = 100)
     String displayName;
 
+    @Column(name = "is_active")
+    Boolean isActive;
+
     @Column(name = "is_system")
     Boolean isSystem;
 

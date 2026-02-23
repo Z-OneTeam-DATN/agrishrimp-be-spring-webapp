@@ -2,6 +2,7 @@ package com.zone.agri.entity;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.zone.agri.entity.enums.PermissionGroup;
+import com.zone.agri.entity.enums.PermissionType;
 import jakarta.persistence.*;
 import lombok.*;
 import lombok.experimental.FieldDefaults;
@@ -30,10 +31,16 @@ public class Permission {
     String code;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "group_name")
+    @Column(name = "group_name", length = 50)
     PermissionGroup groupName;
 
 
+    @Enumerated(EnumType.STRING)
+    @Column(length = 20)
+    PermissionType type;
+
+    @Column(name = "parent_id")
+    Long parentId;
     // QUAN HỆ ONE OR MANY ROLE
     @ManyToMany(mappedBy = "permissions")
     @ToString.Exclude

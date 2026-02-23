@@ -4,6 +4,12 @@ import com.zone.agri.dto.customer.CustomerRequest;
 import com.zone.agri.entity.Customer;
 import com.zone.agri.service.CustomerService;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
+import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -17,43 +23,60 @@ import org.springframework.web.bind.annotation.*;
 @RestController
 @RequestMapping("/api/customers")
 @RequiredArgsConstructor
-@Tag(name = "2. Customer Management", description = "API quản lý khách hàng: Thêm, sửa, xóa, tìm kiếm")
+@Tag(name = "Customer Management", description = "Quản lý hồ sơ khách hàng, nông dân và lịch sử giao dịch")
 public class CustomerController {
 
     private final CustomerService customerService;
 
-    // --- 1. LẤY DANH SÁCH ---
-    @Operation(summary = "Lấy danh sách khách hàng", description = "Hỗ trợ tìm kiếm theo tên/SĐT và lọc theo trạng thái (active/locked). Phân trang mặc định.")
+    @Operation(summary = "Danh sách khách hàng", description = "Tìm kiếm khách hàng theo tên, số điện thoại hoặc mã khách hàng. Hỗ trợ phân trang.")
+    @SecurityRequirement(name = "bearerAuth")
     @GetMapping
     public ResponseEntity<Page<Customer>> getAll(
+            @Parameter(description = "Từ khóa tìm kiếm (Tên, SĐT, Email)", example = "Nguyễn Văn A")
             @RequestParam(required = false) String keyword,
+
+            @Parameter(description = "Trạng thái tài khoản (ACTIVE, LOCKED)", example = "ACTIVE")
             @RequestParam(required = false) String status,
+
+            @Parameter(description = "Số trang (bắt đầu từ 0)", example = "0")
             @RequestParam(defaultValue = "0") int page,
+
+            @Parameter(description = "Số lượng bản ghi mỗi trang", example = "20")
             @RequestParam(defaultValue = "10") int size
     ) {
-        // Sắp xếp mặc định: Mới nhất lên đầu
         Pageable pageable = PageRequest.of(page, size, Sort.by("createdAt").descending());
         return ResponseEntity.ok(customerService.getCustomers(keyword, status, pageable));
     }
 
-    // --- 2. LẤY CHI TIẾT ---
-    @Operation(summary = "Lấy chi tiết khách hàng", description = "Trả về thông tin đầy đủ của một khách hàng theo ID.")
+    @Operation(summary = "Chi tiết khách hàng", description = "Xem hồ sơ chi tiết, địa chỉ và thông tin liên lạc của khách hàng.")
+    @SecurityRequirement(name = "bearerAuth")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Tìm thấy hồ sơ", content = @Content(schema = @Schema(implementation = Customer.class))),
+            @ApiResponse(responseCode = "404", description = "Không tìm thấy ID khách hàng")
+    })
     @GetMapping("/{id}")
-    public ResponseEntity<Customer> getById(@PathVariable Long id) {
+    public ResponseEntity<Customer> getById(
+            @Parameter(description = "ID khách hàng", example = "100", required = true)
+            @PathVariable Long id) {
         return ResponseEntity.ok(customerService.getCustomerById(id));
     }
 
-    // --- 3. TẠO MỚI ---
-    @Operation(summary = "Tạo mới khách hàng", description = "Tạo hồ sơ khách hàng, tự động tạo tài khoản User và gửi email thông báo mật khẩu.")
+    @Operation(summary = "Tạo hồ sơ khách hàng mới", description = "Thêm mới khách hàng vào hệ thống. Hệ thống có thể tự động tạo tài khoản User liên kết nếu được cấu hình.")
+    @SecurityRequirement(name = "bearerAuth")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Tạo thành công", content = @Content(schema = @Schema(implementation = Customer.class))),
+            @ApiResponse(responseCode = "400", description = "Số điện thoại hoặc Email đã tồn tại")
+    })
     @PostMapping
     public ResponseEntity<Customer> create(@Valid @RequestBody CustomerRequest request) {
         return ResponseEntity.ok(customerService.createCustomer(request));
     }
 
-    // --- 4. CẬP NHẬT ---
-    @Operation(summary = "Cập nhật thông tin", description = "Cập nhật thông tin hành chính, trạng thái hoặc ghi chú của khách hàng.")
+    @Operation(summary = "Cập nhật hồ sơ", description = "Chỉnh sửa thông tin cá nhân, địa chỉ hoặc ghi chú quản lý.")
+    @SecurityRequirement(name = "bearerAuth")
     @PutMapping("/{id}")
     public ResponseEntity<Customer> update(
+            @Parameter(description = "ID khách hàng cần sửa", example = "100", required = true)
             @PathVariable Long id,
             @Valid @RequestBody CustomerRequest request
     ) {

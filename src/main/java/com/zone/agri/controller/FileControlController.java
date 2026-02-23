@@ -7,6 +7,13 @@ import com.zone.agri.dto.file.FileControlDto;
 import com.zone.agri.dto.file.S3FileDownloadDto;
 import com.zone.agri.exception.BadRequestException;
 import com.zone.agri.service.FileControlService;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.security.SecurityRequirement;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.File;
 import java.io.FileInputStream;
@@ -17,18 +24,16 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import lombok.RequiredArgsConstructor;
 import org.apache.commons.lang3.StringUtils;
+import org.springframework.http.MediaType;
 import org.springframework.util.StreamUtils;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
 
 @RequiredArgsConstructor
 @RestController
 @RequestMapping("/api/files")
+@Tag(name = "File Management", description = "Quản lý tập tin, hình ảnh và lưu trữ (S3/Local)")
 public class FileControlController {
 
   private final FileControlService fileControlService;
@@ -37,12 +42,18 @@ public class FileControlController {
   private static final Pattern tmpPathPattern = Pattern.compile("^\\d{8}/(.+?)/\\d{17}/.+$");
 
 
-  @PostMapping("/tmpUpload")
-  public FileControlDetailDto tmpFileUpload(@RequestParam("file") MultipartFile file)
+  @Operation(summary = "Tải lên file tạm", description = "Upload file lên thư mục tạm thời trước khi chính thức lưu vào hệ thống.")
+  @SecurityRequirement(name = "bearerAuth")
+  @PostMapping(value = "/tmpUpload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+  public FileControlDetailDto tmpFileUpload(
+      @Parameter(description = "File cần upload (ảnh, tài liệu...)", required = true)
+      @RequestParam("file") MultipartFile file)
       throws IOException {
     return fileControlService.tmpFileUpload(file);
   }
 
+  @Operation(summary = "Tải xuống file", description = "Download file từ server hoặc S3 dựa trên thông tin đường dẫn.")
+  @SecurityRequirement(name = "bearerAuth")
   @PostMapping("/download")
   public void fileDownload(@RequestBody FileControlDto dto, HttpServletResponse response)
       throws IOException {
@@ -111,4 +122,3 @@ public class FileControlController {
     }
   }
 }
-

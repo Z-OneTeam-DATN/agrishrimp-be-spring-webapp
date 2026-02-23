@@ -1,10 +1,12 @@
 package com.zone.agri.config;
 
+import io.swagger.v3.oas.annotations.OpenAPIDefinition;
+import io.swagger.v3.oas.annotations.info.Contact;
+import io.swagger.v3.oas.annotations.info.Info;
+import io.swagger.v3.oas.annotations.info.License;
+import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.models.Components;
 import io.swagger.v3.oas.models.OpenAPI;
-import io.swagger.v3.oas.models.info.Info;
-import io.swagger.v3.oas.models.info.License;
-import io.swagger.v3.oas.models.security.SecurityRequirement;
 import io.swagger.v3.oas.models.security.SecurityScheme;
 import io.swagger.v3.oas.models.servers.Server;
 import org.springdoc.core.models.GroupedOpenApi;
@@ -15,55 +17,66 @@ import org.springframework.context.annotation.Configuration;
 import java.util.List;
 
 @Configuration
+@OpenAPIDefinition(
+        info = @Info(
+                title = "AgriShrimp Enterprise API",
+                version = "1.0.0",
+                description = "Hệ thống quản lý chuỗi cung ứng và vận hành nuôi tôm công nghệ cao.",
+                contact = @Contact(name = "Zone Agri Support", email = "support@zone-agri.com", url = "https://zone-agri.com"),
+                license = @License(name = "Enterprise License", url = "https://zone-agri.com/license")
+        ),
+        security = {@SecurityRequirement(name = "bearerAuth")}
+)
 public class OpenApiConfig {
 
     @Bean
-    public OpenAPI openAPI(@Value("${open.api.title:AgriShrimp API}") String title,
-                           @Value("${open.api.version:1.0.0}") String version) {
+    public OpenAPI customOpenAPI(@Value("${app.server.url:http://localhost:8080}") String serverUrl) {
         return new OpenAPI()
-                // 1. Cấu hình thông tin chung
-                .info(new Info().title(title)
-                        .version(version)
-                        .description("Tài liệu API cho dự án AgriShrimp - Thương mại điện tử")
-                        .license(new License().name("API License").url("http://domain.vn/license")))
-                // 2. Cấu hình Server (để test trên Docker hay Local đều đúng link)
                 .servers(List.of(
-                        new Server().url("http://localhost:8080").description("Server Local"),
-                        new Server().url("http://localhost:8001").description("Server Docker")
+                        new Server().url(serverUrl).description("Default Server"),
+                        new Server().url("https://api.dev.zone-agri.com").description("Development Server"),
+                        new Server().url("https://api.stg.zone-agri.com").description("Staging Server")
                 ))
-                // 3. Cấu hình Bảo mật (Nút ổ khóa để nhập JWT)
-                .addSecurityItem(new SecurityRequirement().addList("bearerAuth"))
                 .components(new Components()
                         .addSecuritySchemes("bearerAuth",
                                 new SecurityScheme()
                                         .type(SecurityScheme.Type.HTTP)
                                         .scheme("bearer")
-                                        .bearerFormat("JWT")));
+                                        .bearerFormat("JWT")
+                                        .description("Nhập Token JWT vào đây (không cần từ khóa Bearer)")));
     }
 
-    // --- PHẦN NÀY ĐỂ CHIA NHÓM API CHO DỄ QUẢN LÝ ---
+    // --- PHÂN NHÓM API ---
 
     @Bean
-    public GroupedOpenApi authApi() {
+    public GroupedOpenApi publicApi() {
         return GroupedOpenApi.builder()
-                .group("1. Authentication") // Tên nhóm trên Menu
-                .pathsToMatch("/api/auth/**") // Chỉ hiện các API bắt đầu bằng /api/auth
+                .group("1. Public APIs")
+                .pathsToMatch("/api/auth/**", "/api/public/**", "/api/external/**")
                 .build();
     }
 
     @Bean
-    public GroupedOpenApi userApi() {
+    public GroupedOpenApi coreSystemApi() {
         return GroupedOpenApi.builder()
-                .group("2. User Management")
-                .pathsToMatch("/api/users/**", "/api/roles/**")
+                .group("2. Core System")
+                .pathsToMatch("/api/users/**", "/api/roles/**", "/api/branches/**", "/api/files/**")
                 .build();
     }
 
     @Bean
-    public GroupedOpenApi branchApi() {
+    public GroupedOpenApi businessApi() {
         return GroupedOpenApi.builder()
-                .group("3. Branch Management")
-                .pathsToMatch("/api/branches/**")
+                .group("3. Business Operations")
+                .pathsToMatch("/api/products/**", "/api/categories/**", "/api/suppliers/**", "/api/customers/**", "/api/attributes/**")
+                .build();
+    }
+
+    @Bean
+    public GroupedOpenApi allApi() {
+        return GroupedOpenApi.builder()
+                .group("0. All APIs (Global View)")
+                .pathsToMatch("/**")
                 .build();
     }
 }

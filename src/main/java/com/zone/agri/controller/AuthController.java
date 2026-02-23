@@ -12,6 +12,10 @@ import com.zone.agri.service.AuthService;
 import com.zone.agri.utils.CookieUtils;
 import com.zone.agri.utils.JwtUtils;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
@@ -24,7 +28,7 @@ import org.springframework.web.bind.annotation.*;
 @RestController
 @RequestMapping("/api/auth")
 @RequiredArgsConstructor
-@Tag(name = "1. Authentication", description = "API quản lý xác thực: Đăng ký, Đăng nhập, Refresh Token")
+@Tag(name = "Authentication Management", description = "Các API xác thực người dùng: Đăng ký, Đăng nhập, Logout, Refresh Token")
 public class AuthController {
 
     private final AuthService authService;
@@ -32,7 +36,12 @@ public class AuthController {
     private final CustomUserDetailsService userDetailsService;
     private final CookieUtils cookieUtils;
 
-    @Operation(summary = "Đăng ký tài khoản", description = "Đăng ký bằng Email hoặc SĐT, trả về AccessToken để đăng nhập ngay lập tức.")
+    @Operation(summary = "Đăng ký tài khoản mới", description = "Cho phép người dùng đăng ký bằng Email và Mật khẩu. Trả về Access Token và Refresh Token ngay lập tức.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Đăng ký thành công", content = @Content(schema = @Schema(implementation = AuthResponse.class))),
+            @ApiResponse(responseCode = "400", description = "Email đã tồn tại hoặc dữ liệu không hợp lệ"),
+            @ApiResponse(responseCode = "500", description = "Lỗi hệ thống nội bộ")
+    })
     @PostMapping("/signup")
     public ResponseEntity<AuthResponse> signup(
             @Valid @RequestBody SignupRequest request,
@@ -44,8 +53,11 @@ public class AuthController {
         return ResponseEntity.ok(authResponse);
     }
 
-    // --- 2. GOOGLE LOGIN ---
-    @Operation(summary = "Đăng nhập bằng Google", description = "Gửi ID Token từ Google, server sẽ xác thực và trả về AccessToken.")
+    @Operation(summary = "Đăng nhập bằng Google", description = "Xác thực người dùng thông qua Google ID Token. Nếu chưa có tài khoản, hệ thống sẽ tự động tạo.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Đăng nhập thành công", content = @Content(schema = @Schema(implementation = AuthResponse.class))),
+            @ApiResponse(responseCode = "401", description = "Google Token không hợp lệ")
+    })
     @PostMapping("/google-login")
     public ResponseEntity<AuthResponse> googleLogin(
             @RequestBody GoogleLoginRequest request,
@@ -56,30 +68,12 @@ public class AuthController {
         return ResponseEntity.ok(authResponse);
     }
 
-//    // --- 2. ĐĂNG NHẬP ---
-//    @Operation(summary = "Đăng nhập hệ thống", description = "Trả về Access Token và Refresh Token để truy cập các API khác.")
-//    @ApiResponses(value = {
-//            @ApiResponse(responseCode = "200", description = "Đăng nhập thành công"),
-//            @ApiResponse(responseCode = "401", description = "Sai email hoặc mật khẩu")
-//    })
-//
-//    @PostMapping("/login")
-//    public ResponseEntity<AuthResponse> login(@Valid @RequestBody LoginRequest request) {
-//        AuthResponse response = authService.login(request);
-//        return ResponseEntity.ok(response);
-//    }
-//
-//    // --- 3. LẤY THÔNG TIN BẢN THÂN ---
-//    @Operation(summary = "Lấy thông tin người dùng hiện tại", description = "Yêu cầu phải có Access Token hợp lệ.")
-//    @SecurityRequirement(name = "bearerAuth") // Icon ổ khóa báo hiệu cần Token
-//    @GetMapping("/me")
-//    public ResponseEntity<UserOutDto> me() {
-//        return ResponseEntity.ok(userService.getMe());
-//    }
-
-    // --- 4. ĐĂNG XUẤT ---
-    @Operation(summary = "Đăng xuất", description = "Vô hiệu hóa Token và xóa Cookie.")
+    @Operation(summary = "Đăng xuất (Logout)", description = "Vô hiệu hóa Token hiện tại và xóa Cookie phiên làm việc.")
     @SecurityRequirement(name = "bearerAuth")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Đăng xuất thành công"),
+            @ApiResponse(responseCode = "401", description = "Chưa đăng nhập hoặc Token hết hạn")
+    })
     @PostMapping("/logout")
     public ResponseEntity<MessageResponse> logout(
             HttpServletRequest request,
@@ -105,8 +99,11 @@ public class AuthController {
         return ResponseEntity.ok(new MessageResponse("Logout successful"));
     }
 
-    // --- 5. LÀM MỚI TOKEN ---
-    @Operation(summary = "Làm mới Access Token", description = "Dùng Refresh Token để lấy Access Token mới khi cái cũ hết hạn.")
+    @Operation(summary = "Làm mới Access Token", description = "Cấp phát lại Access Token mới khi cái cũ hết hạn bằng cách sử dụng Refresh Token.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Cấp Token mới thành công", content = @Content(schema = @Schema(implementation = AuthResponse.class))),
+            @ApiResponse(responseCode = "401", description = "Refresh Token không hợp lệ hoặc đã hết hạn")
+    })
     @PostMapping("/refresh")
     public ResponseEntity<?> refresh(@RequestBody TokenRefreshRequest request) {
         String refreshToken = request.getRefreshToken();

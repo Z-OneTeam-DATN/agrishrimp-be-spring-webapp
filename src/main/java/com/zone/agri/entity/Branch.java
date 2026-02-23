@@ -60,4 +60,12 @@ public class Branch extends BaseEntity {
     @JsonIgnore
     private List<User> users;
 
+    @OneToMany(mappedBy = "fromBranch", fetch = FetchType.LAZY)
+    @JsonIgnore
+    private List<InventoryTransfer> sentTransfers;
+
+    @OneToMany(mappedBy = "toBranch", fetch = FetchType.LAZY)
+    @JsonIgnore
+    private List<InventoryTransfer> receivedTransfers;
+
 }

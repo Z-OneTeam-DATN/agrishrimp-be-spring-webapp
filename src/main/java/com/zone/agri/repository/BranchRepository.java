@@ -9,6 +9,9 @@ import org.springframework.stereotype.Repository;
 @Repository
 public interface BranchRepository extends JpaRepository<Branch, Long> {
 
+    java.util.Optional<Branch> findByBranchCode(String branchCode);
+    java.util.Optional<Branch> findByPhone(String phone);
+
     @Query("SELECT COUNT(b) > 0 FROM Branch b WHERE b.branchCode = :branchCode")
     boolean existsByBranchCode(@Param("branchCode") String branchCode);
 
