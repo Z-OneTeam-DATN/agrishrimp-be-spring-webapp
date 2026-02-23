@@ -5,6 +5,7 @@ import jakarta.persistence.*;
 import lombok.*;
 import lombok.experimental.FieldDefaults;
 import java.time.LocalDateTime;
+import java.util.List;
 
 @Entity
 @Table(name = "products")
@@ -15,7 +16,6 @@ import java.time.LocalDateTime;
 @Builder
 @FieldDefaults(level = AccessLevel.PRIVATE)
 public class Product {
-
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     Long id;
@@ -36,7 +36,6 @@ public class Product {
     @Column(columnDefinition = "ENUM('DRAFT', 'PUBLISHED', 'HIDDEN')")
     ProductStatus status;
 
-
     @Column(name = "created_at")
     LocalDateTime createdAt;
 
@@ -46,8 +45,13 @@ public class Product {
     @Column(name = "review_count")
     Integer reviewCount;
 
-    // --- KHÓA NGOẠI ---
+    @Column(name = "origin", length = 100)
+    String origin;
 
+    @Column(name = "base_sku", length = 50)
+    String baseSku;
+
+    // --- KHÓA NGOẠI ---
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "brand_id")
     @ToString.Exclude
@@ -59,4 +63,9 @@ public class Product {
     @ToString.Exclude
     @EqualsAndHashCode.Exclude
     Category category;
+
+    @OneToMany(mappedBy = "product", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
+    @ToString.Exclude
+    @EqualsAndHashCode.Exclude
+    List<ProductImage> productImages;
 }

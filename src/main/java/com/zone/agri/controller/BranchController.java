@@ -17,7 +17,7 @@ import org.springframework.web.bind.annotation.*;
 import java.util.List;
 
 @RestController
-@RequestMapping("/api/chi-nhanh")
+@RequestMapping("/api/branches")
 @RequiredArgsConstructor
 @Tag(name = "Branch Management", description = "Quản lý chi nhánh, kho bãi và điểm giao dịch")
 @CrossOrigin(origins = "http://localhost:3000")
@@ -27,7 +27,7 @@ public class BranchController {
 
     @Operation(summary = "Lấy danh sách chi nhánh", description = "Trả về toàn bộ danh sách chi nhánh và kho đang hoạt động.")
     @SecurityRequirement(name = "bearerAuth")
-    @GetMapping("/danh-sach-chi-nhanh")
+    @GetMapping()
     public ResponseEntity<List<BranchDTO>> getAll() {
         return ResponseEntity.ok(branchService.getAll());
     }
@@ -38,7 +38,7 @@ public class BranchController {
             @ApiResponse(responseCode = "200", description = "Tìm thấy chi nhánh", content = @Content(schema = @Schema(implementation = BranchDTO.class))),
             @ApiResponse(responseCode = "404", description = "Không tìm thấy chi nhánh với ID cung cấp")
     })
-    @GetMapping("/chi-tiet-danh-sach-/{id}")
+    @GetMapping("/{id}")
     public ResponseEntity<BranchDTO> getById(
             @Parameter(description = "ID của chi nhánh cần tìm", example = "1", required = true)
             @PathVariable Long id) {

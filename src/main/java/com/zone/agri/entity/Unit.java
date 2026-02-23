@@ -28,8 +28,8 @@ public class Unit {
     UnitStatus status;
 
     // --- KHÓA NGOẠI (ONE-TO-MANY) ---
-    @OneToMany(mappedBy = "unit", fetch = FetchType.LAZY)
-    @ToString.Exclude
-    @EqualsAndHashCode.Exclude
-    List<ProductVariant> productVariants;
+//    @OneToMany(mappedBy = "unit", fetch = FetchType.LAZY)
+//    @ToString.Exclude
+//    @EqualsAndHashCode.Exclude
+//    List<ProductVariant> productVariants;
 }

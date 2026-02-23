@@ -13,11 +13,9 @@ import lombok.experimental.FieldDefaults;
 @Builder
 @FieldDefaults(level = AccessLevel.PRIVATE)
 public class ProductImage {
-
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     Long id;
-
 
     @Column(name = "image_url", columnDefinition = "TEXT")
     String imageUrl;
@@ -25,15 +23,12 @@ public class ProductImage {
     @Column(name = "name", length = 50)
     String name;
 
-
     @Column(name = "text", length = 100)
     String text;
 
-    // --- KHÓA NGOẠI ---
-
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "product_variant_id")
+    @JoinColumn(name = "product_id")
     @ToString.Exclude
     @EqualsAndHashCode.Exclude
-    ProductVariant productVariant;
+    Product product;
 }

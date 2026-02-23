@@ -30,28 +30,28 @@ public class UserController {
 
     @Operation(summary = "Danh sách nhân viên (Lọc & Phân trang)", 
                description = "Lấy danh sách nhân viên có hỗ trợ tìm kiếm theo tên/email/sđt và lọc theo phòng ban/vai trò.")
-    @SecurityRequirement(name = "bearerAuth")
+//    @SecurityRequirement(name = "bearerAuth")
     @GetMapping
     public ResponseEntity<Page<UserResponse>> getUsers(
             @Parameter(description = "Từ khóa tìm kiếm (Tên, Email, SĐT, CCCD)", example = "012345678901")
             @RequestParam(required = false) String keyword,
-            
+
             @Parameter(description = "Lọc theo ID vai trò", example = "1")
             @RequestParam(required = false) Long roleId,
-            
+
             @Parameter(description = "Lọc theo ID chi nhánh", example = "1")
             @RequestParam(required = false) Long branchId,
-            
+
             @Parameter(description = "Lọc theo trạng thái: all, active, inactive, banned", example = "active")
             @RequestParam(required = false, defaultValue = "all") String status,
-            
+
             @Parameter(hidden = true)
             @PageableDefault(size = 10, sort = "id", direction = Sort.Direction.DESC) Pageable pageable
     ) {
         return ResponseEntity.ok(userService.getUsers(keyword, roleId, branchId, status, pageable));
     }
 
-    @Operation(summary = "Lấy thông tin chi tiết nhân viên", 
+    @Operation(summary = "Lấy thông tin chi tiết nhân viên",
                description = "Trả về đầy đủ thông tin cá nhân, vai trò và chi nhánh của một nhân viên.")
     @SecurityRequirement(name = "bearerAuth")
     @ApiResponses({
@@ -63,7 +63,7 @@ public class UserController {
         return ResponseEntity.ok(userService.getUserById(id));
     }
 
-    @Operation(summary = "Thêm nhân viên mới", 
+    @Operation(summary = "Thêm nhân viên mới",
                description = "Tạo tài khoản nhân viên mới, gán vai trò và chi nhánh. Mật khẩu mặc định là 123456 nếu không gửi lên.")
     @SecurityRequirement(name = "bearerAuth")
     @ApiResponses({
@@ -75,7 +75,7 @@ public class UserController {
         return ResponseEntity.ok(userService.createUser(request));
     }
 
-    @Operation(summary = "Cập nhật thông tin nhân viên", 
+    @Operation(summary = "Cập nhật thông tin nhân viên",
                description = "Chỉnh sửa thông tin cá nhân, thay đổi vai trò hoặc chuyển chi nhánh công tác.")
     @SecurityRequirement(name = "bearerAuth")
     @ApiResponses({
@@ -88,7 +88,7 @@ public class UserController {
         return ResponseEntity.ok(userService.updateUser(id, request));
     }
 
-    @Operation(summary = "Xóa nhân viên", 
+    @Operation(summary = "Xóa nhân viên",
                description = "Xóa vĩnh viễn tài khoản nhân viên khỏi hệ thống.")
     @SecurityRequirement(name = "bearerAuth")
     @ApiResponses({
