@@ -52,18 +52,9 @@ public class VariantRequest {
 
     /** Các thuộc tính bổ sung tuỳ chọn (VD: Màu sắc, Kích cỡ) */
     @Valid
-    private List<CustomSpecDto> customSpecs;
+    private List<AttributeDto> attributes;
 
     /** Bảng quy đổi đơn vị cho biến thể này */
     @Valid
     private List<UnitConversionRequest> unitConversions;
-
-    @Data
-    public static class CustomSpecDto {
-        @NotBlank(message = "Tên thuộc tính không được để trống")
-        private String key;
-
-        @NotBlank(message = "Giá trị thuộc tính không được để trống")
-        private String value;
-    }
 }

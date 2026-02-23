@@ -15,7 +15,7 @@ public class ProductVariantResponse {
     private String formulation;
     private String packaging;
     private String unit;
-    private BigDecimal importPrice;
+    private BigDecimal costPrice;
     private BigDecimal price;
     private BigDecimal wholesalePrice;
     private Integer quantity;
@@ -24,5 +24,6 @@ public class ProductVariantResponse {
     private BigDecimal shippingWeight;
     private String imageUrl;
     private VariantStatus status;
+    private List<AttributeDto> attributes;
     private List<UnitConversionResponse> unitConversions;
 }

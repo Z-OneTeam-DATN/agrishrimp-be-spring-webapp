@@ -30,17 +30,11 @@ public class ProductRequest {
         private BigDecimal netWeight;
         private String netWeightUnit;
         private BigDecimal shippingWeight;
-        private String image;
-        private String customSpecs;
-
-        // DÙNG LIST NÀY ĐỂ NHẬN BAO NHIÊU THUỘC TÍNH TỪ UI CŨNG ĐƯỢC
-        private List<AttributeDto> attributes;
-    }
-
-    @Data
-    @JsonIgnoreProperties(ignoreUnknown = true)
-    public static class AttributeDto {
-        private String name;  // Tên thuộc tính (VD: "Màu sắc", "Dạng bào chế")
-        private String value; // Giá trị (VD: "Đỏ", "Viên nén")
-    }
-}
+                private String image;
+        
+                // DÙNG LIST NÀY ĐỂ NHẬN BAO NHIÊU THUỘC TÍNH TỪ UI CŨNG ĐƯỢC
+        
+                private List<AttributeDto> attributes;
+            }
+        }
+        
