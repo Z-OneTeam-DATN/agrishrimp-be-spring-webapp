@@ -4,9 +4,11 @@ import com.zone.agri.entity.enums.ProductStatus;
 import jakarta.persistence.*;
 import lombok.*;
 import lombok.experimental.FieldDefaults;
+
 import java.time.LocalDateTime;
 import java.util.List;
-import java.util.Set;
+import java.util.Set; // Import Set
+import java.util.HashSet; // Import HashSet
 
 @Entity
 @Table(name = "products")
@@ -52,7 +54,6 @@ public class Product {
     @Column(name = "base_sku", length = 50)
     String baseSku;
 
-    // --- KHÓA NGOẠI ---
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "brand_id")
     @ToString.Exclude
@@ -68,7 +69,8 @@ public class Product {
     @OneToMany(mappedBy = "product", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
     @ToString.Exclude
     @EqualsAndHashCode.Exclude
-    Set<ProductImage> productImages;
+    @Builder.Default
+    Set<ProductImage> productImages = new HashSet<>();
 
     @OneToMany(mappedBy = "product", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
     @ToString.Exclude
