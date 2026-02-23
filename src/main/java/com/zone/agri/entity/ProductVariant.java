@@ -16,7 +16,6 @@ import java.util.List;
 @Builder
 @FieldDefaults(level = AccessLevel.PRIVATE)
 public class ProductVariant {
-
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     Long id;
@@ -24,29 +23,39 @@ public class ProductVariant {
     @Column(name = "sku", length = 50, unique = true)
     String sku;
 
+    @Column(name = "barcode", length = 50)
+    String barcode;
+
     @Column(name = "price", precision = 38, scale = 2)
     BigDecimal price;
 
     @Column(name = "import_price", precision = 38, scale = 2)
     BigDecimal importPrice;
 
+    @Column(name = "wholesale_price", precision = 38, scale = 2)
+    BigDecimal wholesalePrice;
+
     @Column(name = "quantity")
     Integer quantity;
-
-    @Column(name = "barcode", length = 50)
-    String barcode;
-
-    @Column(name = "image_url", length = 255)
-    String imageUrl;
-
-    @Enumerated(EnumType.STRING)
-    @Column(columnDefinition = "ENUM('ACTIVE', 'INACTIVE')")
-    VariantStatus status;
 
     @Column(name = "weight_value", precision = 38, scale = 2)
     BigDecimal weightValue;
 
-    // --- KHÓA NGOẠI ---
+    @Column(name = "net_weight_unit", length = 20)
+    String netWeightUnit;
+
+    @Column(name = "shipping_weight", precision = 38, scale = 2)
+    BigDecimal shippingWeight;
+
+    @Column(name = "image_url", length = 255)
+    String imageUrl;
+
+    @Column(name = "custom_specs", columnDefinition = "TEXT")
+    String customSpecs;
+
+    @Enumerated(EnumType.STRING)
+    @Column(columnDefinition = "ENUM('ACTIVE', 'INACTIVE')")
+    VariantStatus status;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "product_id")
@@ -54,28 +63,9 @@ public class ProductVariant {
     @EqualsAndHashCode.Exclude
     Product product;
 
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "product_form_id")
+    // --- MỚI: DANH SÁCH THUỘC TÍNH ĐỘNG CỦA BIẾN THỂ NÀY ---
+    @OneToMany(mappedBy = "variant", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
     @ToString.Exclude
     @EqualsAndHashCode.Exclude
-    ProductForm productForm;
-
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "packaging_type_id")
-    @ToString.Exclude
-    @EqualsAndHashCode.Exclude
-    PackagingType packagingType;
-
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "unit_id")
-    @ToString.Exclude
-    @EqualsAndHashCode.Exclude
-    Unit unit;
-
-    @OneToMany(mappedBy = "productVariant", fetch = FetchType.LAZY, cascade = CascadeType.ALL)
-    @ToString.Exclude
-    @EqualsAndHashCode.Exclude
-    List<ProductImage> productImages;
-
-
+    List<VariantAttribute> attributes;
 }
