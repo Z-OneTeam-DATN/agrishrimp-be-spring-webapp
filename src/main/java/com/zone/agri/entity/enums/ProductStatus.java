@@ -2,6 +2,6 @@ package com.zone.agri.entity.enums;
 
 public enum ProductStatus {
     DRAFT,
-    PUBLISHED,
-    HIDDEN
+    ACTIVE,
+    INACTIVE
 }

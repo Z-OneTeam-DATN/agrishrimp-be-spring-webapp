@@ -1,5 +1,6 @@
 package com.zone.agri.entity;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.zone.agri.entity.enums.CategoryStatus;
 import jakarta.persistence.*;
 import lombok.*;
@@ -43,6 +44,7 @@ public class Category {
     Category parent;
 
     //lấy danh sách con (Sub-categories)
+    @JsonIgnore  // phá vòng lặp: Category → children → parent → children → ...
     @OneToMany(mappedBy = "parent", fetch = FetchType.LAZY)
     @ToString.Exclude
     List<Category> children;

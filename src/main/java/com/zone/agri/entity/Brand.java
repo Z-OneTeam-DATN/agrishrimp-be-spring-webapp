@@ -1,5 +1,6 @@
 package com.zone.agri.entity;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.zone.agri.entity.enums.BrandStatus;
 import jakarta.persistence.*;
 import lombok.*;
@@ -29,6 +30,7 @@ public class Brand {
     @Column(columnDefinition = "ENUM('ACTIVE', 'INACTIVE')")
     BrandStatus status;
 
+    @JsonIgnore  // phá vòng lặp: Product → brand → products → product → brand → ...
     @OneToMany(mappedBy = "brand", fetch = FetchType.LAZY)
     @ToString.Exclude
     @EqualsAndHashCode.Exclude

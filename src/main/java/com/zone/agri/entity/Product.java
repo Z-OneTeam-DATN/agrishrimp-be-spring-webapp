@@ -33,7 +33,7 @@ public class Product {
     String description;
 
     @Enumerated(EnumType.STRING)
-    @Column(columnDefinition = "ENUM('DRAFT', 'PUBLISHED', 'HIDDEN')")
+    @Column(name = "status", length = 20)
     ProductStatus status;
 
     @Column(name = "created_at")

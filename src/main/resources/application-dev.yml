@@ -76,3 +76,10 @@ cloud:
     bucket-name: agri-shrimp-storage
     upload-dir: webapp
     region: ${AWS_REGION:ap-southeast-1}
+
+# 9. CẤU HÌNH CLOUDINARY
+cloudinary:
+  cloud-name: ${CLOUDINARY_CLOUD_NAME:demevvyp4}
+  api-key: ${CLOUDINARY_API_KEY:176599529831455}
+  api-secret: ${CLOUDINARY_API_SECRET:PqDexQ59PWJ8pOWeqN_BjimFYuY}
+  folder: agrishrimp/products

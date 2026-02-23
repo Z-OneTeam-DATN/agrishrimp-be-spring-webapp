@@ -2,6 +2,7 @@ package com.zone.agri.exception;
 
 import java.util.List;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.AuthenticationException;
@@ -81,6 +82,19 @@ public class ApiExceptionHandler {
     log.warn(ERROR_LOG_FORMAT, this.getServletPath(request), 401, message);
     log.debug(ex.toString());
     return new ResponseEntity<>(errorVm, HttpStatus.UNAUTHORIZED);
+  }
+
+  @ExceptionHandler(DataIntegrityViolationException.class)
+  public ResponseEntity<ErrorDetail> handleDataIntegrityViolation(
+      DataIntegrityViolationException ex, WebRequest request) {
+    String detail = "Dữ liệu vi phạm ràng buộc cơ sở dữ liệu.";
+    Throwable cause = ex.getRootCause();
+    if (cause != null && cause.getMessage() != null && cause.getMessage().contains("Duplicate entry")) {
+      detail = "Giá trị bị trùng lặp: " + cause.getMessage();
+    }
+    ErrorDetail errorVm = new ErrorDetail(HttpStatus.CONFLICT.toString(), "Xung đột dữ liệu", detail);
+    log.warn(ERROR_LOG_FORMAT, this.getServletPath(request), 409, detail);
+    return ResponseEntity.status(HttpStatus.CONFLICT).body(errorVm);
   }
 
   @ExceptionHandler(MaxUploadSizeExceededException.class)
