@@ -1,6 +1,7 @@
 package com.zone.agri.controller;
 
 import com.zone.agri.dto.customer.CustomerRequest;
+import com.zone.agri.dto.customer.CustomerResponse;
 import com.zone.agri.entity.Customer;
 import com.zone.agri.service.CustomerService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -31,20 +32,20 @@ public class CustomerController {
     @Operation(summary = "Danh sách khách hàng", description = "Tìm kiếm khách hàng theo tên, số điện thoại hoặc mã khách hàng. Hỗ trợ phân trang.")
     @SecurityRequirement(name = "bearerAuth")
     @GetMapping
-    public ResponseEntity<Page<Customer>> getAll(
-            @Parameter(description = "Từ khóa tìm kiếm (Tên, SĐT, Email)", example = "Nguyễn Văn A")
-            @RequestParam(required = false) String keyword,
+    public ResponseEntity<Page<CustomerResponse>> getAll(
+                                                          @Parameter(description = "Từ khóa tìm kiếm (Tên, SĐT, Email)", example = "Nguyễn Văn A")
+                                                          @RequestParam(required = false) String keyword,
 
-            @Parameter(description = "Trạng thái tài khoản (ACTIVE, LOCKED)", example = "ACTIVE")
-            @RequestParam(required = false) String status,
+                                                          @Parameter(description = "Trạng thái tài khoản (ACTIVE, LOCKED)", example = "ACTIVE")
+                                                          @RequestParam(required = false) String status,
 
-            @Parameter(description = "Số trang (bắt đầu từ 0)", example = "0")
-            @RequestParam(defaultValue = "0") int page,
+                                                          @Parameter(description = "Số trang (bắt đầu từ 0)", example = "0")
+                                                          @RequestParam(defaultValue = "0") int page,
 
-            @Parameter(description = "Số lượng bản ghi mỗi trang", example = "20")
-            @RequestParam(defaultValue = "10") int size
+                                                          @Parameter(description = "Số lượng bản ghi mỗi trang", example = "20")
+                                                          @RequestParam(defaultValue = "10") int size
     ) {
-        Pageable pageable = PageRequest.of(page, size, Sort.by("createdAt").descending());
+        Pageable pageable = PageRequest.of(page, size);
         return ResponseEntity.ok(customerService.getCustomers(keyword, status, pageable));
     }
 
@@ -55,9 +56,7 @@ public class CustomerController {
             @ApiResponse(responseCode = "404", description = "Không tìm thấy ID khách hàng")
     })
     @GetMapping("/{id}")
-    public ResponseEntity<Customer> getById(
-            @Parameter(description = "ID khách hàng", example = "100", required = true)
-            @PathVariable Long id) {
+    public ResponseEntity<CustomerResponse> getById(@PathVariable Long id) {
         return ResponseEntity.ok(customerService.getCustomerById(id));
     }
 
