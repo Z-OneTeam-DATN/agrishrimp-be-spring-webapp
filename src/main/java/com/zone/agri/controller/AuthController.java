@@ -110,22 +110,41 @@ public class AuthController {
             HttpServletRequest request,
             HttpServletResponse response
     ) {
-        String token = null;
+        String accessToken = null;
+        String refreshToken = null;
+
+        // 1. Lấy Access Token từ Header hoặc Cookie
         String authHeader = request.getHeader("Authorization");
         if (authHeader != null && authHeader.startsWith("Bearer ")) {
-            token = authHeader.substring(7);
-        } else if (request.getCookies() != null) {
+            accessToken = authHeader.substring(7);
+        }
+
+        if (request.getCookies() != null) {
             for (var cookie : request.getCookies()) {
                 if (CookieUtils.ACCESS_TOKEN_COOKIE_NAME.equals(cookie.getName())) {
-                    token = cookie.getValue();
-                    break;
+                    if (accessToken == null) accessToken = cookie.getValue();
+                } else if (CookieUtils.REFRESH_TOKEN_COOKIE_NAME.equals(cookie.getName())) {
+                    refreshToken = cookie.getValue();
                 }
             }
         }
-        if (token != null) {
-            jwtUtils.revokeToken(token);
+
+        // 2. Thu hồi Token (đưa vào blacklist trong Redis)
+        if (accessToken != null) {
+            try {
+                jwtUtils.revokeToken(accessToken);
+            } catch (Exception ignored) { }
         }
+
+        if (refreshToken != null) {
+            try {
+                jwtUtils.revokeToken(refreshToken);
+            } catch (Exception ignored) { }
+        }
+
+        // 3. Xóa Cookie (set maxAge = 0)
         cookieUtils.deleteAuthCookies(response);
+
         return ResponseEntity.ok(new MessageResponse("Đăng xuất thành công"));
     }
 
