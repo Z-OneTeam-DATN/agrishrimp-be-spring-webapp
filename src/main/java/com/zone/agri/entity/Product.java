@@ -68,4 +68,9 @@ public class Product {
     @ToString.Exclude
     @EqualsAndHashCode.Exclude
     List<ProductImage> productImages;
+
+    @OneToMany(mappedBy = "product", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
+    @ToString.Exclude
+    @EqualsAndHashCode.Exclude
+    List<ProductVariant> variants;
 }

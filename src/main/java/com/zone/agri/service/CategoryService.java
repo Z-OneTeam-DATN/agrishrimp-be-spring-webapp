@@ -2,6 +2,7 @@ package com.zone.agri.service;
 
 import com.zone.agri.dto.admin.CategoryDTO;
 import com.zone.agri.entity.Category;
+import com.zone.agri.common.CloudinaryService;
 import com.zone.agri.repository.CategoryRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;

@@ -2,7 +2,7 @@ package com.zone.agri.controller;
 
 import com.zone.agri.dto.common.ApiResponse;
 import com.zone.agri.dto.product.CreateProductRequest;
-import com.zone.agri.dto.product.CreateProductResponse;
+import com.zone.agri.dto.product.ProductResponse;
 import com.zone.agri.dto.product.ProductRequest;
 import com.zone.agri.entity.*;
 import com.zone.agri.repository.*;
@@ -49,7 +49,7 @@ public class ProductController {
     )
     @SecurityRequirement(name = "bearerAuth")
     @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    public ResponseEntity<ApiResponse<CreateProductResponse>> create(
+    public ResponseEntity<ApiResponse<ProductResponse>> create(
             @RequestPart("data")
             @Valid CreateProductRequest request,
 
@@ -59,7 +59,7 @@ public class ProductController {
             @RequestPart(value = "variantImages", required = false)
             List<MultipartFile> variantImages) {
 
-        CreateProductResponse response = productService.createProduct(request, productImages, variantImages);
+        ProductResponse response = productService.createProduct(request, productImages, variantImages);
         return ResponseEntity
                 .status(HttpStatus.CREATED)
                 .body(ApiResponse.success(response, "Tạo sản phẩm thành công"));
@@ -72,7 +72,7 @@ public class ProductController {
     @Operation(summary = "Lấy danh sách sản phẩm")
     @SecurityRequirement(name = "bearerAuth")
     @GetMapping
-    public ResponseEntity<List<Product>> getAll() {
+    public ResponseEntity<List<ProductResponse>> getAll() {
         return ResponseEntity.ok(productService.getAll());
     }
 
@@ -83,7 +83,7 @@ public class ProductController {
     @Operation(summary = "Chi tiết sản phẩm")
     @SecurityRequirement(name = "bearerAuth")
     @GetMapping("/{id}")
-    public ResponseEntity<Product> getById(
+    public ResponseEntity<ProductResponse> getById(
             @Parameter(description = "ID của sản phẩm", example = "1", required = true)
             @PathVariable Long id) {
         return ResponseEntity.ok(productService.getById(id));
@@ -96,7 +96,7 @@ public class ProductController {
     @Operation(summary = "Cập nhật sản phẩm (JSON)")
     @SecurityRequirement(name = "bearerAuth")
     @PutMapping("/{id}")
-    public ResponseEntity<Product> update(
+    public ResponseEntity<ProductResponse> update(
             @Parameter(description = "ID của sản phẩm", example = "1", required = true)
             @PathVariable Long id,
             @RequestBody ProductRequest request) {
