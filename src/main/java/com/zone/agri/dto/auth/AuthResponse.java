@@ -24,6 +24,7 @@ public class AuthResponse {
     String fullName;
     String email;
     String phoneNumber;
+    String contact; // Thêm trường contact linh động (email hoặc sđt)
     String avatarUrl;
     String role;
 }
