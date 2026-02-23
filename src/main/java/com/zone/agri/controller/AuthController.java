@@ -12,6 +12,8 @@ import com.zone.agri.security.CustomUserDetailsService;
 import com.zone.agri.service.AuthService;
 import com.zone.agri.utils.CookieUtils;
 import com.zone.agri.utils.JwtUtils;
+import com.zone.agri.common.AuthUtils;
+import com.zone.agri.dto.user.UserDetail;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -36,6 +38,24 @@ public class AuthController {
     private final JwtUtils jwtUtils;
     private final CustomUserDetailsService userDetailsService;
     private final CookieUtils cookieUtils;
+
+    // ---------------------------------------------------------
+    // GET /api/auth/me — Lấy thông tin người dùng hiện tại
+    // ---------------------------------------------------------
+    @Operation(summary = "Lấy thông tin cá nhân", description = "Trả về thông tin chi tiết của người dùng đang đăng nhập dựa trên Token.")
+    @SecurityRequirement(name = "bearerAuth")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Thành công", content = @Content(schema = @Schema(implementation = UserDetail.class))),
+            @ApiResponse(responseCode = "401", description = "Chưa đăng nhập hoặc Token hết hạn"),
+    })
+    @GetMapping("/me")
+    public ResponseEntity<UserDetail> getCurrentUser() {
+        UserDetail userDetail = AuthUtils.getUserDetail();
+        if (userDetail == null) {
+            throw new CustomAuthenticationException("Chưa đăng nhập hoặc phiên làm việc hết hạn");
+        }
+        return ResponseEntity.ok(userDetail);
+    }
 
     // ---------------------------------------------------------
     // POST /api/auth/login — Đăng nhập bằng email/SĐT + password
