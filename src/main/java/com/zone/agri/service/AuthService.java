@@ -227,6 +227,7 @@ public class AuthService {
                 .fullName(user.getFullName())
                 .email(user.getEmail())
                 .phoneNumber(user.getPhoneNumber())
+                .contact(user.getEmail() != null ? user.getEmail() : user.getPhoneNumber()) // Linh động email hoặc sđt
                 .avatarUrl(user.getAvatarUrl())
                 .role(user.getRole() != null ? user.getRole().getSlug() : null)
                 .build();
