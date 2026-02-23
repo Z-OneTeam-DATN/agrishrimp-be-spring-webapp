@@ -1,7 +1,6 @@
 package com.zone.agri.controller;
 
 import com.zone.agri.dto.admin.CategoryDTO;
-import com.zone.agri.entity.Category;
 import com.zone.agri.service.CategoryService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
@@ -23,8 +22,13 @@ public class CategoryController {
     }
 
     @PostMapping
-    public ResponseEntity<Category> create(@RequestBody CategoryDTO dto) {
+    public ResponseEntity<CategoryDTO> create(@RequestBody CategoryDTO dto) {
         return ResponseEntity.ok(categoryService.createCategory(dto));
+    }
+
+    @PutMapping("/{id}")
+    public ResponseEntity<CategoryDTO> update(@PathVariable Long id, @RequestBody CategoryDTO dto) {
+        return ResponseEntity.ok(categoryService.updateCategory(id, dto));
     }
 
     @DeleteMapping("/{id}")
@@ -33,15 +37,8 @@ public class CategoryController {
         return ResponseEntity.noContent().build();
     }
 
-    // Lấy chi tiết
     @GetMapping("/{id}")
     public ResponseEntity<CategoryDTO> getById(@PathVariable Long id) {
         return ResponseEntity.ok(categoryService.getCategoryById(id));
-    }
-
-    //Cập nhật
-    @PutMapping("/{id}")
-    public ResponseEntity<Category> update(@PathVariable Long id, @RequestBody CategoryDTO dto) {
-        return ResponseEntity.ok(categoryService.updateCategory(id, dto));
     }
 }
