@@ -1,7 +1,6 @@
 package com.zone.agri.controller;
 
 import com.zone.agri.dto.admin.CategoryDTO;
-import com.zone.agri.entity.Category;
 import com.zone.agri.service.CategoryService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -40,8 +39,13 @@ public class CategoryController {
             @ApiResponse(responseCode = "400", description = "Tên danh mục đã tồn tại hoặc thiếu thông tin")
     })
     @PostMapping
-    public ResponseEntity<Category> create(@RequestBody CategoryDTO dto) {
+    public ResponseEntity<CategoryDTO> create(@RequestBody CategoryDTO dto) {
         return ResponseEntity.ok(categoryService.createCategory(dto));
+    }
+
+    @PutMapping("/{id}")
+    public ResponseEntity<CategoryDTO> update(@PathVariable Long id, @RequestBody CategoryDTO dto) {
+        return ResponseEntity.ok(categoryService.updateCategory(id, dto));
     }
 
     @Operation(summary = "Xóa danh mục", description = "Xóa vĩnh viễn hoặc vô hiệu hóa một danh mục.")
@@ -71,6 +75,8 @@ public class CategoryController {
         return ResponseEntity.ok(categoryService.getCategoryById(id));
     }
 
+}
+
     @Operation(summary = "Cập nhật danh mục", description = "Chỉnh sửa tên, mô tả hoặc trạng thái danh mục.")
     @SecurityRequirement(name = "bearerAuth")
     @PutMapping("/{id}")
@@ -81,3 +87,4 @@ public class CategoryController {
         return ResponseEntity.ok(categoryService.updateCategory(id, dto));
     }
 }
+
