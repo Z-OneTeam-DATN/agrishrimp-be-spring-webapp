@@ -76,3 +76,8 @@ cloud:
     bucket-name: agri-shrimp-storage
     upload-dir: webapp
     region: ${AWS_REGION:ap-southeast-1}
+# 8. CẤU HÌNH CLOUDINARY (UPLOAD ẢNH)
+cloudinary:
+  cloud-name: "demevvyp4"
+  api-key: "176599529831455"
+  api-secret: "PqDexQ59PWJ8pOWeqN_BjimFYuY"
