@@ -53,6 +53,9 @@ public class ProductVariant {
     @Column(name = "custom_specs", columnDefinition = "TEXT")
     String customSpecs;
 
+    @Column(name = "unit", length = 50)
+    String unit;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "status", length = 20)
     VariantStatus status;

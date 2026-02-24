@@ -33,6 +33,9 @@ public class VariantRequest {
     @DecimalMin(value = "0", message = "Trọng lượng vận chuyển phải >= 0")
     private BigDecimal shippingWeight;
 
+    @Size(max = 50, message = "Đơn vị không được vượt quá 50 ký tự")
+    private String unit;
+
     /** Danh sách ID của các giá trị thuộc tính (Màu sắc, Dạng bào chế, Khối lượng, v.v.) */
     private List<Long> attributeValueIds;
 
