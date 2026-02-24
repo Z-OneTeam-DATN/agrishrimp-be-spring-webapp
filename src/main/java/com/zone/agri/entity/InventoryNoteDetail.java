@@ -43,14 +43,6 @@ public class InventoryNoteDetail {
     BigDecimal newSellingPrice; // Khớp với "Giá bán mới" trong UI
 
 
-
-    // --- KHÓA NGOẠI ---
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "inventory_transfer_id", insertable = false, updatable = false)
-    @ToString.Exclude
-    @EqualsAndHashCode.Exclude
-    private InventoryTransfer inventoryTransfer;
-
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "inventory_note_id")
     @ToString.Exclude
