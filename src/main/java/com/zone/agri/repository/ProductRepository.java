@@ -9,6 +9,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import org.springframework.data.domain.Pageable;
 import java.util.List;
 import java.util.Optional;
 
@@ -61,4 +62,28 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
 
     @Query("SELECT b FROM Brand b WHERE LOWER(b.name) = LOWER(:name)")
     Optional<Brand> findBrandByName(@Param("name") String name);
+
+
+    // Lấy danh sách sản phẩm đang kinh doanh và còn hàng
+    @Query("SELECT p FROM Product p " +
+            "JOIN p.variants v " +
+            "JOIN Inventory i ON i.productVariant.id = v.id " +
+            "WHERE p.status = 'ACTIVE' AND v.status = 'ACTIVE' " +
+            "GROUP BY p.id " +
+            "HAVING SUM(i.quantity) > 0")
+    List<Product> findProductsForSale();
+
+    // Lấy Top bán chạy dựa trên số lượng trong OrderItem
+    @Query("SELECT p FROM Product p " +
+            "JOIN p.variants v " +
+            "JOIN OrderItem oi ON oi.productVariant.id = v.id " +
+            "JOIN Inventory i ON i.productVariant.id = v.id " +
+            "WHERE p.status = 'ACTIVE' AND v.status = 'ACTIVE' " +
+            "GROUP BY p.id " +
+            "HAVING SUM(i.quantity) > 0 " +
+            "ORDER BY SUM(oi.quantity) DESC")
+    List<Product> findTopBestSellers(Pageable pageable);
+
+    // Tìm theo Slug cho trang chi tiết
+    Optional<Product> findBySlug(String slug);
 }
