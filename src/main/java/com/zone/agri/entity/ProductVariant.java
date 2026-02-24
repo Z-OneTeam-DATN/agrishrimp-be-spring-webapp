@@ -24,6 +24,9 @@ public class ProductVariant {
     @Column(name = "sku", length = 50, unique = true, nullable = false)
     String sku;
 
+    @Column(name = "unit", length = 50 )
+     String unit;
+
     @Column(name = "barcode", length = 50)
     String barcode;
 
@@ -37,7 +40,7 @@ public class ProductVariant {
     BigDecimal wholesalePrice;
 
     @Column(name = "quantity")
-    Long quantity;
+    Integer quantity;
 
     @Column(name = "shipping_weight", precision = 19, scale = 3)
     BigDecimal shippingWeight;
