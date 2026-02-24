@@ -25,6 +25,7 @@ import org.springframework.web.bind.annotation.*;
 @RequestMapping("/api/suppliers")
 @RequiredArgsConstructor
 @Tag(name = "Supplier Management", description = "Quản lý đối tác cung cấp, nhà phân phối và lịch sử nhập hàng")
+@CrossOrigin(origins = "http://localhost:3000")
 public class SupplierController {
 
     private final SupplierService supplierService;

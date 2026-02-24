@@ -25,6 +25,7 @@ import org.springframework.web.bind.annotation.*;
 @RequestMapping("/api/customers")
 @RequiredArgsConstructor
 @Tag(name = "Customer Management", description = "Quản lý hồ sơ khách hàng, nông dân và lịch sử giao dịch")
+@CrossOrigin(origins = "http://localhost:3000")
 public class CustomerController {
 
     private final CustomerService customerService;

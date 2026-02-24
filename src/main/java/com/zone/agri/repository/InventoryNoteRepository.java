@@ -9,20 +9,42 @@ import org.springframework.stereotype.Repository;
 
 import java.util.Collection;
 import java.util.Optional;
+import java.util.List;
 
 @Repository
 public interface InventoryNoteRepository extends JpaRepository<InventoryNote, Long> {
+
+    // Kiểm tra có phiếu nào thuộc các trạng thái chỉ định không
     boolean existsByStatusIn(Collection<InventoryNoteStatus> statuses);
 
-    @Query("SELECT COUNT(in) > 0 FROM InventoryNote in JOIN in.details detail WHERE in.status IN :statuses AND detail.productVariant.product.id = :productId")
-    boolean existsByStatusInAndProductId(@Param("statuses") Collection<InventoryNoteStatus> statuses, @Param("productId") Long productId);
+    // Kiểm tra sản phẩm có nằm trong phiếu với trạng thái chỉ định không
+    @Query("""
+        SELECT COUNT(in) > 0 
+        FROM InventoryNote in 
+        JOIN in.details detail 
+        WHERE in.status IN :statuses 
+        AND detail.productVariant.product.id = :productId
+    """)
+    boolean existsByStatusInAndProductId(
+            @Param("statuses") Collection<InventoryNoteStatus> statuses,
+            @Param("productId") Long productId
+    );
 
-    // --- CODE MỚI ---
-    // Tìm phiếu nhập bằng mã Code (PNK...) bao gồm cả danh sách chi tiết (Eager loading để tối ưu UI)
-    @Query("SELECT in FROM InventoryNote in LEFT JOIN FETCH in.details WHERE in.code = :code")
+    // Tìm phiếu theo code + fetch details (tránh LazyInitializationException khi trả về UI)
+    @Query("""
+        SELECT DISTINCT in 
+        FROM InventoryNote in 
+        LEFT JOIN FETCH in.details 
+        WHERE in.code = :code
+    """)
     Optional<InventoryNote> findByCodeWithDetails(@Param("code") String code);
 
-    // Tìm kiếm phiếu theo chi nhánh
-    @Query("SELECT in FROM InventoryNote in WHERE in.branch.id = :branchId ORDER BY in.createdAt DESC")
-    Collection<InventoryNote> findAllByBranchId(@Param("branchId") Long branchId);
+    // Lấy danh sách phiếu theo chi nhánh
+    @Query("""
+        SELECT in 
+        FROM InventoryNote in 
+        WHERE in.branch.id = :branchId 
+        ORDER BY in.createdAt DESC
+    """)
+    List<InventoryNote> findAllByBranchId(@Param("branchId") Long branchId);
 }
