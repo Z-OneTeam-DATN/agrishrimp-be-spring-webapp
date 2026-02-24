@@ -1,9 +1,12 @@
 package com.zone.agri.entity;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.annotation.JsonManagedReference;
 import com.zone.agri.entity.enums.InventoryTransferStatus;
 import jakarta.persistence.*;
 import lombok.*;
 import lombok.experimental.FieldDefaults;
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
 
@@ -15,6 +18,7 @@ import java.util.List;
 @AllArgsConstructor
 @Builder
 @FieldDefaults(level = AccessLevel.PRIVATE)
+@JsonIgnoreProperties({"hibernateLazyInitializer", "handler"})
 public class InventoryTransfer {
 
     @Id
@@ -28,6 +32,38 @@ public class InventoryTransfer {
     @Column(columnDefinition = "ENUM('PENDING', 'SHIPPING', 'COMPLETED', 'CANCELLED')")
     InventoryTransferStatus status;
 
+    // --- CÁC TRƯỜNG BỔ SUNG TỪ GIAO DIỆN UI ---
+
+    @Column(name = "description", columnDefinition = "TEXT")
+    String description; // Lý do điều chuyển / Diễn giải
+
+    @Column(name = "transfer_type", length = 50)
+    String transferType; // Loại điều chuyển: BETWEEN_WAREHOUSES, INTERNAL
+
+    @Column(name = "vehicle", length = 100)
+    String vehicle; // Phương tiện vận chuyển (VD: Xe tải 29C...)
+
+    @Column(name = "transporter", length = 100)
+    String transporter; // Tài xế / Người giao
+
+    @Column(name = "dispatch_order", length = 100)
+    String dispatchOrder; // Lệnh điều động số
+
+    @Column(name = "reference_code", length = 100)
+    String referenceCode; // Tham chiếu chứng từ (VD: YCDC001)
+
+    @Column(name = "priority", length = 20)
+    String priority; // Độ ưu tiên: HIGH, NORMAL, LOW
+
+    @Column(name = "transfer_date")
+    LocalDateTime transferDate; // Ngày xuất thực tế / Dự kiến
+
+    @Column(name = "deadline")
+    LocalDateTime deadline; // Dự kiến nhận (Deadline)
+
+    @Column(name = "total_value", precision = 38, scale = 2)
+    BigDecimal totalValue; // Tổng giá trị hàng hóa
+
     @Column(name = "total_quantity")
     Integer totalQuantity;
 
@@ -36,13 +72,11 @@ public class InventoryTransfer {
 
     // --- KHÓA NGOẠI ---
 
-
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "from_branch_id")
     @ToString.Exclude
     @EqualsAndHashCode.Exclude
     Branch fromBranch;
-
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "to_branch_id")
@@ -50,13 +84,11 @@ public class InventoryTransfer {
     @EqualsAndHashCode.Exclude
     Branch toBranch;
 
-
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "sender_id")
     @ToString.Exclude
     @EqualsAndHashCode.Exclude
     User sender;
-
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "receiver_id")
@@ -64,9 +96,8 @@ public class InventoryTransfer {
     @EqualsAndHashCode.Exclude
     User receiver;
 
-
-    @OneToMany(mappedBy = "inventoryTransfer", fetch = FetchType.LAZY, cascade = CascadeType.ALL)
+    @OneToMany(mappedBy = "inventoryTransfer", fetch = FetchType.LAZY, cascade = CascadeType.ALL, orphanRemoval = true)
     @ToString.Exclude
-    List<InventoryNoteDetail> details;
-
+    @JsonManagedReference
+    List<InventoryTransferDetail> details;
 }

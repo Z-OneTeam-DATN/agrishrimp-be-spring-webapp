@@ -1,0 +1,215 @@
+diff --git a/src/main/java/com/zone/agri/controller/InventoryTransferController.java b/src/main/java/com/zone/agri/controller/InventoryTransferController.java
+index 1d7cb86..fd4d557 100644
+--- a/src/main/java/com/zone/agri/controller/InventoryTransferController.java
++++ b/src/main/java/com/zone/agri/controller/InventoryTransferController.java
+@@ -1,7 +1,6 @@
+ package com.zone.agri.controller;
+ 
+ import com.zone.agri.dto.transfer.TransferDetailResponse;
+-import com.zone.agri.dto.transfer.TransferItemRequest;
+ import com.zone.agri.dto.transfer.TransferRequest;
+ import com.zone.agri.dto.transfer.TransferResponse;
+ import com.zone.agri.entity.InventoryTransfer;
+@@ -68,7 +67,9 @@ public class InventoryTransferController {
+     @Operation(summary = "Lấy chi tiết phiếu điều chuyển", description = "Trả về thông tin chi tiết và danh sách sản phẩm của một phiếu.")
+     @SecurityRequirement(name = "bearerAuth")
+     @GetMapping("/{id}")
+-    public ResponseEntity<?> getById(@PathVariable Long id) {
++    public ResponseEntity<?> getById(
++            @Parameter(description = "ID của phiếu điều chuyển", example = "1", required = true)
++            @PathVariable Long id) {
+         try {
+             InventoryTransfer t = transferService.getById(id);
+ 
+@@ -89,7 +90,6 @@ public class InventoryTransferController {
+                     .totalValue(t.getTotalValue())
+                     .items(t.getDetails() == null ? java.util.Collections.emptyList() :
+                             t.getDetails().stream().map(d -> {
+-                                // Xử lý an toàn chống NullPointerException
+                                 String pName = "Chưa có tên";
+                                 String sku = "No-SKU";
+                                 String unit = "-";
+@@ -120,7 +120,7 @@ public class InventoryTransferController {
+ 
+         } catch (Exception e) {
+             e.printStackTrace();
+-            return ResponseEntity.status(500).body("Lỗi Backend: " + e.getMessage());
++            return ResponseEntity.status(500).body(Map.of("message", "Lỗi Backend: " + e.getMessage()));
+         }
+     }
+ 
+@@ -131,11 +131,11 @@ public class InventoryTransferController {
+             @ApiResponse(responseCode = "400", description = "Lỗi xuất kho (kho không đủ hàng, sai trạng thái...)")
+     })
+     @PutMapping("/{id}/ship")
+-    public ResponseEntity<String> approveAndShipTransfer(
++    public ResponseEntity<Map<String, String>> approveAndShipTransfer(
+             @Parameter(description = "ID của phiếu điều chuyển", example = "1", required = true)
+             @PathVariable Long id) {
+         transferService.approveAndShip(id);
+-        return ResponseEntity.ok("Đã xuất kho và đang vận chuyển!");
++        return ResponseEntity.ok(Map.of("message", "Đã xuất kho và đang vận chuyển!"));
+     }
+ 
+     @Operation(summary = "Xác nhận Nhận hàng", description = "Chi nhánh nhận xác nhận số lượng thực tế nhận được. Chuyển trạng thái sang COMPLETED, cộng tồn kho chi nhánh nhận, xử lý chênh lệch.")
+@@ -145,32 +145,42 @@ public class InventoryTransferController {
+             @ApiResponse(responseCode = "400", description = "Lỗi nhận hàng (phiếu không ở trạng thái đang chuyển, sai dữ liệu...)")
+     })
+     @PutMapping("/{id}/receive")
+-    public ResponseEntity<?> receiveTransfer(@PathVariable Long id, @RequestBody List<Map<String, Object>> receivedItems) {
+-        // Trong Service:
+-        // - Lấy quantityReal cập nhật vào phiếu.
+-        // - Cộng tồn kho cho chi nhánh nhận (toBranch) dựa trên quantityReal.
+-        // - Đổi status = COMPLETED.
++    public ResponseEntity<Map<String, String>> receiveTransfer(
++            @Parameter(description = "ID của phiếu điều chuyển", example = "1", required = true)
++            @PathVariable Long id,
++            @Parameter(description = "Danh sách sản phẩm kiểm nhận", required = true)
++            @RequestBody List<Map<String, Object>> receivedItems) {
+         transferService.receiveTransfer(id, receivedItems);
+-        return ResponseEntity.ok("Đã xác nhận nhận hàng");
++        return ResponseEntity.ok(Map.of("message", "Đã xác nhận nhận hàng"));
+     }
+ 
+-    // 1. API Hủy phiếu
++    @Operation(summary = "Hủy phiếu điều chuyển", description = "Hủy phiếu điều chuyển. Nếu phiếu đang trên đường, hoàn trả lại tồn kho cho chi nhánh xuất.")
++    @SecurityRequirement(name = "bearerAuth")
++    @ApiResponses({
++            @ApiResponse(responseCode = "200", description = "Hủy phiếu thành công"),
++            @ApiResponse(responseCode = "400", description = "Không thể hủy phiếu ở trạng thái hiện tại")
++    })
+     @PutMapping("/{id}/cancel")
+-    public ResponseEntity<?> cancelTransfer(@PathVariable Long id) {
+-        // Trong Service: Chuyển status = CANCELLED.
+-        // Nếu phiếu đang SHIPPING (đã trừ kho xuất), thì phải CỘNG LẠI tồn kho cho kho xuất.
++    public ResponseEntity<Map<String, String>> cancelTransfer(
++            @Parameter(description = "ID của phiếu điều chuyển cần hủy", example = "1", required = true)
++            @PathVariable Long id) {
+         transferService.cancelTransfer(id);
+-        return ResponseEntity.ok("Đã hủy phiếu thành công");
++        return ResponseEntity.ok(Map.of("message", "Đã hủy phiếu thành công"));
+     }
+ 
+-    // 2. API Đổi chi nhánh nhận
++    @Operation(summary = "Đổi chi nhánh nhận", description = "Thay đổi chi nhánh đích của lô hàng khi phiếu đang ở trạng thái PENDING hoặc SHIPPING.")
++    @SecurityRequirement(name = "bearerAuth")
++    @ApiResponses({
++            @ApiResponse(responseCode = "200", description = "Đổi chi nhánh thành công"),
++            @ApiResponse(responseCode = "400", description = "Không thể đổi chi nhánh (phiếu đã hoàn thành, hoặc trùng chi nhánh xuất)")
++    })
+     @PutMapping("/{id}/change-destination")
+-    public ResponseEntity<?> changeDestination(@PathVariable Long id, @RequestParam Long newBranchId) {
+-        // Trong Service: Cập nhật toBranch = newBranchId.
++    public ResponseEntity<Map<String, String>> changeDestination(
++            @Parameter(description = "ID của phiếu điều chuyển", example = "1", required = true)
++            @PathVariable Long id,
++            @Parameter(description = "ID của chi nhánh nhận mới", example = "2", required = true)
++            @RequestParam("newBranchId") Long newBranchId) {
+         transferService.changeDestination(id, newBranchId);
+-        return ResponseEntity.ok("Đã thay đổi chi nhánh nhận");
++        return ResponseEntity.ok(Map.of("message", "Đã thay đổi chi nhánh nhận"));
+     }
+-
+-
+-
+ }
+\ No newline at end of file
+diff --git a/src/main/java/com/zone/agri/repository/InventoryRepository.java b/src/main/java/com/zone/agri/repository/InventoryRepository.java
+index aa919c4..38485a2 100644
+--- a/src/main/java/com/zone/agri/repository/InventoryRepository.java
++++ b/src/main/java/com/zone/agri/repository/InventoryRepository.java
+@@ -1,15 +1,25 @@
+ package com.zone.agri.repository;
+ 
+ import com.zone.agri.entity.Inventory;
++import com.zone.agri.entity.Branch;
++import com.zone.agri.entity.ProductVariant;
+ import org.springframework.data.jpa.repository.JpaRepository;
+ import org.springframework.data.jpa.repository.Query;
+ import org.springframework.data.repository.query.Param;
+ import org.springframework.stereotype.Repository;
+ 
++import java.util.Optional;
++
+ @Repository
+ public interface InventoryRepository extends JpaRepository<Inventory, Long> {
++
++    // Tìm tồn kho theo branch + variant
++    Optional<Inventory> findByBranchAndProductVariant(Branch branch, ProductVariant variant);
++
++    // Tổng số lượng tồn kho theo Product
+     @Query("SELECT COALESCE(SUM(i.quantity), 0) FROM Inventory i WHERE i.productVariant.product.id = :productId")
+     Integer sumQuantityByProductId(@Param("productId") Long productId);
+ 
+-    boolean existsByProductVariantProductId(Long productId);
+-}
++    // Tìm tồn kho theo chi nhánh + variant
++    Optional<Inventory> findByBranchIdAndProductVariantId(Long branchId, Long variantId);
++}
+\ No newline at end of file
+diff --git a/src/main/java/com/zone/agri/repository/ProductVariantRepository.java b/src/main/java/com/zone/agri/repository/ProductVariantRepository.java
+index e6bb73a..a3c4d70 100644
+--- a/src/main/java/com/zone/agri/repository/ProductVariantRepository.java
++++ b/src/main/java/com/zone/agri/repository/ProductVariantRepository.java
+@@ -1,9 +1,26 @@
+ package com.zone.agri.repository;
+ 
++import com.zone.agri.dto.product.VariantSearchResponse;
+ import com.zone.agri.entity.ProductVariant;
++import io.lettuce.core.dynamic.annotation.Param;
+ import org.springframework.data.jpa.repository.JpaRepository;
++import org.springframework.data.jpa.repository.Query;
+ import org.springframework.stereotype.Repository;
+ 
++import java.util.List;
++import java.util.Optional;
++
+ @Repository
+ public interface ProductVariantRepository extends JpaRepository<ProductVariant, Long> {
+-}
+\ No newline at end of file
++    @Query("SELECT pv FROM ProductVariant pv WHERE pv.sku = :sku")
++    Optional<ProductVariant> findBySku(@Param("sku") String sku);
++
++        // Tìm kiếm sản phẩm theo Tên (từ bảng Product), SKU, hoặc Barcode
++        @Query("SELECT new com.zone.agri.dto.product.VariantSearchResponse(" +
++                "v.id, v.sku, v.barcode, p.name, v.unit, v.quantity) " +
++                "FROM ProductVariant v JOIN v.product p " +
++                "WHERE LOWER(p.name) LIKE LOWER(CONCAT('%', :keyword, '%')) " +
++                "OR LOWER(v.sku) LIKE LOWER(CONCAT('%', :keyword, '%')) " +
++                "OR LOWER(v.barcode) LIKE LOWER(CONCAT('%', :keyword, '%'))")
++        List<VariantSearchResponse> searchVariants(@Param("keyword") String keyword);
++    }
+\ No newline at end of file
+diff --git a/src/main/java/com/zone/agri/service/InventoryTransferService.java b/src/main/java/com/zone/agri/service/InventoryTransferService.java
+index dd9e406..d782267 100644
+--- a/src/main/java/com/zone/agri/service/InventoryTransferService.java
++++ b/src/main/java/com/zone/agri/service/InventoryTransferService.java
+@@ -237,21 +237,20 @@ public class InventoryTransferService {
+         return transferRepo.searchTransfers(keyword, status, pageable);
+     }
+ 
+-    // 4. HÀM BỔ TRỢ: CỘNG/TRỪ TỒN KHO AN TOÀN
+     private void updateInventoryQuantity(Long branchId, Long variantId, Integer quantityChange) {
+-        // Dùng cái hàm FindBy.. mà Huy đã viết sẵn trong InventoryRepository
+         Inventory inventory = inventoryRepo.findByBranchIdAndProductVariantId(branchId, variantId)
+                 .orElseGet(() -> {
+-                    // Nếu chi nhánh này CHƯA TỪNG có sản phẩm này -> Tạo dòng tồn kho mới = 0
+                     Inventory newInv = new Inventory();
+-                    newInv.setBranch(branchRepo.findById(branchId).orElseThrow());
+-                    newInv.setProductVariant(variantRepo.findById(variantId).orElseThrow());
++                    // Cung cấp message lỗi rõ ràng nếu không tìm thấy Branch
++                    newInv.setBranch(branchRepo.findById(branchId)
++                            .orElseThrow(() -> new RuntimeException("Lỗi cấu hình Tồn kho: Không tìm thấy Chi nhánh với ID " + branchId)));
++                    // Cung cấp message lỗi rõ ràng nếu không tìm thấy Variant
++                    newInv.setProductVariant(variantRepo.findById(variantId)
++                            .orElseThrow(() -> new RuntimeException("Lỗi cấu hình Tồn kho: Không tìm thấy Sản phẩm với ID " + variantId)));
+                     newInv.setQuantity(0);
+-                    // Có thể set thêm các trường khác nếu entity Inventory yêu cầu (như min_stock, shelf_location...)
+                     return newInv;
+                 });
+ 
+-        // Cập nhật số lượng mới
+         inventory.setQuantity(inventory.getQuantity() + quantityChange);
+         inventoryRepo.save(inventory);
+     }

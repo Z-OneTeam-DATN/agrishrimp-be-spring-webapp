@@ -28,7 +28,7 @@ public class VariantRequest {
     private BigDecimal wholesalePrice;
 
     @Min(value = 0, message = "Tồn kho khởi tạo phải >= 0")
-    private Long initialStock;
+    private Integer initialStock;
 
     @DecimalMin(value = "0", message = "Trọng lượng vận chuyển phải >= 0")
     private BigDecimal shippingWeight;

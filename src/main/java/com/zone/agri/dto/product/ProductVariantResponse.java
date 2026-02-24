@@ -15,7 +15,7 @@ public class ProductVariantResponse {
     private BigDecimal costPrice;
     private BigDecimal price;
     private BigDecimal wholesalePrice;
-    private Long quantity;
+    private Integer quantity;
     private BigDecimal shippingWeight;
     private String unit;
     private String imageUrl;
