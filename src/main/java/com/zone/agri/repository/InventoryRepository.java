@@ -23,19 +23,3 @@ public interface InventoryRepository extends JpaRepository<Inventory, Long> {
     Optional<Inventory> findByBranchIdAndProductVariantId(Long branchId, Long variantId);
 }
 
-    // 1. SỬA TẠI ĐÂY: Đổi kiểu trả về từ Integer thành Long để khớp với ProductService
-    // Thêm COALESCE(..., 0L) để tránh bị lỗi Null nếu sản phẩm chưa có bản ghi kho nào
-    @Query("SELECT COALESCE(SUM(i.quantity), 0L) FROM Inventory i WHERE i.productVariant.product.id = :productId")
-    Long sumQuantityByProductId(@Param("productId") Long productId);
-
-    // Kiểm tra sản phẩm có tồn kho không
-    boolean existsByProductVariantProductId(Long productId);
-
-    // ==============================
-    // TỒN KHO THEO CHI NHÁNH
-    // ==============================
-    Optional<Inventory> findByBranchIdAndProductVariantSku(Long branchId, String sku);
-
-    Optional<Inventory> findByBranchAndProductVariant(Branch branch, ProductVariant variant);
-}
-
