@@ -12,7 +12,6 @@ public class ProductRequest {
     private Long categoryId;
     private String brand;
     private String origin;
-    private String baseSku;
     private String description;
     private String status;
     private List<String> images;
@@ -26,15 +25,12 @@ public class ProductRequest {
         private BigDecimal costPrice;
         private BigDecimal price;
         private BigDecimal wholesalePrice;
-        private Integer initialStock;
-        private BigDecimal netWeight;
-        private String netWeightUnit;
+        private Long initialStock;
         private BigDecimal shippingWeight;
-                private String image;
+        private String image;
         
-                // DÙNG LIST NÀY ĐỂ NHẬN BAO NHIÊU THUỘC TÍNH TỪ UI CŨNG ĐƯỢC
-        
-                private List<AttributeDto> attributes;
-            }
-        }
+        /** Danh sách ID của các giá trị thuộc tính (Màu sắc, Dạng bào chế, Khối lượng, v.v.) */
+        private List<Long> attributeValueIds;
+    }
+}
         
