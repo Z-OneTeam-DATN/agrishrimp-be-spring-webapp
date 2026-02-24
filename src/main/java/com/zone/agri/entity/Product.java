@@ -6,9 +6,9 @@ import lombok.*;
 import lombok.experimental.FieldDefaults;
 
 import java.time.LocalDateTime;
-import java.util.List;
-import java.util.Set; // Import Set
-import java.util.HashSet; // Import HashSet
+import java.util.LinkedHashSet;
+import java.util.Set;
+import java.util.HashSet;
 
 @Entity
 @Table(name = "products")
@@ -19,6 +19,7 @@ import java.util.HashSet; // Import HashSet
 @Builder
 @FieldDefaults(level = AccessLevel.PRIVATE)
 public class Product {
+
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     Long id;
@@ -66,14 +67,19 @@ public class Product {
     @EqualsAndHashCode.Exclude
     Category category;
 
-    @OneToMany(mappedBy = "product", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
+    // ==============================
+    // Product Images
+    // ==============================
+    @OneToMany(mappedBy = "product", cascade = CascadeType.ALL, fetch = FetchType.LAZY, orphanRemoval = true)
     @ToString.Exclude
     @EqualsAndHashCode.Exclude
     @Builder.Default
     Set<ProductImage> productImages = new HashSet<>();
 
-    @OneToMany(mappedBy = "product", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
-    @ToString.Exclude
-    @EqualsAndHashCode.Exclude
-    List<ProductVariant> variants;
+    // ==============================
+    // Variants
+    // ==============================
+    @OneToMany(mappedBy = "product", cascade = CascadeType.ALL, fetch = FetchType.EAGER, orphanRemoval = true)
+    @Builder.Default
+    Set<ProductVariant> variants = new LinkedHashSet<>();
 }

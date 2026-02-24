@@ -43,6 +43,24 @@ public class InventoryNote {
     @Column(name = "created_at")
     LocalDateTime createdAt;
 
+    @Column(name = "note", columnDefinition = "TEXT")
+    String note; // Lưu "Ghi chú đơn" từ UI
+
+    @Column(name = "tags")
+    String tags; // Lưu danh sách "Thẻ phân loại" (có thể lưu dạng chuỗi cách nhau bởi dấu phẩy)
+
+    @Column(name = "deliverer")
+    String deliverer; // Lưu tên "Nhân viên/Người giao hàng" từ UI
+
+    @Column(name = "entry_date")
+    LocalDateTime entryDate; // Lưu "Ngày hẹn giao" từ UI
+
+    @Column(name = "payment_amount", precision = 38, scale = 2)
+    BigDecimal paymentAmount; // Lưu "Thanh toán cho NCC" từ UI
+
+    @Column(name = "debt_amount", precision = 38, scale = 2)
+    BigDecimal debtAmount; // Lưu "Còn phải trả" từ UI (tổng tiền - thanh toán)
+
     // --- KHÓA NGOẠI ---
 
     @ManyToOne(fetch = FetchType.LAZY)

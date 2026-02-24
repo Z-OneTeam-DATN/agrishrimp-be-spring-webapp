@@ -4,6 +4,7 @@ import jakarta.persistence.*;
 import lombok.*;
 import lombok.experimental.FieldDefaults;
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
 
 @Entity
 @Table(name = "inventory_note_details")
@@ -31,6 +32,15 @@ public class InventoryNoteDetail {
 
     @Column(name = "quantity_real")
     Integer quantityReal;
+
+    @Column(name = "batch_number", length = 50)
+    String batchNumber; // Khớp với "lotNumber" trong UI
+
+    @Column(name = "expiry_date")
+    LocalDateTime expiryDate; // Khớp với "expiryDate" trong UI
+
+    @Column(name = "new_selling_price", precision = 38, scale = 2)
+    BigDecimal newSellingPrice; // Khớp với "Giá bán mới" trong UI
 
 
 
