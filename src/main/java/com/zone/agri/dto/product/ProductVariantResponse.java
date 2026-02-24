@@ -17,6 +17,7 @@ public class ProductVariantResponse {
     private BigDecimal wholesalePrice;
     private Integer quantity;
     private BigDecimal shippingWeight;
+    private String unit;
     private String imageUrl;
     private VariantStatus status;
     private List<AttributeValueResponse> attributeValues;

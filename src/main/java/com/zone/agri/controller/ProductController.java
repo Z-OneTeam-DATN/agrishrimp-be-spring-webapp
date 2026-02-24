@@ -50,7 +50,7 @@ public class ProductController {
             """
     )
     @SecurityRequirement(name = "bearerAuth")
-    @PostMapping(consumes = MediaType.APPLICATION_JSON_VALUE)
+    @PostMapping(value = "/json", consumes = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<ProductResponse> createJson(
             @RequestBody @Valid CreateProductJsonWrapper wrapper) {
 
@@ -68,7 +68,7 @@ public class ProductController {
             """
     )
     @SecurityRequirement(name = "bearerAuth")
-    @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @PostMapping(value = "/multipart", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<ProductResponse> createMultipart(
             @RequestPart("data")
             @Valid CreateProductRequest request,

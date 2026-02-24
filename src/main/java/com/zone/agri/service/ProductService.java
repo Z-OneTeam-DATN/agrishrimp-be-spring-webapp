@@ -173,6 +173,7 @@ public class ProductService {
                     .wholesalePrice(vDto.getWholesalePrice())
                     .quantity(vDto.getInitialStock())
                     .shippingWeight(vDto.getShippingWeight())
+                    .unit(vDto.getUnit())
                     .imageUrl(vDto.getImage())
                     .status(VariantStatus.ACTIVE)
                     .build();
@@ -215,7 +216,7 @@ public class ProductService {
         }
 
         // 2. Kiểm tra tồn kho
-        Integer totalStock = inventoryRepository.sumQuantityByProductId(id);
+        Long totalStock = inventoryRepository.sumQuantityByProductId(id);
         if (totalStock != null && totalStock > 0) {
             throw new ConflictException("Sản phẩm vẫn còn tồn kho, không thể xóa.");
         }
@@ -319,6 +320,7 @@ public class ProductService {
                 .wholesalePrice(variant.getWholesalePrice())
                 .quantity(variant.getQuantity())
                 .shippingWeight(variant.getShippingWeight())
+                .unit(variant.getUnit())
                 .imageUrl(variant.getImageUrl())
                 .status(variant.getStatus())
                 .attributeValues(attributeValues)
@@ -387,6 +389,7 @@ public class ProductService {
                     .wholesalePrice(vReq.getWholesalePrice())
                     .quantity(vReq.getInitialStock() != null ? vReq.getInitialStock() : 0)
                     .shippingWeight(vReq.getShippingWeight())
+                    .unit(vReq.getUnit())
                     .imageUrl(imageUrl)
                     .imagePublicId(imagePublicId)
                     .status(VariantStatus.ACTIVE)

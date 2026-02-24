@@ -28,6 +28,7 @@ public class ProductRequest {
         private Integer initialStock;
         private BigDecimal shippingWeight;
         private String image;
+        private String unit;
         
         /** Danh sách ID của các giá trị thuộc tính (Màu sắc, Dạng bào chế, Khối lượng, v.v.) */
         private List<Long> attributeValueIds;
