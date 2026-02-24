@@ -32,7 +32,7 @@ public class CartService {
                     .id(item.getId())
                     .variantId(variant.getId())
                     .name(variant.getProduct() != null ? variant.getProduct().getName() : "Sản phẩm")
-                    .variant(variant.getUnit() != null ? variant.getUnit() : "")
+                    .variant("")
                     .price(variant.getPrice())
                     .quantity(item.getQuantity())
                     .stock(variant.getQuantity()) // Tồn kho hiện tại

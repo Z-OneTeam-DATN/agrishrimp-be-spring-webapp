@@ -29,7 +29,7 @@ import java.util.List;
 
 @Configuration
 @EnableWebSecurity
-@EnableMethodSecurity          // Bật @PreAuthorize / @PostAuthorize / @Secured
+@EnableMethodSecurity
 @RequiredArgsConstructor
 public class SecurityConfig {
 
@@ -43,13 +43,6 @@ public class SecurityConfig {
     /** Các endpoint công khai — không cần token */
     private static final String[] PUBLIC_MATCHERS = {
             "/api/auth/**",
-            "/api/v1/inventory/**",
-            "/api/branches/**",
-            "/api/customers/**",
-            "/api/suppliers/**",
-            "/api/suppliers",
-            "/api/categories/**",
-            "/api/products/**",
             "/swagger-ui/**",
             "/swagger-ui.html",
             "/v3/api-docs/**",

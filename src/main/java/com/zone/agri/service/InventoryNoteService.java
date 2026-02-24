@@ -30,6 +30,7 @@ public class InventoryNoteService {
     private final ProductVariantRepository productVariantRepository;
     private final SupplierRepository supplierRepository;
     private final UserRepository userRepository;
+    private final com.zone.agri.common.WarehouseContext warehouseContext;
 
     @Transactional
     public InventoryNoteResponse createExportCommand(ExportNoteRequest request) {
@@ -50,6 +51,8 @@ public class InventoryNoteService {
 
         note.setBranch(branchRepository.findById(request.getBranchId())
                 .orElseThrow(() -> new RuntimeException("Không tìm thấy kho xuất")));
+
+        warehouseContext.assertAccess(note.getBranch().getId());
 
         if (request.getCreatedById() != null) {
             userRepository.findById(request.getCreatedById()).ifPresent(note::setCreatedBy);
@@ -96,7 +99,12 @@ public class InventoryNoteService {
 
     // 1. CHỈ LẤY CÁC LỆNH ĐANG CHỜ XỬ LÝ (Tab Lệnh chờ xuất)
     public List<InventoryNoteResponse> getAllExportCommands() {
-        return inventoryNoteRepository.findAll().stream()
+        Long warehouseId = warehouseContext.resolveWarehouseId();
+        List<InventoryNote> notes = (warehouseId == null)
+                ? inventoryNoteRepository.findAll()
+                : inventoryNoteRepository.findAllByBranchId(warehouseId);
+
+        return notes.stream()
                 .filter(note -> note.getStatus() == InventoryNoteStatus.PENDING) // Thêm điều kiện lọc
                 .map(this::mapToResponse)
                 .filter(Objects::nonNull)
@@ -105,7 +113,12 @@ public class InventoryNoteService {
 
     // 2. CHỈ LẤY CÁC PHIẾU ĐÃ HOÀN THÀNH (Tab Lịch sử xuất kho)
     public List<InventoryNoteResponse> getAllExportReceipts() {
-        return inventoryNoteRepository.findAll().stream()
+        Long warehouseId = warehouseContext.resolveWarehouseId();
+        List<InventoryNote> notes = (warehouseId == null)
+                ? inventoryNoteRepository.findAll()
+                : inventoryNoteRepository.findAllByBranchId(warehouseId);
+
+        return notes.stream()
                 .filter(note -> note.getStatus() == InventoryNoteStatus.COMPLETED) // Thêm điều kiện lọc
                 .map(this::mapToResponse)
                 .filter(Objects::nonNull)
@@ -153,6 +166,8 @@ public class InventoryNoteService {
         // 1. Kiểm tra lệnh có tồn tại không
         InventoryNote note = inventoryNoteRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Không tìm thấy lệnh xuất ID: " + id));
+
+        warehouseContext.assertAccess(note.getBranch().getId());
 
         // 2. Kiểm tra trạng thái (Tùy chọn: Chỉ cho xóa khi lệnh ở trạng thái PENDING hoặc CANCELLED)
         if (note.getStatus() == InventoryNoteStatus.COMPLETED) {

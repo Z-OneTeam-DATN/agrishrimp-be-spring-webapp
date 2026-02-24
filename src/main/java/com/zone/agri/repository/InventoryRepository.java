@@ -13,16 +13,30 @@ import java.util.Optional;
 
 @Repository
 public interface InventoryRepository extends JpaRepository<Inventory, Long> {
-    // Tìm tồn kho theo branch + variant
+
+    // ==============================
+    // TÌM TỒN KHO THEO CHI NHÁNH + VARIANT
+    // ==============================
     Optional<Inventory> findByBranchAndProductVariant(Branch branch, ProductVariant variant);
 
-    // Tìm đến hàm này trong InventoryRepository
-    @Query("SELECT COALESCE(CAST(SUM(i.quantity) AS integer), 0) FROM Inventory i WHERE i.productVariant.product.id = :productId")
-    Integer sumQuantityByProductId(@Param("productId") Long productId);
-
-    // Tìm tồn kho theo chi nhánh + variant
     Optional<Inventory> findByBranchIdAndProductVariantId(Long branchId, Long variantId);
 
     List<Inventory> findByProductVariantIdIn(List<Long> variantIds);
-}
 
+    Optional<Inventory> findByBranchIdAndProductVariantSku(Long branchId, String sku);
+
+    // ==============================
+    // TỔNG TỒN KHO TOÀN HỆ THỐNG THEO PRODUCT
+    // ==============================
+    @Query("""
+           SELECT COALESCE(SUM(i.quantity), 0L)
+           FROM Inventory i
+           WHERE i.productVariant.product.id = :productId
+           """)
+    Long sumQuantityByProductId(@Param("productId") Long productId);
+
+    // ==============================
+    // KIỂM TRA SẢN PHẨM CÓ TỒN KHO KHÔNG
+    // ==============================
+    boolean existsByProductVariantProductId(Long productId);
+}

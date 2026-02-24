@@ -52,6 +52,9 @@ public class JwtUtils {
         Map<String, Object> claims = new HashMap<>();
         claims.put("userId", customUserDetail.getUserDetail().getId());
         claims.put("fullName", customUserDetail.getUserDetail().getFullName());
+        claims.put("warehouseId", customUserDetail.getUserDetail().getBranchId());
+        claims.put("roleSlug", customUserDetail.getUserDetail().getRole() != null 
+            ? customUserDetail.getUserDetail().getRole().getSlug() : null);
 
         return buildToken(customUserDetail.getUsername(), claims, accessExpiration);
     }
