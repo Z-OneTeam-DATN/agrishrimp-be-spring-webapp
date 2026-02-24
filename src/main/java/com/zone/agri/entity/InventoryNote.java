@@ -44,27 +44,25 @@ public class InventoryNote {
     LocalDateTime createdAt;
 
     @Column(name = "note", columnDefinition = "TEXT")
-    String note; // Lưu "Ghi chú đơn" từ UI
+    String note;
 
     @Column(name = "tags")
-    String tags; // Lưu danh sách "Thẻ phân loại" (có thể lưu dạng chuỗi cách nhau bởi dấu phẩy)
+    String tags;
 
     @Column(name = "deliverer")
-    String deliverer; // Lưu tên "Nhân viên/Người giao hàng" từ UI
+    String deliverer;
 
     @Column(name = "entry_date")
-    LocalDateTime entryDate; // Lưu "Ngày hẹn giao" từ UI
+    LocalDateTime entryDate;
 
     @Column(name = "payment_amount", precision = 38, scale = 2)
-    BigDecimal paymentAmount; // Lưu "Thanh toán cho NCC" từ UI
+    BigDecimal paymentAmount;
 
     @Column(name = "debt_amount", precision = 38, scale = 2)
-    BigDecimal debtAmount; // Lưu "Còn phải trả" từ UI (tổng tiền - thanh toán)
-
-    // --- KHÓA NGOẠI ---
+    BigDecimal debtAmount;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "branch_id") // Chi nhánh thực hiện phiếu
+    @JoinColumn(name = "branch_id")
     @ToString.Exclude
     @EqualsAndHashCode.Exclude
     Branch branch;
@@ -76,18 +74,17 @@ public class InventoryNote {
     Supplier supplier;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "partner_branch_id") // Chi nhánh đối tác (trong trường hợp chuyển kho)
+    @JoinColumn(name = "partner_branch_id")
     @ToString.Exclude
     @EqualsAndHashCode.Exclude
     Branch partnerBranch;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "created_by") // Người tạo phiếu
+    @JoinColumn(name = "created_by")
     @ToString.Exclude
     @EqualsAndHashCode.Exclude
     User createdBy;
 
-    // --- QUAN HỆ 1-N (Chi tiết phiếu) ---
     @OneToMany(mappedBy = "inventoryNote", fetch = FetchType.LAZY, cascade = CascadeType.ALL)
     @ToString.Exclude
     List<InventoryNoteDetail> details;

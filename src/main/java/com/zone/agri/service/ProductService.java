@@ -218,7 +218,7 @@ public class ProductService {
         }
 
         // 2. Kiểm tra tồn kho
-        Integer totalStock = inventoryRepository.sumQuantityByProductId(id);
+        Long totalStock = inventoryRepository.sumQuantityByProductId(id);
         if (totalStock != null && totalStock > 0) {
             throw new ConflictException("Sản phẩm vẫn còn tồn kho, không thể xóa.");
         }

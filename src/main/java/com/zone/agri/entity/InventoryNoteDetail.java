@@ -14,7 +14,6 @@ import java.time.LocalDateTime;
 @AllArgsConstructor
 @Builder
 @FieldDefaults(level = AccessLevel.PRIVATE)
-
 public class InventoryNoteDetail {
 
     @Id
@@ -34,14 +33,13 @@ public class InventoryNoteDetail {
     Integer quantityReal;
 
     @Column(name = "batch_number", length = 50)
-    String batchNumber; // Khớp với "lotNumber" trong UI
+    String batchNumber;
 
     @Column(name = "expiry_date")
-    LocalDateTime expiryDate; // Khớp với "expiryDate" trong UI
+    LocalDateTime expiryDate;
 
     @Column(name = "new_selling_price", precision = 38, scale = 2)
-    BigDecimal newSellingPrice; // Khớp với "Giá bán mới" trong UI
-
+    BigDecimal newSellingPrice;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "inventory_note_id")
