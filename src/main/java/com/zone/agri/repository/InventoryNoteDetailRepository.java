@@ -7,4 +7,6 @@ import org.springframework.stereotype.Repository;
 @Repository
 public interface InventoryNoteDetailRepository extends JpaRepository<InventoryNoteDetail, Long> {
     boolean existsByProductVariantProductId(Long productId);
+    void deleteByInventoryNoteId(Long inventoryNoteId);
 }
+
