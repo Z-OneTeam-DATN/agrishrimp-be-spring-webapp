@@ -98,7 +98,7 @@ public class InventoryTransferController {
                                 if (d.getProductVariant() != null) {
                                     vId = d.getProductVariant().getId();
                                     sku = d.getProductVariant().getSku();
-                                    unit = d.getProductVariant().getUnit();
+                                    unit = "";
                                     if (d.getProductVariant().getProduct() != null) {
                                         pName = d.getProductVariant().getProduct().getName();
                                     }

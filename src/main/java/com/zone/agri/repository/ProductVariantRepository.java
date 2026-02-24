@@ -19,7 +19,7 @@ public interface ProductVariantRepository extends JpaRepository<ProductVariant, 
 
     // Tìm kiếm sản phẩm theo Tên (từ bảng Product), SKU, hoặc Barcode
     @Query("SELECT new com.zone.agri.dto.product.VariantSearchResponse(" +
-            "v.id, v.sku, v.barcode, p.name, v.unit, v.quantity) " +
+            "v.id, v.sku, v.barcode, p.name, '', v.quantity) " +
             "FROM ProductVariant v JOIN v.product p " +
             "WHERE LOWER(p.name) LIKE LOWER(CONCAT('%', :keyword, '%')) " +
             "OR LOWER(v.sku) LIKE LOWER(CONCAT('%', :keyword, '%')) " +

@@ -186,7 +186,7 @@ public class InventoryService {
                 .items(entity.getDetails().stream().map(d -> InventoryReceiptResponse.ItemResponse.builder()
                         .productCode(d.getProductVariant().getSku())
                         .productName(d.getProductVariant().getProduct().getName())
-                        .unit(d.getProductVariant().getUnit())
+                        .unit("")
                         .quantity(d.getQuantity())
                         .price(d.getPrice())
                         .newSellingPrice(d.getNewSellingPrice())

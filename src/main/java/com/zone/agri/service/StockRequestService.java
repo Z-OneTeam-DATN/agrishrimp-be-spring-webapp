@@ -266,7 +266,7 @@ public class StockRequestService {
                         .sku(i.getProductVariant().getSku())
                         .productName(i.getProductVariant().getProduct() != null
                                 ? i.getProductVariant().getProduct().getName() : "")
-                        .unit(i.getProductVariant().getUnit())
+                        .unit("")
                         .requestedQty(i.getRequestedQty())
                         .approvedQty(i.getApprovedQty())
                         .build())

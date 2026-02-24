@@ -642,7 +642,7 @@ public class DataSeeder implements CommandLineRunner {
             productVariantRepository.save(ProductVariant.builder()
                 .sku(sku).barcode(barcode).price(bd(price)).importPrice(bd(importPrice))
                 .wholesalePrice(bd(wholesalePrice)).quantity(0)
-                .shippingWeight(bd(weight)).unit(unit).status(status).product(product).build()));
+                .shippingWeight(bd(weight)).status(status).product(product).build()));
     }
 
     private void skua(ProductVariant variant, Attribute attr, AttributeValue attrVal) {
