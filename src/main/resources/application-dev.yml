@@ -1,3 +1,7 @@
+logging:
+  level:
+    org.springframework.web.filter.CommonsRequestLoggingFilter: DEBUG
+
 spring:
   application:
     name: agri-shrimp

@@ -6,6 +6,7 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.AuthenticationException;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ControllerAdvice;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -43,6 +44,15 @@ public class ApiExceptionHandler {
       WebRequest request) {
     String message = ex.getMessage();
     ErrorDetail errorVm = new ErrorDetail(HttpStatus.CONFLICT.toString(), "Conflict", message);
+    return ResponseEntity.badRequest().body(errorVm);
+  }
+
+  @ExceptionHandler(HttpMessageNotReadableException.class)
+  public ResponseEntity<ErrorDetail> handleHttpMessageNotReadable(
+      HttpMessageNotReadableException ex, WebRequest request) {
+    String message = "Dữ liệu gửi lên không hợp lệ: " + ex.getMostSpecificCause().getMessage();
+    ErrorDetail errorVm = new ErrorDetail("400", "Bad Request", message);
+    log.warn(ERROR_LOG_FORMAT, this.getServletPath(request), 400, message);
     return ResponseEntity.badRequest().body(errorVm);
   }
 

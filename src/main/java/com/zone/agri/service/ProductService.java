@@ -32,7 +32,8 @@ public class ProductService {
     private final BrandRepository brandRepository;
     private final CategoryRepository categoryRepository;
     private final AttributeRepository attributeRepository;
-    private final VariantAttributeRepository variantAttributeRepository;
+    private final AttributeValueRepository attributeValueRepository;
+    private final SKUAttributeValueRepository skuAttributeValueRepository;
     private final UnitConversionRepository unitConversionRepository;
     private final OrderRepository orderRepository;
     private final OrderItemRepository orderItemRepository;
@@ -47,6 +48,21 @@ public class ProductService {
     // =========================================================================
     // READ METHODS
     // =========================================================================
+
+    public List<ProductResponse> getAll(String keyword, Long categoryId, String statusStr) {
+        ProductStatus status = null;
+        if (statusStr != null && !statusStr.isBlank()) {
+            try {
+                status = ProductStatus.valueOf(statusStr.toUpperCase());
+            } catch (IllegalArgumentException e) {
+                // Ignore invalid status
+            }
+        }
+
+        return productRepository.findAllWithFilter(keyword, categoryId, status).stream()
+                .map(this::convertToResponse)
+                .collect(Collectors.toList());
+    }
 
     public List<ProductResponse> getAll() {
         return productRepository.findAllWithDetails().stream()
@@ -81,7 +97,6 @@ public class ProductService {
                 .description(request.getDescription())
                 .status(parseProductStatus(request.getStatus()))
                 .origin(request.getOrigin())
-                .baseSku(request.getBaseSku())
                 .category(category)
                 .createdAt(LocalDateTime.now())
                 .build();
@@ -120,7 +135,6 @@ public class ProductService {
         // Update basic info
         product.setName(request.getName());
         product.setOrigin(request.getOrigin());
-        product.setBaseSku(request.getBaseSku());
         product.setDescription(request.getDescription());
         product.setStatus(parseProductStatus(request.getStatus()));
 
@@ -158,24 +172,22 @@ public class ProductService {
                     .importPrice(vDto.getCostPrice())
                     .wholesalePrice(vDto.getWholesalePrice())
                     .quantity(vDto.getInitialStock())
-                    .weightValue(vDto.getNetWeight())
-                    .netWeightUnit(vDto.getNetWeightUnit())
                     .shippingWeight(vDto.getShippingWeight())
                     .imageUrl(vDto.getImage())
-                    .customSpecs(serializeCustomSpecs(vDto.getAttributes()))
                     .status(VariantStatus.ACTIVE)
                     .build();
 
             ProductVariant savedVariant = variantRepository.save(variant);
 
-            if (vDto.getAttributes() != null) {
-                for (AttributeDto attrDto : vDto.getAttributes()) {
-                    if (attrDto.getName() == null || attrDto.getName().isBlank()) continue;
-                    Attribute attribute = getOrCreateAttribute(attrDto.getName());
-                    variantAttributeRepository.save(VariantAttribute.builder()
-                            .variant(savedVariant)
-                            .attribute(attribute)
-                            .value(attrDto.getValue())
+            if (vDto.getAttributeValueIds() != null) {
+                for (Long valId : vDto.getAttributeValueIds()) {
+                    AttributeValue attrValue = attributeValueRepository.findById(valId)
+                            .orElseThrow(() -> new NotFoundException("Giá trị thuộc tính không tồn tại ID: " + valId));
+
+                    skuAttributeValueRepository.save(SKUAttributeValue.builder()
+                            .sku(savedVariant)
+                            .attribute(attrValue.getAttribute())
+                            .attributeValue(attrValue)
                             .build());
                 }
             }
@@ -271,7 +283,6 @@ public class ProductService {
                 .description(product.getDescription())
                 .status(product.getStatus() != null ? product.getStatus().name() : null)
                 .origin(product.getOrigin())
-                .baseSku(product.getBaseSku())
                 .categoryName(product.getCategory() != null ? product.getCategory().getName() : null)
                 .brandName(product.getBrand() != null ? product.getBrand().getName() : null)
                 .imageUrls(imageUrls)
@@ -289,10 +300,13 @@ public class ProductService {
                         .build()).collect(Collectors.toList()) :
                 Collections.emptyList();
 
-        List<AttributeDto> attributeDtos = variant.getAttributes() != null ?
-                variant.getAttributes().stream().map(va -> AttributeDto.builder()
-                        .name(va.getAttribute().getName())
-                        .value(va.getValue())
+        List<AttributeValueResponse> attributeValues = variant.getAttributeValues() != null ?
+                variant.getAttributeValues().stream().map(sav -> AttributeValueResponse.builder()
+                        .attributeId(sav.getAttribute().getId())
+                        .attributeName(sav.getAttribute().getName())
+                        .attributeCode(sav.getAttribute().getCode())
+                        .valueId(sav.getAttributeValue().getId())
+                        .value(sav.getAttributeValue().getValue())
                         .build()).collect(Collectors.toList()) :
                 Collections.emptyList();
 
@@ -300,19 +314,14 @@ public class ProductService {
                 .id(variant.getId())
                 .sku(variant.getSku())
                 .barcode(variant.getBarcode())
-                .formulation(variant.getFormulation())
-                .packaging(variant.getPackaging())
-                .unit(variant.getUnit())
                 .costPrice(variant.getImportPrice())
                 .price(variant.getPrice())
                 .wholesalePrice(variant.getWholesalePrice())
                 .quantity(variant.getQuantity())
-                .weightValue(variant.getWeightValue())
-                .netWeightUnit(variant.getNetWeightUnit())
                 .shippingWeight(variant.getShippingWeight())
                 .imageUrl(variant.getImageUrl())
                 .status(variant.getStatus())
-                .attributes(attributeDtos)
+                .attributeValues(attributeValues)
                 .unitConversions(conversions)
                 .build();
     }
@@ -322,16 +331,6 @@ public class ProductService {
                 .orElseGet(() -> brandRepository.save(Brand.builder()
                         .name(name.trim())
                         .status(BrandStatus.ACTIVE)
-                        .build()));
-    }
-
-    private Attribute getOrCreateAttribute(String name) {
-        String trimmedName = name.trim();
-        return attributeRepository.findByNameIgnoreCase(trimmedName)
-                .orElseGet(() -> attributeRepository.save(Attribute.builder()
-                        .name(trimmedName)
-                        .code(toSlug(trimmedName))
-                        .status(AttributeStatus.ACTIVE)
                         .build()));
     }
 
@@ -383,33 +382,28 @@ public class ProductService {
                     .product(product)
                     .sku(vReq.getSku())
                     .barcode(vReq.getBarcode())
-                    .formulation(vReq.getFormulation())
-                    .packaging(vReq.getPackaging())
-                    .unit(vReq.getUnit())
                     .price(vReq.getPrice())
                     .importPrice(vReq.getCostPrice())
                     .wholesalePrice(vReq.getWholesalePrice())
-                    .quantity(vReq.getInitialStock() != null ? vReq.getInitialStock() : 0)
-                    .weightValue(vReq.getNetWeight())
-                    .netWeightUnit(vReq.getNetWeightUnit())
+                    .quantity(vReq.getInitialStock() != null ? vReq.getInitialStock() : 0L)
                     .shippingWeight(vReq.getShippingWeight())
                     .imageUrl(imageUrl)
                     .imagePublicId(imagePublicId)
-                    .customSpecs(serializeCustomSpecs(vReq.getAttributes()))
                     .status(VariantStatus.ACTIVE)
                     .build();
 
             ProductVariant savedVariant = variantRepository.save(variant);
 
-            // Save Variant Attributes
-            if (vReq.getAttributes() != null) {
-                for (AttributeDto attrDto : vReq.getAttributes()) {
-                    if (attrDto.getName() == null || attrDto.getName().isBlank()) continue;
-                    Attribute attribute = getOrCreateAttribute(attrDto.getName());
-                    variantAttributeRepository.save(VariantAttribute.builder()
-                            .variant(savedVariant)
-                            .attribute(attribute)
-                            .value(attrDto.getValue())
+            // Save SKU Attribute Values
+            if (vReq.getAttributeValueIds() != null) {
+                for (Long valueId : vReq.getAttributeValueIds()) {
+                    AttributeValue attrValue = attributeValueRepository.findById(valueId)
+                            .orElseThrow(() -> new NotFoundException("Giá trị thuộc tính không tồn tại ID: " + valueId));
+
+                    skuAttributeValueRepository.save(SKUAttributeValue.builder()
+                            .sku(savedVariant)
+                            .attribute(attrValue.getAttribute())
+                            .attributeValue(attrValue)
                             .build());
                 }
             }
@@ -425,16 +419,6 @@ public class ProductService {
                             .build());
                 }
             }
-        }
-    }
-
-    private String serializeCustomSpecs(List<AttributeDto> specs) {
-        if (specs == null || specs.isEmpty()) return null;
-        try {
-            return objectMapper.writeValueAsString(specs);
-        } catch (JsonProcessingException e) {
-            log.warn("Không thể serialize customSpecs: {}", e.getMessage());
-            return null;
         }
     }
 
