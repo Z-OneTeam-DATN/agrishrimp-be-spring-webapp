@@ -22,3 +22,4 @@ public interface InventoryRepository extends JpaRepository<Inventory, Long> {
     // Tìm tồn kho theo chi nhánh + variant
     Optional<Inventory> findByBranchIdAndProductVariantId(Long branchId, Long variantId);
 }
+

@@ -12,6 +12,8 @@ import com.zone.agri.exception.NotFoundException;
 import com.zone.agri.repository.*;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
@@ -442,5 +444,35 @@ public class ProductService {
                 .replaceAll("[^a-z0-9\\s]", "")
                 .replaceAll("\\s+", "-");
         return slug;
+    }
+
+
+    public List<ProductResponse> getProductsForSale() {
+        return productRepository.findProductsForSale().stream()
+                .map(this::convertToResponse)
+                .collect(Collectors.toList());
+    }
+
+
+    public List<ProductResponse> getTopBestSellers(int limit) {
+        // Khai báo kiểu Pageable rõ ràng để khớp với tham số của Repository
+        Pageable pageable = PageRequest.of(0, limit);
+
+        return productRepository.findTopBestSellers(pageable).stream()
+                .map(this::convertToResponse)
+                .collect(Collectors.toList());
+    }
+
+
+    public ProductResponse getProductDetailForUser(String slug) {
+        Product product = productRepository.findBySlug(slug)
+                .orElseThrow(() -> new NotFoundException("Sản phẩm không tồn tại hoặc đã bị xóa."));
+
+        // Kiểm tra nếu sản phẩm bị ngừng kinh doanh (INACTIVE) thì không hiển thị cho user
+        if (product.getStatus() == ProductStatus.INACTIVE) {
+            throw new BadRequestException("Sản phẩm này hiện tại không còn kinh doanh.");
+        }
+
+        return convertToResponse(product);
     }
 }
