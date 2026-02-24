@@ -20,10 +20,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.LocalDate;
 import java.util.Set;
-import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
 @Component
 @RequiredArgsConstructor
@@ -39,172 +36,94 @@ public class DataSeeder implements CommandLineRunner {
     @Override
     @Transactional
     public void run(String... args) throws Exception {
-        log.info(">>> ĐANG KIỂM TRA VÀ KHỞI TẠO DỮ LIỆU MẪU...");
+        log.info(">>> INITIALIZING SYSTEM DATA...");
 
-        // ==========================================
-        // 1. TẠO PERMISSIONS (QUYỀN HẠN CHA - CON)
-        // ==========================================
+        // 1. Create Branches
+        Branch mainBranch = branchRepository.findByBranchCode("MAIN_WH").orElseGet(() ->
+            branchRepository.save(Branch.builder()
+                .branchCode("MAIN_WH")
+                .branchType("WAREHOUSE")
+                .name("Main Warehouse")
+                .phone("0111111111")
+                .email("main@agrishrimp.com")
+                .addressDetail("Hanoi")
+                .status(BranchStatus.ACTIVE)
+                .build())
+        );
 
-        // ===== 1. GROUP: HỆ THỐNG (SYSTEM) =====
-        Permission pDashboard = createPermission("Tổng quan", "DASHBOARD_VIEW", PermissionGroup.SYSTEM, PermissionType.MODULE, null);
-        Permission pInventoryDashboard = createPermission("Bàn làm việc kho", "INVENTORY_DASHBOARD_VIEW", PermissionGroup.SYSTEM, PermissionType.MODULE, null);
+        Branch branch1 = branchRepository.findByBranchCode("BRANCH_01").orElseGet(() ->
+            branchRepository.save(Branch.builder()
+                .branchCode("BRANCH_01")
+                .branchType("STORE")
+                .name("Branch 01")
+                .phone("0222222222")
+                .email("branch1@agrishrimp.com")
+                .addressDetail("Can Tho")
+                .status(BranchStatus.ACTIVE)
+                .build())
+        );
 
-        // ===== 2. GROUP: QUẢN TRỊ (ADMINISTRATION) =====
-        Permission pUserModule = createPermission("Nhân viên hệ thống", "USER_MANAGE", PermissionGroup.ADMINISTRATION, PermissionType.MODULE, null);
-        Permission pUserCreate = createPermission("Tạo nhân viên", "USER_CREATE", PermissionGroup.ADMINISTRATION, PermissionType.ACTION, pUserModule.getId());
-        Permission pUserUpdate = createPermission("Sửa nhân viên", "USER_UPDATE", PermissionGroup.ADMINISTRATION, PermissionType.ACTION, pUserModule.getId());
-        Permission pUserDelete = createPermission("Xóa nhân viên", "USER_DELETE", PermissionGroup.ADMINISTRATION, PermissionType.ACTION, pUserModule.getId());
-
-        Permission pBranchModule = createPermission("Chi nhánh & Kho", "BRANCH_MANAGE", PermissionGroup.ADMINISTRATION, PermissionType.MODULE, null);
-
-        // ===== 3. GROUP: HÀNG HÓA (PRODUCT_CATALOG) =====
-        Permission pProductModule = createPermission("Sản phẩm", "PRODUCT_MANAGE", PermissionGroup.PRODUCT_CATALOG, PermissionType.MODULE, null);
-        Permission pProductCreate = createPermission("Tạo sản phẩm", "PRODUCT_CREATE", PermissionGroup.PRODUCT_CATALOG, PermissionType.ACTION, pProductModule.getId());
-        Permission pProductUpdate = createPermission("Sửa sản phẩm", "PRODUCT_UPDATE", PermissionGroup.PRODUCT_CATALOG, PermissionType.ACTION, pProductModule.getId());
-        Permission pProductDelete = createPermission("Xóa sản phẩm", "PRODUCT_DELETE", PermissionGroup.PRODUCT_CATALOG, PermissionType.ACTION, pProductModule.getId());
-
-        Permission pCategoryModule = createPermission("Danh mục", "CATEGORY_MANAGE", PermissionGroup.PRODUCT_CATALOG, PermissionType.MODULE, null);
-        Permission pVariantModule = createPermission("Thuộc tính", "VARIANT_MANAGE", PermissionGroup.PRODUCT_CATALOG, PermissionType.MODULE, null);
-
-        // ===== 4. GROUP: GIAO DỊCH KHO (INVENTORY_TRANSACTION) =====
-        Permission pImportModule = createPermission("Nhập hàng", "IMPORT_MANAGE", PermissionGroup.INVENTORY_TRANSACTION, PermissionType.MODULE, null);
-        Permission pImportApprove = createPermission("Duyệt phiếu nhập", "IMPORT_APPROVE", PermissionGroup.INVENTORY_TRANSACTION, PermissionType.ACTION, pImportModule.getId());
-
-        Permission pExportModule = createPermission("Xuất hàng", "EXPORT_MANAGE", PermissionGroup.INVENTORY_TRANSACTION, PermissionType.MODULE, null);
-        Permission pExportApprove = createPermission("Duyệt lệnh xuất kho", "EXPORT_APPROVE", PermissionGroup.INVENTORY_TRANSACTION, PermissionType.ACTION, pExportModule.getId());
-        Permission pExportForceEdit = createPermission("Sửa/Xóa phiếu đã hoàn thành", "EXPORT_FORCE_EDIT", PermissionGroup.INVENTORY_TRANSACTION, PermissionType.ACTION, pExportModule.getId());
-
-        Permission pTransferModule = createPermission("Điều chuyển", "TRANSFER_MANAGE", PermissionGroup.INVENTORY_TRANSACTION, PermissionType.MODULE, null);
-        Permission pTransferApprove = createPermission("Duyệt lệnh điều chuyển", "TRANSFER_APPROVE", PermissionGroup.INVENTORY_TRANSACTION, PermissionType.ACTION, pTransferModule.getId());
-
-        Permission pInventoryCheckModule = createPermission("Kiểm kê hàng hóa", "INVENTORY_CHECK_MANAGE", PermissionGroup.INVENTORY_TRANSACTION, PermissionType.MODULE, null);
-        Permission pInventoryBalance = createPermission("Chốt sổ / Cân bằng kho", "INVENTORY_BALANCE", PermissionGroup.INVENTORY_TRANSACTION, PermissionType.ACTION, pInventoryCheckModule.getId());
-
-        // ===== 5. GROUP: VẬN CHUYỂN (SHIPPING) =====
-        Permission pShippingModule = createPermission("Tổng quan vận chuyển", "SHIPPING_MANAGE", PermissionGroup.SHIPPING, PermissionType.MODULE, null);
-
-        // ===== 6. GROUP: ĐỐI TÁC (PARTNER) =====
-        Permission pSupplierModule = createPermission("Nhà cung cấp", "SUPPLIER_MANAGE", PermissionGroup.PARTNER, PermissionType.MODULE, null);
-        Permission pCustomerModule = createPermission("Khách hàng", "CUSTOMER_MANAGE", PermissionGroup.PARTNER, PermissionType.MODULE, null);
-
-        // ===== 7. GROUP: BÁO CÁO (REPORT) =====
-        Permission pReportSales = createPermission("Báo cáo bán hàng", "REPORT_SALES_VIEW", PermissionGroup.REPORT, PermissionType.MODULE, null);
-        Permission pReportInventory = createPermission("Báo cáo kho", "REPORT_INVENTORY_VIEW", PermissionGroup.REPORT, PermissionType.MODULE, null);
-        Permission pReportFinancial = createPermission("Báo cáo tài chính", "REPORT_FINANCIAL_VIEW", PermissionGroup.REPORT, PermissionType.MODULE, null);
-
-        // ===== 8. GROUP: CÀI ĐẶT (SETTING) =====
-        Permission pSettingModule = createPermission("Cài đặt hệ thống", "SETTING_MANAGE", PermissionGroup.SETTING, PermissionType.MODULE, null);
-        Permission pRoleModule = createPermission("Phân quyền vai trò", "ROLE_MANAGE", PermissionGroup.SETTING, PermissionType.MODULE, null);
-
-        // ==========================================
-        // 2. TẠO ROLES (VAI TRÒ)
-        // ==========================================
-
-        // --- Role ADMIN: Full toàn bộ quyền ---
-        Set<Permission> adminPerms = Stream.of(
-                pDashboard, pInventoryDashboard,
-                pUserModule, pUserCreate, pUserUpdate, pUserDelete, pBranchModule,
-                pProductModule, pProductCreate, pProductUpdate, pProductDelete, pCategoryModule, pVariantModule,
-                pImportModule, pImportApprove, pExportModule, pExportApprove, pExportForceEdit,
-                pTransferModule, pTransferApprove, pInventoryCheckModule, pInventoryBalance,
-                pShippingModule,
-                pSupplierModule, pCustomerModule,
-                pReportSales, pReportInventory, pReportFinancial,
-                pSettingModule, pRoleModule
-        ).collect(Collectors.toSet());
-        Role adminRole = createRole("ADMIN", "Quản Trị Viên", true, adminPerms);
-
-        // --- Role KHO ---
-        Set<Permission> staffKhoPerms = Stream.of(
-                pInventoryDashboard, pProductModule, pCategoryModule, pVariantModule,
-                pImportModule, pExportModule, pTransferModule, pInventoryCheckModule,
-                pShippingModule, pSupplierModule, pReportInventory
-        ).collect(Collectors.toSet());
-        createRole("STAFF_KHO", "Thủ Kho", false, staffKhoPerms);
-
-        // --- Role BÁN HÀNG ---
-        Set<Permission> salesPerms = Stream.of(
-                pDashboard, pProductModule, pCustomerModule, pReportSales
-        ).collect(Collectors.toSet());
-        createRole("SALES", "Nhân viên Bán hàng", false, salesPerms);
-
-        // --- Role USER: Người dùng mặc định (đăng ký từ web/app) ---
-        createRole("USER", "Người dùng", false, Set.of());
-
-        // ==========================================
-        // 3. TẠO BRANCH (CHI NHÁNH MẪU)
-        // ==========================================
-        Branch mainBranch = branchRepository.findByBranchCode("CN_CT_01").orElse(null);
+        // 2. Create Permissions
+        Permission pStockRequestCreate = createPermission("Tạo yêu cầu bổ sung kho", "STOCK_REQUEST_CREATE", PermissionGroup.INVENTORY_TRANSACTION, PermissionType.ACTION);
+        Permission pStockRequestApprove = createPermission("Duyệt yêu cầu bổ sung kho", "STOCK_REQUEST_APPROVE", PermissionGroup.INVENTORY_TRANSACTION, PermissionType.ACTION);
+        Permission pInventoryView = createPermission("Xem tồn kho", "INVENTORY_VIEW", PermissionGroup.INVENTORY_TRANSACTION, PermissionType.ACTION);
         
-        // Nếu không tìm thấy theo mã, kiểm tra tiếp theo số điện thoại để tránh lỗi Duplicate
-        if (mainBranch == null) {
-            mainBranch = branchRepository.findByPhone("0292388888").orElse(null);
-        }
+        // Modules
+        Permission pImportManage = createPermission("Quản lý nhập", "IMPORT_MANAGE", PermissionGroup.INVENTORY_TRANSACTION, PermissionType.MODULE);
+        Permission pExportManage = createPermission("Quản lý xuất", "EXPORT_MANAGE", PermissionGroup.INVENTORY_TRANSACTION, PermissionType.MODULE);
 
-        if (mainBranch == null) {
-            mainBranch = Branch.builder()
-                    .branchCode("CN_CT_01")
-                    .name("Trụ sở chính Cần Thơ")
-                    .phone("0292388888")
-                    .email("contact@agrishrimp.vn")
-                    .addressDetail("Ninh Kiều, Cần Thơ")
-                    .provinceId(92)
-                    .districtId(916)
-                    .status(BranchStatus.ACTIVE)
-                    .build();
-            mainBranch = branchRepository.save(mainBranch);
-            log.info(">>> Đã tạo Chi nhánh mẫu thành công!");
-        } else {
-            log.info(">>> Chi nhánh mẫu đã tồn tại (Mã: {} hoặc SĐT: {}), sử dụng bản ghi hiện có.", 
-                     mainBranch.getBranchCode(), mainBranch.getPhone());
-        }
+        // 3. Create Roles
+        Role superAdminRole = createRole("SUPER_ADMIN", "Super Admin", true, 
+            Set.of(pStockRequestCreate, pStockRequestApprove, pInventoryView, pImportManage, pExportManage));
+        
+        Role branchManagerRole = createRole("BRANCH_MANAGER", "Branch Manager", false, 
+            Set.of(pStockRequestCreate, pInventoryView, pImportManage, pExportManage));
+            
+        Role userRole = createRole("USER", "Regular User", false, Set.of());
 
-        // ==========================================
-        // 4. TẠO TÀI KHOẢN ADMIN MẪU
-        // ==========================================
-        if (!userRepository.existsByEmail("admin@gmail.com")) {
-            User admin = User.builder()
-                    .fullName("Super Admin")
-                    .email("admin@gmail.com")
-                    .phoneNumber("0999999999")
-                    .passwordHash(passwordEncoder.encode("123456"))
-                    .dateOfBirth(LocalDate.of(1990, 1, 1))
-                    .status(UserStatus.ACTIVE)
-                    .role(adminRole)
-                    .branch(mainBranch)
-                    .provider(AuthProvider.LOCAL)
-                    .avatarUrl("https://ui-avatars.com/api/?name=Super+Admin&background=random")
-                    .build();
+        // 4. Create Accounts
+        createAccount("superadmin@gmail.com", "Super Admin", "123456", superAdminRole, mainBranch);
+        createAccount("branch1@gmail.com", "Branch Manager 1", "123456", branchManagerRole, branch1);
+        createAccount("user1@gmail.com", "Regular User 1", "123456", userRole, null);
 
-            userRepository.save(admin);
-            log.info(">>> Đã tạo tài khoản Admin mẫu: admin@gmail.com / 123456");
-        }
-
-        log.info(">>> KHỞI TẠO DỮ LIỆU HOÀN TẤT!");
+        log.info(">>> DATA INITIALIZATION COMPLETE.");
     }
 
-    // --- HELPER METHODS ---
+    private void createAccount(String email, String name, String pass, Role role, Branch branch) {
+        if (!userRepository.existsByEmail(email)) {
+            userRepository.save(User.builder()
+                .fullName(name)
+                .email(email)
+                .passwordHash(passwordEncoder.encode(pass))
+                .status(UserStatus.ACTIVE)
+                .role(role)
+                .branch(branch)
+                .provider(AuthProvider.LOCAL)
+                .build());
+            log.info(">>> Created account: {} / {}", email, pass);
+        }
+    }
 
-    private Permission createPermission(String name, String code, PermissionGroup group, PermissionType type, Long parentId) {
+    private Permission createPermission(String name, String code, PermissionGroup group, PermissionType type) {
         return permissionRepository.findByCode(code).orElseGet(() -> 
             permissionRepository.save(Permission.builder()
                 .name(name)
                 .code(code)
                 .groupName(group)
                 .type(type)
-                .parentId(parentId)
                 .build())
         );
     }
 
-    private Role createRole(String slug, String displayName, boolean isSystem, Set<Permission> permissions) {
+    private Role createRole(String slug, String displayName, boolean isSystem, Set<Permission> perms) {
         return roleRepository.findBySlug(slug).orElseGet(() -> 
             roleRepository.save(Role.builder()
                 .slug(slug)
                 .displayName(displayName)
                 .isSystem(isSystem)
+                .isActive(true)
                 .description("Vai trò " + displayName + " hệ thống")
-                .permissions(permissions)
+                .permissions(perms)
                 .build())
         );
     }

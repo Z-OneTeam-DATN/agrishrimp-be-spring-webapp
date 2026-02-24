@@ -42,11 +42,6 @@ public class SecurityConfig {
     /** Các endpoint công khai — không cần token */
     private static final String[] PUBLIC_MATCHERS = {
             "/api/auth/**",
-            "/api/v1/inventory/**",
-            "/api/branches/**",
-            "/api/customers/**",
-            "/api/suppliers/**",
-            "/api/suppliers",
             "/swagger-ui/**",
             "/swagger-ui.html",
             "/v3/api-docs/**",

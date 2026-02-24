@@ -27,6 +27,7 @@ public class InventoryService {
     private final ProductVariantRepository variantRepository;
     private final BranchRepository branchRepository;
     private final SupplierRepository supplierRepository;
+    private final com.zone.agri.common.WarehouseContext warehouseContext;
 
     // --- 1. TẠO PHIẾU MỚI ---
     @Transactional
@@ -150,7 +151,12 @@ public class InventoryService {
     // --- 4. LẤY DANH SÁCH PHIẾU NHẬP ---
     @Transactional(readOnly = true)
     public List<InventoryReceiptResponse> getAllReceipts() {
-        return noteRepository.findAll().stream()
+        Long warehouseId = warehouseContext.resolveWarehouseId();
+        List<InventoryNote> notes = (warehouseId == null)
+                ? noteRepository.findAll()
+                : noteRepository.findAllByBranchId(warehouseId);
+
+        return notes.stream()
                 .filter(note -> note.getType() == InventoryNoteType.IMPORT) // Chỉ lấy phiếu nhập
                 .map(this::mapToResponse)
                 .collect(Collectors.toList());
@@ -161,6 +167,7 @@ public class InventoryService {
     public InventoryReceiptResponse getReceiptById(Long id) {
         InventoryNote note = noteRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Không tìm thấy phiếu nhập kho ID: " + id));
+        warehouseContext.assertAccess(note.getBranch().getId());
         return mapToResponse(note);
     }
 
