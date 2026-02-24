@@ -40,7 +40,7 @@ public class ProductVariant {
     BigDecimal wholesalePrice;
 
     @Column(name = "quantity")
-    Long quantity;
+    Integer quantity;
 
     @Column(name = "shipping_weight", precision = 19, scale = 3)
     BigDecimal shippingWeight;

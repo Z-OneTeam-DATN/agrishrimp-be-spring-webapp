@@ -25,7 +25,7 @@ public class ProductRequest {
         private BigDecimal costPrice;
         private BigDecimal price;
         private BigDecimal wholesalePrice;
-        private Long initialStock;
+        private Integer initialStock;
         private BigDecimal shippingWeight;
         private String image;
         

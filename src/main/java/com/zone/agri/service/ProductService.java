@@ -385,7 +385,7 @@ public class ProductService {
                     .price(vReq.getPrice())
                     .importPrice(vReq.getCostPrice())
                     .wholesalePrice(vReq.getWholesalePrice())
-                    .quantity(vReq.getInitialStock() != null ? vReq.getInitialStock() : 0L)
+                    .quantity(vReq.getInitialStock() != null ? vReq.getInitialStock() : 0)
                     .shippingWeight(vReq.getShippingWeight())
                     .imageUrl(imageUrl)
                     .imagePublicId(imagePublicId)
