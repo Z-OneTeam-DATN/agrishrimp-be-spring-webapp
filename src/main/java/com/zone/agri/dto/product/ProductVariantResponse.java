@@ -12,18 +12,14 @@ public class ProductVariantResponse {
     private Long id;
     private String sku;
     private String barcode;
-    private String formulation;
-    private String packaging;
-    private String unit;
     private BigDecimal costPrice;
     private BigDecimal price;
     private BigDecimal wholesalePrice;
-    private Integer quantity;
-    private BigDecimal weightValue;
-    private String netWeightUnit;
+    private Long quantity;
     private BigDecimal shippingWeight;
+    private String unit;
     private String imageUrl;
     private VariantStatus status;
-    private List<AttributeDto> attributes;
+    private List<AttributeValueResponse> attributeValues;
     private List<UnitConversionResponse> unitConversions;
 }

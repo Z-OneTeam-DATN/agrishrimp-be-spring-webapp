@@ -7,6 +7,9 @@ import com.zone.agri.entity.ProductVariant;
 import org.springframework.data.repository.query.Param;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
+
+import org.springframework.data.repository.query.Param;
+
 import org.springframework.stereotype.Repository;
 
 import java.util.Optional;
@@ -14,8 +17,11 @@ import java.util.Optional;
 @Repository
 public interface InventoryRepository extends JpaRepository<Inventory, Long> {
 
+
+    // Tổng tồn của 1 sản phẩm (toàn hệ thống)
     @Query("SELECT SUM(i.quantity) FROM Inventory i WHERE i.productVariant.product.id = :productId")
-    Long sumQuantityByProductId(@Param("productId") Long productId);
+    Integer sumQuantityByProductId(@Param("productId") Long productId);
+
 
     // Kiểm tra sản phẩm có tồn kho không
     boolean existsByProductVariantProductId(Long productId);

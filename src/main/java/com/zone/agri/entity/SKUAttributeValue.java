@@ -6,28 +6,29 @@ import lombok.*;
 import lombok.experimental.FieldDefaults;
 
 @Entity
-@Table(name = "variant_attributes")
+@Table(name = "sku_attribute_values")
 @Getter
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
 @FieldDefaults(level = AccessLevel.PRIVATE)
-public class VariantAttribute {
+public class SKUAttributeValue {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     Long id;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "variant_id")
-    @JsonIgnore // Tránh lặp JSON
-    ProductVariant variant;
+    @JoinColumn(name = "sku_id", nullable = false)
+    @JsonIgnore
+    ProductVariant sku;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "attribute_id")
-    Attribute attribute; // Trỏ về bảng Từ điển (Tên thuộc tính)
+    @JoinColumn(name = "attribute_id", nullable = false)
+    Attribute attribute;
 
-    @Column(name = "attr_value", length = 255)
-    String value; // Giá trị (VD: "Đỏ", "100ml")
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "attribute_value_id", nullable = false)
+    AttributeValue attributeValue;
 }

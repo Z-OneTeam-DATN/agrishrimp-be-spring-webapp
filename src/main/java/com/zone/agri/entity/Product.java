@@ -55,6 +55,7 @@ public class Product {
     @Column(name = "base_sku", length = 50)
     String baseSku;
 
+    // --- KHÓA NGOẠI ---
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "brand_id")
     @ToString.Exclude

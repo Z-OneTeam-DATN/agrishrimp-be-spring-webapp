@@ -27,18 +27,6 @@ public class ProductVariant {
     @Column(name = "barcode", length = 50)
     String barcode;
 
-    /** Dạng bào chế (VD: Viên nén, Bột, Dung dịch) */
-    @Column(name = "formulation", length = 100)
-    String formulation;
-
-    /** Quy cách đóng gói (VD: Hộp 100 viên, Chai 1 lít) */
-    @Column(name = "packaging", length = 100)
-    String packaging;
-
-    /** Đơn vị tính nhỏ nhất (VD: Viên, Gói, Hộp) */
-    @Column(name = "unit", length = 50)
-    String unit;
-
     @Column(name = "price", precision = 19, scale = 2)
     BigDecimal price;
 
@@ -49,13 +37,7 @@ public class ProductVariant {
     BigDecimal wholesalePrice;
 
     @Column(name = "quantity")
-    Integer quantity;
-
-    @Column(name = "weight_value", precision = 19, scale = 3)
-    BigDecimal weightValue;
-
-    @Column(name = "net_weight_unit", length = 20)
-    String netWeightUnit;
+    Long quantity;
 
     @Column(name = "shipping_weight", precision = 19, scale = 3)
     BigDecimal shippingWeight;
@@ -71,6 +53,9 @@ public class ProductVariant {
     @Column(name = "custom_specs", columnDefinition = "TEXT")
     String customSpecs;
 
+    @Column(name = "unit", length = 50)
+    String unit;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "status", length = 20)
     VariantStatus status;
@@ -82,10 +67,10 @@ public class ProductVariant {
     Product product;
 
     /** Thuộc tính động (màu sắc, v.v.) */
-    @OneToMany(mappedBy = "variant", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
+    @OneToMany(mappedBy = "sku", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
     @ToString.Exclude
     @EqualsAndHashCode.Exclude
-    List<VariantAttribute> attributes;
+    List<SKUAttributeValue> attributeValues;
 
     /** Bảng quy đổi đơn vị của biến thể này */
     @OneToMany(mappedBy = "variant", cascade = CascadeType.ALL, fetch = FetchType.LAZY)

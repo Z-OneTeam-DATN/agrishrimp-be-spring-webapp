@@ -1,6 +1,7 @@
 package com.zone.agri.entity;
 
 import com.zone.agri.entity.enums.AttributeStatus;
+import com.zone.agri.entity.enums.AttributeType;
 import jakarta.persistence.*;
 import lombok.*;
 import lombok.experimental.FieldDefaults;
@@ -25,14 +26,18 @@ public class Attribute {
     @Column(name = "code", length = 50, unique = true)
     String code;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "type", length = 20)
+    AttributeType type;
+
     @Column(name = "description", columnDefinition = "TEXT")
     String description;
-
-    @Column(name = "value_list", columnDefinition = "TEXT")
-    String valueList;
 
     @Enumerated(EnumType.STRING)
     @Column(columnDefinition = "ENUM('ACTIVE', 'INACTIVE')")
     AttributeStatus status;
 
+    /** Danh sách giá trị phân tách bằng dấu phẩy. VD: "250g,500g,1kg,5kg" */
+    @Column(name = "value_list", columnDefinition = "TEXT")
+    String valueList;
 }
