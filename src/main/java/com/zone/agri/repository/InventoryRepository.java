@@ -8,6 +8,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.util.List;
 import java.util.Optional;
 
 @Repository
@@ -21,5 +22,7 @@ public interface InventoryRepository extends JpaRepository<Inventory, Long> {
 
     // Tìm tồn kho theo chi nhánh + variant
     Optional<Inventory> findByBranchIdAndProductVariantId(Long branchId, Long variantId);
+
+    List<Inventory> findByProductVariantIdIn(List<Long> variantIds);
 }
 
