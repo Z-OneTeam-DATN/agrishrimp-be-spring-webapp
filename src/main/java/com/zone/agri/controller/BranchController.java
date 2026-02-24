@@ -13,6 +13,9 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import com.zone.agri.dto.branch.CheckStockItemRequest;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 
 import java.util.List;
 
@@ -82,5 +85,12 @@ public class BranchController {
             @PathVariable Long id) {
         branchService.delete(id);
         return ResponseEntity.noContent().build();
+    }
+
+    @Operation(summary = "Kiểm tra tồn kho", description = "Trả về danh sách các chi nhánh có ĐỦ SỐ LƯỢNG cho TẤT CẢ sản phẩm truyền vào.")
+    @SecurityRequirement(name = "bearerAuth")
+    @PostMapping("/check-stock")
+    public ResponseEntity<List<BranchDTO>> checkStock(@RequestBody List<CheckStockItemRequest> items) {
+        return ResponseEntity.ok(branchService.findBranchesWithEnoughStock(items));
     }
 }

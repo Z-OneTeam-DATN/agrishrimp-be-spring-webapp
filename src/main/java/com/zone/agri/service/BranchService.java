@@ -1,16 +1,23 @@
 package com.zone.agri.service;
 
 import com.zone.agri.dto.admin.BranchDTO;
+import com.zone.agri.dto.branch.CheckStockItemRequest;
 import com.zone.agri.entity.Branch;
+import com.zone.agri.entity.Inventory;
 import com.zone.agri.entity.User;
 import com.zone.agri.entity.enums.BranchStatus;
 import com.zone.agri.repository.BranchRepository;
+import com.zone.agri.repository.InventoryRepository;
 import com.zone.agri.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -18,6 +25,7 @@ public class BranchService {
 
     private final BranchRepository branchRepository;
     private final UserRepository userRepository;
+    private final InventoryRepository inventoryRepository;
 
     public List<BranchDTO> getAll() {
         return branchRepository.findAll().stream()
@@ -119,6 +127,67 @@ public class BranchService {
             }
             branchRepository.delete(branch);
         }
+    }
+
+    public List<BranchDTO> findBranchesWithEnoughStock(List<CheckStockItemRequest> items) {
+        if (items == null || items.isEmpty()) {
+            return new ArrayList<>();
+        }
+
+        // 1. Trích xuất danh sách ID sản phẩm từ Giỏ hàng gửi lên
+        List<Long> variantIds = items.stream()
+                .map(CheckStockItemRequest::getVariantId)
+                .toList();
+
+        // 2. Gọi DB ĐÚNG 1 LẦN để lấy toàn bộ tồn kho của các sản phẩm này tại TẤT CẢ chi nhánh
+        List<Inventory> inventories = inventoryRepository.findByProductVariantIdIn(variantIds);
+
+        // 3. Gom nhóm tồn kho theo từng Chi nhánh (Key là Branch, Value là List<Inventory> của Branch đó)
+        Map<Branch, List<Inventory>> branchInventoryMap = inventories.stream()
+                .collect(Collectors.groupingBy(Inventory::getBranch));
+
+        List<BranchDTO> eligibleBranches = new ArrayList<>();
+
+        // 4. Quét từng chi nhánh xem có "vượt qua bài test" không
+        for (Map.Entry<Branch, List<Inventory>> entry : branchInventoryMap.entrySet()) {
+            Branch branch = entry.getKey();
+            List<Inventory> branchStock = entry.getValue();
+
+            // Chỉ xét các chi nhánh đang hoạt động (Giả sử Huy có Enum status là ACTIVE)
+            if (!"ACTIVE".equals(branch.getStatus().name())) continue;
+
+            boolean hasEnoughStockForAll = true;
+
+            // Kiểm tra TỪNG MÓN HÀNG trong giỏ đối chiếu với kho của chi nhánh này
+            for (CheckStockItemRequest requestedItem : items) {
+
+                // Tìm tồn kho thực tế của món hàng này trong chi nhánh
+                Optional<Inventory> stockOfItem = branchStock.stream()
+                        .filter(inv -> inv.getProductVariant().getId().equals(requestedItem.getVariantId()))
+                        .findFirst();
+
+                // Nếu chi nhánh KHÔNG CÓ món này, HOẶC số lượng nhỏ hơn số khách đặt -> Rớt bài test!
+                if (stockOfItem.isEmpty() || stockOfItem.get().getQuantity() < requestedItem.getQuantity()) {
+                    hasEnoughStockForAll = false;
+                    break; // Dừng luôn vòng lặp kiểm tra sản phẩm, chuyển qua chi nhánh tiếp theo
+                }
+            }
+
+            // Nếu xuất sắc vượt qua bài test (đủ hàng cho toàn bộ sản phẩm)
+            if (hasEnoughStockForAll) {
+                // Chuyển Branch Entity sang DTO (Huy chỉnh lại hàm map cho đúng với code của Huy nhé)
+                BranchDTO dto = new BranchDTO();
+                dto.setId(branch.getId());
+                dto.setName(branch.getName());
+                dto.setProvinceId(branch.getProvinceId());
+                dto.setAddressDetail(branch.getAddressDetail());
+                // ... map các field khác nếu cần
+
+                eligibleBranches.add(dto);
+            }
+        }
+
+        return eligibleBranches;
     }
 
     private BranchDTO mapToDTO(Branch entity) {
