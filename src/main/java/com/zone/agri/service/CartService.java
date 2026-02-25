@@ -28,11 +28,24 @@ public class CartService {
 
         return items.stream().map(item -> {
             ProductVariant variant = item.getProductVariant();
+            Product product = variant.getProduct();
+            
+            // Tạo tên phân loại đầy đủ từ các thuộc tính (VD: Màu sắc: Đỏ, Kích thước: L)
+            String variantName = (variant.getAttributeValues() != null && !variant.getAttributeValues().isEmpty())
+                    ? variant.getAttributeValues().stream()
+                        .map(sav -> sav.getAttribute().getName() + ": " + sav.getAttributeValue().getValue())
+                        .collect(Collectors.joining(", "))
+                    : variant.getSku(); // Fallback về SKU nếu không có thuộc tính
+
             return CartItemResponse.builder()
                     .id(item.getId())
                     .variantId(variant.getId())
-                    .name(variant.getProduct() != null ? variant.getProduct().getName() : "Sản phẩm")
-                    .variant("")
+                    .name(product != null ? product.getName() : "Sản phẩm")
+                    .variant(variantName)
+                    .variantName(variantName)
+                    .categoryName(product != null && product.getCategory() != null ? product.getCategory().getName() : "")
+                    .brandName(product != null && product.getBrand() != null ? product.getBrand().getName() : "")
+                    .productForm("") // Hiện tại chưa có link trực tiếp ProductForm vào Product/Variant
                     .price(variant.getPrice())
                     .quantity(item.getQuantity())
                     .stock(variant.getQuantity()) // Tồn kho hiện tại
