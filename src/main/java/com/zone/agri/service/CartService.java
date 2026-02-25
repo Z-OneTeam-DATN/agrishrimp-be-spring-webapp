@@ -63,10 +63,6 @@ public class CartService {
                 cartItemRepo.delete(cartItem);
             }
         } else {
-            // Kiểm tra tồn kho
-            if (newQuantity > variant.getQuantity()) {
-                throw new RuntimeException("Số lượng yêu cầu vượt quá tồn kho hiện tại!");
-            }
             cartItem.setQuantity(newQuantity);
             cartItemRepo.save(cartItem);
         }
