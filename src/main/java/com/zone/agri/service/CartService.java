@@ -2,6 +2,7 @@ package com.zone.agri.service;
 
 import com.zone.agri.dto.cart.CartItemResponse;
 import com.zone.agri.entity.CartItem;
+import com.zone.agri.entity.Product;
 import com.zone.agri.entity.ProductVariant;
 import com.zone.agri.entity.User;
 import com.zone.agri.repository.CartItemRepository;
