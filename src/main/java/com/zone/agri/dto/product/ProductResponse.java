@@ -17,5 +17,6 @@ public class ProductResponse {
     private String categoryName;
     private String brandName;
     private List<String> imageUrls;
+    private Integer inventory;
     private List<ProductVariantResponse> variants;
 }

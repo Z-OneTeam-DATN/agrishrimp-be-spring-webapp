@@ -1,6 +1,6 @@
 package com.zone.agri.controller;
 
-import com.zone.agri.dto.product.VariantSearchResponse;
+import com.zone.agri.dto.product.ProductVariantResponse;
 import com.zone.agri.service.ProductVariantService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -21,7 +21,11 @@ public class ProductVariantController {
 
     @Operation(summary = "Tìm kiếm biến thể sản phẩm (Dùng cho tạo đơn/chuyển kho)")
     @GetMapping("/search")
-    public ResponseEntity<List<VariantSearchResponse>> searchVariants(@RequestParam String keyword) {
-        return ResponseEntity.ok(variantService.searchVariants(keyword));
+    // [CẬP NHẬT QUAN TRỌNG]: Nhận thêm branchId (không bắt buộc) và đổi kiểu trả về
+    public ResponseEntity<List<ProductVariantResponse>> searchVariants(
+            @RequestParam(required = false) String keyword,
+            @RequestParam(required = false) Long branchId) {
+
+        return ResponseEntity.ok(variantService.searchVariants(keyword, branchId));
     }
 }

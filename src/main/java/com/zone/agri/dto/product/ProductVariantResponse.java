@@ -20,6 +20,7 @@ public class ProductVariantResponse {
     private String unit;
     private String imageUrl;
     private VariantStatus status;
+    private String productName;
     private List<AttributeValueResponse> attributeValues;
     private List<UnitConversionResponse> unitConversions;
 }

@@ -1,6 +1,5 @@
 package com.zone.agri.service;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zone.agri.common.CloudinaryService;
 import com.zone.agri.dto.product.*;
@@ -234,7 +233,7 @@ public class ProductService {
 
         // 4. Xóa từ DB (Sử dụng cơ chế Cascade đã cấu hình trong Entity)
         productRepository.delete(product);
-        
+
         log.info("Xóa sản phẩm thành công: id={}", id);
     }
 
@@ -250,7 +249,7 @@ public class ProductService {
         // 2. Kiểm tra giao dịch kho đang mở (InventoryNote PENDING hoặc InventoryTransfer PENDING/SHIPPING)
         boolean hasPendingNote = inventoryNoteRepository.existsByStatusInAndProductId(
                 Collections.singletonList(InventoryNoteStatus.PENDING), id);
-        
+
         boolean hasPendingTransfer = inventoryTransferRepository.existsByStatusInAndProductId(
                 Arrays.asList(InventoryTransferStatus.PENDING, InventoryTransferStatus.SHIPPING), id);
 
@@ -263,7 +262,7 @@ public class ProductService {
             product.getVariants().forEach(v -> v.setStatus(VariantStatus.INACTIVE));
         }
         productRepository.save(product);
-        
+
         log.info("Ngừng kinh doanh sản phẩm thành công: id={}", id);
     }
 
@@ -280,6 +279,14 @@ public class ProductService {
                 product.getVariants().stream().map(this::mapVariantToResponse).collect(Collectors.toList()) :
                 Collections.emptyList();
 
+        // [CẬP NHẬT 1]: Tính tổng tồn kho của tất cả biến thể cho sản phẩm cha
+        int totalInventory = 0;
+        if (variantResponses != null) {
+            totalInventory = variantResponses.stream()
+                    .mapToInt(v -> v.getQuantity() != null ? v.getQuantity() : 0)
+                    .sum();
+        }
+
         return ProductResponse.builder()
                 .id(product.getId())
                 .name(product.getName())
@@ -290,11 +297,12 @@ public class ProductService {
                 .categoryName(product.getCategory() != null ? product.getCategory().getName() : null)
                 .brandName(product.getBrand() != null ? product.getBrand().getName() : null)
                 .imageUrls(imageUrls)
+                .inventory(totalInventory) // <-- Gán tổng tồn kho vào đây
                 .variants(variantResponses)
                 .build();
     }
 
-    private ProductVariantResponse mapVariantToResponse(ProductVariant variant) {
+    public ProductVariantResponse mapVariantToResponse(ProductVariant variant) {
         List<UnitConversionResponse> conversions = variant.getUnitConversions() != null ?
                 variant.getUnitConversions().stream().map(uc -> UnitConversionResponse.builder()
                         .id(uc.getId())
@@ -314,6 +322,21 @@ public class ProductService {
                         .build()).collect(Collectors.toList()) :
                 Collections.emptyList();
 
+        // [CẬP NHẬT 2]: Lấy số lượng tồn kho THỰC TẾ từ bảng Inventory thay vì ProductVariant
+        Long actualStockLong = null;
+        try {
+            actualStockLong = inventoryRepository.sumQuantityByProductVariantId(variant.getId());
+        } catch (Exception e) {
+            log.warn("Không thể lấy tồn kho cho biến thể ID: " + variant.getId(), e);
+        }
+
+        Integer actualStock = (actualStockLong != null) ? actualStockLong.intValue() : 0;
+
+        // Nếu trong kho (bảng Inventory) chưa có dữ liệu, nhưng lúc tạo sản phẩm có nhập số lượng khởi tạo thì lấy số lượng đó
+        if (actualStock == 0 && variant.getQuantity() != null && variant.getQuantity() > 0) {
+            actualStock = variant.getQuantity();
+        }
+        String pName = (variant.getProduct() != null) ? variant.getProduct().getName() : "";
         return ProductVariantResponse.builder()
                 .id(variant.getId())
                 .sku(variant.getSku())
@@ -321,11 +344,12 @@ public class ProductService {
                 .costPrice(variant.getImportPrice())
                 .price(variant.getPrice())
                 .wholesalePrice(variant.getWholesalePrice())
-                .quantity(variant.getQuantity())
+                .quantity(actualStock) // <-- Gán số lượng thực tế vào đây
                 .shippingWeight(variant.getShippingWeight())
                 .unit("")
                 .imageUrl(variant.getImageUrl())
                 .status(variant.getStatus())
+                .productName(pName)
                 .attributeValues(attributeValues)
                 .unitConversions(conversions)
                 .build();
@@ -446,16 +470,13 @@ public class ProductService {
         return slug;
     }
 
-
     public List<ProductResponse> getProductsForSale() {
         return productRepository.findProductsForSale().stream()
                 .map(this::convertToResponse)
                 .collect(Collectors.toList());
     }
 
-
     public List<ProductResponse> getTopBestSellers(int limit) {
-        // Khai báo kiểu Pageable rõ ràng để khớp với tham số của Repository
         Pageable pageable = PageRequest.of(0, limit);
 
         return productRepository.findTopBestSellers(pageable).stream()
@@ -463,18 +484,17 @@ public class ProductService {
                 .collect(Collectors.toList());
     }
 
-
     public ProductResponse getProductDetailForUser(String slug) {
         Product product = productRepository.findBySlug(slug)
                 .orElseThrow(() -> new NotFoundException("Sản phẩm không tồn tại hoặc đã bị xóa."));
 
-        // Kiểm tra nếu sản phẩm bị ngừng kinh doanh (INACTIVE) thì không hiển thị cho user
         if (product.getStatus() == ProductStatus.INACTIVE) {
             throw new BadRequestException("Sản phẩm này hiện tại không còn kinh doanh.");
         }
 
         return convertToResponse(product);
     }
+
 
     @Transactional(readOnly = true)
     public List<ProductResponse> getPublicProductsByCategoryId(Long categoryId) {
@@ -554,4 +574,7 @@ public class ProductService {
         return new PageImpl<>(productResponses, pageable, productIdsPage.getTotalElements());
     }
 }
+
+
+
 

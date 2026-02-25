@@ -13,13 +13,18 @@ import java.util.List;
 @NoArgsConstructor
 @AllArgsConstructor
 public class InventoryReceiptRequest {
+    private String importType;     // "SUPPLIER" hoặc "INTERNAL"
+    private Long sourceBranchId;   // Dùng khi INTERNAL (Kho xuất)
+
     private String receiptCode;
-    private String supplierCode;
-    private String branchName;
+    private String supplierCode;   // Dùng khi SUPPLIER
+    private String branchName;     // Kho nhận
     private String deliverer;
-    private String entryDate;
+    private String entryDate;      // Ngày hẹn giao (yyyy-MM-dd)
     private String note;
-    private String importStatus; // "PO" hoặc "IMPORTED"
+    private String importStatus;   // "PO" (Phiếu tạm) hoặc "IMPORTED" (Đã nhập)
+
+    private List<String> tags;     // React gửi lên mảng chuỗi
     private BigDecimal paymentAmount;
     private List<ItemRequest> items;
 
