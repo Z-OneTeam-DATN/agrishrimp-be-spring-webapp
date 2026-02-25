@@ -15,6 +15,8 @@ import org.springframework.data.domain.Page; // ADDED THIS LINE
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
@@ -23,12 +25,13 @@ import java.text.Normalizer;
 import java.time.LocalDateTime;
 import java.util.*;
 import java.util.stream.Collectors;
-
+import java.math.BigDecimal;
 @Service
 @RequiredArgsConstructor
 @Slf4j
 public class ProductService {
 
+    private final UserRepository userRepository;
     private final ProductRepository productRepository;
     private final ProductVariantRepository variantRepository;
     private final ProductImageRepository imageRepository;
@@ -269,23 +272,30 @@ public class ProductService {
     // =========================================================================
     // HELPERS & MAPPERS
     // =========================================================================
+// =========================================================================
+    // LẤY THÔNG TIN USER ĐANG ĐĂNG NHẬP
+    // =========================================================================
+    private User getCurrentUser() {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth == null || !auth.isAuthenticated() || "anonymousUser".equals(auth.getPrincipal())) {
+            return null;
+        }
+        return userRepository.findByEmail(auth.getName()).orElse(null);
+    }
 
     public ProductResponse convertToResponse(Product product) {
+        // Lấy user đang request
+        User currentUser = getCurrentUser();
+
         List<String> imageUrls = product.getProductImages() != null ?
                 product.getProductImages().stream().map(ProductImage::getImageUrl).collect(Collectors.toList()) :
                 Collections.emptyList();
 
         List<ProductVariantResponse> variantResponses = product.getVariants() != null ?
-                product.getVariants().stream().map(this::mapVariantToResponse).collect(Collectors.toList()) :
+                product.getVariants().stream()
+                        .map(variant -> mapVariantToResponse(variant, currentUser))
+                        .collect(Collectors.toList()) :
                 Collections.emptyList();
-
-        // [CẬP NHẬT 1]: Tính tổng tồn kho của tất cả biến thể cho sản phẩm cha
-        int totalInventory = 0;
-        if (variantResponses != null) {
-            totalInventory = variantResponses.stream()
-                    .mapToInt(v -> v.getQuantity() != null ? v.getQuantity() : 0)
-                    .sum();
-        }
 
         return ProductResponse.builder()
                 .id(product.getId())
@@ -297,12 +307,42 @@ public class ProductService {
                 .categoryName(product.getCategory() != null ? product.getCategory().getName() : null)
                 .brandName(product.getBrand() != null ? product.getBrand().getName() : null)
                 .imageUrls(imageUrls)
-                .inventory(totalInventory) // <-- Gán tổng tồn kho vào đây
                 .variants(variantResponses)
                 .build();
     }
 
     public ProductVariantResponse mapVariantToResponse(ProductVariant variant) {
+        return mapVariantToResponse(variant, getCurrentUser());
+    }
+    public ProductVariantResponse mapVariantToResponse(ProductVariant variant, User currentUser) {
+
+        boolean isAdmin = false;
+        Branch currentBranch = null;
+
+        if (currentUser != null) {
+            isAdmin = "ADMIN".equals(currentUser.getRole().getSlug());
+            currentBranch = currentUser.getBranch();
+        }
+
+        // 1. TÍNH TỒN KHO THỰC TẾ
+        int displayQuantity = 0;
+        if (isAdmin) {
+            // Admin: Xem TỔNG tồn kho của tất cả chi nhánh
+            Integer totalStock = inventoryRepository.sumQuantityByVariantId(variant.getId());
+            displayQuantity = totalStock != null ? totalStock : 0;
+        } else if (currentBranch != null) {
+            // Nhân viên chi nhánh: Chỉ xem tồn kho tại chi nhánh của mình
+            displayQuantity = inventoryRepository
+                    .findByBranchIdAndProductVariantId(currentBranch.getId(), variant.getId())
+                    .map(Inventory::getQuantity)
+                    .orElse(0); // Nếu kho chi nhánh chưa có dữ liệu thì = 0
+        }
+
+        // 2. ẨN GIÁ VỐN NẾU KHÔNG PHẢI ADMIN
+        // Lưu ý: Đảm bảo field costPrice trong DTO ProductVariantResponse dùng BigDecimal (hoặc Float/Double dạng Object) để có thể gán null
+        BigDecimal displayCostPrice = isAdmin ? variant.getImportPrice() : null;
+
+        // ... Các phần map khác giữ nguyên
         List<UnitConversionResponse> conversions = variant.getUnitConversions() != null ?
                 variant.getUnitConversions().stream().map(uc -> UnitConversionResponse.builder()
                         .id(uc.getId())
@@ -322,39 +362,22 @@ public class ProductService {
                         .build()).collect(Collectors.toList()) :
                 Collections.emptyList();
 
-        // [CẬP NHẬT 2]: Lấy số lượng tồn kho THỰC TẾ từ bảng Inventory thay vì ProductVariant
-        Long actualStockLong = null;
-        try {
-            actualStockLong = inventoryRepository.sumQuantityByProductVariantId(variant.getId());
-        } catch (Exception e) {
-            log.warn("Không thể lấy tồn kho cho biến thể ID: " + variant.getId(), e);
-        }
-
-        Integer actualStock = (actualStockLong != null) ? actualStockLong.intValue() : 0;
-
-        // Nếu trong kho (bảng Inventory) chưa có dữ liệu, nhưng lúc tạo sản phẩm có nhập số lượng khởi tạo thì lấy số lượng đó
-        if (actualStock == 0 && variant.getQuantity() != null && variant.getQuantity() > 0) {
-            actualStock = variant.getQuantity();
-        }
-        String pName = (variant.getProduct() != null) ? variant.getProduct().getName() : "";
         return ProductVariantResponse.builder()
                 .id(variant.getId())
                 .sku(variant.getSku())
                 .barcode(variant.getBarcode())
-                .costPrice(variant.getImportPrice())
+                .costPrice(displayCostPrice) // ✅ Đã áp dụng phân quyền giá vốn
                 .price(variant.getPrice())
                 .wholesalePrice(variant.getWholesalePrice())
-                .quantity(actualStock) // <-- Gán số lượng thực tế vào đây
+                .quantity(displayQuantity)
                 .shippingWeight(variant.getShippingWeight())
                 .unit("")
                 .imageUrl(variant.getImageUrl())
                 .status(variant.getStatus())
-                .productName(pName)
                 .attributeValues(attributeValues)
                 .unitConversions(conversions)
                 .build();
     }
-
     private Brand getOrCreateBrand(String name) {
         return brandRepository.findByName(name.trim())
                 .orElseGet(() -> brandRepository.save(Brand.builder()
