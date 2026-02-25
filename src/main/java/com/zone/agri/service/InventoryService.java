@@ -57,12 +57,13 @@ public class InventoryService {
             noteEntity.setTags(String.join(",", request.getTags()));
         }
 
-        // RẼ NHÁNH NGUỒN NHẬP
+
         if ("INTERNAL".equals(request.getImportType())) {
             Branch sourceBranch = branchRepository.findById(request.getSourceBranchId())
                     .orElseThrow(() -> new RuntimeException("Kho xuất đi không tồn tại"));
-            noteEntity.setPartnerBranch(sourceBranch); // Ghi nhận kho chuyển đến
+            noteEntity.setPartnerBranch(sourceBranch); // Ghi nhận kho xuất
         } else {
+            // Nếu là SUPPLIER thì mới đi tìm nhà cung cấp
             Supplier supplier = supplierRepository.findByCode(request.getSupplierCode())
                     .orElseThrow(() -> new RuntimeException("Nhà cung cấp không tồn tại"));
             noteEntity.setSupplier(supplier);
@@ -78,7 +79,7 @@ public class InventoryService {
         return mapToResponse(saved);
     }
 
-    // --- 2. CẬP NHẬT PHIẾU (CHỈ KHI PENDING) ---
+    // --- 2. CẬP NHẬT PHIẾU ---
     @Transactional
     public InventoryReceiptResponse updateReceipt(Long id, InventoryReceiptRequest request) {
         InventoryNote existingNote = noteRepository.findById(id)
@@ -88,7 +89,6 @@ public class InventoryService {
             throw new RuntimeException("Phiếu đã nhập kho thành công, không thể sửa đổi.");
         }
 
-        // Cập nhật thông tin Header
         existingNote.setNote(request.getNote());
         existingNote.setDeliverer(request.getDeliverer());
         existingNote.setPaymentAmount(request.getPaymentAmount() != null ? request.getPaymentAmount() : BigDecimal.ZERO);
@@ -103,12 +103,23 @@ public class InventoryService {
             existingNote.setTags(null);
         }
 
-        // Nếu người dùng bấm lưu và chuyển thành "Đã nhập kho"
+
+        if ("INTERNAL".equals(request.getImportType())) {
+            Branch sourceBranch = branchRepository.findById(request.getSourceBranchId())
+                    .orElseThrow(() -> new RuntimeException("Kho xuất đi không tồn tại"));
+            existingNote.setPartnerBranch(sourceBranch);
+            existingNote.setSupplier(null); // Xóa NCC nếu đổi từ NCC sang Nội bộ
+        } else {
+            Supplier supplier = supplierRepository.findByCode(request.getSupplierCode())
+                    .orElseThrow(() -> new RuntimeException("Nhà cung cấp không tồn tại"));
+            existingNote.setSupplier(supplier);
+            existingNote.setPartnerBranch(null); // Xóa kho xuất nếu đổi từ Nội bộ sang NCC
+        }
+
         if ("IMPORTED".equals(request.getImportStatus())) {
             existingNote.setStatus(InventoryNoteStatus.COMPLETED);
         }
 
-        // Xóa chi tiết cũ và tạo chi tiết mới
         existingNote.getDetails().clear();
         processItemsAndStock(existingNote, request.getItems(), request.getImportType());
 
@@ -177,7 +188,11 @@ public class InventoryService {
         }
 
         note.setTotalAmount(totalAmount);
-        note.setDebtAmount(totalAmount.subtract(note.getPaymentAmount()));
+        if (note.getPartnerBranch() != null) {
+            note.setDebtAmount(BigDecimal.ZERO);
+        } else {
+            note.setDebtAmount(totalAmount.subtract(note.getPaymentAmount()));
+        }
     }
 
     // Hàm cập nhật tồn kho (Có thể xử lý cộng số dương hoặc trừ số âm)
@@ -211,7 +226,19 @@ public class InventoryService {
                 : noteRepository.findAllByBranchId(warehouseId);
 
         return notes.stream()
-                .filter(note -> note.getType() == InventoryNoteType.IMPORT)
+                .filter(note -> note.getType() == InventoryNoteType.IMPORT) // Chỉ lấy phiếu nhập
+                .sorted((n1, n2) -> {
+
+                    if (n1.getStatus() != n2.getStatus()) {
+                        if (n1.getStatus() == InventoryNoteStatus.PENDING) return -1;
+                        if (n2.getStatus() == InventoryNoteStatus.PENDING) return 1;
+                    }
+
+
+                    LocalDateTime time1 = n1.getCreatedAt() != null ? n1.getCreatedAt() : LocalDateTime.MIN;
+                    LocalDateTime time2 = n2.getCreatedAt() != null ? n2.getCreatedAt() : LocalDateTime.MIN;
+                    return time2.compareTo(time1);
+                })
                 .map(this::mapToResponse)
                 .collect(Collectors.toList());
     }
