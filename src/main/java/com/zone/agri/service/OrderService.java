@@ -111,6 +111,11 @@ public class OrderService {
         return savedOrder;
     }
 
+    // Thêm hàm này để trả về dữ liệu cho Frontend
+    public List<Order> getOrdersByUserId(Long userId) {
+        return orderRepository.findByUserIdOrderByCreatedAtDesc(userId);
+    }
+
     // --- HÀM TÌM CHI NHÁNH ĐỦ HÀNG ---
     private Branch findBranchWithEnoughStock(List<CheckoutItemRequest> itemsToBuy) {
         List<Branch> allBranches = branchRepository.findAll();

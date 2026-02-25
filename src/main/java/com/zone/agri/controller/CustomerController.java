@@ -82,4 +82,12 @@ public class CustomerController {
     ) {
         return ResponseEntity.ok(customerService.updateCustomer(id, request));
     }
+
+    @Operation(summary = "Khóa/Mở khóa tài khoản", description = "Đổi trạng thái đăng nhập của khách hàng")
+    @SecurityRequirement(name = "bearerAuth")
+    @PatchMapping("/{id}/toggle-status")
+    public ResponseEntity<String> toggleStatus(@PathVariable Long id) {
+        customerService.toggleUserStatus(id);
+        return ResponseEntity.ok("Cập nhật trạng thái tài khoản thành công!");
+    }
 }

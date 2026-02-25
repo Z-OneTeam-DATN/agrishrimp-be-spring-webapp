@@ -1,9 +1,9 @@
 package com.zone.agri.repository;
 
-import com.zone.agri.dto.customer.CustomerResponse;
 import com.zone.agri.entity.User;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -36,16 +36,12 @@ public interface UserRepository extends JpaRepository<User, Long> {
     boolean existsByPhoneNumberAndIdNot(String phoneNumber, Long id);
     boolean existsByCitizenIdAndIdNot(String citizenId, Long id);
 
-    // Lấy cả người dùng tự đăng ký (Role 11) và khách hàng do Admin thêm (Role 12)
-    @Query("SELECT new com.zone.agri.dto.customer.CustomerResponse(" +
-            "u.id, u.fullName, u.email, u.phoneNumber, u.provider, u.status, u.createdAt, " +
-            "c.id, c.status, c.addressDetail) " +
-            "FROM User u LEFT JOIN Customer c ON c.user.id = u.id " +
-            "WHERE u.role.id IN (11L, 12L) " + // SỬA LẠI CHỖ NÀY: Dùng IN để lấy cả 2 Role ID
-            "AND (:keyword IS NULL " +
-            "   OR LOWER(u.fullName) LIKE LOWER(CONCAT('%', :keyword, '%')) " +
-            "   OR LOWER(u.email) LIKE LOWER(CONCAT('%', :keyword, '%')) " +
-            "   OR u.phoneNumber LIKE CONCAT('%', :keyword, '%')) " +
+    @EntityGraph(attributePaths = {"customer"})
+    @Query("SELECT u FROM User u WHERE u.role.slug IN ('CUSTOMER', 'USER') " +
+            "AND (:status = 'all' OR CAST(u.status AS string) = :status) " +
+            "AND (:keyword IS NULL OR :keyword = '' OR LOWER(u.fullName) LIKE LOWER(CONCAT('%', :keyword, '%')) " +
+            "OR LOWER(u.email) LIKE LOWER(CONCAT('%', :keyword, '%')) " +
+            "OR u.phoneNumber LIKE CONCAT('%', :keyword, '%')) " +
             "ORDER BY u.createdAt DESC")
-    Page<CustomerResponse> findAllCustomers(@Param("keyword") String keyword, Pageable pageable);
+    Page<User> findAllCustomers(@Param("keyword") String keyword, @Param("status") String status, Pageable pageable);
 }
