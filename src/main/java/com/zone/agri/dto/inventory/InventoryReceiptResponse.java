@@ -16,13 +16,19 @@ import java.util.List;
 public class InventoryReceiptResponse {
     private Long id;
     private String code;
+    private String importType;     // Trả về cho Frontend biết loại gì
+    private Long sourceBranchId;   // Trả về ID kho xuất (nếu có)
     private String status;
     private String supplierName;
+    private String supplierCode;
     private String branchName;
     private BigDecimal totalAmount;
     private BigDecimal paymentAmount;
     private BigDecimal debtAmount;
     private String deliverer;
+    private String note;
+    private List<String> tags;     // Trả về mảng Tags
+    private String entryDate;
     private LocalDateTime createdAt;
     private List<ItemResponse> items;
 

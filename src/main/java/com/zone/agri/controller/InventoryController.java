@@ -13,7 +13,7 @@ import org.springframework.web.bind.annotation.*;
 import java.util.List;
 
 @RestController
-@RequestMapping("/api/v1/inventory")
+@RequestMapping("/api/inventory")
 @RequiredArgsConstructor
 @CrossOrigin(origins = "http://localhost:3000")
 public class InventoryController {
@@ -48,7 +48,7 @@ public class InventoryController {
     }
 
     @GetMapping("/receipts")
-    @com.zone.agri.security.annotation.RequirePermission({"IMPORT_MANAGE", "INVENTORY_VIEW"})
+    @com.zone.agri.security.annotation.RequirePermission({"INVENTORY_VIEW", "IMPORT_MANAGE"})
     public ResponseEntity<List<InventoryReceiptResponse>> getAllReceipts() {
         return ResponseEntity.ok(inventoryService.getAllReceipts());
     }
@@ -65,13 +65,13 @@ public class InventoryController {
     // ==============================
 
     @GetMapping("/export-commands")
-    @com.zone.agri.security.annotation.RequirePermission({"EXPORT_MANAGE", "INVENTORY_VIEW"})
+//    @com.zone.agri.security.annotation.RequirePermission({"EXPORT_MANAGE", "INVENTORY_VIEW"})
     public ResponseEntity<?> getAllExportCommands() {
         return ResponseEntity.ok(inventoryNoteService.getAllExportCommands());
     }
 
     @GetMapping("/export-receipts")
-    @com.zone.agri.security.annotation.RequirePermission({"EXPORT_MANAGE", "INVENTORY_VIEW"})
+//    @com.zone.agri.security.annotation.RequirePermission({"EXPORT_MANAGE", "INVENTORY_VIEW"})
     public ResponseEntity<?> getAllExportReceipts() {
         return ResponseEntity.ok(inventoryNoteService.getAllExportReceipts());
     }

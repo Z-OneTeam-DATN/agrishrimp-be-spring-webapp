@@ -18,9 +18,12 @@ public class WarehouseContext {
         if (user == null) {
             throw new SignInRequiredException("Vui lòng đăng nhập");
         }
-        String slug = (user.getRole() != null) ? user.getRole().getSlug() : "USER";
+
+        String slug = (user.getRole() != null) ? user.getRole().getSlug().toUpperCase() : "USER";
+
         return switch (slug) {
-            case "SUPER_ADMIN" -> null;
+            // Thêm ADMIN vào đây
+            case "ADMIN" -> null;
             case "BRANCH_MANAGER" -> {
                 Long bid = user.getBranchId();
                 if (bid == null) throw new Forbidden("BRANCH_MANAGER chưa được gán chi nhánh");
@@ -44,6 +47,6 @@ public class WarehouseContext {
     public boolean isSuperAdmin() {
         UserDetail user = AuthUtils.getUserDetail();
         if (user == null || user.getRole() == null) return false;
-        return "SUPER_ADMIN".equals(user.getRole().getSlug());
+        return "ADMIN".equals(user.getRole().getSlug());
     }
 }

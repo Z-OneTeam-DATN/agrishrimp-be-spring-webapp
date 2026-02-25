@@ -40,6 +40,7 @@ public interface InventoryRepository extends JpaRepository<Inventory, Long> {
     // ==============================
     boolean existsByProductVariantProductId(Long productId);
 
+
     // ==============================
     // BATCH: tổng tồn kho cho nhiều sản phẩm (dùng cho API public list)
     // Trả về Object[]{productId (Long), totalQty (Long)}
@@ -51,4 +52,7 @@ public interface InventoryRepository extends JpaRepository<Inventory, Long> {
            GROUP BY i.productVariant.product.id
            """)
     List<Object[]> sumQuantityGroupByProductIds(@Param("productIds") List<Long> productIds);
+
+    @Query("SELECT SUM(i.quantity) FROM Inventory i WHERE i.productVariant.id = :variantId")
+    Long sumQuantityByProductVariantId(@Param("variantId") Long variantId);
 }
