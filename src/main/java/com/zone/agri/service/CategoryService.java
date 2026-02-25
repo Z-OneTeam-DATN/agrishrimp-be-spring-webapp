@@ -2,6 +2,7 @@ package com.zone.agri.service;
 
 import com.zone.agri.dto.admin.CategoryDTO;
 import com.zone.agri.entity.Category;
+import com.zone.agri.entity.enums.CategoryStatus; // Import CategoryStatus
 import com.zone.agri.common.CloudinaryService;
 import com.zone.agri.repository.CategoryRepository;
 import lombok.RequiredArgsConstructor;
@@ -20,6 +21,14 @@ public class CategoryService {
 
     public List<CategoryDTO> getAllCategories() {
         List<Category> categories = categoryRepository.findAll();
+        if (categories == null || categories.isEmpty()) {
+            return new ArrayList<>();
+        }
+        return categories.stream().map(this::convertToDTO).collect(Collectors.toList());
+    }
+
+    public List<CategoryDTO> getPublicCategories() {
+        List<Category> categories = categoryRepository.findByStatus(CategoryStatus.ACTIVE);
         if (categories == null || categories.isEmpty()) {
             return new ArrayList<>();
         }

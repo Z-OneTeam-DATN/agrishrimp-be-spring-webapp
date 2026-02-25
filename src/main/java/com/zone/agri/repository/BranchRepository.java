@@ -1,11 +1,13 @@
 package com.zone.agri.repository;
 
 import com.zone.agri.entity.Branch;
+import com.zone.agri.entity.enums.BranchStatus;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.util.List;
 import java.util.Optional;
 
 @Repository
@@ -13,6 +15,8 @@ public interface BranchRepository extends JpaRepository<Branch, Long> {
 
     java.util.Optional<Branch> findByBranchCode(String branchCode);
     java.util.Optional<Branch> findByPhone(String phone);
+
+    List<Branch> findByStatus(BranchStatus status);
 
     @Query("SELECT COUNT(b) > 0 FROM Branch b WHERE b.branchCode = :branchCode")
     boolean existsByBranchCode(@Param("branchCode") String branchCode);

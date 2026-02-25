@@ -3,6 +3,7 @@ package com.zone.agri.repository;
 import com.zone.agri.entity.Brand;
 import com.zone.agri.entity.Product;
 import com.zone.agri.entity.enums.ProductStatus;
+import org.springframework.data.domain.Page;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
@@ -86,4 +87,58 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
 
     // Tìm theo Slug cho trang chi tiết
     Optional<Product> findBySlug(String slug);
+
+    // =========================================================================
+    // PUBLIC WEBSITE API — không lộ dữ liệu nội bộ
+    // =========================================================================
+
+    /**
+     * Bước 1 (phân trang): trả về danh sách ID sản phẩm thoả điều kiện hiển thị công khai.
+     * Dùng query riêng trên ID để tránh Hibernate in-memory pagination
+     * khi fetch collection (variants).
+     * Điều kiện:
+     *  - product.status = ACTIVE
+     *  - category.status = ACTIVE
+     *  - (keyword trùng tên sản phẩm) AND (categoryId khớp nếu có)
+     */
+    @Query(value = """
+            SELECT p.id FROM Product p
+            JOIN p.category c
+            LEFT JOIN p.brand b
+            WHERE p.status = com.zone.agri.entity.enums.ProductStatus.ACTIVE
+              AND c.status = com.zone.agri.entity.enums.CategoryStatus.ACTIVE
+              AND (:keyword IS NULL OR LOWER(p.name) LIKE LOWER(CONCAT('%', :keyword, '%')))
+              AND (:categoryId IS NULL OR c.id = :categoryId)
+              AND (:brandId IS NULL OR b.id = :brandId)
+            ORDER BY p.createdAt DESC
+            """,
+           countQuery = """
+            SELECT COUNT(p) FROM Product p
+            JOIN p.category c
+            LEFT JOIN p.brand b
+            WHERE p.status = com.zone.agri.entity.enums.ProductStatus.ACTIVE
+              AND c.status = com.zone.agri.entity.enums.CategoryStatus.ACTIVE
+              AND (:keyword IS NULL OR LOWER(p.name) LIKE LOWER(CONCAT('%', :keyword, '%')))
+              AND (:categoryId IS NULL OR c.id = :categoryId)
+              AND (:brandId IS NULL OR b.id = :brandId)
+            """)
+    Page<Long> findPublicProductIds(
+            @Param("keyword") String keyword,
+            @Param("categoryId") Long categoryId,
+            @Param("brandId") Long brandId, // Thêm tham số brandId
+            Pageable pageable);
+
+    /**
+     * Bước 2 (data loading): fetch đầy đủ quan hệ cho danh sách ID.
+     * JOIN FETCH brand + category + productImages để tránh N+1.
+     * variants được load qua EAGER trên entity.
+     */
+    @Query("""
+            SELECT DISTINCT p FROM Product p
+            LEFT JOIN FETCH p.brand
+            LEFT JOIN FETCH p.category
+            LEFT JOIN FETCH p.productImages
+            WHERE p.id IN :ids
+            """)
+    List<Product> findPublicByIds(@Param("ids") List<Long> ids);
 }

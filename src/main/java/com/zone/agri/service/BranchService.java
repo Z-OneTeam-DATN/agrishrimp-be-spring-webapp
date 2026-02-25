@@ -33,6 +33,12 @@ public class BranchService {
                 .toList();
     }
 
+    public List<BranchDTO> getPublicBranches() {
+        return branchRepository.findByStatus(BranchStatus.ACTIVE).stream()
+                .map(this::mapToDTO)
+                .toList();
+    }
+
     public BranchDTO getBranchById(Long id) {
         Branch branch = branchRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Không tìm thấy chi nhánh với ID: " + id));

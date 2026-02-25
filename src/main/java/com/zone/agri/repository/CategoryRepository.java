@@ -1,6 +1,7 @@
 package com.zone.agri.repository;
 
 import com.zone.agri.entity.Category;
+import com.zone.agri.entity.enums.CategoryStatus;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
 import java.util.List;
@@ -13,5 +14,5 @@ public interface CategoryRepository extends JpaRepository<Category, Long> {
     List<Category> findByParentIsNull();
 
     //Tìm danh mục theo trạng thái ACTIVE
-    // List<Category> findByStatus(CategoryStatus status);
+    List<Category> findByStatus(CategoryStatus status);
 }

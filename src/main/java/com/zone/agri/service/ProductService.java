@@ -12,6 +12,8 @@ import com.zone.agri.exception.NotFoundException;
 import com.zone.agri.repository.*;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.Page; // ADDED THIS LINE
+import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
@@ -473,4 +475,83 @@ public class ProductService {
 
         return convertToResponse(product);
     }
+
+    @Transactional(readOnly = true)
+    public List<ProductResponse> getPublicProductsByCategoryId(Long categoryId) {
+        // 1. Kiểm tra Category có tồn tại và đang ACTIVE không
+        Category category = categoryRepository.findById(categoryId)
+                .orElseThrow(() -> new NotFoundException("Không tìm thấy danh mục với ID: " + categoryId));
+
+        if (category.getStatus() != CategoryStatus.ACTIVE) {
+            throw new BadRequestException("Danh mục không hoạt động.");
+        }
+
+        // 2. Lấy ID sản phẩm thỏa điều kiện (ACTIVE products, ACTIVE category)
+        Pageable pageable = PageRequest.of(0, Integer.MAX_VALUE);
+        Page<Long> productIdsPage = productRepository.findPublicProductIds(null, categoryId, null, pageable);
+        List<Long> productIds = productIdsPage.getContent();
+
+        if (productIds.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        // 3. Fetch đầy đủ chi tiết sản phẩm theo ID
+        List<Product> products = productRepository.findPublicByIds(productIds);
+
+        // 4. Chuyển đổi sang DTO và trả về
+        return products.stream()
+                .map(this::convertToResponse)
+                .collect(Collectors.toList());
+    }
+
+    @Transactional(readOnly = true)
+    public List<ProductResponse> getPublicProductsByBrandId(Long brandId) {
+        // 1. Kiểm tra Brand có tồn tại và đang ACTIVE không
+        Brand brand = brandRepository.findById(brandId)
+                .orElseThrow(() -> new NotFoundException("Không tìm thấy thương hiệu với ID: " + brandId));
+
+        if (brand.getStatus() != BrandStatus.ACTIVE) {
+            throw new BadRequestException("Thương hiệu không hoạt động.");
+        }
+
+        // 2. Lấy ID sản phẩm thỏa điều kiện (ACTIVE products, ACTIVE brand)
+        Pageable pageable = PageRequest.of(0, Integer.MAX_VALUE);
+        Page<Long> productIdsPage = productRepository.findPublicProductIds(null, null, brandId, pageable);
+        List<Long> productIds = productIdsPage.getContent();
+
+        if (productIds.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        // 3. Fetch đầy đủ chi tiết sản phẩm theo ID
+        List<Product> products = productRepository.findPublicByIds(productIds);
+
+        // 4. Chuyển đổi sang DTO và trả về
+        return products.stream()
+                .map(this::convertToResponse)
+                .collect(Collectors.toList());
+    }
+
+    @Transactional(readOnly = true)
+    public Page<ProductResponse> getPublicProducts(String keyword, Long categoryId, Long brandId, Pageable pageable) {
+        // Find public product IDs based on filters
+        Page<Long> productIdsPage = productRepository.findPublicProductIds(keyword, categoryId, brandId, pageable);
+        List<Long> productIds = productIdsPage.getContent();
+
+        if (productIds.isEmpty()) {
+            return Page.empty(pageable);
+        }
+
+        // Fetch full product details for the IDs
+        List<Product> products = productRepository.findPublicByIds(productIds);
+
+        // Convert to DTOs and return as a Page
+        List<ProductResponse> productResponses = products.stream()
+                .map(this::convertToResponse)
+                .collect(Collectors.toList());
+
+        // Reconstruct Page with DTOs
+        return new PageImpl<>(productResponses, pageable, productIdsPage.getTotalElements());
+    }
 }
+
