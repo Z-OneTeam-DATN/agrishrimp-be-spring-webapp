@@ -55,4 +55,8 @@ public interface InventoryRepository extends JpaRepository<Inventory, Long> {
 
     @Query("SELECT SUM(i.quantity) FROM Inventory i WHERE i.productVariant.id = :variantId")
     Long sumQuantityByProductVariantId(@Param("variantId") Long variantId);
+
+    // Lấy TỔNG tồn kho của 1 biến thể trên TOÀN HỆ THỐNG (Dành cho Admin)
+    @Query("SELECT SUM(i.quantity) FROM Inventory i WHERE i.productVariant.id = :variantId")
+    Integer sumQuantityByVariantId(@Param("variantId") Long variantId);
 }
