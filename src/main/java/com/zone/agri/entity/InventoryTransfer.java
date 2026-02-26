@@ -8,6 +8,7 @@ import lombok.*;
 import lombok.experimental.FieldDefaults;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 
 @Entity
@@ -96,8 +97,6 @@ public class InventoryTransfer {
     @EqualsAndHashCode.Exclude
     User receiver;
 
-    @OneToMany(mappedBy = "inventoryTransfer", fetch = FetchType.LAZY, cascade = CascadeType.ALL, orphanRemoval = true)
-    @ToString.Exclude
-    @JsonManagedReference
-    List<InventoryTransferDetail> details;
+    @OneToMany(mappedBy = "inventoryTransfer", cascade = CascadeType.ALL, orphanRemoval = true)
+    private List<InventoryTransferDetail> details = new ArrayList<>();
 }
