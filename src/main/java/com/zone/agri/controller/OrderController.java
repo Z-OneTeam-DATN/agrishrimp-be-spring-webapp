@@ -62,7 +62,7 @@ public class OrderController {
             description = "Bước 1 — Tính toán phân bổ tồn kho + phí ship cho từng chi nhánh. "
                     + "Không lưu DB. Trả về prepareToken dùng cho /confirm (hết hạn sau 30 phút)."
     )
-    @PostMapping("/prepare")
+    @PostMapping("/orders/prepare")
     public ResponseEntity<PrepareOrderResponse> prepareOrder(
             @Valid @RequestBody PrepareOrderRequest request) {
         Long userId = getCurrentUserId();
@@ -75,7 +75,7 @@ public class OrderController {
             description = "Bước 2 — Lưu đơn vào DB, trừ tồn kho (có lock tránh race condition), "
                     + "tạo SubOrder theo từng chi nhánh."
     )
-    @PostMapping("/confirm")
+    @PostMapping("/orders/confirm")
     public ResponseEntity<ConfirmOrderResponse> confirmOrder(
             @Valid @RequestBody ConfirmOrderRequest request) {
         Long userId = getCurrentUserId();
