@@ -10,4 +10,5 @@ import java.util.List;
 public interface SKUAttributeValueRepository extends JpaRepository<SKUAttributeValue, Long> {
     List<SKUAttributeValue> findBySkuId(Long skuId);
     void deleteBySkuId(Long skuId);
+    boolean existsByAttributeId(Long attributeId);
 }
