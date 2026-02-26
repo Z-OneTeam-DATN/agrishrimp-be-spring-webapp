@@ -52,6 +52,7 @@ public class SecurityConfig {
             "/actuator/health",
             "/actuator/info",
             "/api/public/**",
+            "/api/webhooks/**",
     };
 
     @Bean

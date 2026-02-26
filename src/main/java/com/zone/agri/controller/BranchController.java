@@ -1,6 +1,9 @@
 package com.zone.agri.controller;
 
 import com.zone.agri.dto.admin.BranchDTO;
+import com.zone.agri.dto.branch.FindNearestBranchRequest;
+import com.zone.agri.dto.branch.NearestBranchResponse;
+import com.zone.agri.service.BranchSearchService;
 import com.zone.agri.service.BranchService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -10,12 +13,11 @@ import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import com.zone.agri.dto.branch.CheckStockItemRequest;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
 
 import java.util.List;
 
@@ -27,6 +29,7 @@ import java.util.List;
 public class BranchController {
 
     private final BranchService branchService;
+    private final BranchSearchService branchSearchService;
 
     @Operation(summary = "Lấy danh sách chi nhánh", description = "Trả về toàn bộ danh sách chi nhánh và kho đang hoạt động.")
     @SecurityRequirement(name = "bearerAuth")
@@ -92,5 +95,33 @@ public class BranchController {
     @PostMapping("/check-stock")
     public ResponseEntity<List<BranchDTO>> checkStock(@RequestBody List<CheckStockItemRequest> items) {
         return ResponseEntity.ok(branchService.findBranchesWithEnoughStock(items));
+    }
+
+    @Operation(
+            summary = "Tìm chi nhánh gần nhất",
+            description = "Tìm danh sách chi nhánh gần nhất với vị trí người dùng theo 3 tầng lọc: "
+                    + "Bounding Box → Haversine → Distance Matrix API. "
+                    + "Kết quả sort theo thời gian di chuyển thực tế (tăng dần)."
+    )
+    @PostMapping("/nearest")
+    public ResponseEntity<List<NearestBranchResponse>> findNearest(
+            @Valid @RequestBody FindNearestBranchRequest request) {
+
+        List<BranchSearchService.BranchWithRealDistance> nearest =
+                branchSearchService.findNearestBranches(request.getLat(), request.getLng());
+
+        List<NearestBranchResponse> response = nearest.stream()
+                .limit(request.getLimit() != null ? request.getLimit() : 5)
+                .map(bwr -> NearestBranchResponse.builder()
+                        .id(bwr.branch().getId())
+                        .name(bwr.branch().getName())
+                        .addressText(bwr.branch().getAddressDetail())
+                        .phone(bwr.branch().getPhone())
+                        .distanceKm(Math.round(bwr.distanceKm() * 100.0) / 100.0)
+                        .durationMinutes(Math.round(bwr.durationMinutes() * 10.0) / 10.0)
+                        .build())
+                .toList();
+
+        return ResponseEntity.ok(response);
     }
 }

@@ -1,0 +1,129 @@
+package com.zone.agri.service;
+
+import com.zone.agri.dto.geo.DeliveryInfo;
+import com.zone.agri.dto.geo.ShippingFeeParams;
+import com.zone.agri.dto.geo.ShippingFeeResult;
+import com.zone.agri.dto.order.OrderItemDto;
+import com.zone.agri.dto.order.SubOrderDraftDto;
+import com.zone.agri.entity.ProductVariant;
+import com.zone.agri.repository.ProductVariantRepository;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Service;
+
+import java.math.BigDecimal;
+import java.math.RoundingMode;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+
+/**
+ * Tính phí ship cho tất cả sub-orders SONG SONG (CompletableFuture.allOf).
+ * Mỗi sub-order gọi 1 request tới ShippingProvider.
+ */
+@Service
+@RequiredArgsConstructor
+@Slf4j
+public class ShippingService {
+
+    private final GHNShippingProvider ghnProvider;
+    private final ProductVariantRepository productVariantRepository;
+
+    @Value("${shipping.provider:ghn}")
+    private String shippingProviderName;
+
+    private final ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
+
+    /**
+     * Enrich danh sách sub-orders với shipping fee, carrier, estimatedDays.
+     * Gọi API song song — không để lỗi 1 sub-order ảnh hưởng sub-order khác.
+     *
+     * @param subOrders    danh sách draft từ InventoryAllocationService
+     * @param deliveryInfo thông tin điểm giao hàng của khách
+     * @param variantMap   map variantId → entity (để tính weight)
+     * @return danh sách sub-orders đã có shippingFee
+     */
+    public List<SubOrderDraftDto> enrichWithShippingFees(
+            List<SubOrderDraftDto> subOrders,
+            DeliveryInfo deliveryInfo,
+            Map<Long, ProductVariant> variantMap
+    ) {
+        List<CompletableFuture<SubOrderDraftDto>> futures = subOrders.stream()
+                .map(draft -> CompletableFuture
+                        .supplyAsync(() -> calculateForDraft(draft, deliveryInfo, variantMap), executor)
+                        .exceptionally(ex -> {
+                            log.error("Shipping fee failed for branch {}: {}", draft.getBranchId(), ex.getMessage());
+                            return draft.toBuilder()
+                                    .shippingFee(new BigDecimal("30000"))
+                                    .estimatedDays("2-3 ngày (ước tính)")
+                                    .carrier("GHN")
+                                    .shippingEstimate(true)
+                                    .build();
+                        })
+                )
+                .toList();
+
+        CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
+
+        List<SubOrderDraftDto> result = new ArrayList<>();
+        for (CompletableFuture<SubOrderDraftDto> f : futures) {
+            try {
+                result.add(f.get());
+            } catch (Exception e) {
+                log.error("Failed to get shipping future result: {}", e.getMessage());
+            }
+        }
+        return result;
+    }
+
+    private SubOrderDraftDto calculateForDraft(
+            SubOrderDraftDto draft,
+            DeliveryInfo deliveryInfo,
+            Map<Long, ProductVariant> variantMap
+    ) {
+        // Tính tổng weight (gram) của sub-order này
+        int totalWeightGram = draft.getItems().stream()
+                .mapToInt(item -> {
+                    ProductVariant v = variantMap.get(item.getProductVariantId());
+                    if (v == null || v.getShippingWeight() == null) return 500; // default 500g
+                    // shippingWeight lưu theo kg → * 1000 = gram
+                    return v.getShippingWeight()
+                            .multiply(BigDecimal.valueOf(1000))
+                            .setScale(0, RoundingMode.UP)
+                            .intValue() * item.getQuantity();
+                })
+                .sum();
+
+        if (totalWeightGram <= 0) totalWeightGram = 500;
+
+        ShippingProvider provider = resolveProvider();
+        ShippingFeeParams params = ShippingFeeParams.builder()
+                .fromDistrictId(getFromDistrictId(draft))
+                .toDistrictId(deliveryInfo.getToDistrictId())
+                .toWardCode(deliveryInfo.getToWardCode())
+                .weightGram(totalWeightGram)
+                .codAmount(draft.getSubtotal() != null ? draft.getSubtotal().longValue() : 0L)
+                .build();
+
+        ShippingFeeResult result = provider.calculateFee(params);
+
+        return draft.toBuilder()
+                .shippingFee(result.getTotalFee())
+                .estimatedDays(result.getEstimatedDays())
+                .carrier(result.getCarrier())
+                .shippingEstimate(result.isEstimate())
+                .build();
+    }
+
+    private Integer getFromDistrictId(SubOrderDraftDto draft) {
+        return draft.getFromDistrictId();
+    }
+
+    private ShippingProvider resolveProvider() {
+        return ghnProvider; // hiện chỉ hỗ trợ GHN
+    }
+}

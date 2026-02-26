@@ -1,13 +1,15 @@
 package com.zone.agri.controller;
 
-import com.zone.agri.dto.order.CheckoutRequest;
+import com.zone.agri.dto.order.*;
+import com.zone.agri.exception.SignInRequiredException;
 import com.zone.agri.repository.UserRepository;
 import com.zone.agri.service.OrderService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
-import org.springframework.http.HttpStatus;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -21,6 +23,7 @@ import java.util.Map;
 @Tag(name = "Order Management", description = "Quản lý Đặt hàng và Đơn hàng")
 @CrossOrigin(origins = "http://localhost:3000")
 @SecurityRequirement(name = "bearerAuth")
+@Slf4j
 public class OrderController {
 
     private final OrderService orderService;
@@ -29,25 +32,55 @@ public class OrderController {
     private Long getCurrentUserId() {
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
         if (auth == null || !auth.isAuthenticated() || "anonymousUser".equals(auth.getPrincipal())) {
-            throw new RuntimeException("UNAUTHORIZED");
+            throw new SignInRequiredException("Vui lòng đăng nhập để tiếp tục");
         }
         String email = auth.getName();
         return userRepository.findByEmail(email)
-                .orElseThrow(() -> new RuntimeException("Tài khoản không tồn tại"))
+                .orElseThrow(() -> new SignInRequiredException("Tài khoản không tồn tại"))
                 .getId();
     }
 
-    @Operation(summary = "Đặt hàng (Checkout)", description = "Tạo đơn hàng COD mới. Hệ thống sẽ tự tìm chi nhánh có đủ tồn kho để trừ hàng.")
+    // ── LEGACY ────────────────────────────────────────────────────
+
+    @Operation(
+            summary = "Đặt hàng (Checkout — legacy)",
+            description = "Tạo đơn hàng COD tại 1 chi nhánh có đủ hàng. "
+                    + "Đã thay thế bởi /prepare + /confirm."
+    )
     @PostMapping("/checkout")
     public ResponseEntity<?> placeOrder(@RequestBody CheckoutRequest request) {
-        try {
-            orderService.placeOrder(getCurrentUserId(), request);
-            return ResponseEntity.ok(Map.of("message", "Đặt hàng thành công!"));
-        } catch (RuntimeException e) {
-            if ("UNAUTHORIZED".equals(e.getMessage())) {
-                return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("message", "Vui lòng đăng nhập"));
-            }
-            return ResponseEntity.badRequest().body(Map.of("message", e.getMessage()));
-        }
+        Long userId = getCurrentUserId();
+        orderService.placeOrder(userId, request);
+        return ResponseEntity.ok(Map.of("message", "Đặt hàng thành công!"));
+    }
+
+    // ── NEW: Tách đơn thông minh ──────────────────────────────────
+
+    @Operation(
+            summary = "Chuẩn bị đơn hàng",
+            description = "Bước 1 — Tính toán phân bổ tồn kho + phí ship cho từng chi nhánh. "
+                    + "Không lưu DB. Trả về prepareToken dùng cho /confirm (hết hạn sau 30 phút)."
+    )
+    @PostMapping("/prepare")
+    public ResponseEntity<PrepareOrderResponse> prepareOrder(
+            @Valid @RequestBody PrepareOrderRequest request) {
+        Long userId = getCurrentUserId();
+        PrepareOrderResponse response = orderService.prepareOrder(userId, request);
+        return ResponseEntity.ok(response);
+    }
+
+    @Operation(
+            summary = "Xác nhận đơn hàng",
+            description = "Bước 2 — Lưu đơn vào DB, trừ tồn kho (có lock tránh race condition), "
+                    + "tạo SubOrder theo từng chi nhánh."
+    )
+    @PostMapping("/confirm")
+    public ResponseEntity<ConfirmOrderResponse> confirmOrder(
+            @Valid @RequestBody ConfirmOrderRequest request) {
+        Long userId = getCurrentUserId();
+        ConfirmOrderResponse response = orderService.confirmOrder(userId, request);
+        log.info("Order confirmed for user {}: orderCode={}, checkoutUrl={}", 
+                userId, response.getOrderCode(), response.getCheckoutUrl());
+        return ResponseEntity.ok(response);
     }
 }

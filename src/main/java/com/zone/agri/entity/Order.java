@@ -40,7 +40,7 @@ public class Order {
     BigDecimal finalAmount;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "payment_method", columnDefinition = "ENUM('CASH', 'TRANSFER', 'COD')")
+    @Column(name = "payment_method", columnDefinition = "ENUM('CASH', 'TRANSFER', 'COD', 'PAYOS')")
     PaymentMethod paymentMethod;
 
     @Enumerated(EnumType.STRING)
@@ -56,6 +56,31 @@ public class Order {
 
     @Column(name = "shipping_address", columnDefinition = "TEXT")
     String shippingAddress;
+
+    // --- Trường cho luồng tách đơn thông minh ---
+
+    @Column(name = "total_shipping_fee", precision = 38, scale = 2)
+    BigDecimal totalShippingFee;
+
+    @Column(name = "user_lat")
+    Double userLat;
+
+    @Column(name = "user_lng")
+    Double userLng;
+
+    @Column(name = "delivery_address", columnDefinition = "TEXT")
+    String deliveryAddress;
+
+    @Column(name = "note", columnDefinition = "TEXT")
+    String note;
+
+    // --- payOS ---
+
+    @Column(name = "payos_payment_link_id")
+    String payosPaymentLinkId;
+
+    @Column(name = "payos_checkout_url", length = 512)
+    String payosCheckoutUrl;
 
     // --- KHÓA NGOẠI ---
 
@@ -89,4 +114,9 @@ public class Order {
     @ToString.Exclude
     @EqualsAndHashCode.Exclude
     List<OrderItem> orderItems;
+
+    @OneToMany(mappedBy = "order", fetch = FetchType.LAZY, cascade = CascadeType.ALL)
+    @ToString.Exclude
+    @EqualsAndHashCode.Exclude
+    List<SubOrder> subOrders;
 }
