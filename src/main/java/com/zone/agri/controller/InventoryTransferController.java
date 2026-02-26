@@ -171,6 +171,14 @@ public class InventoryTransferController {
         return ResponseEntity.ok("Đã thay đổi chi nhánh nhận");
     }
 
+    @Operation(summary = "Xóa hoàn toàn phiếu điều chuyển", description = "Chỉ áp dụng cho phiếu PENDING")
+    @SecurityRequirement(name = "bearerAuth")
+    @DeleteMapping("/{id}")
+    public ResponseEntity<?> deleteTransfer(@PathVariable Long id) {
+        transferService.deleteTransfer(id);
+        return ResponseEntity.ok("Đã xóa phiếu điều chuyển thành công!");
+    }
+
 
 
 }

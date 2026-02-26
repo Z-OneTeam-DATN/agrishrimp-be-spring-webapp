@@ -255,4 +255,17 @@ public class InventoryTransferService {
         inventory.setQuantity(inventory.getQuantity() + quantityChange);
         inventoryRepo.save(inventory);
     }
+    @Transactional
+    public void deleteTransfer(Long id) {
+        InventoryTransfer transfer = transferRepo.findById(id)
+                .orElseThrow(() -> new RuntimeException("Không tìm thấy phiếu điều chuyển với ID: " + id));
+
+        // Chỉ cho phép xóa cứng (hard delete) nếu phiếu đang ở trạng thái PENDING
+        if (transfer.getStatus() != InventoryTransferStatus.PENDING) {
+            throw new RuntimeException("Chỉ có thể xóa hoàn toàn phiếu đang ở trạng thái Chờ xuất (PENDING)!");
+        }
+
+        // Xóa phiếu (Cascade sẽ tự động xóa các detail liên quan nếu bạn cấu hình đúng trong Entity)
+        transferRepo.delete(transfer);
+    }
 }

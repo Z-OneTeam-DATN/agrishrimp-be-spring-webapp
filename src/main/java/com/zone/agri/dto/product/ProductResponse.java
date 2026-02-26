@@ -1,5 +1,6 @@
 package com.zone.agri.dto.product;
 
+import com.zone.agri.dto.admin.CategoryDTO;
 import lombok.Builder;
 import lombok.Data;
 import java.util.List;
@@ -16,7 +17,9 @@ public class ProductResponse {
     private String baseSku;
     private String categoryName;
     private String brandName;
-    private List<String> imageUrls;
+    private CategoryDTO category;
+    private BrandResponse brand;
     private Integer inventory;
+    private List<String> imageUrls;
     private List<ProductVariantResponse> variants;
 }

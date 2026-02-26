@@ -14,6 +14,9 @@ import java.util.List;
 @Repository
 public interface OrderRepository extends JpaRepository<Order, Long> {
 
+    java.util.Optional<Order> findByCode(String code);
+
+
     boolean existsByStatusIn(Collection<OrderStatus> statuses);
 
     @Query("SELECT COUNT(o) > 0 FROM Order o JOIN o.orderItems item WHERE o.status IN :statuses AND item.productVariant.product.id = :productId")

@@ -3,7 +3,9 @@ package com.zone.agri.repository;
 import com.zone.agri.entity.Branch;
 import com.zone.agri.entity.Inventory;
 import com.zone.agri.entity.ProductVariant;
+import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
@@ -59,4 +61,32 @@ public interface InventoryRepository extends JpaRepository<Inventory, Long> {
     // Lấy TỔNG tồn kho của 1 biến thể trên TOÀN HỆ THỐNG (Dành cho Admin)
     @Query("SELECT SUM(i.quantity) FROM Inventory i WHERE i.productVariant.id = :variantId")
     Integer sumQuantityByVariantId(@Param("variantId") Long variantId);
+
+    // ==============================
+    // TÁCH ĐƠN THÔNG MINH
+    // ==============================
+
+    /**
+     * Query gộp tồn kho nhiều chi nhánh + nhiều variant — 1 lần duy nhất.
+     * Dùng để build inventory matrix cho thuật toán greedy allocation.
+     */
+    @Query("""
+           SELECT i FROM Inventory i
+           WHERE i.branch.id IN :branchIds
+             AND i.productVariant.id IN :variantIds
+           """)
+    List<Inventory> findInventoryMatrix(
+            @Param("branchIds") List<Long> branchIds,
+            @Param("variantIds") List<Long> variantIds
+    );
+
+    /**
+     * Dùng khi confirm đơn — lock để tránh race condition (overselling).
+     */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT i FROM Inventory i WHERE i.branch.id = :branchId AND i.productVariant.id = :variantId")
+    Optional<Inventory> findForUpdate(
+            @Param("branchId") Long branchId,
+            @Param("variantId") Long variantId
+    );
 }

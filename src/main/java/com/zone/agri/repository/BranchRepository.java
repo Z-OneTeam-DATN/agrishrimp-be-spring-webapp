@@ -38,4 +38,28 @@ public interface BranchRepository extends JpaRepository<Branch, Long> {
 
     @Query("SELECT b FROM Branch b WHERE b.name = :name")
     Optional<Branch> findByName(@Param("name") String name);
+
+    List<Branch> findByStatusAndDistrictId(BranchStatus status, Integer districtId);
+
+    List<Branch> findByStatusAndProvinceId(BranchStatus status, Integer provinceId);
+
+    /**
+     * Tầng 1 — Bounding Box filter.
+     * Chỉ trả về chi nhánh ACTIVE đã được geocode và nằm trong hộp giới hạn.
+     */
+    @Query("""
+            SELECT b FROM Branch b
+            WHERE b.status = :status
+              AND b.lat IS NOT NULL
+              AND b.lng IS NOT NULL
+              AND b.lat BETWEEN :minLat AND :maxLat
+              AND b.lng BETWEEN :minLng AND :maxLng
+            """)
+    List<Branch> findBranchesInBoundingBox(
+            @Param("status") BranchStatus status,
+            @Param("minLat") double minLat,
+            @Param("maxLat") double maxLat,
+            @Param("minLng") double minLng,
+            @Param("maxLng") double maxLng
+    );
 }

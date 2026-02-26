@@ -54,9 +54,9 @@ public class DataSeeder implements CommandLineRunner {
         log.info(">>> BẮT ĐẦU KHỞI TẠO DỮ LIỆU DEMO...");
 
         // ── 1. CHI NHÁNH & KHO ──────────────────────────────────────────
-        Branch mainWh  = saveBranch("MAIN_WH",   "WAREHOUSE", "Kho Tổng Cần Thơ",    "02921112222", "khotong@agrishrimp.vn", "99 Nguyễn Văn Cừ, P.An Khánh, Q.Ninh Kiều, Cần Thơ");
-        Branch branch1 = saveBranch("BRANCH_01", "STORE",     "Chi Nhánh Cần Thơ",   "02923334444", "cn1@agrishrimp.vn",     "15 Mậu Thân, P.Xuân Khánh, Q.Ninh Kiều, Cần Thơ");
-        Branch branch2 = saveBranch("BRANCH_02", "STORE",     "Chi Nhánh Sóc Trăng", "02995556666", "cn2@agrishrimp.vn",     "21 Trần Hưng Đạo, P.1, TP.Sóc Trăng, Sóc Trăng");
+        Branch mainWh  = saveBranch("MAIN_WH",   "WAREHOUSE", "Kho Tổng Cần Thơ",    "02921112222", "khotong@agrishrimp.vn", "99 Nguyễn Văn Cừ, P.An Khánh, Q.Ninh Kiều, Cần Thơ", 10.0341, 105.7904, 92, 916);
+        Branch branch1 = saveBranch("BRANCH_01", "STORE",     "Chi Nhánh Cần Thơ",   "02923334444", "cn1@agrishrimp.vn",     "15 Mậu Thân, P.Xuân Khánh, Q.Ninh Kiều, Cần Thơ", 10.0300, 105.7700, 92, 916);
+        Branch branch2 = saveBranch("BRANCH_02", "STORE",     "Chi Nhánh Sóc Trăng", "02995556666", "cn2@agrishrimp.vn",     "21 Trần Hưng Đạo, P.1, TP.Sóc Trăng, Sóc Trăng", 9.6025, 105.9731, 94, 941);
 
         // ── 2. PHÂN QUYỀN ───────────────────────────────────────────────
         // SYSTEM
@@ -151,6 +151,13 @@ public class DataSeeder implements CommandLineRunner {
         Permission aSetV    = pAct("Xem cài đặt",              "SETTING_VIEW",             PermissionGroup.SETTING,             mSet);
         Permission aSetU    = pAct("Cập nhật cài đặt",         "SETTING_UPDATE",           PermissionGroup.SETTING,             mSet);
 
+        // SALES_MANAGEMENT — Đơn hàng khách (tách đơn thông minh)
+        Permission mOrder   = pMod("Quản lý đơn hàng",         "ORDER_MANAGE",             PermissionGroup.SALES_MANAGEMENT);
+        Permission aOrdV    = pAct("Xem đơn hàng",             "ORDER_VIEW",               PermissionGroup.SALES_MANAGEMENT,    mOrder);
+        Permission aOrdC    = pAct("Tạo đơn hàng",             "ORDER_CREATE",             PermissionGroup.SALES_MANAGEMENT,    mOrder);
+        Permission aOrdCnf  = pAct("Xác nhận đơn hàng",        "ORDER_CONFIRM",            PermissionGroup.SALES_MANAGEMENT,    mOrder);
+        Permission aOrdX    = pAct("Huỷ đơn hàng",             "ORDER_CANCEL",             PermissionGroup.SALES_MANAGEMENT,    mOrder);
+
         // ── 3. VAI TRÒ ──────────────────────────────────────────────────
         Set<Permission> allPerms = Set.of(
             mDash, aDashV, mWspace, aWspaceV,
@@ -169,7 +176,8 @@ public class DataSeeder implements CommandLineRunner {
             mSup, aSupV, aSupC, aSupU, aSupD,
             mCus, aCusV, aCusC, aCusU, aCusD,
             mRpt, aRptSale, aRptInv, aRptFin,
-            mSet, aSetV, aSetU
+            mSet, aSetV, aSetU,
+            mOrder, aOrdV, aOrdC, aOrdCnf, aOrdX
         );
 
         Role adminRole    = saveRole("ADMIN",      "Quản trị viên",       true,  allPerms);
@@ -181,15 +189,19 @@ public class DataSeeder implements CommandLineRunner {
             aTrfV, aTrfC,
             aSRV, aSRC,
             aInvV,
-            aSupV, aCusV
+            aSupV, aCusV,
+            aOrdV, aOrdCnf  // Nhân viên kho xem + xác nhận đơn hàng
         ));
         Role salesRole    = saveRole("SALES",      "Nhân viên bán hàng",  false, Set.of(
             aDashV, aProdV, aCatV,
             aImpV, aExpV, aInvV,
             aCusV, aCusC, aCusU,
-            aRptSale
+            aRptSale,
+            aOrdV, aOrdC, aOrdCnf, aOrdX  // Sales quản lý đơn hàng
         ));
-        Role userRole     = saveRole("USER",       "Người dùng",          false, Set.of());
+        Role userRole     = saveRole("USER",       "Người dùng",          false, Set.of(
+            aOrdV, aOrdC, aOrdX  // Khách hàng: xem + tạo + huỷ đơn của mình
+        ));
 
         // ── 4. NGƯỜI DÙNG ────────────────────────────────────────────────
         User admin  = saveUser("Nguyễn Văn Admin",  "admin@agrishrimp.vn",  "0901000001", "123456", adminRole,    mainWh,  Gender.MALE,   LocalDate.of(1985,  3, 15));
@@ -576,11 +588,13 @@ public class DataSeeder implements CommandLineRunner {
     // PRIVATE HELPERS
     // ====================================================================
 
-    private Branch saveBranch(String code, String type, String name, String phone, String email, String address) {
+    private Branch saveBranch(String code, String type, String name, String phone, String email, String address, Double lat, Double lng, Integer provinceId, Integer districtId) {
         return branchRepository.findByBranchCode(code).orElseGet(() ->
             branchRepository.save(Branch.builder()
                 .branchCode(code).branchType(type).name(name)
                 .phone(phone).email(email).addressDetail(address)
+                .lat(lat).lng(lng)
+                .provinceId(provinceId).districtId(districtId)
                 .status(BranchStatus.ACTIVE).build()));
     }
 
