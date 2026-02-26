@@ -7,6 +7,8 @@ import com.zone.agri.entity.enums.CategoryStatus;
 import com.zone.agri.entity.enums.ProductStatus;
 import com.zone.agri.entity.enums.VariantStatus;
 import com.zone.agri.common.CloudinaryService;
+import com.zone.agri.exception.ConflictException; // Chắc chắn đã import đúng class Exception của bạn
+import com.zone.agri.exception.NotFoundException;
 import com.zone.agri.repository.CategoryRepository;
 import com.zone.agri.repository.ProductRepository;
 import lombok.RequiredArgsConstructor;
@@ -20,11 +22,11 @@ import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
-@Slf4j // Thêm log để theo dõi
+@Slf4j
 public class CategoryService {
 
     private final CategoryRepository categoryRepository;
-    private final ProductRepository productRepository; // ✅ Inject thêm ProductRepository
+    private final ProductRepository productRepository;
     private final CloudinaryService cloudinaryService;
 
     public List<CategoryDTO> getAllCategories() {
@@ -45,7 +47,7 @@ public class CategoryService {
 
     public CategoryDTO getCategoryById(Long id) {
         Category category = categoryRepository.findById(id)
-                .orElseThrow(() -> new RuntimeException("Không tìm thấy danh mục với ID: " + id));
+                .orElseThrow(() -> new NotFoundException("Không tìm thấy danh mục với ID: " + id));
         return convertToDTO(category);
     }
 
@@ -55,6 +57,7 @@ public class CategoryService {
         category.setName(dto.getName());
         category.setDescription(dto.getDescription());
         category.setStatus(dto.getStatus());
+
         String imageUrl = dto.getImageUrl();
         if (imageUrl != null && imageUrl.startsWith("data:image")) {
             imageUrl = cloudinaryService.uploadImage(imageUrl);
@@ -70,12 +73,11 @@ public class CategoryService {
         return convertToDTO(savedCategory);
     }
 
-    @Transactional // ✅ Rất quan trọng để rollback nếu có lỗi
+    @Transactional
     public CategoryDTO updateCategory(Long id, CategoryDTO dto) {
         Category category = categoryRepository.findById(id)
-                .orElseThrow(() -> new RuntimeException("Không tìm thấy danh mục"));
+                .orElseThrow(() -> new NotFoundException("Không tìm thấy danh mục"));
 
-        // Lưu lại trạng thái cũ để so sánh
         CategoryStatus oldStatus = category.getStatus();
 
         category.setName(dto.getName());
@@ -99,14 +101,12 @@ public class CategoryService {
 
         // ✅ LOGIC TỰ ĐỘNG ẨN SẢN PHẨM KHI ẨN DANH MỤC
         if (oldStatus == CategoryStatus.ACTIVE && dto.getStatus() == CategoryStatus.INACTIVE) {
-            // Lấy tất cả sản phẩm thuộc danh mục này đang có trạng thái ACTIVE
             List<Product> products = productRepository.findAllWithFilter(null, id, ProductStatus.ACTIVE);
-
             if (products != null && !products.isEmpty()) {
                 for (Product p : products) {
-                    p.setStatus(ProductStatus.INACTIVE); // Ẩn sản phẩm
+                    p.setStatus(ProductStatus.INACTIVE);
                     if (p.getVariants() != null) {
-                        p.getVariants().forEach(v -> v.setStatus(VariantStatus.INACTIVE)); // Ẩn biến thể
+                        p.getVariants().forEach(v -> v.setStatus(VariantStatus.INACTIVE));
                     }
                 }
                 productRepository.saveAll(products);
@@ -117,9 +117,30 @@ public class CategoryService {
         return convertToDTO(savedCategory);
     }
 
+    /**
+     * ✅ Cập nhật logic xóa: Chặn xóa nếu có ràng buộc dữ liệu
+     */
     @Transactional
     public void deleteCategory(Long id) {
-        categoryRepository.deleteById(id);
+        // 1. Kiểm tra danh mục có tồn tại không
+        Category category = categoryRepository.findById(id)
+                .orElseThrow(() -> new NotFoundException("Danh mục không tồn tại hoặc đã bị xóa trước đó."));
+
+        // 2. Kiểm tra xem có sản phẩm nào đang thuộc danh mục này không
+        boolean hasProducts = productRepository.existsByCategoryId(id);
+        if (hasProducts) {
+            log.warn("Thao tác bị chặn: Cố gắng xóa danh mục ID {} đang có sản phẩm liên kết.", id);
+            throw new ConflictException("Danh mục này đã có sản phẩm. Bạn không thể xóa, vui lòng chuyển sản phẩm sang danh mục khác hoặc ẩn danh mục này.");
+        }
+
+        // 3. Kiểm tra xem có danh mục con không (Nếu xóa cha thì con mất gốc)
+        if (category.getChildren() != null && !category.getChildren().isEmpty()) {
+            throw new ConflictException("Danh mục này đang chứa các danh mục con. Vui lòng xóa các danh mục con trước.");
+        }
+
+        // 4. Nếu hợp lệ thì thực hiện xóa
+        categoryRepository.delete(category);
+        log.info("Đã xóa vĩnh viễn danh mục ID: {}", id);
     }
 
     private CategoryDTO convertToDTO(Category entity) {

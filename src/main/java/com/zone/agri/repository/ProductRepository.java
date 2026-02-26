@@ -141,4 +141,6 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
             WHERE p.id IN :ids
             """)
     List<Product> findPublicByIds(@Param("ids") List<Long> ids);
+
+    boolean existsByCategoryId(Long categoryId);
 }
