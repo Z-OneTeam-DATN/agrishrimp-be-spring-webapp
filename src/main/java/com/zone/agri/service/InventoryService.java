@@ -7,8 +7,10 @@ import com.zone.agri.entity.enums.InventoryNoteStatus;
 import com.zone.agri.entity.enums.InventoryNoteType;
 import com.zone.agri.repository.*;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.server.ResponseStatusException;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -37,6 +39,10 @@ public class InventoryService {
         Branch destBranch = branchRepository.findByName(request.getBranchName())
                 .orElseThrow(() -> new RuntimeException("Chi nhánh không tồn tại: " + request.getBranchName()));
 
+        if ("SUPPLIER".equals(request.getImportType()) && !"WAREHOUSE".equalsIgnoreCase(destBranch.getBranchType())) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Lỗi: Chỉ có KHO TỔNG mới được phép nhập hàng trực tiếp từ Nhà cung cấp.");
+        }
+
         InventoryNote noteEntity = new InventoryNote();
         noteEntity.setCode(request.getReceiptCode());
         noteEntity.setType(InventoryNoteType.IMPORT);
@@ -56,7 +62,6 @@ public class InventoryService {
         if (request.getTags() != null && !request.getTags().isEmpty()) {
             noteEntity.setTags(String.join(",", request.getTags()));
         }
-
 
         if ("INTERNAL".equals(request.getImportType())) {
             Branch sourceBranch = branchRepository.findById(request.getSourceBranchId())
@@ -89,6 +94,15 @@ public class InventoryService {
             throw new RuntimeException("Phiếu đã nhập kho thành công, không thể sửa đổi.");
         }
 
+        // Lấy kho nhận mới (có thể người dùng đã chọn lại)
+        Branch destBranch = branchRepository.findByName(request.getBranchName())
+                .orElseThrow(() -> new RuntimeException("Chi nhánh không tồn tại: " + request.getBranchName()));
+
+        if ("SUPPLIER".equals(request.getImportType()) && !"WAREHOUSE".equalsIgnoreCase(destBranch.getBranchType())) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Lỗi: Chỉ có KHO TỔNG mới được phép nhập hàng trực tiếp từ Nhà cung cấp.");
+        }
+
+        existingNote.setBranch(destBranch);
         existingNote.setNote(request.getNote());
         existingNote.setDeliverer(request.getDeliverer());
         existingNote.setPaymentAmount(request.getPaymentAmount() != null ? request.getPaymentAmount() : BigDecimal.ZERO);
@@ -102,7 +116,6 @@ public class InventoryService {
         } else {
             existingNote.setTags(null);
         }
-
 
         if ("INTERNAL".equals(request.getImportType())) {
             Branch sourceBranch = branchRepository.findById(request.getSourceBranchId())
@@ -121,6 +134,8 @@ public class InventoryService {
         }
 
         existingNote.getDetails().clear();
+        noteRepository.flush(); // Xóa sạch dữ liệu detail cũ dưới database để tránh duplicate
+
         processItemsAndStock(existingNote, request.getItems(), request.getImportType());
 
         return mapToResponse(noteRepository.save(existingNote));
@@ -137,11 +152,11 @@ public class InventoryService {
 
             for (InventoryNoteDetail detail : note.getDetails()) {
                 // Đảo ngược: Trừ kho nhận
-                updateStockBalance(note.getBranch(), detail.getProductVariant(), -detail.getQuantity());
+                updateStockBalance(note.getBranch(), detail.getProductVariant(), -detail.getQuantityReal());
 
                 // Đảo ngược: Cộng lại kho xuất (nếu nội bộ)
                 if (isInternal) {
-                    updateStockBalance(note.getPartnerBranch(), detail.getProductVariant(), detail.getQuantity());
+                    updateStockBalance(note.getPartnerBranch(), detail.getProductVariant(), detail.getQuantityReal());
                 }
             }
         }
@@ -207,10 +222,9 @@ public class InventoryService {
 
         int newQuantity = inv.getQuantity() + quantityChange;
 
-        // Bạn có thể mở comment dòng dưới nếu muốn ném lỗi khi kho xuất không đủ hàng
-        // if (newQuantity < 0) {
-        //    throw new RuntimeException("Kho " + branch.getName() + " không đủ số lượng cho sản phẩm " + variant.getSku());
-        // }
+        if (newQuantity < 0) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Kho " + branch.getName() + " không đủ số lượng để xuất nội bộ cho sản phẩm " + variant.getSku());
+        }
 
         inv.setQuantity(newQuantity);
         inv.setLastReceiptDate(LocalDateTime.now());
@@ -228,13 +242,10 @@ public class InventoryService {
         return notes.stream()
                 .filter(note -> note.getType() == InventoryNoteType.IMPORT) // Chỉ lấy phiếu nhập
                 .sorted((n1, n2) -> {
-
                     if (n1.getStatus() != n2.getStatus()) {
                         if (n1.getStatus() == InventoryNoteStatus.PENDING) return -1;
                         if (n2.getStatus() == InventoryNoteStatus.PENDING) return 1;
                     }
-
-
                     LocalDateTime time1 = n1.getCreatedAt() != null ? n1.getCreatedAt() : LocalDateTime.MIN;
                     LocalDateTime time2 = n2.getCreatedAt() != null ? n2.getCreatedAt() : LocalDateTime.MIN;
                     return time2.compareTo(time1);
