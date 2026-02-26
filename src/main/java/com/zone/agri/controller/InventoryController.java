@@ -3,6 +3,7 @@ package com.zone.agri.controller;
 import com.zone.agri.dto.inventory.InventoryReceiptRequest;
 import com.zone.agri.dto.inventory.InventoryReceiptResponse;
 import com.zone.agri.dto.request.inventory.ExportNoteRequest;
+import com.zone.agri.dto.response.InventoryNoteResponse;
 import com.zone.agri.service.InventoryService;
 import com.zone.agri.service.InventoryNoteService;
 
@@ -65,13 +66,13 @@ public class InventoryController {
     // ==============================
 
     @GetMapping("/export-commands")
-//    @com.zone.agri.security.annotation.RequirePermission({"EXPORT_MANAGE", "INVENTORY_VIEW"})
+    @com.zone.agri.security.annotation.RequirePermission({"EXPORT_MANAGE", "INVENTORY_VIEW"})
     public ResponseEntity<?> getAllExportCommands() {
         return ResponseEntity.ok(inventoryNoteService.getAllExportCommands());
     }
 
     @GetMapping("/export-receipts")
-//    @com.zone.agri.security.annotation.RequirePermission({"EXPORT_MANAGE", "INVENTORY_VIEW"})
+    @com.zone.agri.security.annotation.RequirePermission({"EXPORT_MANAGE", "INVENTORY_VIEW"})
     public ResponseEntity<?> getAllExportReceipts() {
         return ResponseEntity.ok(inventoryNoteService.getAllExportReceipts());
     }
@@ -88,5 +89,23 @@ public class InventoryController {
     public ResponseEntity<?> deleteExportCommand(@PathVariable Long id) {
         inventoryNoteService.deleteExportCommand(id);
         return ResponseEntity.ok("Xóa lệnh xuất thành công");
+    }
+    @PostMapping("/export-commands/{id}/complete")
+    @com.zone.agri.security.annotation.RequirePermission("EXPORT_MANAGE")
+    public ResponseEntity<?> completeExportCommand(@PathVariable Long id) {
+        return ResponseEntity.ok(inventoryNoteService.completeExportCommand(id));
+    }
+    @GetMapping("/export-commands/{id}")
+ @com.zone.agri.security.annotation.RequirePermission({"EXPORT_MANAGE", "INVENTORY_VIEW"})
+    public ResponseEntity<InventoryNoteResponse> getExportCommandDetail(@PathVariable Long id) {
+        return ResponseEntity.ok(inventoryNoteService.getExportCommandById(id));
+    }
+
+    @PutMapping("/export-commands/{id}")
+    @com.zone.agri.security.annotation.RequirePermission("EXPORT_MANAGE")
+    public ResponseEntity<?> updateExportCommand(
+            @PathVariable Long id,
+            @RequestBody ExportNoteRequest request) {
+        return ResponseEntity.ok(inventoryNoteService.updateExportCommand(id, request));
     }
 }

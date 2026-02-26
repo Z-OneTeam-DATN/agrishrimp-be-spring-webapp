@@ -28,16 +28,19 @@ public class UserAddressController {
     private final UserRepository userRepository;
 
     // --- HÀM BỔ TRỢ LẤY USER TỪ TOKEN ---
+
     private Long getCurrentUserId() {
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
 
-        // Nếu không có token, chưa đăng nhập, hoặc là tài khoản vô danh (anonymous)
         if (auth == null || !auth.isAuthenticated() || "anonymousUser".equals(auth.getPrincipal())) {
-            throw new RuntimeException("UNAUTHORIZED"); // Bắn tín hiệu để bắt ở try-catch
+            throw new RuntimeException("UNAUTHORIZED");
         }
 
-        String email = auth.getName(); // Spring Security lưu email của user ở đây
-        User user = userRepository.findByEmail(email)
+        String contact = auth.getName();
+
+
+        User user = userRepository.findByEmail(contact)
+                .or(() -> userRepository.findByPhoneNumber(contact))
                 .orElseThrow(() -> new RuntimeException("Tài khoản không tồn tại trong hệ thống"));
 
         return user.getId();

@@ -1,6 +1,8 @@
 package com.zone.agri.controller;
 
 import com.zone.agri.dto.order.*;
+import com.zone.agri.entity.Order;
+import com.zone.agri.entity.enums.OrderStatus;
 import com.zone.agri.exception.SignInRequiredException;
 import com.zone.agri.repository.UserRepository;
 import com.zone.agri.service.OrderService;
@@ -15,10 +17,11 @@ import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.List;
 import java.util.Map;
 
 @RestController
-@RequestMapping("/api/orders")
+@RequestMapping("/api")
 @RequiredArgsConstructor
 @Tag(name = "Order Management", description = "Quản lý Đặt hàng và Đơn hàng")
 @CrossOrigin(origins = "http://localhost:3000")
@@ -40,14 +43,12 @@ public class OrderController {
                 .getId();
     }
 
-    // ── LEGACY ────────────────────────────────────────────────────
-
     @Operation(
             summary = "Đặt hàng (Checkout — legacy)",
             description = "Tạo đơn hàng COD tại 1 chi nhánh có đủ hàng. "
                     + "Đã thay thế bởi /prepare + /confirm."
     )
-    @PostMapping("/checkout")
+    @PostMapping("/orders/checkout")
     public ResponseEntity<?> placeOrder(@RequestBody CheckoutRequest request) {
         Long userId = getCurrentUserId();
         orderService.placeOrder(userId, request);
@@ -79,8 +80,49 @@ public class OrderController {
             @Valid @RequestBody ConfirmOrderRequest request) {
         Long userId = getCurrentUserId();
         ConfirmOrderResponse response = orderService.confirmOrder(userId, request);
-        log.info("Order confirmed for user {}: orderCode={}, checkoutUrl={}", 
+        log.info("Order confirmed for user {}: orderCode={}, checkoutUrl={}",
                 userId, response.getOrderCode(), response.getCheckoutUrl());
         return ResponseEntity.ok(response);
+    }
+
+    @Operation(summary = "Lấy danh sách đơn hàng (Admin)", description = "Lấy toàn bộ danh sách đơn hàng cho trang quản trị")
+    @GetMapping("/admin/all")
+    public ResponseEntity<?> getAllOrders() {
+        try {
+            return ResponseEntity.ok(orderService.getAllAdminOrders());
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body(Map.of("message", "Lỗi lấy danh sách đơn hàng: " + e.getMessage()));
+        }
+    }
+
+    @Operation(summary = "Cập nhật trạng thái đơn hàng", description = "Dành cho Admin duyệt đơn, đóng gói, giao hàng...")
+    @PutMapping("/admin/{id}/status")
+    public ResponseEntity<?> updateOrderStatus(
+            @PathVariable Long id,
+            @RequestParam OrderStatus status) {
+        try {
+            orderService.updateOrderStatus(id, status);
+            return ResponseEntity.ok(Map.of("message", "Cập nhật trạng thái thành công!"));
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body(Map.of("message", e.getMessage()));
+        }
+    }
+
+    @Operation(summary = "Lấy lịch sử đơn hàng của khách", description = "Admin xem nhật ký giao dịch của một khách hàng cụ thể.")
+    @GetMapping("/admin/orders/user/{userId}")
+    public ResponseEntity<?> getCustomerOrderHistory(@PathVariable Long userId) {
+        List<Order> orders = orderService.getOrdersByUserId(userId);
+
+        List<java.util.Map<String, Object>> responseList = orders.stream().map(order -> {
+            java.util.Map<String, Object> map = new java.util.HashMap<>();
+            map.put("id", order.getId());
+            map.put("code", order.getCode());
+            map.put("finalAmount", order.getFinalAmount());
+            map.put("status", order.getStatus());
+            map.put("createdAt", order.getCreatedAt());
+            return map;
+        }).collect(java.util.stream.Collectors.toList());
+
+        return ResponseEntity.ok(responseList);
     }
 }

@@ -53,6 +53,8 @@ public class SecurityConfig {
             "/actuator/info",
             "/api/public/**",
             "/api/webhooks/**",
+            "/api/orders/admin/**",
+
     };
 
     @Bean

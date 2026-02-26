@@ -26,6 +26,8 @@ import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
@@ -38,22 +40,44 @@ public class AuthController {
     private final JwtUtils jwtUtils;
     private final CustomUserDetailsService userDetailsService;
     private final CookieUtils cookieUtils;
-
+    private final com.zone.agri.repository.UserRepository userRepository;
     // ---------------------------------------------------------
     // GET /api/auth/me — Lấy thông tin người dùng hiện tại
     // ---------------------------------------------------------
-    @Operation(summary = "Lấy thông tin cá nhân", description = "Trả về thông tin chi tiết của người dùng đang đăng nhập dựa trên Token.")
+    @Operation(summary = "Lấy thông tin cá nhân", description = "Trả về thông tin chi tiết TƯƠI MỚI NHẤT từ Database.")
     @SecurityRequirement(name = "bearerAuth")
-    @ApiResponses({
-            @ApiResponse(responseCode = "200", description = "Thành công", content = @Content(schema = @Schema(implementation = UserDetail.class))),
-            @ApiResponse(responseCode = "401", description = "Chưa đăng nhập hoặc Token hết hạn"),
-    })
     @GetMapping("/me")
     public ResponseEntity<UserDetail> getCurrentUser() {
-        UserDetail userDetail = AuthUtils.getUserDetail();
-        if (userDetail == null) {
+
+        // 1. Lấy thông tin định danh từ Token
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth == null || !auth.isAuthenticated() || "anonymousUser".equals(auth.getPrincipal())) {
             throw new CustomAuthenticationException("Chưa đăng nhập hoặc phiên làm việc hết hạn");
         }
+
+        String contact = auth.getName();
+
+        // 2. Chọc thẳng vào Database để lấy dữ liệu mới nhất (đầy đủ Giới tính, Ngày sinh)
+        com.zone.agri.entity.User user = userRepository.findByEmail(contact)
+                .or(() -> userRepository.findByPhoneNumber(contact))
+                .orElseThrow(() -> new CustomAuthenticationException("Không tìm thấy người dùng"));
+
+        // 3. Đóng gói dữ liệu trả về cho Frontend
+        UserDetail userDetail = UserDetail.builder()
+                .id(user.getId())
+                .fullName(user.getFullName())
+                .email(user.getEmail())
+                .phoneNumber(user.getPhoneNumber())
+                .contact(contact)
+                .dateOfBirth(user.getDateOfBirth())
+                .gender(user.getGender())
+                .avatarUrl(user.getAvatarUrl())
+                .status(user.getStatus())
+                .role(user.getRole() != null ? new com.zone.agri.dto.user.RoleDto(user.getRole()) : null)
+                .createdAt(user.getCreatedAt())
+                .updatedAt(user.getUpdatedAt())
+                .build();
+
         return ResponseEntity.ok(userDetail);
     }
 

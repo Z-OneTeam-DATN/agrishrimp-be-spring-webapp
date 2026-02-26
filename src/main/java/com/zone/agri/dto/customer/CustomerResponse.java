@@ -6,6 +6,8 @@ import com.zone.agri.entity.enums.UserStatus;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 @Data
@@ -17,6 +19,7 @@ public class CustomerResponse {
     private String fullName;
     private String email;
     private String phone;
+    private String avatarUrl;
     private AuthProvider provider; // Biết được tạo qua LOCAL (Admin tạo giùm) hay GOOGLE (Khách tự đăng nhập)
     private UserStatus userStatus;
     private LocalDateTime createdAt;
@@ -25,4 +28,9 @@ public class CustomerResponse {
     private Long customerId;
     private CustomerStatus customerStatus;
     private String addressDetail;
+
+    private Long totalOrders;
+    private BigDecimal totalSpent;
+    private Double reputationScore; // Điểm uy tín (%)
+
 }
