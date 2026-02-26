@@ -2,6 +2,8 @@ package com.zone.agri.service;
 
 import com.zone.agri.dto.order.CheckoutItemRequest;
 import com.zone.agri.dto.order.CheckoutRequest;
+import com.zone.agri.dto.order.OrderItemResponse;
+import com.zone.agri.dto.order.OrderResponse;
 import com.zone.agri.entity.*;
 import com.zone.agri.entity.enums.OrderStatus;
 import com.zone.agri.entity.enums.PaymentMethod;
@@ -138,5 +140,78 @@ public class OrderService {
             }
         }
         return null; // Không có chi nhánh nào đủ hàng
+    }
+
+    // ==========================================
+    // LẤY DANH SÁCH ĐƠN HÀNG CHO ADMIN
+    // ==========================================
+    public List<OrderResponse> getAllAdminOrders() {
+        return orderRepository.findAll().stream().map(order -> {
+            String custName = order.getUser() != null ? order.getUser().getFullName() : "Khách hàng";
+            String custPhone = order.getUser() != null ? order.getUser().getPhoneNumber() : "";
+
+            // --- ĐOẠN CODE MỚI THÊM: Lấy danh sách sản phẩm ---
+            List<OrderItemResponse> itemResponses = new ArrayList<>();
+            if (order.getOrderItems() != null) {
+                itemResponses = order.getOrderItems().stream().map(item -> {
+                    String pName = "Sản phẩm không xác định";
+                    String pSku = "N/A";
+                    String pImg = null;
+
+                    if (item.getProductVariant() != null) {
+                        pSku = item.getProductVariant().getSku();
+                        // Giả sử Entity Product của bạn có trường image hoặc thumbnail, bạn có thể lấy ra ở đây
+                        if (item.getProductVariant().getProduct() != null) {
+                            pName = item.getProductVariant().getProduct().getName();
+                        }
+                    }
+
+                    BigDecimal itemTotal = item.getPrice() != null ?
+                            item.getPrice().multiply(new BigDecimal(item.getQuantity())) : BigDecimal.ZERO;
+
+                    return OrderItemResponse.builder()
+                            .id(item.getId())
+                            .productName(pName)
+                            .sku(pSku)
+                            .image(pImg)
+                            .quantity(item.getQuantity())
+                            .price(item.getPrice() != null ? item.getPrice() : BigDecimal.ZERO)
+                            .totalPrice(itemTotal)
+                            .build();
+                }).toList();
+            }
+            // ----------------------------------------------------
+
+            return OrderResponse.builder()
+                    .id(order.getId())
+                    .code(order.getCode())
+                    .customerName(custName)
+                    .customerPhone(custPhone)
+                    .finalAmount(order.getFinalAmount() != null ? order.getFinalAmount() : BigDecimal.ZERO)
+                    .paymentMethod(order.getPaymentMethod() != null ? order.getPaymentMethod().name() : "")
+                    .paymentStatus(order.getPaymentStatus() != null ? order.getPaymentStatus().name() : "UNPAID")
+                    .status(order.getStatus() != null ? order.getStatus().name() : "PENDING")
+                    .branchName(order.getBranch() != null ? order.getBranch().getName() : "Chưa phân bổ")
+                    .createdAt(order.getCreatedAt())
+                    .shippingAddress(order.getShippingAddress())
+                    .items(itemResponses) // <-- Nhét list sản phẩm vào đây
+                    .build();
+        }).toList();
+    }
+    // ==========================================
+    // CẬP NHẬT TRẠNG THÁI ĐƠN HÀNG (MODULE 2)
+    // ==========================================
+    @Transactional
+    public void updateOrderStatus(Long orderId, OrderStatus newStatus) {
+        Order order = orderRepository.findById(orderId)
+                .orElseThrow(() -> new RuntimeException("Không tìm thấy đơn hàng ID: " + orderId));
+
+        // Tùy chọn: Thêm các rule chặn logic ở đây (VD: Đơn đã Hủy thì không được Xác nhận)
+        if (order.getStatus() == OrderStatus.CANCELLED || order.getStatus() == OrderStatus.COMPLETED) {
+            throw new RuntimeException("Không thể thay đổi trạng thái của đơn hàng đã đóng!");
+        }
+
+        order.setStatus(newStatus);
+        orderRepository.save(order);
     }
 }
