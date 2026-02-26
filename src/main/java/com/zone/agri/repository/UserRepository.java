@@ -1,5 +1,6 @@
 package com.zone.agri.repository;
 
+import com.zone.agri.dto.customer.CustomerResponse;
 import com.zone.agri.entity.User;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
