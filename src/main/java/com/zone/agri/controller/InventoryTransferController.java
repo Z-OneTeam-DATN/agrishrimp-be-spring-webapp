@@ -68,60 +68,10 @@ public class InventoryTransferController {
     @Operation(summary = "Lấy chi tiết phiếu điều chuyển", description = "Trả về thông tin chi tiết và danh sách sản phẩm của một phiếu.")
     @SecurityRequirement(name = "bearerAuth")
     @GetMapping("/{id}")
-    public ResponseEntity<?> getById(@PathVariable Long id) {
-        try {
-            InventoryTransfer t = transferService.getById(id);
-
-            TransferDetailResponse res = TransferDetailResponse.builder()
-                    .id(t.getId())
-                    .transferCode(t.getTransferCode())
-                    .transferType(t.getTransferType())
-                    .status(t.getStatus())
-                    .description(t.getDescription())
-                    .vehicle(t.getVehicle())
-                    .transporter(t.getTransporter())
-                    .dispatchOrder(t.getDispatchOrder())
-                    .referenceCode(t.getReferenceCode())
-                    .createdAt(t.getCreatedAt())
-                    .fromBranchName(t.getFromBranch() != null ? t.getFromBranch().getName() : "Không xác định")
-                    .toBranchName(t.getToBranch() != null ? t.getToBranch().getName() : "Không xác định")
-                    .totalQuantity(t.getTotalQuantity())
-                    .totalValue(t.getTotalValue())
-                    .items(t.getDetails() == null ? java.util.Collections.emptyList() :
-                            t.getDetails().stream().map(d -> {
-                                // Xử lý an toàn chống NullPointerException
-                                String pName = "Chưa có tên";
-                                String sku = "No-SKU";
-                                String unit = "-";
-                                Long vId = null;
-
-                                if (d.getProductVariant() != null) {
-                                    vId = d.getProductVariant().getId();
-                                    sku = d.getProductVariant().getSku();
-                                    unit = "";
-                                    if (d.getProductVariant().getProduct() != null) {
-                                        pName = d.getProductVariant().getProduct().getName();
-                                    }
-                                }
-
-                                return TransferDetailResponse.ItemDetail.builder()
-                                        .variantId(vId)
-                                        .productName(pName)
-                                        .sku(sku)
-                                        .unit(unit)
-                                        .quantityRequested(d.getQuantityRequested())
-                                        .quantityReal(d.getQuantityReal())
-                                        .note(d.getNote())
-                                        .build();
-                            }).toList())
-                    .build();
-
-            return ResponseEntity.ok(res);
-
-        } catch (Exception e) {
-            e.printStackTrace();
-            return ResponseEntity.status(500).body("Lỗi Backend: " + e.getMessage());
-        }
+    public ResponseEntity<TransferDetailResponse> getById(@PathVariable Long id) {
+        // Vì Service đã lo toàn bộ việc build DTO và bắt lỗi,
+        // Controller chỉ việc gọi hàm và trả về trực tiếp.
+        return ResponseEntity.ok(transferService.getById(id));
     }
 
     @Operation(summary = "Xác nhận Xuất kho", description = "Duyệt phiếu và chuyển trạng thái sang SHIPPING (Đang vận chuyển), đồng thời trừ số lượng tồn kho tại chi nhánh xuất.")
