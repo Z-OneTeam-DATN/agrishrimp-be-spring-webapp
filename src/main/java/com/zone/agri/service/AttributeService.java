@@ -5,6 +5,8 @@ import com.zone.agri.entity.Attribute;
 import com.zone.agri.entity.enums.AttributeStatus;
 import com.zone.agri.entity.enums.AttributeType;
 import com.zone.agri.repository.AttributeRepository;
+import com.zone.agri.repository.SKUAttributeValueRepository;
+import com.zone.agri.exception.ConflictException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -18,7 +20,9 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class AttributeService {
 
+    //  KHAI BÁO CÁC REPOSITORY Ở ĐẦU CLASS
     private final AttributeRepository repository;
+    private final SKUAttributeValueRepository skuAttributeValueRepository;
 
     // Lấy tất cả
     @Transactional(readOnly = true)
@@ -51,9 +55,17 @@ public class AttributeService {
         return toDTO(repository.save(attr));
     }
 
-    // Xóa
+    //  GỘP LẠI THÀNH 1 HÀM XÓA DUY NHẤT VÀ KIỂM TRA RÀNG BUỘC
     @Transactional
     public void delete(Long id) {
+        // 1. Kiểm tra xem Thuộc tính đã được gán cho bất kỳ SKU (Sản phẩm) nào chưa
+        boolean isUsedInProducts = skuAttributeValueRepository.existsByAttributeId(id);
+
+        if (isUsedInProducts) {
+            throw new ConflictException("Không thể xóa thuộc tính này vì đang được sử dụng trong các biến thể sản phẩm. Hãy ngừng kích hoạt nó thay vì xóa.");
+        }
+
+        // 2. Nếu chưa dùng, thì cho phép xóa
         repository.deleteById(id);
     }
 

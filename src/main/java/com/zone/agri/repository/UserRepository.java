@@ -21,10 +21,10 @@ public interface UserRepository extends JpaRepository<User, Long> {
     boolean existsByCitizenId(String citizenId);
 
     @Query("SELECT u FROM User u WHERE " +
-           "(:keyword IS NULL OR LOWER(u.fullName) LIKE LOWER(CONCAT('%', :keyword, '%')) OR u.email LIKE LOWER(CONCAT('%', :keyword, '%')) OR u.phoneNumber LIKE CONCAT('%', :keyword, '%') OR u.citizenId LIKE CONCAT('%', :keyword, '%')) AND " +
-           "(:roleId IS NULL OR u.role.id = :roleId) AND " +
-           "(:branchId IS NULL OR u.branch.id = :branchId) AND " +
-           "(:status IS NULL OR u.status = :status)")
+            "(:keyword IS NULL OR LOWER(u.fullName) LIKE LOWER(CONCAT('%', :keyword, '%')) OR u.email LIKE LOWER(CONCAT('%', :keyword, '%')) OR u.phoneNumber LIKE CONCAT('%', :keyword, '%') OR u.citizenId LIKE CONCAT('%', :keyword, '%')) AND " +
+            "(:roleId IS NULL OR u.role.id = :roleId) AND " +
+            "(:branchId IS NULL OR u.branch.id = :branchId) AND " +
+            "(:status IS NULL OR u.status = :status)")
     Page<User> findAllWithFilter(
             @Param("keyword") String keyword,
             @Param("roleId") Long roleId,
@@ -43,10 +43,8 @@ public interface UserRepository extends JpaRepository<User, Long> {
             "OR LOWER(u.email) LIKE LOWER(CONCAT('%', :keyword, '%')) " +
             "OR u.phoneNumber LIKE CONCAT('%', :keyword, '%')) " +
             "ORDER BY u.createdAt DESC")
-
-    Page<CustomerResponse> findAllCustomers(@Param("keyword") String keyword, Pageable pageable);
-
-
-    Page<User> findAllCustomers(@Param("keyword") String keyword, @Param("status") String status, Pageable pageable);
+    Page<User> findAllCustomers(
+            @Param("keyword") String keyword,
+            @Param("status") String status,
+            Pageable pageable);
 }
-
