@@ -155,13 +155,11 @@ public class ProductService {
 
         Product updatedProduct = productRepository.save(product);
 
-        // Clear existing related data (Simple destructive update for now)
+        // 1. Xóa các ràng buộc thuộc tính và quy đổi đơn vị (Thằng này không vướng ảnh)
         productRepository.deleteVariantAttributesByProduct(updatedProduct);
         productRepository.deleteUnitConversionsByProduct(updatedProduct);
-        productRepository.deleteVariantsByProduct(updatedProduct);
         productRepository.deleteImagesByProduct(updatedProduct);
-
-        // Re-save images from URLs in request
+        productRepository.deleteVariantsByProduct(updatedProduct);
         if (request.getImages() != null) {
             request.getImages().forEach(url -> imageRepository.save(ProductImage.builder()
                     .imageUrl(url)
@@ -169,7 +167,6 @@ public class ProductService {
                     .build()));
         }
 
-        // Re-save variants
         for (ProductRequest.VariantDto vDto : request.getVariants()) {
             ProductVariant variant = ProductVariant.builder()
                     .product(updatedProduct)
