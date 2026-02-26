@@ -85,7 +85,7 @@ public class InventoryNote {
     @EqualsAndHashCode.Exclude
     User createdBy;
 
-    @OneToMany(mappedBy = "inventoryNote", fetch = FetchType.LAZY, cascade = CascadeType.ALL)
+    @OneToMany(mappedBy = "inventoryNote", fetch = FetchType.LAZY, cascade = CascadeType.ALL, orphanRemoval = true)
     @ToString.Exclude
     List<InventoryNoteDetail> details;
 }

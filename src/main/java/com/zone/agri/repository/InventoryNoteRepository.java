@@ -2,6 +2,7 @@ package com.zone.agri.repository;
 
 import com.zone.agri.entity.InventoryNote;
 import com.zone.agri.entity.enums.InventoryNoteStatus;
+import com.zone.agri.entity.enums.InventoryNoteType;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -13,7 +14,36 @@ import java.util.List;
 
 @Repository
 public interface InventoryNoteRepository extends JpaRepository<InventoryNote, Long> {
+    @Query("""
+        SELECT DISTINCT inote 
+        FROM InventoryNote inote 
+        LEFT JOIN FETCH inote.branch 
+        LEFT JOIN FETCH inote.partnerBranch 
+        LEFT JOIN FETCH inote.supplier 
+        LEFT JOIN FETCH inote.createdBy
+        WHERE inote.type = :type AND inote.status = :status
+        ORDER BY inote.createdAt DESC
+    """)
+    List<InventoryNote> findAllByTypeAndStatusWithPartners(
+            @Param("type") InventoryNoteType type,
+            @Param("status") InventoryNoteStatus status
+    );
 
+    @Query("""
+        SELECT DISTINCT inote 
+        FROM InventoryNote inote 
+        LEFT JOIN FETCH inote.branch 
+        LEFT JOIN FETCH inote.partnerBranch 
+        LEFT JOIN FETCH inote.supplier 
+        LEFT JOIN FETCH inote.createdBy
+        WHERE inote.type = :type AND inote.status = :status AND inote.branch.id = :branchId
+        ORDER BY inote.createdAt DESC
+    """)
+    List<InventoryNote> findAllByTypeAndStatusAndBranchWithPartners(
+            @Param("type") InventoryNoteType type,
+            @Param("status") InventoryNoteStatus status,
+            @Param("branchId") Long branchId
+    );
     // Kiểm tra có phiếu nào thuộc các trạng thái chỉ định không
     boolean existsByStatusIn(Collection<InventoryNoteStatus> statuses);
 
