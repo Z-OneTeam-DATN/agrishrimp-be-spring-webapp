@@ -5,7 +5,6 @@ import com.zone.agri.dto.user.UserResponse;
 import com.zone.agri.entity.Branch;
 import com.zone.agri.entity.Role;
 import com.zone.agri.entity.User;
-import com.zone.agri.entity.enums.AuthProvider;
 import com.zone.agri.entity.enums.Gender;
 import com.zone.agri.entity.enums.UserStatus;
 import com.zone.agri.exception.ConflictException;
@@ -63,7 +62,7 @@ public class UserService {
 
         Role role = roleRepository.findById(request.getRoleId())
                 .orElseThrow(() -> new NotFoundException("Không tìm thấy vai trò"));
-        
+
         Branch branch = branchRepository.findById(request.getBranchId())
                 .orElseThrow(() -> new NotFoundException("Không tìm thấy chi nhánh"));
 
@@ -100,7 +99,7 @@ public class UserService {
 
         Role role = roleRepository.findById(request.getRoleId())
                 .orElseThrow(() -> new NotFoundException("Không tìm thấy vai trò"));
-        
+
         Branch branch = branchRepository.findById(request.getBranchId())
                 .orElseThrow(() -> new NotFoundException("Không tìm thấy chi nhánh"));
 
@@ -111,7 +110,7 @@ public class UserService {
         user.setDateOfBirth(request.getDateOfBirth());
         user.setRole(role);
         user.setBranch(branch);
-        
+
         if (request.getStatus() != null) {
             user.setStatus(com.zone.agri.entity.enums.UserStatus.valueOf(request.getStatus().toUpperCase()));
         }
@@ -147,5 +146,25 @@ public class UserService {
                 .branchId(user.getBranch() != null ? user.getBranch().getId() : null)
                 .createdAt(user.getCreatedAt())
                 .build();
+    }
+
+    // ==============================================================
+    // HÀM MỚI: DÀNH CHO USER TỰ CẬP NHẬT PROFILE CỦA CHÍNH MÌNH
+    // ==============================================================
+    @Transactional
+    public void updateMyProfile(String contact, com.zone.agri.dto.user.ProfileUpdateRequest request) {
+        User user = userRepository.findByEmail(contact)
+                .or(() -> userRepository.findByPhoneNumber(contact))
+                .orElseThrow(() -> new RuntimeException("Không tìm thấy user"));
+
+        user.setFullName(request.getFullName());
+        user.setPhoneNumber(request.getPhoneNumber());
+        user.setDateOfBirth(request.getDateOfBirth());
+
+        if (request.getGender() != null) {
+            user.setGender(Gender.valueOf(request.getGender().toUpperCase()));
+        }
+
+        userRepository.save(user);
     }
 }

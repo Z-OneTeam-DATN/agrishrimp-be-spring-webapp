@@ -7,6 +7,7 @@ import lombok.*;
 import lombok.experimental.FieldDefaults;
 import lombok.experimental.SuperBuilder;
 
+import java.time.Instant;
 import java.util.List;
 
 @Entity
@@ -54,6 +55,23 @@ public class Branch extends BaseEntity {
     @Column(length = 20)
     BranchStatus status;
 
+    // --- Geo fields (dùng cho tìm chi nhánh gần nhất & GHN shipping) ---
+
+    /** Vĩ độ — lấy từ Geocoding API sau khi tạo/sửa branch */
+    @Column(name = "lat")
+    Double lat;
+
+    /** Kinh độ */
+    @Column(name = "lng")
+    Double lng;
+
+    /** Mã phường/xã theo hệ thống GHN (string, khác wardId Integer) */
+    @Column(name = "ward_code", length = 20)
+    String wardCode;
+
+    /** Timestamp lần geocode gần nhất */
+    @Column(name = "geocoded_at")
+    Instant geocodedAt;
 
 //  KHÓA NGOẠI
     @OneToMany(mappedBy = "branch", fetch = FetchType.LAZY)

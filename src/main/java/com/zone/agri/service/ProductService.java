@@ -2,6 +2,7 @@ package com.zone.agri.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zone.agri.common.CloudinaryService;
+import com.zone.agri.dto.admin.CategoryDTO;
 import com.zone.agri.dto.product.*;
 import com.zone.agri.entity.*;
 import com.zone.agri.entity.enums.*;
@@ -297,6 +298,28 @@ public class ProductService {
                         .collect(Collectors.toList()) :
                 Collections.emptyList();
 
+        // TÍNH TỔNG TỒN KHO
+        int totalInventory = variantResponses.stream()
+                .mapToInt(v -> v.getQuantity() != null ? v.getQuantity() : 0)
+                .sum();
+
+        CategoryDTO categoryDTO = null;
+        if (product.getCategory() != null) {
+            categoryDTO = new CategoryDTO();
+            categoryDTO.setId(product.getCategory().getId());
+            categoryDTO.setName(product.getCategory().getName());
+            categoryDTO.setStatus(product.getCategory().getStatus());
+            // Add other fields if necessary
+        }
+
+        BrandResponse brandResponse = null;
+        if (product.getBrand() != null) {
+            brandResponse = BrandResponse.builder()
+                    .id(product.getBrand().getId())
+                    .name(product.getBrand().getName())
+                    .build();
+        }
+
         return ProductResponse.builder()
                 .id(product.getId())
                 .name(product.getName())
@@ -304,8 +327,12 @@ public class ProductService {
                 .description(product.getDescription())
                 .status(product.getStatus() != null ? product.getStatus().name() : null)
                 .origin(product.getOrigin())
+                .baseSku(product.getBaseSku())
                 .categoryName(product.getCategory() != null ? product.getCategory().getName() : null)
                 .brandName(product.getBrand() != null ? product.getBrand().getName() : null)
+                .category(categoryDTO)
+                .brand(brandResponse)
+                .inventory(totalInventory)
                 .imageUrls(imageUrls)
                 .variants(variantResponses)
                 .build();
@@ -366,6 +393,7 @@ public class ProductService {
                 .id(variant.getId())
                 .sku(variant.getSku())
                 .barcode(variant.getBarcode())
+                .productName(variant.getProduct() != null ? variant.getProduct().getName() : null)
                 .costPrice(displayCostPrice) // ✅ Đã áp dụng phân quyền giá vốn
                 .price(variant.getPrice())
                 .wholesalePrice(variant.getWholesalePrice())

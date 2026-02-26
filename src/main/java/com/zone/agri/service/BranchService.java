@@ -2,6 +2,7 @@ package com.zone.agri.service;
 
 import com.zone.agri.dto.admin.BranchDTO;
 import com.zone.agri.dto.branch.CheckStockItemRequest;
+import com.zone.agri.dto.geo.CoordinateDto;
 import com.zone.agri.entity.Branch;
 import com.zone.agri.entity.Inventory;
 import com.zone.agri.entity.User;
@@ -10,8 +11,11 @@ import com.zone.agri.repository.BranchRepository;
 import com.zone.agri.repository.InventoryRepository;
 import com.zone.agri.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+
+import java.time.Instant;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -21,11 +25,13 @@ import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class BranchService {
 
     private final BranchRepository branchRepository;
     private final UserRepository userRepository;
     private final InventoryRepository inventoryRepository;
+    private final GeocodingService geocodingService;
 
     public List<BranchDTO> getAll() {
         return branchRepository.findAll().stream()
@@ -64,6 +70,9 @@ public class BranchService {
                 .status(dto.getStatus())
                 .build();
 
+        // Geocode địa chỉ → lat/lng (chỉ gọi trong admin flow)
+        geocodeBranchSilently(branch);
+
         Branch savedBranch = branchRepository.save(branch);
 
         // Cập nhật chi nhánh cho các user được chọn làm quản lý
@@ -83,6 +92,9 @@ public class BranchService {
             throw new RuntimeException("Lỗi: Mã chi nhánh mới bị trùng!");
         }
 
+        // Lưu địa chỉ cũ để so sánh trước khi set
+        String oldAddress = branch.getAddressDetail();
+
         branch.setName(dto.getName());
         branch.setBranchCode(dto.getBranchCode());
         branch.setBranchType(dto.getBranchType());
@@ -93,6 +105,11 @@ public class BranchService {
         branch.setDistrictId(dto.getDistrictId());
         branch.setWardId(dto.getWardId());
         branch.setStatus(dto.getStatus());
+
+        // Re-geocode nếu địa chỉ thay đổi
+        if (!dto.getAddressDetail().equals(oldAddress)) {
+            geocodeBranchSilently(branch);
+        }
 
         // Xử lý cập nhật danh sách quản lý
         updateBranchManagers(branch, dto.getManagerIds());
@@ -194,6 +211,23 @@ public class BranchService {
         }
 
         return eligibleBranches;
+    }
+
+    /**
+     * Geocode địa chỉ chi nhánh → lat/lng.
+     * Silent: lỗi geocoding không dừng việc lưu branch.
+     */
+    private void geocodeBranchSilently(Branch branch) {
+        try {
+            if (branch.getAddressDetail() != null && !branch.getAddressDetail().isBlank()) {
+                CoordinateDto coord = geocodingService.geocode(branch.getAddressDetail());
+                branch.setLat(coord.getLat());
+                branch.setLng(coord.getLng());
+                branch.setGeocodedAt(Instant.now());
+            }
+        } catch (Exception e) {
+            log.warn("Geocoding failed for branch '{}', sẽ không có tọa độ: {}", branch.getName(), e.getMessage());
+        }
     }
 
     private BranchDTO mapToDTO(Branch entity) {
