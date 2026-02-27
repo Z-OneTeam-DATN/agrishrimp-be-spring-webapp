@@ -14,7 +14,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.client.RestTemplate;
 import vn.payos.PayOS;
-import vn.payos.type.CheckoutResponseData;
 import vn.payos.type.Webhook;
 import vn.payos.type.WebhookData;
 
@@ -62,17 +61,16 @@ public class PayOSService {
 
     /**
      * Tạo PayOS payment link bằng cách gọi REST API trực tiếp.
-     * Không dùng payOS.createPaymentLink() để tránh bug signature verification trong SDK 1.0.3+.
+     * Trả về PayOSLinkData chứa URL thanh toán.
      */
-    public CheckoutResponseData createPaymentLink(Order order) throws Exception {
+    public PayOSApiResponse.PayOSLinkData createPaymentLink(Order order) throws Exception {
         int amount = order.getFinalAmount().intValue();
         String description = truncate(order.getCode(), 25); // PayOS giới hạn 25 ký tự
         long orderCode = parseOrderCode(order);
 
         log.info("Creating PayOS payment link for order {}: orderCode={}, amount={}", order.getCode(), orderCode, amount);
 
-        // Tính chữ ký theo chuẩn PayOS:
-        // sorted alphabetically: amount, cancelUrl, description, orderCode, returnUrl
+        // Tính chữ ký theo chuẩn PayOS
         String dataToSign = "amount=" + amount
                 + "&cancelUrl=" + cancelUrl
                 + "&description=" + description
@@ -108,39 +106,40 @@ public class PayOSService {
 
         PayOSApiResponse apiResponse = resp.getBody();
         if (apiResponse == null || !"00".equals(apiResponse.getCode()) || apiResponse.getData() == null) {
-            String errMsg = apiResponse != null
-                    ? "code=" + apiResponse.getCode() + " desc=" + apiResponse.getDesc()
-                    : "null response";
-            log.error("PayOS API error for order {}: {}", order.getCode(), errMsg);
+            String errMsg = apiResponse != null ? apiResponse.getDesc() : "null response";
+            log.error("PayOS API error: {}", errMsg);
             throw new RuntimeException("PayOS API error: " + errMsg);
         }
 
-        PayOSApiResponse.PayOSLinkData data = apiResponse.getData();
-        if (data.getCheckoutUrl() == null) {
-            throw new RuntimeException("PayOS returned null checkoutUrl");
-        }
-
-        log.info("PayOS link created for order {}: {}", order.getCode(), data.getCheckoutUrl());
-
-        // Map sang CheckoutResponseData để tương thích với OrderService
-        return CheckoutResponseData.builder()
-                .paymentLinkId(data.getPaymentLinkId())
-                .checkoutUrl(data.getCheckoutUrl())
-                .bin(data.getBin())
-                .accountNumber(data.getAccountNumber())
-                .accountName(data.getAccountName())
-                .amount(data.getAmount())
-                .description(data.getDescription())
-                .orderCode(data.getOrderCode())
-                .currency(data.getCurrency())
-                .status(data.getStatus())
-                .qrCode(data.getQrCode())
-                .build();
+        return apiResponse.getData();
     }
 
-    // ──────────────────────────────────────────────────────────────
-    // Xử lý webhook — vẫn dùng SDK để verify signature
-    // ──────────────────────────────────────────────────────────────
+    /**
+     * Chủ động kiểm tra trạng thái thanh toán từ PayOS (dùng khi Webhook chưa tới).
+     */
+    public boolean checkPaymentStatus(Order order) {
+        try {
+            long orderCode = parseOrderCode(order);
+            String url = PAYOS_URL + "/" + orderCode;
+
+            HttpHeaders headers = new HttpHeaders();
+            headers.set("x-client-id", clientId);
+            headers.set("x-api-key", apiKey);
+
+            ResponseEntity<PayOSApiResponse> resp = restTemplate.exchange(
+                    url, HttpMethod.GET, new HttpEntity<>(headers), PayOSApiResponse.class
+            );
+
+            PayOSApiResponse apiResponse = resp.getBody();
+            if (apiResponse != null && "00".equals(apiResponse.getCode()) && apiResponse.getData() != null) {
+                String status = apiResponse.getData().getStatus();
+                return "PAID".equalsIgnoreCase(status);
+            }
+        } catch (Exception e) {
+            log.warn("Failed to check PayOS status for order {}: {}", order.getCode(), e.getMessage());
+        }
+        return false;
+    }
 
     @Transactional
     public void handleWebhook(ObjectNode webhookBody) {
@@ -148,47 +147,36 @@ public class PayOSService {
             Webhook webhookEnvelope = objectMapper.treeToValue(webhookBody, Webhook.class);
             WebhookData webhookData = payOS.verifyPaymentWebhookData(webhookEnvelope);
 
-            if (!"00".equals(webhookData.getCode())) {
-                log.info("payOS webhook: non-success transaction code={}", webhookData.getCode());
-                return;
-            }
+            if (!"00".equals(webhookData.getCode())) return;
 
             Long payosOrderCode = webhookData.getOrderCode();
             Optional<Order> orderOpt = orderRepository.findById(payosOrderCode);
             if (orderOpt.isEmpty()) {
                 orderOpt = orderRepository.findByCode("ORD" + payosOrderCode);
             }
-
             if (orderOpt.isEmpty()) {
-                log.warn("payOS webhook: order not found for orderCode={}", payosOrderCode);
-                return;
+                String partialCode = String.valueOf(payosOrderCode);
+                orderOpt = orderRepository.findAll().stream().filter(o -> o.getCode().contains(partialCode)).findFirst();
             }
 
-            Order order = orderOpt.get();
-            if (PaymentStatus.PAID.equals(order.getPaymentStatus())) {
-                log.info("payOS webhook: order {} already PAID, skipping", payosOrderCode);
-                return;
+            if (orderOpt.isPresent()) {
+                Order order = orderOpt.get();
+                if (!PaymentStatus.PAID.equals(order.getPaymentStatus())) {
+                    order.setPaymentStatus(PaymentStatus.PAID);
+                    orderRepository.save(order);
+                    log.info("Order {} marked as PAID via Webhook", order.getCode());
+                }
             }
-
-            order.setPaymentStatus(PaymentStatus.PAID);
-            orderRepository.save(order);
-            log.info("payOS webhook: order {} marked as PAID", payosOrderCode);
-
         } catch (Exception e) {
-            log.error("payOS webhook processing failed: {}", e.getMessage(), e);
-            throw new RuntimeException("Webhook verification failed: " + e.getMessage(), e);
+            log.error("payOS webhook failed: {}", e.getMessage());
+            throw new RuntimeException(e);
         }
     }
-
-    // ──────────────────────────────────────────────────────────────
-    // Helpers
-    // ──────────────────────────────────────────────────────────────
 
     private long parseOrderCode(Order order) {
         try {
             return Long.parseLong(order.getCode().replaceAll("[^0-9]", ""));
-        } catch (NumberFormatException e) {
-            log.warn("Cannot parse numeric orderCode from {}, using order.id", order.getCode());
+        } catch (Exception e) {
             return order.getId();
         }
     }
@@ -198,9 +186,7 @@ public class PayOSService {
         mac.init(new SecretKeySpec(key.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
         byte[] hash = mac.doFinal(data.getBytes(StandardCharsets.UTF_8));
         StringBuilder sb = new StringBuilder(hash.length * 2);
-        for (byte b : hash) {
-            sb.append(String.format("%02x", b));
-        }
+        for (byte b : hash) sb.append(String.format("%02x", b));
         return sb.toString();
     }
 

@@ -36,4 +36,10 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
 
     // Thêm hàm này để lấy lịch sử đơn hàng của 1 khách hàng cụ thể
     List<Order> findByUserIdOrderByCreatedAtDesc(Long userId);
+
+    List<Order> findByUserIdAndStatusOrderByCreatedAtDesc(Long userId, OrderStatus status);
+
+    List<Order> findByStatusOrderByCreatedAtDesc(OrderStatus status);
+
+    List<Order> findAllByOrderByCreatedAtDesc();
 }

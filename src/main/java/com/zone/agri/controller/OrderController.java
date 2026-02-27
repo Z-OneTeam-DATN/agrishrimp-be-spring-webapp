@@ -2,7 +2,9 @@ package com.zone.agri.controller;
 
 import com.zone.agri.dto.order.*;
 import com.zone.agri.entity.Order;
+import com.zone.agri.entity.User;
 import com.zone.agri.entity.enums.OrderStatus;
+import com.zone.agri.exception.BadRequestException;
 import com.zone.agri.exception.SignInRequiredException;
 import com.zone.agri.repository.UserRepository;
 import com.zone.agri.service.OrderService;
@@ -33,14 +35,30 @@ public class OrderController {
     private final UserRepository userRepository;
 
     private Long getCurrentUserId() {
+        return getCurrentUser().getId();
+    }
+
+    private User getCurrentUser() {
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
         if (auth == null || !auth.isAuthenticated() || "anonymousUser".equals(auth.getPrincipal())) {
             throw new SignInRequiredException("Vui lòng đăng nhập để tiếp tục");
         }
-        String email = auth.getName();
-        return userRepository.findByEmail(email)
-                .orElseThrow(() -> new SignInRequiredException("Tài khoản không tồn tại"))
-                .getId();
+        return userRepository.findByEmail(auth.getName())
+                .orElseThrow(() -> new SignInRequiredException("Tài khoản không tồn tại"));
+    }
+
+    @Operation(summary = "Lấy danh sách đơn hàng của tôi", description = "Người dùng xem lịch sử đơn hàng, có thể lọc theo trạng thái (PENDING, CONFIRMED...)")
+    @GetMapping("/v1/orders/my-orders")
+    public ResponseEntity<?> getMyOrders(@RequestParam(required = false) OrderStatus status) {
+        Long userId = getCurrentUserId();
+        return ResponseEntity.ok(orderService.getMyOrders(userId, status));
+    }
+
+    @Operation(summary = "Lấy chi tiết đơn hàng của tôi", description = "Người dùng xem chi tiết thông tin và sản phẩm của một đơn hàng cụ thể")
+    @GetMapping({"/v1/orders/{id}", "/orders/{id}"})
+    public ResponseEntity<OrderResponse> getMyOrderDetail(@PathVariable Long id) {
+        Long userId = getCurrentUserId();
+        return ResponseEntity.ok(orderService.getMyOrderDetail(userId, id));
     }
 
     @Operation(
@@ -85,27 +103,27 @@ public class OrderController {
         return ResponseEntity.ok(response);
     }
 
-    @Operation(summary = "Lấy danh sách đơn hàng (Admin)", description = "Lấy toàn bộ danh sách đơn hàng cho trang quản trị")
+    @Operation(summary = "Lấy danh sách đơn hàng (Admin)", description = "Lấy toàn bộ đơn hàng, có thể lọc theo trạng thái và tìm kiếm mã đơn.")
     @GetMapping("/admin/all")
-    public ResponseEntity<?> getAllOrders() {
-        try {
-            return ResponseEntity.ok(orderService.getAllAdminOrders());
-        } catch (Exception e) {
-            return ResponseEntity.badRequest().body(Map.of("message", "Lỗi lấy danh sách đơn hàng: " + e.getMessage()));
-        }
+    public ResponseEntity<?> getAllOrders(
+            @RequestParam(required = false) OrderStatus status,
+            @RequestParam(required = false) String search) {
+        return ResponseEntity.ok(orderService.getAdminOrders(status, search));
     }
 
-    @Operation(summary = "Cập nhật trạng thái đơn hàng", description = "Dành cho Admin duyệt đơn, đóng gói, giao hàng...")
+    @Operation(summary = "Lấy chi tiết đơn hàng (Admin)", description = "Admin xem chi tiết toàn bộ thông tin đơn hàng")
+    @GetMapping("/admin/{id}")
+    public ResponseEntity<OrderResponse> getAdminOrderDetail(@PathVariable Long id) {
+        return ResponseEntity.ok(orderService.getAdminOrderDetail(id));
+    }
+
+    @Operation(summary = "Cập nhật trạng thái đơn hàng (Admin)", description = "Admin duyệt đơn, đóng gói, giao hàng theo quy trình.")
     @PutMapping("/admin/{id}/status")
     public ResponseEntity<?> updateOrderStatus(
             @PathVariable Long id,
             @RequestParam OrderStatus status) {
-        try {
-            orderService.updateOrderStatus(id, status);
-            return ResponseEntity.ok(Map.of("message", "Cập nhật trạng thái thành công!"));
-        } catch (Exception e) {
-            return ResponseEntity.badRequest().body(Map.of("message", e.getMessage()));
-        }
+        orderService.updateOrderStatus(id, status);
+        return ResponseEntity.ok(Map.of("message", "Cập nhật trạng thái '" + status + "' thành công!"));
     }
 
     @Operation(summary = "Lấy lịch sử đơn hàng của khách", description = "Admin xem nhật ký giao dịch của một khách hàng cụ thể.")
@@ -124,5 +142,56 @@ public class OrderController {
         }).collect(java.util.stream.Collectors.toList());
 
         return ResponseEntity.ok(responseList);
+    }
+
+    // ── QUẢN LÝ ĐƠN HÀNG THEO CHI NHÁNH (Branch / Kho) ────────────
+
+    @Operation(
+            summary = "Danh sách đơn hàng của chi nhánh",
+            description = "Nhân viên/quản lý chi nhánh xem danh sách phần đơn được phân bổ về chi nhánh mình. "
+                    + "Có thể lọc theo trạng thái (status) và tìm kiếm theo mã đơn hoặc tên khách (search). "
+                    + "Tài khoản phải được gán vào một chi nhánh (branch_id)."
+    )
+    @GetMapping("/branch/orders")
+    public ResponseEntity<List<BranchOrderResponse>> getBranchOrders(
+            @RequestParam(required = false) OrderStatus status,
+            @RequestParam(required = false) String search) {
+        User user = getCurrentUser();
+        if (user.getBranch() == null) {
+            throw new BadRequestException("Tài khoản chưa được gán vào chi nhánh nào");
+        }
+        return ResponseEntity.ok(orderService.getBranchOrders(user.getBranch().getId(), status, search));
+    }
+
+    @Operation(
+            summary = "Chi tiết đơn hàng của chi nhánh",
+            description = "Xem chi tiết phần đơn (SubOrder) thuộc chi nhánh của người dùng đang đăng nhập, "
+                    + "bao gồm danh sách sản phẩm cần đóng gói và thông tin vận chuyển."
+    )
+    @GetMapping("/branch/orders/{orderId}")
+    public ResponseEntity<BranchOrderResponse> getBranchOrderDetail(@PathVariable Long orderId) {
+        User user = getCurrentUser();
+        if (user.getBranch() == null) {
+            throw new BadRequestException("Tài khoản chưa được gán vào chi nhánh nào");
+        }
+        return ResponseEntity.ok(orderService.getBranchOrderDetail(user.getBranch().getId(), orderId));
+    }
+
+    @Operation(
+            summary = "Cập nhật trạng thái phần đơn của chi nhánh",
+            description = "Chi nhánh tự quản lý trạng thái phần đơn của mình theo quy trình: "
+                    + "PENDING → CONFIRMED → PROCESSING → SHIPPING → COMPLETED. "
+                    + "Trạng thái tổng của đơn hàng sẽ được tự động đồng bộ theo chi nhánh chậm nhất."
+    )
+    @PutMapping("/branch/orders/{orderId}/status")
+    public ResponseEntity<?> updateBranchSubOrderStatus(
+            @PathVariable Long orderId,
+            @RequestParam OrderStatus status) {
+        User user = getCurrentUser();
+        if (user.getBranch() == null) {
+            throw new BadRequestException("Tài khoản chưa được gán vào chi nhánh nào");
+        }
+        orderService.updateSubOrderStatus(user.getBranch().getId(), orderId, status);
+        return ResponseEntity.ok(Map.of("message", "Cập nhật trạng thái '" + status + "' thành công!"));
     }
 }

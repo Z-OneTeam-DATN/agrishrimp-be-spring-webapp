@@ -212,23 +212,4 @@ public class UserService {
                 .build();
     }
 
-    // ==============================================================
-    // HÀM MỚI: DÀNH CHO USER TỰ CẬP NHẬT PROFILE CỦA CHÍNH MÌNH
-    // ==============================================================
-    @Transactional
-    public void updateMyProfile(String contact, com.zone.agri.dto.user.ProfileUpdateRequest request) {
-        User user = userRepository.findByEmail(contact)
-                .or(() -> userRepository.findByPhoneNumber(contact))
-                .orElseThrow(() -> new RuntimeException("Không tìm thấy user"));
-
-        user.setFullName(request.getFullName());
-        user.setPhoneNumber(request.getPhoneNumber());
-        user.setDateOfBirth(request.getDateOfBirth());
-
-        if (request.getGender() != null) {
-            user.setGender(Gender.valueOf(request.getGender().toUpperCase()));
-        }
-
-        userRepository.save(user);
-    }
 }

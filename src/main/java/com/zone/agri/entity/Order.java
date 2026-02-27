@@ -48,7 +48,7 @@ public class Order {
     PaymentStatus paymentStatus;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "status", columnDefinition = "ENUM('PENDING', 'CONFIRMED', 'SHIPPING', 'COMPLETED', 'CANCELLED', 'RETURNED')")
+    @Column(name = "status", columnDefinition = "ENUM('PENDING', 'CONFIRMED', 'PROCESSING', 'SHIPPING', 'COMPLETED', 'CANCELLED', 'RETURNED')")
     OrderStatus status;
 
     @Column(name = "created_at")
