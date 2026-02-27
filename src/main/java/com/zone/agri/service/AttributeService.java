@@ -2,8 +2,8 @@ package com.zone.agri.service;
 
 import com.zone.agri.dto.admin.AttributeDTO;
 import com.zone.agri.entity.Attribute;
+import com.zone.agri.entity.AttributeValue;
 import com.zone.agri.entity.enums.AttributeStatus;
-import com.zone.agri.entity.enums.AttributeType;
 import com.zone.agri.repository.AttributeRepository;
 import com.zone.agri.repository.SKUAttributeValueRepository;
 import com.zone.agri.exception.ConflictException;
@@ -11,26 +11,24 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.util.Arrays;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
 public class AttributeService {
 
-    //  KHAI BÁO CÁC REPOSITORY Ở ĐẦU CLASS
     private final AttributeRepository repository;
     private final SKUAttributeValueRepository skuAttributeValueRepository;
 
-    // Lấy tất cả
     @Transactional(readOnly = true)
     public List<AttributeDTO> getAll() {
         return repository.findAll().stream().map(this::toDTO).collect(Collectors.toList());
     }
 
-    // Lấy chi tiết
     @Transactional(readOnly = true)
     public AttributeDTO getById(Long id) {
         Attribute attr = repository.findById(id)
@@ -38,34 +36,40 @@ public class AttributeService {
         return toDTO(attr);
     }
 
-    // Tạo mới
     @Transactional
     public AttributeDTO create(AttributeDTO dto) {
+        // KIỂM TRA TRÙNG MÃ CODE
+        Optional<Attribute> existing = repository.findByCodeIgnoreCase(dto.getCode());
+        if (existing.isPresent()) {
+            throw new ConflictException("Mã Code '" + dto.getCode() + "' đã tồn tại! Vui lòng sử dụng mã khác.");
+        }
+
         Attribute attr = new Attribute();
         mapToEntity(attr, dto);
         return toDTO(repository.save(attr));
     }
 
-    // Cập nhật
     @Transactional
     public AttributeDTO update(Long id, AttributeDTO dto) {
         Attribute attr = repository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Không tìm thấy thuộc tính!"));
+
+        // KIỂM TRA TRÙNG MÃ CODE NHƯNG BỎ QUA CHÍNH NÓ
+        Optional<Attribute> existing = repository.findByCodeIgnoreCase(dto.getCode());
+        if (existing.isPresent() && !existing.get().getId().equals(id)) {
+            throw new ConflictException("Mã Code '" + dto.getCode() + "' đã được sử dụng cho một thuộc tính khác!");
+        }
+
         mapToEntity(attr, dto);
         return toDTO(repository.save(attr));
     }
 
-    //  GỘP LẠI THÀNH 1 HÀM XÓA DUY NHẤT VÀ KIỂM TRA RÀNG BUỘC
     @Transactional
     public void delete(Long id) {
-        // 1. Kiểm tra xem Thuộc tính đã được gán cho bất kỳ SKU (Sản phẩm) nào chưa
         boolean isUsedInProducts = skuAttributeValueRepository.existsByAttributeId(id);
-
         if (isUsedInProducts) {
-            throw new ConflictException("Không thể xóa thuộc tính này vì đang được sử dụng trong các biến thể sản phẩm. Hãy ngừng kích hoạt nó thay vì xóa.");
+            throw new ConflictException("Không thể xóa thuộc tính này vì nó đang được gắn cho các biến thể sản phẩm. Vui lòng chuyển trạng thái sang 'Tạm ngừng' thay vì xóa.");
         }
-
-        // 2. Nếu chưa dùng, thì cho phép xóa
         repository.deleteById(id);
     }
 
@@ -78,43 +82,42 @@ public class AttributeService {
         dto.setId(entity.getId());
         dto.setName(entity.getName());
         dto.setCode(entity.getCode());
-        dto.setType(entity.getType() != null ? entity.getType().name() : null);
-        dto.setDescription(entity.getDescription());
         dto.setStatus(entity.getStatus() != null ? entity.getStatus() : AttributeStatus.ACTIVE);
-        dto.setValues(parseValueList(entity.getValueList()));
+
+        if (entity.getAttributeValues() != null) {
+            List<String> values = entity.getAttributeValues().stream()
+                    .map(AttributeValue::getValue)
+                    .collect(Collectors.toList());
+            dto.setValues(values);
+        } else {
+            dto.setValues(Collections.emptyList());
+        }
+
         return dto;
     }
 
     private void mapToEntity(Attribute entity, AttributeDTO dto) {
         entity.setName(dto.getName());
-        entity.setCode(dto.getCode());
-        entity.setDescription(dto.getDescription());
-        entity.setStatus(dto.getStatus());
-        entity.setValueList(joinValues(dto.getValues()));
-        if (dto.getType() != null) {
-            try {
-                entity.setType(AttributeType.valueOf(dto.getType().toUpperCase()));
-            } catch (IllegalArgumentException e) {
-                entity.setType(AttributeType.TEXT);
-            }
+        entity.setCode(dto.getCode().toUpperCase()); // Luôn ép hoa mã code
+        entity.setStatus(dto.getStatus() != null ? dto.getStatus() : AttributeStatus.ACTIVE);
+
+        if (entity.getAttributeValues() == null) {
+            entity.setAttributeValues(new ArrayList<>());
         }
-    }
 
-    /** "250g, 500g, 1kg" → ["250g", "500g", "1kg"] */
-    private List<String> parseValueList(String valueList) {
-        if (valueList == null || valueList.isBlank()) return Collections.emptyList();
-        return Arrays.stream(valueList.split(","))
-                .map(String::trim)
-                .filter(s -> !s.isEmpty())
-                .collect(Collectors.toList());
-    }
+        entity.getAttributeValues().clear();
 
-    /** ["250g", "500g", "1kg"] → "250g,500g,1kg" */
-    private String joinValues(List<String> values) {
-        if (values == null || values.isEmpty()) return null;
-        return values.stream()
-                .map(String::trim)
-                .filter(s -> !s.isEmpty())
-                .collect(Collectors.joining(","));
+        if (dto.getValues() != null && !dto.getValues().isEmpty()) {
+            List<AttributeValue> newValues = dto.getValues().stream()
+                    .map(String::trim)
+                    .filter(s -> !s.isEmpty())
+                    .map(val -> AttributeValue.builder()
+                            .attribute(entity)
+                            .value(val)
+                            .build())
+                    .collect(Collectors.toList());
+
+            entity.getAttributeValues().addAll(newValues);
+        }
     }
 }

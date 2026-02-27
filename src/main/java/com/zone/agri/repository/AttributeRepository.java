@@ -9,4 +9,6 @@ import java.util.Optional;
 @Repository
 public interface AttributeRepository extends JpaRepository<Attribute, Long> {
     Optional<Attribute> findByNameIgnoreCase(String name);
+
+    Optional<Attribute> findByCodeIgnoreCase(String code);
 }
