@@ -19,6 +19,12 @@ import java.util.List;
 public class PrepareOrderDraft {
     private String prepareToken;
     private Long userId;
+
+    // --- Thông tin bổ sung theo yêu cầu ---
+    private Long branchId; // Chi nhánh chính hoặc chi nhánh duy nhất
+    private List<OrderItemDto> finalItems; // Danh sách hàng hóa cuối cùng đã phân bổ
+    // --------------------------------------
+
     private Double userLat;
     private Double userLng;
     private String deliveryAddress;

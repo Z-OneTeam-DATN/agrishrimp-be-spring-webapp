@@ -18,7 +18,10 @@
       "WebFetch(domain:www.javadoc.io)",
       "WebFetch(domain:payos.vn)",
       "Bash(\"$JAVA_HOME/bin/javap.exe\" -c -p \"vn/payos/constant/ErrorCode.class\")",
-      "Bash(cd:*)"
+      "Bash(cd:*)",
+      "Bash(mysql:*)",
+      "Bash(\"/c/Program Files/MySQL/MySQL Server 8.0/bin/mysql.exe\":*)",
+      "Bash(JAVA_HOME=\"/c/Users/Bao Nhien/.jdks/openjdk-25\" ./mvnw clean:*)"
     ]
   }
 }

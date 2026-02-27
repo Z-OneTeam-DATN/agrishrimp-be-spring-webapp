@@ -52,4 +52,7 @@ public class UserRequest {
 
     @Schema(description = "Trạng thái tài khoản", allowableValues = {"ACTIVE", "INACTIVE", "BANNED"}, example = "ACTIVE")
     String status;
+
+    @Schema(description = "URL ảnh đại diện của người dùng", example = "https://res.cloudinary.com/avatar.png")
+    String avatarUrl;
 }

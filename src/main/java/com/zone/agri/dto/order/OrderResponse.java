@@ -20,5 +20,6 @@ public class OrderResponse {
     private String branchName;
     private LocalDateTime createdAt;
     private String shippingAddress;
+    private String checkoutUrl;
     private List<OrderItemResponse> items;
 }
