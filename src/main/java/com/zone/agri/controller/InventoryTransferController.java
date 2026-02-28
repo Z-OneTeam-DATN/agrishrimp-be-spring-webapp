@@ -5,6 +5,7 @@ import com.zone.agri.dto.transfer.TransferItemRequest;
 import com.zone.agri.dto.transfer.TransferRequest;
 import com.zone.agri.dto.transfer.TransferResponse;
 import com.zone.agri.entity.InventoryTransfer;
+import com.zone.agri.repository.UserRepository;
 import com.zone.agri.service.InventoryTransferService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -20,6 +21,7 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -33,6 +35,15 @@ import java.util.Map;
 public class InventoryTransferController {
 
     private final InventoryTransferService transferService;
+    private final UserRepository userRepository;
+
+    private boolean isCurrentUserAdmin() {
+        String email = SecurityContextHolder.getContext().getAuthentication().getName();
+        return userRepository.findByEmail(email)
+                .map(user -> user.getRole() != null &&
+                        (user.getRole().getId() == 1L || "ADMIN".equalsIgnoreCase(user.getRole().getSlug())))
+                .orElse(false);
+    }
 
     @Operation(summary = "Lấy danh sách phiếu điều chuyển", description = "Trả về danh sách phiếu điều chuyển có hỗ trợ phân trang, tìm kiếm và lọc theo trạng thái.")
     @SecurityRequirement(name = "bearerAuth")
@@ -62,7 +73,18 @@ public class InventoryTransferController {
     })
     @PostMapping
     public ResponseEntity<InventoryTransfer> createTransfer(@RequestBody TransferRequest request) {
-        return ResponseEntity.ok(transferService.createTransfer(request));
+        // 1. Tạo phiếu điều chuyển (Mặc định PENDING)
+        InventoryTransfer transfer = transferService.createTransfer(request);
+
+        // 2. ADMIN -> Tự động gọi hàm xác nhận xuất kho (Chuyển sang SHIPPING & trừ kho xuất)
+        if (isCurrentUserAdmin()) {
+            transferService.approveAndShip(transfer.getId());
+            // Trả về bản ghi đã cập nhật trạng thái
+            return ResponseEntity.ok(transfer);
+        }
+
+        // Quản lý kho -> Dừng ở PENDING, chờ Admin duyệt hoặc Kho xuất xác nhận
+        return ResponseEntity.ok(transfer);
     }
 
     @Operation(summary = "Lấy chi tiết phiếu điều chuyển", description = "Trả về thông tin chi tiết và danh sách sản phẩm của một phiếu.")
@@ -81,9 +103,13 @@ public class InventoryTransferController {
             @ApiResponse(responseCode = "400", description = "Lỗi xuất kho (kho không đủ hàng, sai trạng thái...)")
     })
     @PutMapping("/{id}/ship")
-    public ResponseEntity<String> approveAndShipTransfer(
-            @Parameter(description = "ID của phiếu điều chuyển", example = "1", required = true)
-            @PathVariable Long id) {
+    public ResponseEntity<String> approveAndShipTransfer(@PathVariable Long id) {
+
+        // CHẶN QUYỀN DUYỆT CỦA NHÂN VIÊN TẠI ĐÂY
+        if (!isCurrentUserAdmin()) {
+            throw new RuntimeException("CẢNH BÁO: BẠN KHÔNG PHẢI ADMIN, KHÔNG ĐƯỢC PHÉP XÁC NHẬN ĐIỀU CHUYỂN!");
+        }
+
         transferService.approveAndShip(id);
         return ResponseEntity.ok("Đã xuất kho và đang vận chuyển!");
     }
