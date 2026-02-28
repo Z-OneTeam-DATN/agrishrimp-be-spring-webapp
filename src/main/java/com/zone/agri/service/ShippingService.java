@@ -6,6 +6,7 @@ import com.zone.agri.dto.geo.ShippingFeeResult;
 import com.zone.agri.dto.order.SubOrderDraftDto;
 import com.zone.agri.entity.ProductVariant;
 import com.zone.agri.repository.ProductVariantRepository;
+import com.zone.agri.repository.ShippingProvider;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;

@@ -3,6 +3,7 @@ package com.zone.agri.controller;
 import com.zone.agri.dto.user.ProfileUpdateRequest;
 import com.zone.agri.dto.user.UserRequest;
 import com.zone.agri.dto.user.UserResponse;
+import com.zone.agri.security.annotation.RequirePermission;
 import com.zone.agri.service.UserService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
@@ -51,6 +52,8 @@ public class UserController {
     }
 
     @GetMapping
+    @SecurityRequirement(name = "bearerAuth")
+    @RequirePermission("STAFF_VIEW")
     public ResponseEntity<Page<UserResponse>> getUsers(
             @RequestParam(required = false) String keyword,
             @RequestParam(required = false) Long roleId,
@@ -63,24 +66,28 @@ public class UserController {
 
     @GetMapping("/{id}")
     @SecurityRequirement(name = "bearerAuth")
+    @RequirePermission("STAFF_VIEW")
     public ResponseEntity<UserResponse> getUserById(@PathVariable Long id) {
         return ResponseEntity.ok(userService.getUserById(id));
     }
 
     @PostMapping
     @SecurityRequirement(name = "bearerAuth")
+    @RequirePermission("STAFF_CREATE")
     public ResponseEntity<UserResponse> createUser(@Valid @RequestBody UserRequest request) {
         return ResponseEntity.ok(userService.createUser(request));
     }
 
     @PutMapping("/{id}")
     @SecurityRequirement(name = "bearerAuth")
+    @RequirePermission("STAFF_UPDATE")
     public ResponseEntity<UserResponse> updateUser(@PathVariable Long id, @Valid @RequestBody UserRequest request) {
         return ResponseEntity.ok(userService.updateUser(id, request));
     }
 
     @DeleteMapping("/{id}")
     @SecurityRequirement(name = "bearerAuth")
+    @RequirePermission("STAFF_DELETE")
     public ResponseEntity<Void> deleteUser(@PathVariable Long id) {
         userService.deleteUser(id);
         return ResponseEntity.noContent().build();

@@ -22,7 +22,7 @@ public class Category {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     Long id;
 
-    @Column(name = "name", length = 255)
+    @Column(name = "name", length = 255,unique = true)
     String name;
 
 
@@ -33,8 +33,6 @@ public class Category {
     @Column(columnDefinition = "ENUM('ACTIVE', 'INACTIVE')")
     CategoryStatus status;
 
-    @Column(name = "description", columnDefinition = "TEXT")
-    private String description;
 
     // parent_id trỏ về chính bảng category
     @ManyToOne(fetch = FetchType.LAZY)

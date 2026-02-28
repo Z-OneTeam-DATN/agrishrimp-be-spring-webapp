@@ -38,8 +38,6 @@ public class DataSeeder implements CommandLineRunner {
     private final CustomerRepository customerRepository;
     private final OrderRepository orderRepository;
     private final OrderItemRepository orderItemRepository;
-    private final StockRequestRepository stockRequestRepository;
-    private final StockRequestItemRepository stockRequestItemRepository;
     private final InventoryTransferRepository inventoryTransferRepository;
     private final PasswordEncoder passwordEncoder;
 
@@ -58,150 +56,186 @@ public class DataSeeder implements CommandLineRunner {
         Branch branch2 = saveBranch("BRANCH_02", "STORE",     "Chi Nhánh Sóc Trăng", "02995556666", "cn2@agrishrimp.vn",     "21 Trần Hưng Đạo, P.1, TP.Sóc Trăng, Sóc Trăng", 9.6025, 105.9731, 94, 941);
 
         // ── 2. PHÂN QUYỀN ───────────────────────────────────────────────
-        // (Giữ nguyên phân quyền vì logic không đổi)
-        Permission mDash    = pMod("Tổng quan hệ thống",       "DASHBOARD_MANAGE",         PermissionGroup.SYSTEM);
-        Permission aDashV   = pAct("Xem tổng quan",            "DASHBOARD_VIEW",           PermissionGroup.SYSTEM,              mDash);
-        Permission mWspace  = pMod("Bàn làm việc kho",         "WORKSPACE_MANAGE",         PermissionGroup.SYSTEM);
-        Permission aWspaceV = pAct("Xem bàn làm việc",        "WORKSPACE_VIEW",           PermissionGroup.SYSTEM,              mWspace);
 
-        Permission mUser    = pMod("Quản lý nhân viên",        "USER_MANAGE",              PermissionGroup.ADMINISTRATION);
-        Permission aUserV   = pAct("Xem nhân viên",            "USER_VIEW",                PermissionGroup.ADMINISTRATION,      mUser);
-        Permission aUserC   = pAct("Thêm nhân viên",           "USER_CREATE",              PermissionGroup.ADMINISTRATION,      mUser);
-        Permission aUserU   = pAct("Sửa nhân viên",            "USER_UPDATE",              PermissionGroup.ADMINISTRATION,      mUser);
-        Permission aUserD   = pAct("Xóa nhân viên",            "USER_DELETE",              PermissionGroup.ADMINISTRATION,      mUser);
-        Permission mBranch  = pMod("Quản lý chi nhánh",        "BRANCH_MANAGE",            PermissionGroup.ADMINISTRATION);
-        Permission aBranchV = pAct("Xem chi nhánh",            "BRANCH_VIEW",              PermissionGroup.ADMINISTRATION,      mBranch);
-        Permission aBranchC = pAct("Thêm chi nhánh",           "BRANCH_CREATE",            PermissionGroup.ADMINISTRATION,      mBranch);
-        Permission aBranchU = pAct("Sửa chi nhánh",            "BRANCH_UPDATE",            PermissionGroup.ADMINISTRATION,      mBranch);
-        Permission aBranchD = pAct("Xóa chi nhánh",            "BRANCH_DELETE",            PermissionGroup.ADMINISTRATION,      mBranch);
-        Permission mRole    = pMod("Quản lý vai trò",          "ROLE_MANAGE",              PermissionGroup.ADMINISTRATION);
-        Permission aRoleV   = pAct("Xem vai trò",              "ROLE_VIEW",                PermissionGroup.ADMINISTRATION,      mRole);
-        Permission aRoleC   = pAct("Tạo vai trò",              "ROLE_CREATE",              PermissionGroup.ADMINISTRATION,      mRole);
-        Permission aRoleU   = pAct("Sửa vai trò",              "ROLE_UPDATE",              PermissionGroup.ADMINISTRATION,      mRole);
-        Permission aRoleD   = pAct("Xóa vai trò",              "ROLE_DELETE",              PermissionGroup.ADMINISTRATION,      mRole);
+        // ============== 1 GROUP SYSTEM ==============
+        Permission mDash  = pMod("Tổng quan hệ thống", "DASHBOARD", PermissionGroup.SYSTEM);
+        Permission aDashV = pAct("Xem tổng quan", "DASHBOARD_VIEW", PermissionGroup.SYSTEM, mDash);
 
-        Permission mProd    = pMod("Quản lý sản phẩm",         "PRODUCT_MANAGE",           PermissionGroup.PRODUCT_CATALOG);
-        Permission aProdV   = pAct("Xem sản phẩm",             "PRODUCT_VIEW",             PermissionGroup.PRODUCT_CATALOG,     mProd);
-        Permission aProdC   = pAct("Thêm sản phẩm",            "PRODUCT_CREATE",           PermissionGroup.PRODUCT_CATALOG,     mProd);
-        Permission aProdU   = pAct("Sửa sản phẩm",             "PRODUCT_UPDATE",           PermissionGroup.PRODUCT_CATALOG,     mProd);
-        Permission aProdD   = pAct("Xóa sản phẩm",             "PRODUCT_DELETE",           PermissionGroup.PRODUCT_CATALOG,     mProd);
-        Permission mCat     = pMod("Quản lý danh mục",         "CATEGORY_MANAGE",          PermissionGroup.PRODUCT_CATALOG);
-        Permission aCatV    = pAct("Xem danh mục",             "CATEGORY_VIEW",            PermissionGroup.PRODUCT_CATALOG,     mCat);
-        Permission aCatC    = pAct("Thêm danh mục",            "CATEGORY_CREATE",          PermissionGroup.PRODUCT_CATALOG,     mCat);
-        Permission aCatU    = pAct("Sửa danh mục",             "CATEGORY_UPDATE",          PermissionGroup.PRODUCT_CATALOG,     mCat);
-        Permission aCatD    = pAct("Xóa danh mục",             "CATEGORY_DELETE",          PermissionGroup.PRODUCT_CATALOG,     mCat);
-        Permission mAttr    = pMod("Quản lý thuộc tính",       "ATTRIBUTE_MANAGE",         PermissionGroup.PRODUCT_CATALOG);
-        Permission aAttrV   = pAct("Xem thuộc tính",           "ATTRIBUTE_VIEW",           PermissionGroup.PRODUCT_CATALOG,     mAttr);
-        Permission aAttrC   = pAct("Thêm thuộc tính",          "ATTRIBUTE_CREATE",         PermissionGroup.PRODUCT_CATALOG,     mAttr);
-        Permission aAttrU   = pAct("Sửa thuộc tính",           "ATTRIBUTE_UPDATE",         PermissionGroup.PRODUCT_CATALOG,     mAttr);
-        Permission aAttrD   = pAct("Xóa thuộc tính",           "ATTRIBUTE_DELETE",         PermissionGroup.PRODUCT_CATALOG,     mAttr);
+        Permission mWspace  = pMod("Bàn làm việc", "WORKSPACE", PermissionGroup.SYSTEM);
+        Permission aWspaceV = pAct("Xem bàn làm việc", "WORKSPACE_VIEW", PermissionGroup.SYSTEM, mWspace);
 
-        Permission mImp     = pMod("Quản lý nhập hàng",        "IMPORT_MANAGE",            PermissionGroup.INVENTORY_TRANSACTION);
-        Permission aImpV    = pAct("Xem phiếu nhập",           "IMPORT_VIEW",              PermissionGroup.INVENTORY_TRANSACTION, mImp);
-        Permission aImpC    = pAct("Tạo phiếu nhập",           "IMPORT_CREATE",            PermissionGroup.INVENTORY_TRANSACTION, mImp);
-        Permission aImpU    = pAct("Sửa phiếu nhập",           "IMPORT_UPDATE",            PermissionGroup.INVENTORY_TRANSACTION, mImp);
-        Permission aImpA    = pAct("Duyệt phiếu nhập",         "IMPORT_APPROVE",           PermissionGroup.INVENTORY_TRANSACTION, mImp);
-        Permission aImpX    = pAct("Hủy phiếu nhập",           "IMPORT_CANCEL",            PermissionGroup.INVENTORY_TRANSACTION, mImp);
-        Permission mExp     = pMod("Quản lý xuất hàng",        "EXPORT_MANAGE",            PermissionGroup.INVENTORY_TRANSACTION);
-        Permission aExpV    = pAct("Xem phiếu xuất",           "EXPORT_VIEW",              PermissionGroup.INVENTORY_TRANSACTION, mExp);
-        Permission aExpC    = pAct("Tạo phiếu xuất",           "EXPORT_CREATE",            PermissionGroup.INVENTORY_TRANSACTION, mExp);
-        Permission aExpA    = pAct("Duyệt phiếu xuất",         "EXPORT_APPROVE",           PermissionGroup.INVENTORY_TRANSACTION, mExp);
-        Permission aExpFE   = pAct("Chỉnh sửa bắt buộc",      "EXPORT_FORCE_EDIT",        PermissionGroup.INVENTORY_TRANSACTION, mExp);
-        Permission aExpX    = pAct("Hủy phiếu xuất",           "EXPORT_CANCEL",            PermissionGroup.INVENTORY_TRANSACTION, mExp);
-        Permission mTrf     = pMod("Quản lý điều chuyển",      "TRANSFER_MANAGE",          PermissionGroup.INVENTORY_TRANSACTION);
-        Permission aTrfV    = pAct("Xem phiếu điều chuyển",   "TRANSFER_VIEW",            PermissionGroup.INVENTORY_TRANSACTION, mTrf);
-        Permission aTrfC    = pAct("Tạo phiếu điều chuyển",   "TRANSFER_CREATE",          PermissionGroup.INVENTORY_TRANSACTION, mTrf);
-        Permission aTrfA    = pAct("Duyệt điều chuyển",        "TRANSFER_APPROVE",         PermissionGroup.INVENTORY_TRANSACTION, mTrf);
-        Permission aTrfX    = pAct("Hủy điều chuyển",          "TRANSFER_CANCEL",          PermissionGroup.INVENTORY_TRANSACTION, mTrf);
-        Permission mSR      = pMod("Quản lý yêu cầu bổ sung",  "STOCK_REQUEST_MANAGE",     PermissionGroup.INVENTORY_TRANSACTION);
-        Permission aSRV     = pAct("Xem yêu cầu bổ sung",      "STOCK_REQUEST_VIEW",       PermissionGroup.INVENTORY_TRANSACTION, mSR);
-        Permission aSRC     = pAct("Tạo yêu cầu bổ sung",      "STOCK_REQUEST_CREATE",     PermissionGroup.INVENTORY_TRANSACTION, mSR);
-        Permission aSRA     = pAct("Duyệt yêu cầu bổ sung",    "STOCK_REQUEST_APPROVE",    PermissionGroup.INVENTORY_TRANSACTION, mSR);
-        Permission mInv     = pMod("Xem tồn kho",              "INVENTORY_MANAGE",         PermissionGroup.INVENTORY_TRANSACTION);
-        Permission aInvV    = pAct("Xem tồn kho",              "INVENTORY_VIEW",           PermissionGroup.INVENTORY_TRANSACTION, mInv);
 
-        Permission mShip    = pMod("Quản lý vận chuyển",       "SHIPPING_MANAGE",          PermissionGroup.SHIPPING);
-        Permission aShipV   = pAct("Xem vận chuyển",           "SHIPPING_VIEW",            PermissionGroup.SHIPPING,            mShip);
+        // ============== 2 GROUP REPORT ==============
+        Permission mRpt     = pMod("Báo cáo", "REPORT", PermissionGroup.REPORT);
+        Permission aRptSale = pAct("Báo cáo doanh thu", "REPORT_REVENUE_VIEW", PermissionGroup.REPORT, mRpt);
+        Permission aRptInv  = pAct("Báo cáo kho", "REPORT_INVENTORY_VIEW", PermissionGroup.REPORT, mRpt);
+        Permission aRptFin  = pAct("Báo cáo tài chính", "REPORT_FINANCE_VIEW", PermissionGroup.REPORT, mRpt);
 
-        Permission mSup     = pMod("Quản lý nhà cung cấp",     "SUPPLIER_MANAGE",          PermissionGroup.PARTNER);
-        Permission aSupV    = pAct("Xem nhà cung cấp",         "SUPPLIER_VIEW",            PermissionGroup.PARTNER,             mSup);
-        Permission aSupC    = pAct("Thêm nhà cung cấp",        "SUPPLIER_CREATE",          PermissionGroup.PARTNER,             mSup);
-        Permission aSupU    = pAct("Sửa nhà cung cấp",         "SUPPLIER_UPDATE",          PermissionGroup.PARTNER,             mSup);
-        Permission aSupD    = pAct("Xóa nhà cung cấp",         "SUPPLIER_DELETE",          PermissionGroup.PARTNER,             mSup);
-        Permission mCus     = pMod("Quản lý khách hàng",       "CUSTOMER_MANAGE",          PermissionGroup.PARTNER);
-        Permission aCusV    = pAct("Xem khách hàng",           "CUSTOMER_VIEW",            PermissionGroup.PARTNER,             mCus);
-        Permission aCusC    = pAct("Thêm khách hàng",          "CUSTOMER_CREATE",          PermissionGroup.PARTNER,             mCus);
-        Permission aCusU    = pAct("Sửa khách hàng",           "CUSTOMER_UPDATE",          PermissionGroup.PARTNER,             mCus);
-        Permission aCusD    = pAct("Xóa khách hàng",           "CUSTOMER_DELETE",          PermissionGroup.PARTNER,             mCus);
 
-        Permission mRpt     = pMod("Báo cáo",                  "REPORT_MANAGE",            PermissionGroup.REPORT);
-        Permission aRptSale = pAct("Báo cáo bán hàng",         "REPORT_SALE",              PermissionGroup.REPORT,              mRpt);
-        Permission aRptInv  = pAct("Báo cáo kho",              "REPORT_INVENTORY",         PermissionGroup.REPORT,              mRpt);
-        Permission aRptFin  = pAct("Báo cáo tài chính",        "REPORT_FINANCE",           PermissionGroup.REPORT,              mRpt);
+        // ============== 3 GROUP ADMINISTRATION ==============
+        Permission mUser  = pMod("Quản lý nhân viên", "STAFF", PermissionGroup.ADMINISTRATION);
+        Permission aUserV = pAct("Xem nhân viên", "STAFF_VIEW", PermissionGroup.ADMINISTRATION, mUser);
+        Permission aUserC = pAct("Thêm nhân viên", "STAFF_CREATE", PermissionGroup.ADMINISTRATION, mUser);
+        Permission aUserU = pAct("Sửa nhân viên", "STAFF_UPDATE", PermissionGroup.ADMINISTRATION, mUser);
+        Permission aUserD = pAct("Xóa nhân viên", "STAFF_DELETE", PermissionGroup.ADMINISTRATION, mUser);
 
-        Permission mSet     = pMod("Cài đặt hệ thống",         "SETTING_MANAGE",           PermissionGroup.SETTING);
-        Permission aSetV    = pAct("Xem cài đặt",              "SETTING_VIEW",             PermissionGroup.SETTING,             mSet);
-        Permission aSetU    = pAct("Cập nhật cài đặt",         "SETTING_UPDATE",           PermissionGroup.SETTING,             mSet);
+        Permission mBranch  = pMod("Quản lý chi nhánh", "BRANCH", PermissionGroup.ADMINISTRATION);
+        Permission aBranchV = pAct("Xem chi nhánh", "BRANCH_VIEW", PermissionGroup.ADMINISTRATION, mBranch);
+        Permission aBranchC = pAct("Thêm chi nhánh", "BRANCH_CREATE", PermissionGroup.ADMINISTRATION, mBranch);
+        Permission aBranchU = pAct("Sửa chi nhánh", "BRANCH_UPDATE", PermissionGroup.ADMINISTRATION, mBranch);
+        Permission aBranchD = pAct("Xóa chi nhánh", "BRANCH_DELETE", PermissionGroup.ADMINISTRATION, mBranch);
 
-        Permission mOrder   = pMod("Quản lý đơn hàng",         "ORDER_MANAGE",             PermissionGroup.SALES_MANAGEMENT);
-        Permission aOrdV    = pAct("Xem đơn hàng",             "ORDER_VIEW",               PermissionGroup.SALES_MANAGEMENT,    mOrder);
-        Permission aOrdC    = pAct("Tạo đơn hàng",             "ORDER_CREATE",             PermissionGroup.SALES_MANAGEMENT,    mOrder);
-        Permission aOrdCnf  = pAct("Xác nhận đơn hàng",        "ORDER_CONFIRM",            PermissionGroup.SALES_MANAGEMENT,    mOrder);
-        Permission aOrdX    = pAct("Huỷ đơn hàng",             "ORDER_CANCEL",             PermissionGroup.SALES_MANAGEMENT,    mOrder);
+        Permission mRole  = pMod("Quản lý vai trò", "ROLE", PermissionGroup.ADMINISTRATION);
+        Permission aRoleV = pAct("Xem vai trò", "ROLE_VIEW", PermissionGroup.ADMINISTRATION, mRole);
+        Permission aRoleC = pAct("Tạo vai trò", "ROLE_CREATE", PermissionGroup.ADMINISTRATION, mRole);
+        Permission aRoleU = pAct("Sửa vai trò", "ROLE_UPDATE", PermissionGroup.ADMINISTRATION, mRole);
+        Permission aRoleD = pAct("Xóa vai trò", "ROLE_DELETE", PermissionGroup.ADMINISTRATION, mRole);
+
+
+        // ============== 4 GROUP SALES ==============
+        Permission mOrder     = pMod("Quản lý đơn hàng", "ORDER", PermissionGroup.SALES);
+        Permission aOrdV      = pAct("Xem đơn hàng", "ORDER_VIEW", PermissionGroup.SALES, mOrder);
+        Permission aOrdC      = pAct("Tạo đơn hàng", "ORDER_CREATE", PermissionGroup.SALES, mOrder);
+        Permission aOrdU      = pAct("Cập nhật đơn hàng", "ORDER_UPDATE", PermissionGroup.SALES, mOrder);
+        Permission aOrdCnf    = pAct("Xác nhận đơn hàng", "ORDER_CONFIRM", PermissionGroup.SALES, mOrder);
+        Permission aOrdShip   = pAct("Giao hàng", "ORDER_SHIP", PermissionGroup.SALES, mOrder);
+        Permission aOrdX      = pAct("Huỷ đơn hàng", "ORDER_CANCEL", PermissionGroup.SALES, mOrder);
+        Permission aOrdDone   = pAct("Hoàn tất đơn hàng", "ORDER_COMPLETE", PermissionGroup.SALES, mOrder);
+        Permission aOrdExport = pAct("Xuất danh sách đơn hàng", "ORDER_EXPORT", PermissionGroup.SALES, mOrder);
+        Permission aOrdRefund = pAct("Hoàn tiền đơn hàng", "ORDER_REFUND", PermissionGroup.SALES, mOrder);
+        Permission aOrdD      = pAct("Xóa đơn hàng", "ORDER_DELETE", PermissionGroup.SALES, mOrder);
+
+        Permission mCus  = pMod("Quản lý khách hàng", "CUSTOMER", PermissionGroup.SALES);
+        Permission aCusV = pAct("Xem khách hàng", "CUSTOMER_VIEW", PermissionGroup.SALES, mCus);
+        Permission aCusC = pAct("Thêm khách hàng", "CUSTOMER_CREATE", PermissionGroup.SALES, mCus);
+        Permission aCusU = pAct("Sửa khách hàng", "CUSTOMER_UPDATE", PermissionGroup.SALES, mCus);
+        Permission aCusD = pAct("Xóa khách hàng", "CUSTOMER_DELETE", PermissionGroup.SALES, mCus);
+
+
+        // ============== 5 GROUP PRODUCT_CATALOG ==============
+        Permission mProd  = pMod("Quản lý sản phẩm", "PRODUCT", PermissionGroup.PRODUCT_CATALOG);
+        Permission aProdV = pAct("Xem sản phẩm", "PRODUCT_VIEW", PermissionGroup.PRODUCT_CATALOG, mProd);
+        Permission aProdC = pAct("Thêm sản phẩm", "PRODUCT_CREATE", PermissionGroup.PRODUCT_CATALOG, mProd);
+        Permission aProdU = pAct("Sửa sản phẩm", "PRODUCT_UPDATE", PermissionGroup.PRODUCT_CATALOG, mProd);
+        Permission aProdD = pAct("Xóa sản phẩm", "PRODUCT_DELETE", PermissionGroup.PRODUCT_CATALOG, mProd);
+
+        Permission mCat  = pMod("Quản lý danh mục", "CATEGORY", PermissionGroup.PRODUCT_CATALOG);
+        Permission aCatV = pAct("Xem danh mục", "CATEGORY_VIEW", PermissionGroup.PRODUCT_CATALOG, mCat);
+        Permission aCatC = pAct("Thêm danh mục", "CATEGORY_CREATE", PermissionGroup.PRODUCT_CATALOG, mCat);
+        Permission aCatU = pAct("Sửa danh mục", "CATEGORY_UPDATE", PermissionGroup.PRODUCT_CATALOG, mCat);
+        Permission aCatD = pAct("Xóa danh mục", "CATEGORY_DELETE", PermissionGroup.PRODUCT_CATALOG, mCat);
+
+        Permission mAttr  = pMod("Quản lý thuộc tính", "ATTRIBUTE", PermissionGroup.PRODUCT_CATALOG);
+        Permission aAttrV = pAct("Xem thuộc tính", "ATTRIBUTE_VIEW", PermissionGroup.PRODUCT_CATALOG, mAttr);
+        Permission aAttrC = pAct("Thêm thuộc tính", "ATTRIBUTE_CREATE", PermissionGroup.PRODUCT_CATALOG, mAttr);
+        Permission aAttrU = pAct("Sửa thuộc tính", "ATTRIBUTE_UPDATE", PermissionGroup.PRODUCT_CATALOG, mAttr);
+        Permission aAttrD = pAct("Xóa thuộc tính", "ATTRIBUTE_DELETE", PermissionGroup.PRODUCT_CATALOG, mAttr);
+
+
+        // ============== 6 GROUP INVENTORY ==============
+        Permission mSup  = pMod("Quản lý nhà cung cấp", "SUPPLIER", PermissionGroup.INVENTORY);
+        Permission aSupV = pAct("Xem nhà cung cấp", "SUPPLIER_VIEW", PermissionGroup.INVENTORY, mSup);
+        Permission aSupC = pAct("Thêm nhà cung cấp", "SUPPLIER_CREATE", PermissionGroup.INVENTORY, mSup);
+        Permission aSupU = pAct("Sửa nhà cung cấp", "SUPPLIER_UPDATE", PermissionGroup.INVENTORY, mSup);
+        Permission aSupD = pAct("Xóa nhà cung cấp", "SUPPLIER_DELETE", PermissionGroup.INVENTORY, mSup);
+
+        Permission mImp  = pMod("Quản lý nhập hàng", "IMPORT", PermissionGroup.INVENTORY);
+        Permission aImpV = pAct("Xem phiếu nhập", "IMPORT_VIEW", PermissionGroup.INVENTORY, mImp);
+        Permission aImpC = pAct("Tạo phiếu nhập", "IMPORT_CREATE", PermissionGroup.INVENTORY, mImp);
+        Permission aImpU = pAct("Sửa phiếu nhập", "IMPORT_UPDATE", PermissionGroup.INVENTORY, mImp);
+        Permission aImpA = pAct("Duyệt phiếu nhập", "IMPORT_APPROVE", PermissionGroup.INVENTORY, mImp);
+        Permission aImpX = pAct("Hủy phiếu nhập", "IMPORT_CANCEL", PermissionGroup.INVENTORY, mImp);
+        Permission aImpD = pAct("Xóa phiếu nhập", "IMPORT_DELETE", PermissionGroup.INVENTORY, mImp);
+
+        Permission mExp  = pMod("Quản lý xuất hàng", "EXPORT", PermissionGroup.INVENTORY);
+        Permission aExpV = pAct("Xem phiếu xuất", "EXPORT_VIEW", PermissionGroup.INVENTORY, mExp);
+        Permission aExpC = pAct("Tạo phiếu xuất", "EXPORT_CREATE", PermissionGroup.INVENTORY, mExp);
+        Permission aExpA = pAct("Duyệt phiếu xuất", "EXPORT_APPROVE", PermissionGroup.INVENTORY, mExp);
+        Permission aExpU = pAct("Sửa phiếu xuất", "EXPORT_UPDATE", PermissionGroup.INVENTORY, mExp);
+        Permission aExpX = pAct("Hủy phiếu xuất", "EXPORT_CANCEL", PermissionGroup.INVENTORY, mExp);
+        Permission aExpD = pAct("Xóa phiếu xuất", "EXPORT_DELETE", PermissionGroup.INVENTORY, mExp);
+
+        Permission mTrf  = pMod("Quản lý điều chuyển", "TRANSFER", PermissionGroup.INVENTORY);
+        Permission aTrfV = pAct("Xem phiếu điều chuyển", "TRANSFER_VIEW", PermissionGroup.INVENTORY, mTrf);
+        Permission aTrfC = pAct("Tạo phiếu điều chuyển", "TRANSFER_CREATE", PermissionGroup.INVENTORY, mTrf);
+        Permission aTrfA = pAct("Duyệt điều chuyển", "TRANSFER_APPROVE", PermissionGroup.INVENTORY, mTrf);
+        Permission aTrfX = pAct("Hủy điều chuyển", "TRANSFER_CANCEL", PermissionGroup.INVENTORY, mTrf);
+        Permission aTrfD = pAct("Xóa điều chuyển", "TRANSFER_DELETE", PermissionGroup.INVENTORY, mTrf);
+        Permission aTrfU = pAct("Sửa điều chuyển", "TRANSFER_UPDATE", PermissionGroup.INVENTORY, mTrf);
+
+
+        // ============== 7 GROUP SETTING ==============
+        Permission mSet  = pMod("Cài đặt hệ thống", "SETTING", PermissionGroup.SETTING);
+        Permission aSetV = pAct("Xem cài đặt", "SETTING_VIEW", PermissionGroup.SETTING, mSet);
+        Permission aSetU = pAct("Cập nhật cài đặt", "SETTING_UPDATE", PermissionGroup.SETTING, mSet);
+
 
         // ── 3. VAI TRÒ ──────────────────────────────────────────────────
-        Set<Permission> allPerms = Set.of(
-                mDash, aDashV, mWspace, aWspaceV,
-                mUser, aUserV, aUserC, aUserU, aUserD,
-                mBranch, aBranchV, aBranchC, aBranchU, aBranchD,
-                mRole, aRoleV, aRoleC, aRoleU, aRoleD,
-                mProd, aProdV, aProdC, aProdU, aProdD,
-                mCat, aCatV, aCatC, aCatU, aCatD,
-                mAttr, aAttrV, aAttrC, aAttrU, aAttrD,
-                mImp, aImpV, aImpC, aImpU, aImpA, aImpX,
-                mExp, aExpV, aExpC, aExpA, aExpFE, aExpX,
-                mTrf, aTrfV, aTrfC, aTrfA, aTrfX,
-                mSR, aSRV, aSRC, aSRA,
-                mInv, aInvV,
-                mShip, aShipV,
-                mSup, aSupV, aSupC, aSupU, aSupD,
-                mCus, aCusV, aCusC, aCusU, aCusD,
-                mRpt, aRptSale, aRptInv, aRptFin,
-                mSet, aSetV, aSetU,
-                mOrder, aOrdV, aOrdC, aOrdCnf, aOrdX
-        );
+        Role adminRole = saveRole("ADMIN", "Quản trị viên", false, Set.of(
+                aDashV, aWspaceV,
+                aRptSale, aRptInv, aRptFin,
+                aUserV, aUserC, aUserU, aUserD,
+                aRoleV, aRoleC, aRoleU, aRoleD,
+                aBranchV, aBranchC, aBranchU, aBranchD,
+                aProdV, aProdC, aProdU, aProdD,
+                aCatV, aCatC, aCatU, aCatD,
+                aAttrV, aAttrC, aAttrU, aAttrD,
+                aImpV, aImpC, aImpA, aImpU, aImpX, aImpD,
+                aExpV, aExpC, aExpA, aExpU, aExpX, aExpD,
+                aTrfV, aTrfC, aTrfA, aTrfU, aTrfX, aTrfD,
+                aCusV, aCusC, aCusU, aCusD,
+                aSupV, aSupC, aSupU, aSupD,
+                aOrdV, aOrdC, aOrdU, aOrdD, aOrdCnf, aOrdShip, aOrdX, aOrdDone, aOrdRefund, aOrdExport
+        ));
 
-        Role adminRole    = saveRole("ADMIN",      "Quản trị viên",       true,  allPerms);
-        Role staffKhoRole = saveRole("STAFF_KHO",  "Nhân viên kho",       false, Set.of(
-                aDashV, aWspaceV, aProdV, aCatV, aImpV, aImpC, aImpU, aExpV, aExpC,
-                aTrfV, aTrfC, aSRV, aSRC, aInvV, aSupV, aCusV, aOrdV, aOrdCnf
+        Role managerRole = saveRole("MANAGER", "Quản lý chi nhánh & kho", false, Set.of(
+                aWspaceV,
+                aRptSale, aRptInv, aRptFin,
+                aUserV, aUserC, aUserU, aUserD,
+                aProdV,
+                aCatV,
+                aAttrV,
+                aSupV,
+                aImpV, aImpC, aImpU, aImpX, aImpD,
+                aExpV, aExpC, aExpU, aExpX, aExpD,
+                aTrfV, aTrfC, aTrfU, aTrfX, aTrfD,
+                aCusV, aCusC, aCusU, aCusD,
+                aOrdV, aOrdC, aOrdU, aOrdCnf, aOrdShip, aOrdX, aOrdDone, aOrdExport
         ));
-        Role salesRole    = saveRole("SALES",      "Nhân viên bán hàng",  false, Set.of(
-                aDashV, aProdV, aCatV, aImpV, aExpV, aInvV, aCusV, aCusC, aCusU,
-                aRptSale, aOrdV, aOrdC, aOrdCnf, aOrdX
+
+        Role staffRole = saveRole("STAFF", "Nhân viên", false, Set.of(
+                aDashV, aWspaceV,
+                aRptInv,
+                aProdV,
+                aCatV,
+                aOrdV, aOrdC
         ));
-        Role userRole     = saveRole("USER",       "Người dùng",          false, Set.of(
-                aOrdV, aOrdC, aOrdX
-        ));
+
+        Role userRole = saveRole("USER", "Khách hàng", false, Set.of(aOrdV, aOrdC, aOrdX));
+
 
         // ── 4. NGƯỜI DÙNG ────────────────────────────────────────────────
         User admin  = saveUser("Nguyễn Văn Admin",  "admin@agrishrimp.vn",  "0901000001", "123456", adminRole,    mainWh,  Gender.MALE,   LocalDate.of(1985,  3, 15));
-        User kho1   = saveUser("Trần Thị Kho Một",  "kho1@agrishrimp.vn",   "0901000002", "123456", staffKhoRole, mainWh,  Gender.FEMALE, LocalDate.of(1992,  7, 20));
-        User kho2   = saveUser("Lê Văn Kho Hai",    "kho2@agrishrimp.vn",   "0901000003", "123456", staffKhoRole, branch1, Gender.MALE,   LocalDate.of(1993, 11,  5));
-        User sales1 = saveUser("Phạm Thị Sales",    "sales1@agrishrimp.vn", "0901000004", "123456", salesRole,    branch1, Gender.FEMALE, LocalDate.of(1995,  4, 10));
+        User kho1   = saveUser("Trần Thị Kho Một",  "kho1@agrishrimp.vn",   "0901000002", "123456", managerRole,  mainWh,  Gender.FEMALE, LocalDate.of(1992,  7, 20));
+        User kho2   = saveUser("Lê Văn Kho Hai",    "kho2@agrishrimp.vn",   "0901000003", "123456", managerRole,  branch1, Gender.MALE,   LocalDate.of(1993, 11,  5));
         User user1  = saveUser("Nguyễn Văn Tôm",    "user1@gmail.com",      "0911000001", "123456", userRole,     null,    Gender.MALE,   LocalDate.of(1988,  6, 12));
         User user2  = saveUser("Trần Thị Cua",      "user2@gmail.com",      "0911000002", "123456", userRole,     null,    Gender.FEMALE, LocalDate.of(1990,  9, 25));
         User user3  = saveUser("Lê Minh Nuôi",      "user3@gmail.com",      "0911000003", "123456", userRole,     null,    Gender.MALE,   LocalDate.of(1995,  2, 18));
 
-        // ── 5. DANH MỤC ──────────────────────────────────────────────────
-        Category catFeed   = categoryRepository.save(cat("Thức Ăn Thủy Sản",         null,      "Thức ăn công nghiệp cho các loài thủy sản nuôi trồng"));
-        Category catChem   = categoryRepository.save(cat("Thuốc & Chế Phẩm Sinh Học", null,      "Thuốc phòng trị bệnh và chế phẩm vi sinh xử lý ao nuôi"));
-        Category catMine   = categoryRepository.save(cat("Khoáng Chất & Dinh Dưỡng",  null,      "Khoáng, vitamin, enzyme bổ sung cho tôm cá"));
-        Category catEquip  = categoryRepository.save(cat("Dụng Cụ & Trang Thiết Bị",  null,      "Thiết bị đo lường và dụng cụ ao nuôi"));
-        Category catSF     = categoryRepository.save(cat("Thức Ăn Tôm",               catFeed,   "Thức ăn chuyên dụng cho tôm thẻ chân trắng và tôm sú"));
-        Category catFF     = categoryRepository.save(cat("Thức Ăn Cá",                catFeed,   "Thức ăn viên nổi/chìm cho cá tra, cá rô phi"));
-        Category catPro    = categoryRepository.save(cat("Chế Phẩm Vi Sinh",           catChem,   "Vi khuẩn có lợi làm sạch đáy ao, giảm khí độc"));
-        Category catMed    = categoryRepository.save(cat("Thuốc Phòng Trị Bệnh",      catChem,   "Thuốc kháng sinh, sát khuẩn, phòng bệnh cho tôm cá"));
+        // ── 5. DANH MỤC  ──────────────────────────
+        Category catFeed   = categoryRepository.save(cat("Thức Ăn Thủy Sản",         null));
+        Category catChem   = categoryRepository.save(cat("Thuốc & Chế Phẩm Sinh Học", null));
+        Category catMine   = categoryRepository.save(cat("Khoáng Chất & Dinh Dưỡng",  null));
+        Category catEquip  = categoryRepository.save(cat("Dụng Cụ & Trang Thiết Bị",  null));
+
+        Category catSF     = categoryRepository.save(cat("Thức Ăn Tôm",               catFeed));
+        Category catFF     = categoryRepository.save(cat("Thức Ăn Cá",                catFeed));
+        Category catPro    = categoryRepository.save(cat("Chế Phẩm Vi Sinh",           catChem));
+        Category catMed    = categoryRepository.save(cat("Thuốc Phòng Trị Bệnh",      catChem));
+        Category catMin    = categoryRepository.save(cat("Khoáng Chất",               catMine));
+        Category catVit    = categoryRepository.save(cat("Vitamin & Enzyme",           catMine));
+        Category catMeas   = categoryRepository.save(cat("Dụng Cụ Đo Lường",          catEquip));
+        Category catPondE  = categoryRepository.save(cat("Thiết Bị Ao Nuôi",          catEquip));
 
         // ── 6. THƯƠNG HIỆU ───────────────────────────────────────────────
         Brand bCP      = brandRepository.save(Brand.builder().name("CP Vietnam").status(BrandStatus.ACTIVE).build());
@@ -210,18 +244,25 @@ public class DataSeeder implements CommandLineRunner {
 
         // ── 7. THUỘC TÍNH & GIÁ TRỊ ──────────────────────────────────────
         Attribute attrW = attributeRepository.save(Attribute.builder()
-                .name("Trọng Lượng").code("WEIGHT").type(AttributeType.SELECT)
-                .valueList("500g,1kg,5kg,10kg,25kg").status(AttributeStatus.ACTIVE).build());
-        Attribute attrP = attributeRepository.save(Attribute.builder()
-                .name("Quy Cách").code("PACKAGING").type(AttributeType.SELECT)
-                .valueList("Túi PE,Bao PP,Chai nhựa").status(AttributeStatus.ACTIVE).build());
+                .name("Trọng Lượng")
+                .code("TRONG_LUONG")
+                .status(AttributeStatus.ACTIVE)
+                .build());
 
+        Attribute attrP = attributeRepository.save(Attribute.builder()
+                .name("Quy Cách Đóng Gói")
+                .code("QUY_CACH_DONG_GOI")
+                .status(AttributeStatus.ACTIVE)
+                .build());
+
+        // Tạo và lưu các giá trị chi tiết vào bảng attribute_values thông qua hàm av()
         AttributeValue av500g  = av(attrW, "500g");
         AttributeValue av5kg   = av(attrW, "5kg");
         AttributeValue av25kg  = av(attrW, "25kg");
-        AttributeValue avBag   = av(attrP, "Túi PE");
-        AttributeValue avSack  = av(attrP, "Bao PP");
-        AttributeValue avBottle= av(attrP, "Chai nhựa");
+
+        AttributeValue avBag    = av(attrP, "Túi PE");
+        AttributeValue avSack   = av(attrP, "Bao PP");
+        AttributeValue avBottle = av(attrP, "Chai nhựa");
 
         // ── 8. SẢN PHẨM & BIẾN THỂ (LƯU Ý: KHÔNG CÒN SET GIÁ) ────────────
         Product p1  = prod("Thức Ăn Tôm CP 8012", "thuc-an-tom-cp-8012",
@@ -322,9 +363,12 @@ public class DataSeeder implements CommandLineRunner {
                 .gender(gender).dateOfBirth(dob).provider(AuthProvider.LOCAL).build());
     }
 
-    private Category cat(String name, Category parent, String desc) {
-        return Category.builder().name(name).parent(parent)
-                .description(desc).status(CategoryStatus.ACTIVE).build();
+    private Category cat(String name, Category parent) {
+        return Category.builder()
+                .name(name)
+                .parent(parent)
+                .status(CategoryStatus.ACTIVE)
+                .build();
     }
 
     private AttributeValue av(Attribute attr, String value) {
@@ -342,7 +386,6 @@ public class DataSeeder implements CommandLineRunner {
                         .createdAt(LocalDateTime.now()).build()));
     }
 
-    // 👉 ĐÃ SỬA: Xóa bỏ Price, ImportPrice, Weight
     private ProductVariant pv(Product product, String sku, String barcode, VariantStatus status) {
         return productVariantRepository.findBySku(sku).orElseGet(() ->
                 productVariantRepository.save(ProductVariant.builder()
@@ -354,7 +397,7 @@ public class DataSeeder implements CommandLineRunner {
                 SKUAttributeValue.builder().sku(variant).attribute(attr).attributeValue(attrVal).build());
     }
 
-    // 👉 ĐÃ SỬA: Thêm Giá Vốn và Mã Lô vào Inventory
+    // Thêm Giá Vốn và Mã Lô vào Inventory
     private void inv(ProductVariant variant, Branch branch, int qty, BigDecimal importPrice, String batchCode, int minStock, LocalDateTime now) {
         inventoryRepository.save(Inventory.builder()
                 .productVariant(variant).branch(branch).quantity(qty)

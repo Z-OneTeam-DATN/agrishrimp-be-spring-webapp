@@ -1,6 +1,8 @@
 package com.zone.agri.controller;
 
 import com.zone.agri.dto.admin.CategoryDTO;
+import com.zone.agri.entity.enums.CategoryStatus;
+import com.zone.agri.security.annotation.RequirePermission;
 import com.zone.agri.service.CategoryService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -20,20 +22,22 @@ import java.util.List;
 @RequestMapping("/api/categories")
 @RequiredArgsConstructor
 @Tag(name = "Product Categories", description = "Quản lý danh mục, nhóm hàng hóa và phân loại sản phẩm")
-@CrossOrigin(origins = "http://localhost:3000")
 public class CategoryController {
 
     private final CategoryService categoryService;
 
-    @Operation(summary = "Lấy tất cả danh mục", description = "Trả về danh sách danh mục sản phẩm dạng phẳng (flat list).")
+    @Operation(summary = "Lấy tất cả danh mục", description = "Có hỗ trợ tìm kiếm và lọc")
     @SecurityRequirement(name = "bearerAuth")
+    @RequirePermission("CATEGORY_VIEW")
     @GetMapping
-    public ResponseEntity<List<CategoryDTO>> getAll() {
-        return ResponseEntity.ok(categoryService.getAllCategories());
+    public ResponseEntity<List<CategoryDTO>> getAll(
+            @RequestParam(required = false) String keyword,
+            @RequestParam(required = false) CategoryStatus status) {
+        return ResponseEntity.ok(categoryService.getAllCategories(keyword, status));
     }
-
     @Operation(summary = "Xem chi tiết danh mục", description = "Lấy thông tin chi tiết của một nhóm hàng.")
     @SecurityRequirement(name = "bearerAuth")
+    @RequirePermission("CATEGORY_VIEW")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Tìm thấy danh mục",
                     content = @Content(schema = @Schema(implementation = CategoryDTO.class))),
@@ -48,6 +52,7 @@ public class CategoryController {
 
     @Operation(summary = "Tạo danh mục mới", description = "Thêm mới một nhóm hàng hóa vào hệ thống.")
     @SecurityRequirement(name = "bearerAuth")
+    @RequirePermission("CATEGORY_CREATE")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Tạo thành công",
                     content = @Content(schema = @Schema(implementation = CategoryDTO.class))),
@@ -60,6 +65,7 @@ public class CategoryController {
 
     @Operation(summary = "Cập nhật danh mục", description = "Chỉnh sửa tên, mô tả hoặc trạng thái danh mục.")
     @SecurityRequirement(name = "bearerAuth")
+    @RequirePermission("CATEGORY_UPDATE")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Cập nhật thành công",
                     content = @Content(schema = @Schema(implementation = CategoryDTO.class))),
@@ -75,6 +81,7 @@ public class CategoryController {
 
     @Operation(summary = "Xóa danh mục", description = "Xóa vĩnh viễn một danh mục.")
     @SecurityRequirement(name = "bearerAuth")
+    @RequirePermission("CATEGORY_DELETE")
     @ApiResponses({
             @ApiResponse(responseCode = "204", description = "Xóa thành công"),
             @ApiResponse(responseCode = "404", description = "Không tìm thấy danh mục")

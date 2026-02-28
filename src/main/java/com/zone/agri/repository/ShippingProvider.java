@@ -1,4 +1,4 @@
-package com.zone.agri.service;
+package com.zone.agri.repository;
 
 import com.zone.agri.dto.geo.ShippingFeeParams;
 import com.zone.agri.dto.geo.ShippingFeeResult;

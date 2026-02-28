@@ -18,7 +18,6 @@ import java.util.List;
 @RequestMapping("/api/public/brands")
 @RequiredArgsConstructor
 @Tag(name = "Public Brand APIs", description = "Các API công khai để lấy thông tin thương hiệu")
-@CrossOrigin(origins = "http://localhost:3000")
 @Slf4j
 public class PublicBrandController {
 

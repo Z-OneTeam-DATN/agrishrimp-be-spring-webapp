@@ -27,9 +27,6 @@ public class InventoryTransferService {
     private final ProductVariantRepository variantRepo;
     private final InventoryRepository inventoryRepo;
 
-    // ==========================================
-    // BƯỚC 1: KHỞI TẠO PHIẾU (PENDING - CHƯA TRỪ KHO)
-    // ==========================================
     @Transactional
     public InventoryTransfer createTransfer(TransferRequest req) {
         Branch fromBranch = branchRepo.findById(req.getFromBranchId())
@@ -76,7 +73,7 @@ public class InventoryTransferService {
             details.add(detail);
             totalQty += itemReq.getQuantity();
 
-            // 👉 LOGIC LÔ HÀNG ĐỘNG: Ước tính Tổng giá trị phiếu chuyển dựa trên Giá vốn của các lô FIFO ở Kho xuất
+            // LOGIC LÔ HÀNG ĐỘNG: Ước tính Tổng giá trị phiếu chuyển dựa trên Giá vốn của các lô FIFO ở Kho xuất
             List<Inventory> sourceBatches = inventoryRepo.findByProductVariantId(variant.getId()).stream()
                     .filter(inv -> inv.getBranch().getId().equals(fromBranch.getId()) && inv.getQuantity() != null && inv.getQuantity() > 0)
                     .sorted(Comparator.comparing(Inventory::getId)) // Sắp xếp FIFO
@@ -103,9 +100,6 @@ public class InventoryTransferService {
         return transferRepo.save(transfer);
     }
 
-    // ==========================================
-    // BƯỚC 2: DUYỆT XUẤT KHO (CHỈ ĐỔI TRẠNG THÁI)
-    // ==========================================
     @Transactional
     public void approveAndShip(Long transferId) {
         InventoryTransfer transfer = transferRepo.findById(transferId)
@@ -151,7 +145,7 @@ public class InventoryTransferService {
             detail.setQuantityReal(qtyReal);
             detail.setNote(note);
 
-            // 👉 LOGIC LÔ HÀNG ĐỘNG: Di chuyển Lô hàng từ Kho A sang Kho B
+            // LOGIC LÔ HÀNG ĐỘNG: Di chuyển Lô hàng từ Kho A sang Kho B
             if (qtyReal > 0) {
                 Long fromBranchId = transfer.getFromBranch().getId();
                 Long toBranchId = transfer.getToBranch().getId();
@@ -203,7 +197,7 @@ public class InventoryTransferService {
                                 .lastReceiptDate(LocalDateTime.now())
                                 .build();
                         inventoryRepo.save(newTargetBatch);
-                        targetBatches.add(newTargetBatch); // Thêm vào list để vòng lặp sau có thể tìm thấy nếu lặp lại
+                        targetBatches.add(newTargetBatch);
                     }
 
                     remainingToTransfer -= transferAmount;
@@ -225,8 +219,7 @@ public class InventoryTransferService {
     // HÀM LẤY CHI TIẾT
     // ==========================================
     public TransferDetailResponse getById(Long id) {
-        InventoryTransfer transfer = transferRepo.findById(id)
-                .orElseThrow(() -> new RuntimeException("Không tìm thấy phiếu"));
+        InventoryTransfer transfer = transferRepo.findById(id).orElseThrow();
         return convertToDetailResponse(transfer);
     }
 
@@ -236,60 +229,39 @@ public class InventoryTransferService {
     public Page<TransferResponse> getTransfers(String keyword, String statusStr, Pageable pageable) {
         InventoryTransferStatus status = null;
         if (statusStr != null && !statusStr.isEmpty() && !statusStr.equalsIgnoreCase("all")) {
-            try {
-                status = InventoryTransferStatus.valueOf(statusStr.toUpperCase());
-            } catch (Exception e) {
-                // Ignore invalid status
-            }
+            try { status = InventoryTransferStatus.valueOf(statusStr.toUpperCase()); } catch (Exception e) {}
         }
         return transferRepo.searchTransfers(keyword, status, pageable);
     }
 
-    // ==========================================
-    // CÁC HÀM NGHIỆP VỤ PHỤ
-    // ==========================================
     @Transactional
     public void cancelTransfer(Long id) {
-        InventoryTransfer transfer = transferRepo.findById(id)
-                .orElseThrow(() -> new RuntimeException("Không tìm thấy phiếu điều chuyển với ID: " + id));
-
+        InventoryTransfer transfer = transferRepo.findById(id).orElseThrow();
         if (transfer.getStatus() == InventoryTransferStatus.COMPLETED || transfer.getStatus() == InventoryTransferStatus.CANCELLED) {
             throw new RuntimeException("Chỉ có thể hủy phiếu đang ở trạng thái Chờ xuất hoặc Đang vận chuyển!");
         }
-
         transfer.setStatus(InventoryTransferStatus.CANCELLED);
         transferRepo.save(transfer);
     }
 
     @Transactional
     public void changeDestination(Long id, Long newBranchId) {
-        InventoryTransfer transfer = transferRepo.findById(id)
-                .orElseThrow(() -> new RuntimeException("Không tìm thấy phiếu điều chuyển"));
-
+        InventoryTransfer transfer = transferRepo.findById(id).orElseThrow();
         if (transfer.getStatus() == InventoryTransferStatus.COMPLETED || transfer.getStatus() == InventoryTransferStatus.CANCELLED) {
             throw new RuntimeException("Không thể đổi chi nhánh cho phiếu đã chốt hoặc đã hủy!");
         }
-
-        if (transfer.getFromBranch().getId().equals(newBranchId)) {
-            throw new RuntimeException("Chi nhánh nhận không được trùng với chi nhánh xuất!");
-        }
-
-        Branch newBranch = branchRepo.findById(newBranchId)
-                .orElseThrow(() -> new RuntimeException("Không tìm thấy chi nhánh mới trên hệ thống"));
-
+        if (transfer.getFromBranch().getId().equals(newBranchId)) throw new RuntimeException("Chi nhánh nhận trùng chi nhánh xuất!");
+        Branch newBranch = branchRepo.findById(newBranchId).orElseThrow();
         transfer.setToBranch(newBranch);
         transferRepo.save(transfer);
     }
 
     @Transactional
     public void deleteTransfer(Long id) {
-        InventoryTransfer transfer = transferRepo.findById(id)
-                .orElseThrow(() -> new RuntimeException("Không tìm thấy phiếu điều chuyển với ID: " + id));
-
+        InventoryTransfer transfer = transferRepo.findById(id).orElseThrow();
         if (transfer.getStatus() != InventoryTransferStatus.PENDING) {
             throw new RuntimeException("Chỉ có thể xóa hoàn toàn phiếu đang ở trạng thái Chờ xuất (PENDING)!");
         }
-
         transferRepo.delete(transfer);
     }
 

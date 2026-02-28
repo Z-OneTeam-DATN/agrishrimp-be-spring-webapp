@@ -20,7 +20,6 @@ import java.util.Map;
 @RequestMapping("/api/addresses")
 @RequiredArgsConstructor
 @Tag(name = "Address Book", description = "Quản lý sổ địa chỉ (Yêu cầu đăng nhập)")
-@CrossOrigin(origins = "http://localhost:3000")
 @SecurityRequirement(name = "bearerAuth")
 public class UserAddressController {
 

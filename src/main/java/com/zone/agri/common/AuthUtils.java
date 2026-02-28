@@ -18,10 +18,4 @@ public class AuthUtils {
     }
     return customUserDetail.getUserDetail();
   }
-
-  public static Long getCurrentUserId() {
-    return Optional.ofNullable(getUserDetail())
-        .map(UserDetail::getId)
-        .orElse(null);
-  }
 }

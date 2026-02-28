@@ -34,18 +34,17 @@ public class Inventory {
     @Column(name = "expiry_date")
     LocalDateTime expiryDate;
 
-    // --- CẢNH BÁO KHO ---
-    @Column(name = "min_stock")
-    Integer minStock;
-
     @Column(name = "shelf_location", length = 50)
     String shelfLocation;
 
-    @Column(name = "last_checked_at")
-    LocalDateTime lastCheckedAt;
-
     @Column(name = "last_receipt_date")
     LocalDateTime lastReceiptDate;
+
+    @Column(name = "min_stock")
+    Integer minStock;
+
+    @Column(name = "last_checked_at")
+    LocalDateTime lastCheckedAt;
 
     // --- KHÓA NGOẠI ---
     @ManyToOne(fetch = FetchType.LAZY)

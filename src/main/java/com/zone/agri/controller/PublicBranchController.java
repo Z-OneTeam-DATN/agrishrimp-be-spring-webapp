@@ -15,7 +15,6 @@ import java.util.List;
 @RequestMapping("/api/public/branches")
 @RequiredArgsConstructor
 @Tag(name = "Public Branch APIs", description = "Các API công khai để lấy thông tin chi nhánh và cửa hàng")
-@CrossOrigin(origins = "http://localhost:3000")
 public class PublicBranchController {
 
     private final BranchService branchService;

@@ -9,10 +9,7 @@ public class AttributeDTO {
     private Long id;
     private String name;
     private String code;
-    private String type;
-    private String description;
-    private AttributeStatus status;
 
-    /** Danh sách giá trị khả dụng (đọc/ghi từ cột value_list trong DB) */
+    private AttributeStatus status;
     private List<String> values;
 }

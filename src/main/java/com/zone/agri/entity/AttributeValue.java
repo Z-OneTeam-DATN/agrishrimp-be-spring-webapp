@@ -19,9 +19,9 @@ public class AttributeValue {
     Long id;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "attribute_id", nullable = false)
+    @JoinColumn(name = "attribute_id")
     Attribute attribute;
 
-    @Column(name = "value", nullable = false, length = 255)
+    @Column(name = "value", length = 255)
     String value;
 }

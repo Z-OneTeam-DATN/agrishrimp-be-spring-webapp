@@ -22,7 +22,6 @@ import java.util.Map;
 @RequestMapping("/api/cart")
 @RequiredArgsConstructor
 @Tag(name = "Cart Management", description = "Quản lý giỏ hàng của người dùng (Yêu cầu đăng nhập)")
-@CrossOrigin(origins = "http://localhost:3000")
 public class CartController {
 
     private final CartService cartService;

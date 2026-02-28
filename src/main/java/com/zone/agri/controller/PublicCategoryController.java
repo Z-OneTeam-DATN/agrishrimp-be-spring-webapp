@@ -17,7 +17,6 @@ import java.util.List;
 @RequestMapping("/api/public/categories") // Base path for public category APIs
 @RequiredArgsConstructor
 @Tag(name = "Public Category APIs", description = "Các API công khai để lấy thông tin danh mục")
-@CrossOrigin(origins = "http://localhost:3000")
 public class PublicCategoryController {
 
     private final CategoryService categoryService;

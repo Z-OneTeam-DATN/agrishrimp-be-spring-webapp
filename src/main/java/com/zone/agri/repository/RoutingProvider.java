@@ -1,4 +1,4 @@
-package com.zone.agri.service;
+package com.zone.agri.repository;
 
 import com.zone.agri.dto.geo.CoordinateDto;
 import com.zone.agri.dto.geo.RoutingResult;
