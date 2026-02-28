@@ -50,10 +50,13 @@ public class GlobalExceptionHandler {
         return buildResponse("Yêu cầu không hợp lệ: JSON sai định dạng hoặc chứa trường không tồn tại.", HttpStatus.BAD_REQUEST);
     }
 
-    // 5. Xử lý các lỗi tham số không hợp lệ khác (400)
     @ExceptionHandler(IllegalArgumentException.class)
     public ResponseEntity<Map<String, String>> handleIllegalArgumentException(IllegalArgumentException ex) {
-        return buildResponse(ex.getMessage(), HttpStatus.BAD_REQUEST);
+        Map<String, String> errorResponse = new HashMap<>();
+        // Đẩy message lỗi về Frontend
+        errorResponse.put("message", ex.getMessage());
+        // QUAN TRỌNG: Trả về 400 BAD_REQUEST, KHÔNG trả về 500
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(errorResponse);
     }
 
     // 6. CATCH-ALL: Bắt mọi lỗi 500 chưa được định nghĩa
