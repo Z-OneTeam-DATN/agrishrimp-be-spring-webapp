@@ -70,8 +70,8 @@ public class ApiExceptionHandler {
   @ExceptionHandler({SignInRequiredException.class})
   public ResponseEntity<ErrorDetail> handleSignInRequired(SignInRequiredException ex) {
     String message = ex.getMessage();
-    ErrorDetail errorVm = new ErrorDetail("403", "Authentication required", message);
-    return ResponseEntity.status(HttpStatus.FORBIDDEN).body(errorVm);
+    ErrorDetail errorVm = new ErrorDetail(HttpStatus.UNAUTHORIZED.toString(), "Authentication required", message);
+    return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(errorVm);
   }
 
   @ExceptionHandler({Forbidden.class})

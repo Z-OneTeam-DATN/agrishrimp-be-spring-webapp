@@ -22,11 +22,10 @@ public class WarehouseContext {
         String slug = (user.getRole() != null) ? user.getRole().getSlug().toUpperCase() : "USER";
 
         return switch (slug) {
-            // Thêm ADMIN vào đây
             case "ADMIN" -> null;
-            case "BRANCH_MANAGER" -> {
+            case "MANAGER", "BRANCH_MANAGER" -> {
                 Long bid = user.getBranchId();
-                if (bid == null) throw new Forbidden("BRANCH_MANAGER chưa được gán chi nhánh");
+                if (bid == null) throw new Forbidden("Quản lý chưa được gán chi nhánh");
                 yield bid;
             }
             default -> throw new Forbidden("Không có quyền truy cập kho");
@@ -47,6 +46,6 @@ public class WarehouseContext {
     public boolean isSuperAdmin() {
         UserDetail user = AuthUtils.getUserDetail();
         if (user == null || user.getRole() == null) return false;
-        return "ADMIN".equals(user.getRole().getSlug());
+        return "ADMIN".equalsIgnoreCase(user.getRole().getSlug());
     }
 }

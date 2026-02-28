@@ -13,14 +13,13 @@ public class CookieUtils {
     public static final String ACCESS_TOKEN_COOKIE_NAME = "accessToken";
     public static final String REFRESH_TOKEN_COOKIE_NAME = "refreshToken";
 
-    // ✅ LẤY ĐÚNG CONFIG TỪ application.yml
+
     @Value("${security.jwt.expiry-time-in-seconds}")
     private long accessExpirationSeconds;
 
     @Value("${security.jwt.refreshable-duration}")
     private long refreshExpirationSeconds;
 
-    // ✅ Thêm config cookie (có default để khỏi crash nếu thiếu)
     @Value("${app.cookie.secure:false}")
     private boolean isSecure;
 

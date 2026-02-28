@@ -134,7 +134,7 @@ public class JwtUtils {
     }
 
     public String extractBearerToken(String bearerToken) {
-        if (StringUtils.hasText(bearerToken) && bearerToken.startsWith(BEARER_PREFIX)) {
+        if (StringUtils.hasText(bearerToken) && bearerToken.regionMatches(true, 0, BEARER_PREFIX, 0, BEARER_PREFIX.length())) {
             return bearerToken.substring(7);
         }
         return null;

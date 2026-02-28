@@ -189,9 +189,10 @@ public class DataSeeder implements CommandLineRunner {
         ));
 
         Role managerRole = saveRole("MANAGER", "Quản lý chi nhánh & kho", false, Set.of(
-                aWspaceV,
+                aDashV, aWspaceV,
                 aRptSale, aRptInv, aRptFin,
                 aUserV, aUserC, aUserU, aUserD,
+                aBranchV,
                 aProdV,
                 aCatV,
                 aAttrV,
