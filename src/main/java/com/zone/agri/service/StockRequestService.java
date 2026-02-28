@@ -156,7 +156,7 @@ public class StockRequestService {
                             .branch(toBranch)
                             .productVariant(variant)
                             .quantity(0)
-                            .minStock(0)
+
                             .build());
 
             int branchNewBalance = branchInventory.getQuantity() + approvedQty;

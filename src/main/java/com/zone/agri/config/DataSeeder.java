@@ -679,7 +679,7 @@ public class DataSeeder implements CommandLineRunner {
         inventoryRepository.findByBranchAndProductVariant(branch, variant).orElseGet(() ->
             inventoryRepository.save(Inventory.builder()
                 .productVariant(variant).branch(branch).quantity(qty)
-                .minStock(minStock).lastCheckedAt(now).lastReceiptDate(now).build()));
+                .lastReceiptDate(now).build()));
     }
 
     private void nd(InventoryNote note, ProductVariant variant, int qty, BigDecimal price,
