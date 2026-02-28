@@ -77,4 +77,7 @@ public interface InventoryNoteRepository extends JpaRepository<InventoryNote, Lo
         ORDER BY in.createdAt DESC
     """)
     List<InventoryNote> findAllByBranchId(@Param("branchId") Long branchId);
+
+    // Lấy phiếu nhập của NCC, sắp xếp mới nhất lên đầu
+    List<InventoryNote> findBySupplierIdAndTypeOrderByCreatedAtDesc(Long supplierId, InventoryNoteType type);
 }

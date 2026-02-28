@@ -2,7 +2,6 @@ package com.zone.agri.dto.product;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import lombok.Data;
-import java.math.BigDecimal;
 import java.util.List;
 
 @Data
@@ -22,16 +21,9 @@ public class ProductRequest {
     public static class VariantDto {
         private String sku;
         private String barcode;
-        private BigDecimal costPrice;
-        private BigDecimal price;
-        private BigDecimal wholesalePrice;
-        private Integer initialStock;
-        private BigDecimal shippingWeight;
         private String image;
-        private String unit;
-        
-        /** Danh sách ID của các giá trị thuộc tính (Màu sắc, Dạng bào chế, Khối lượng, v.v.) */
+
+        /** Danh sách ID của các giá trị thuộc tính (Kích thước, Màu sắc, v.v.) */
         private List<Long> attributeValueIds;
     }
 }
-        

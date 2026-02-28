@@ -42,6 +42,7 @@ public class Inventory {
 
     @Column(name = "min_stock")
     Integer minStock;
+
     @Column(name = "last_checked_at")
     LocalDateTime lastCheckedAt;
 

@@ -15,17 +15,14 @@ import java.util.Optional;
 public interface SupplierRepository extends JpaRepository<Supplier, Long> {
 
     boolean existsByTaxCode(String taxCode);
-    boolean existsByCode(String code);
 
     @Query("SELECT s FROM Supplier s WHERE " +
             "(:keyword IS NULL OR LOWER(s.name) LIKE LOWER(CONCAT('%', :keyword, '%')) " +
             "OR s.taxCode LIKE CONCAT('%', :keyword, '%') " +
             "OR s.phone LIKE CONCAT('%', :keyword, '%')) " +
-            "AND (:categoryId IS NULL OR s.category.id = :categoryId) " +
             "AND (:status IS NULL OR s.status = :status)")
     Page<Supplier> searchSuppliers(
             @Param("keyword") String keyword,
-            @Param("categoryId") Long categoryId,
             @Param("status") SupplierStatus status,
             Pageable pageable);
 

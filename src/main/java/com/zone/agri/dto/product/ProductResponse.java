@@ -19,7 +19,10 @@ public class ProductResponse {
     private String brandName;
     private CategoryDTO category;
     private BrandResponse brand;
+
+    // Tồn kho động (tính tổng từ các kho/lô hàng)
     private Integer inventory;
+
     private List<String> imageUrls;
     private List<ProductVariantResponse> variants;
 }

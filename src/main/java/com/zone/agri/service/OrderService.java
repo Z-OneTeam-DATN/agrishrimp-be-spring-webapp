@@ -11,7 +11,6 @@ import com.zone.agri.entity.enums.PaymentStatus;
 import com.zone.agri.exception.BadRequestException;
 import com.zone.agri.exception.ConflictException;
 import com.zone.agri.exception.NotFoundException;
-import vn.payos.type.CheckoutResponseData;
 import com.zone.agri.repository.*;
 import com.zone.agri.service.BranchSearchService.BranchWithRealDistance;
 import com.zone.agri.service.InventoryAllocationService.AllocationResult;
@@ -20,6 +19,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.context.annotation.Lazy;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -28,7 +28,6 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
-import java.util.Comparator;
 
 @Service
 @RequiredArgsConstructor
@@ -49,6 +48,10 @@ public class OrderService {
     private final InventoryAllocationService allocationService;
     private final ShippingService shippingService;
     private final PayOSService payOSService;
+    private final SettingService settingService; // 👉 Bổ sung SettingService
+
+    @Lazy
+    private final CustomerService customerService;
 
     private final StringRedisTemplate redisTemplate;
     private final ObjectMapper objectMapper;
@@ -78,7 +81,6 @@ public class OrderService {
             throw new BadRequestException("Bạn không có quyền xem đơn hàng này!");
         }
 
-        // Đồng bộ trạng thái từ PayOS nếu vẫn là UNPAID
         if (PaymentMethod.PAYOS.equals(order.getPaymentMethod()) && PaymentStatus.UNPAID.equals(order.getPaymentStatus())) {
             if (payOSService.checkPaymentStatus(order)) {
                 order.setPaymentStatus(PaymentStatus.PAID);
@@ -105,7 +107,7 @@ public class OrderService {
             String searchLower = search.toLowerCase();
             orders = orders.stream()
                     .filter(o -> (o.getCode() != null && o.getCode().toLowerCase().contains(searchLower)) ||
-                                 (o.getUser() != null && o.getUser().getFullName() != null && o.getUser().getFullName().toLowerCase().contains(searchLower)))
+                            (o.getUser() != null && o.getUser().getFullName() != null && o.getUser().getFullName().toLowerCase().contains(searchLower)))
                     .collect(Collectors.toList());
         }
 
@@ -136,6 +138,10 @@ public class OrderService {
 
         order.setStatus(newStatus);
         orderRepository.save(order);
+
+        if (newStatus == OrderStatus.COMPLETED || newStatus == OrderStatus.CANCELLED || newStatus == OrderStatus.RETURNED) {
+            customerService.evaluateAndHandleCustomerReputation(order.getUser().getId());
+        }
     }
 
     private void validateStatusTransition(OrderStatus current, OrderStatus next) {
@@ -164,10 +170,6 @@ public class OrderService {
     // QUẢN LÝ ĐƠN HÀNG CHO CHI NHÁNH / KHO
     // ══════════════════════════════════════════════════════════════
 
-    /**
-     * Danh sách phần đơn được phân bổ về chi nhánh.
-     * Mỗi bản ghi = 1 SubOrder thuộc chi nhánh + thông tin đơn tổng.
-     */
     @Transactional(readOnly = true)
     public List<BranchOrderResponse> getBranchOrders(Long branchId, OrderStatus status, String search) {
         List<SubOrder> subOrders = (status != null)
@@ -181,14 +183,13 @@ public class OrderService {
                 Order o = s.getOrder();
                 return (o.getCode() != null && o.getCode().toLowerCase().contains(lc))
                         || (o.getUser() != null && o.getUser().getFullName() != null
-                                && o.getUser().getFullName().toLowerCase().contains(lc));
+                        && o.getUser().getFullName().toLowerCase().contains(lc));
             });
         }
 
         return stream.map(this::mapSubOrderToBranchOrderResponse).collect(Collectors.toList());
     }
 
-    /** Chi tiết phần đơn của chi nhánh theo orderId. */
     @Transactional(readOnly = true)
     public BranchOrderResponse getBranchOrderDetail(Long branchId, Long orderId) {
         SubOrder subOrder = subOrderRepository.findByOrderIdAndBranchId(orderId, branchId)
@@ -196,10 +197,6 @@ public class OrderService {
         return mapSubOrderToBranchOrderResponse(subOrder);
     }
 
-    /**
-     * Cập nhật trạng thái phần đơn của chi nhánh (SubOrder.status).
-     * Sau đó tự động đồng bộ trạng thái tổng (Order.status).
-     */
     @Transactional
     public void updateSubOrderStatus(Long branchId, Long orderId, OrderStatus newStatus) {
         SubOrder subOrder = subOrderRepository.findByOrderIdAndBranchId(orderId, branchId)
@@ -215,14 +212,9 @@ public class OrderService {
         subOrder.setStatus(newStatus);
         subOrderRepository.save(subOrder);
 
-        // Đồng bộ trạng thái tổng dựa trên tất cả SubOrders
         syncMasterOrderStatus(subOrder.getOrder());
     }
 
-    /**
-     * Đồng bộ Order.status từ trạng thái của tất cả SubOrders.
-     * Quy tắc: Order lấy trạng thái chậm nhất (bottleneck) trong các SubOrder còn hoạt động.
-     */
     private void syncMasterOrderStatus(Order order) {
         List<SubOrder> allSubs = subOrderRepository.findByOrderId(order.getId());
         if (allSubs.isEmpty()) return;
@@ -238,7 +230,6 @@ public class OrderService {
             newMasterStatus = OrderStatus.COMPLETED;
             order.setPaymentStatus(PaymentStatus.PAID);
         } else {
-            // Lấy trạng thái chậm nhất trong chuỗi xử lý
             newMasterStatus = activeSubs.stream()
                     .map(SubOrder::getStatus)
                     .min(Comparator.comparingInt(this::statusWeight))
@@ -247,9 +238,12 @@ public class OrderService {
 
         order.setStatus(newMasterStatus);
         orderRepository.save(order);
+
+        if (newMasterStatus == OrderStatus.COMPLETED || newMasterStatus == OrderStatus.CANCELLED || newMasterStatus == OrderStatus.RETURNED) {
+            customerService.evaluateAndHandleCustomerReputation(order.getUser().getId());
+        }
     }
 
-    /** Trọng số thứ tự trạng thái trong quy trình xử lý đơn. */
     private int statusWeight(OrderStatus s) {
         return switch (s) {
             case PENDING    -> 0;
@@ -294,10 +288,10 @@ public class OrderService {
 
     private OrderResponse mapToOrderResponse(Order order) {
         List<OrderItemResponse> itemResponses = new ArrayList<>();
-        
+
         if (order.getOrderItems() != null && !order.getOrderItems().isEmpty()) {
             itemResponses = order.getOrderItems().stream().map(this::mapItemToResponse).collect(Collectors.toList());
-        } 
+        }
         else if (order.getSubOrders() != null && !order.getSubOrders().isEmpty()) {
             itemResponses = order.getSubOrders().stream()
                     .filter(sub -> sub.getItems() != null)
@@ -388,7 +382,7 @@ public class OrderService {
     }
 
     // ══════════════════════════════════════════════════════════════
-    // PREPARE & CONFIRM LOGIC
+    // PREPARE & CONFIRM LOGIC (THUẬT TOÁN FIFO + LÔ HÀNG)
     // ══════════════════════════════════════════════════════════════
 
     public PrepareOrderResponse prepareOrder(Long userId, PrepareOrderRequest request) {
@@ -404,7 +398,9 @@ public class OrderService {
         if (nearestBranches.isEmpty()) throw new NotFoundException("Không có chi nhánh hoạt động");
 
         List<Long> branchIds = nearestBranches.stream().map(bwr -> bwr.branch().getId()).toList();
-        Map<Long, Map<Long, Integer>> inventoryMatrix = allocationService.buildInventoryMatrix(branchIds, variantIds);
+
+        // Cập nhật lấy Matrix theo cấu trúc Lô hàng (Batches)
+        Map<Long, Map<Long, List<Inventory>>> inventoryMatrix = allocationService.buildInventoryMatrix(branchIds, variantIds);
         AllocationResult allocation = allocationService.allocate(request.getCart(), variantMap, nearestBranches, inventoryMatrix);
 
         DeliveryInfo deliveryInfo = DeliveryInfo.builder()
@@ -442,14 +438,6 @@ public class OrderService {
         if (draft == null) throw new BadRequestException("Token hết hạn");
         if (!userId.equals(draft.getUserId())) throw new BadRequestException("Token không hợp lệ");
 
-        for (SubOrderDraftDto subDraft : draft.getSubOrders()) {
-            for (OrderItemDto item : subDraft.getItems()) {
-                Inventory inv = inventoryRepository.findForUpdate(subDraft.getBranchId(), item.getProductVariantId())
-                        .orElseThrow(() -> new ConflictException("Hết hàng"));
-                if (inv.getQuantity() < item.getQuantity()) throw new ConflictException("Không đủ hàng");
-            }
-        }
-
         User user = userRepository.findById(userId).orElseThrow(() -> new NotFoundException("User không tồn tại"));
         PaymentMethod paymentMethod = request.getPaymentMethod() != null ? request.getPaymentMethod() : PaymentMethod.COD;
 
@@ -461,6 +449,7 @@ public class OrderService {
         Order savedOrder = orderRepository.save(order);
 
         List<SubOrderSummaryDto> subOrderSummaries = new ArrayList<>();
+
         for (SubOrderDraftDto subDraft : draft.getSubOrders()) {
             Branch branch = branchRepository.findById(subDraft.getBranchId()).orElseThrow(() -> new NotFoundException("Branch không tồn tại"));
             SubOrder subOrder = SubOrder.builder().order(savedOrder).branch(branch).status(OrderStatus.PENDING)
@@ -469,13 +458,40 @@ public class OrderService {
             SubOrder savedSubOrder = subOrderRepository.save(subOrder);
 
             for (OrderItemDto item : subDraft.getItems()) {
-                ProductVariant variant = variantRepository.findById(item.getProductVariantId()).orElseThrow(() -> new NotFoundException("Sản phẩm không tồn tại"));
-                subOrderItemRepository.save(SubOrderItem.builder().subOrder(savedSubOrder).productVariant(variant).quantity(item.getQuantity()).unitPrice(item.getUnitPrice()).build());
-                Inventory inventory = inventoryRepository.findForUpdate(subDraft.getBranchId(), item.getProductVariantId()).get();
-                inventory.setQuantity(inventory.getQuantity() - item.getQuantity());
-                inventoryRepository.save(inventory);
+                ProductVariant variant = variantRepository.findById(item.getProductVariantId())
+                        .orElseThrow(() -> new NotFoundException("Sản phẩm không tồn tại"));
+
+                subOrderItemRepository.save(SubOrderItem.builder()
+                        .subOrder(savedSubOrder)
+                        .productVariant(variant)
+                        .quantity(item.getQuantity())
+                        .unitPrice(item.getUnitPrice())
+                        .build());
+
+                // 👉 LOGIC TRỪ KHO THEO LÔ (FIFO)
+                int remainingToDeduct = item.getQuantity();
+                List<Inventory> batches = inventoryRepository.findForUpdateFIFO(subDraft.getBranchId(), item.getProductVariantId());
+
+                for (Inventory batch : batches) {
+                    if (remainingToDeduct <= 0) break;
+                    int available = batch.getQuantity();
+                    if (available <= 0) continue;
+
+                    int deductAmount = Math.min(available, remainingToDeduct);
+                    batch.setQuantity(available - deductAmount);
+                    inventoryRepository.save(batch);
+                    remainingToDeduct -= deductAmount;
+                }
+
+                if (remainingToDeduct > 0) {
+                    throw new ConflictException("Lỗi đồng bộ: Kho chi nhánh không đủ số lượng cho sản phẩm " + item.getVariantName());
+                }
             }
-            subOrderSummaries.add(SubOrderSummaryDto.builder().subOrderId(savedSubOrder.getId()).branchId(branch.getId()).branchName(branch.getName()).status(OrderStatus.PENDING.name()).subtotal(subDraft.getSubtotal()).shippingFee(subDraft.getShippingFee()).estimatedDays(subDraft.getEstimatedDays()).carrier(subDraft.getCarrier()).build());
+
+            subOrderSummaries.add(SubOrderSummaryDto.builder()
+                    .subOrderId(savedSubOrder.getId()).branchId(branch.getId()).branchName(branch.getName())
+                    .status(OrderStatus.PENDING.name()).subtotal(subDraft.getSubtotal()).shippingFee(subDraft.getShippingFee())
+                    .estimatedDays(subDraft.getEstimatedDays()).carrier(subDraft.getCarrier()).build());
         }
 
         String checkoutUrl = null;
@@ -495,7 +511,9 @@ public class OrderService {
         draft.getSubOrders().stream().flatMap(s -> s.getItems().stream()).map(OrderItemDto::getProductVariantId).distinct()
                 .forEach(vId -> cartItemRepository.findByUserIdAndProductVariantId(userId, vId).ifPresent(cartItemRepository::delete));
 
-        return ConfirmOrderResponse.builder().orderId(savedOrder.getId()).orderCode(savedOrder.getCode()).status(OrderStatus.PENDING.name()).subOrders(subOrderSummaries).totalAmount(draft.getTotalAmount()).totalShippingFee(draft.getTotalShippingFee()).checkoutUrl(checkoutUrl).build();
+        return ConfirmOrderResponse.builder().orderId(savedOrder.getId()).orderCode(savedOrder.getCode())
+                .status(OrderStatus.PENDING.name()).subOrders(subOrderSummaries).totalAmount(draft.getTotalAmount())
+                .totalShippingFee(draft.getTotalShippingFee()).checkoutUrl(checkoutUrl).build();
     }
 
     // ══════════════════════════════════════════════════════════════
@@ -528,18 +546,50 @@ public class OrderService {
 
         Order order = Order.builder().code("ORD" + System.currentTimeMillis()).user(user).branch(selectedBranch)
                 .shippingAddress(req.getShippingAddress()).status(OrderStatus.PENDING).paymentMethod(PaymentMethod.COD)
-                .paymentStatus(PaymentStatus.UNPAID).createdAt(LocalDateTime.now()).totalAmount(BigDecimal.ZERO).discountAmount(BigDecimal.ZERO).finalAmount(BigDecimal.ZERO).build();
+                .paymentStatus(PaymentStatus.UNPAID).createdAt(LocalDateTime.now()).totalAmount(BigDecimal.ZERO)
+                .discountAmount(BigDecimal.ZERO).finalAmount(BigDecimal.ZERO).build();
         Order savedOrder = orderRepository.save(order);
 
         BigDecimal totalAmount = BigDecimal.ZERO;
+
         for (CheckoutItemRequest itemReq : req.getItems()) {
-            ProductVariant variant = variantRepository.findById(itemReq.getVariantId()).orElseThrow(() -> new NotFoundException("Sản phẩm không tồn tại"));
-            Inventory inventory = inventoryRepository.findByBranchIdAndProductVariantId(selectedBranch.getId(), variant.getId()).get();
-            inventory.setQuantity(inventory.getQuantity() - itemReq.getQuantity());
-            inventoryRepository.save(inventory);
-            orderItemRepository.save(OrderItem.builder().order(savedOrder).productVariant(variant).quantity(itemReq.getQuantity()).price(variant.getPrice()).build());
-            totalAmount = totalAmount.add(variant.getPrice().multiply(new BigDecimal(itemReq.getQuantity())));
+            ProductVariant variant = variantRepository.findById(itemReq.getVariantId())
+                    .orElseThrow(() -> new NotFoundException("Sản phẩm không tồn tại"));
+
+            // 👉 LOGIC TRỪ KHO THEO LÔ (FIFO) CHO HÀM PLACE_ORDER
+            int remainingToDeduct = itemReq.getQuantity();
+            List<Inventory> batches = inventoryRepository.findForUpdateFIFO(selectedBranch.getId(), variant.getId());
+
+            for (Inventory batch : batches) {
+                if (remainingToDeduct <= 0) break;
+                int available = batch.getQuantity();
+                if (available <= 0) continue;
+
+                int deduct = Math.min(available, remainingToDeduct);
+                batch.setQuantity(available - deduct);
+                inventoryRepository.save(batch);
+                remainingToDeduct -= deduct;
+
+                // Tính giá bán lô này
+                BigDecimal importPrice = batch.getImportPrice() != null ? batch.getImportPrice() : BigDecimal.ZERO;
+                // 👉 TÍNH GIÁ ĐỘNG TỪ CẤU HÌNH HỆ THỐNG
+                BigDecimal sellingPrice = importPrice.multiply(settingService.getProfitMultiplier());
+
+                orderItemRepository.save(OrderItem.builder()
+                        .order(savedOrder)
+                        .productVariant(variant)
+                        .quantity(deduct)
+                        .price(sellingPrice) // Lưu giá của lô này
+                        .build());
+
+                totalAmount = totalAmount.add(sellingPrice.multiply(new BigDecimal(deduct)));
+            }
+
+            if (remainingToDeduct > 0) {
+                throw new ConflictException("Hết hàng trong lúc thanh toán cho sản phẩm: " + variant.getSku());
+            }
         }
+
         savedOrder.setTotalAmount(totalAmount);
         savedOrder.setFinalAmount(totalAmount.add(new BigDecimal("15000")));
         orderRepository.save(savedOrder);
@@ -547,6 +597,12 @@ public class OrderService {
     }
 
     private Branch findBranchWithEnoughStock(List<CheckoutItemRequest> itemsToBuy) {
-        return branchRepository.findAll().stream().filter(branch -> itemsToBuy.stream().allMatch(item -> inventoryRepository.findByBranchIdAndProductVariantId(branch.getId(), item.getVariantId()).map(inv -> inv.getQuantity() >= item.getQuantity()).orElse(false))).findFirst().orElse(null);
+        return branchRepository.findAll().stream().filter(branch -> itemsToBuy.stream().allMatch(item -> {
+            // Tổng tồn kho của tất cả các lô hàng tại chi nhánh này
+            int totalStock = inventoryRepository.findByProductVariantId(item.getVariantId()).stream()
+                    .filter(inv -> inv.getBranch().getId().equals(branch.getId()))
+                    .mapToInt(Inventory::getQuantity).sum();
+            return totalStock >= item.getQuantity();
+        })).findFirst().orElse(null);
     }
 }

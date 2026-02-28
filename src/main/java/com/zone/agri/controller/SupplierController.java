@@ -30,7 +30,7 @@ public class SupplierController {
 
     private final SupplierService supplierService;
 
-    @Operation(summary = "Thêm nhà cung cấp mới", description = "Tạo hồ sơ nhà cung cấp với đầy đủ thông tin pháp lý, liên hệ và tài chính.")
+    @Operation(summary = "Thêm nhà cung cấp mới", description = "Tạo hồ sơ nhà cung cấp với đầy đủ thông tin pháp lý và liên hệ.")
     @SecurityRequirement(name = "bearerAuth")
     @RequirePermission("SUPPLIER_CREATE")
     @ApiResponses({
@@ -42,7 +42,7 @@ public class SupplierController {
         return ResponseEntity.ok(supplierService.createSupplier(request));
     }
 
-    @Operation(summary = "Danh sách nhà cung cấp", description = "Tìm kiếm, lọc theo trạng thái/danh mục và phân trang danh sách nhà cung cấp.")
+    @Operation(summary = "Danh sách nhà cung cấp", description = "Tìm kiếm, lọc theo trạng thái và phân trang danh sách nhà cung cấp.")
     @SecurityRequirement(name = "bearerAuth")
     @RequirePermission("SUPPLIER_VIEW")
     @GetMapping
@@ -50,16 +50,14 @@ public class SupplierController {
             @Parameter(description = "Từ khóa tìm kiếm (Tên, MST, SĐT)", example = "Công ty TNHH A")
             @RequestParam(required = false) String keyword,
 
-            @Parameter(description = "Lọc theo nhóm hàng cung cấp", example = "THUC_AN")
-            @RequestParam(required = false) String category,
-
             @Parameter(description = "Trạng thái hoạt động", example = "ACTIVE")
             @RequestParam(required = false) String status,
 
             @Parameter(hidden = true)
             @PageableDefault(size = 10, sort = "createdAt", direction = Sort.Direction.DESC) Pageable pageable
     ) {
-        return ResponseEntity.ok(supplierService.getAllSuppliers(keyword, category, status, pageable));
+        // Đã xóa tham số category ở đây
+        return ResponseEntity.ok(supplierService.getAllSuppliers(keyword, status, pageable));
     }
 
     @Operation(summary = "Chi tiết nhà cung cấp", description = "Xem hồ sơ chi tiết của một đối tác.")
@@ -101,5 +99,12 @@ public class SupplierController {
             @PathVariable Long id) {
         supplierService.deleteSupplier(id);
         return ResponseEntity.ok(new MessageResponse("Đã xóa nhà cung cấp thành công!"));
+    }
+
+    @Operation(summary = "Lịch sử nhập hàng", description = "Lấy danh sách các phiếu nhập hàng từ nhà cung cấp này.")
+    @SecurityRequirement(name = "bearerAuth")
+    @GetMapping("/{id}/imports")
+    public ResponseEntity<?> getSupplierImports(@PathVariable Long id) {
+        return ResponseEntity.ok(supplierService.getImportHistory(id));
     }
 }

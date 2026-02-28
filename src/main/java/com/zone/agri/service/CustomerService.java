@@ -10,6 +10,7 @@ import com.zone.agri.entity.enums.AuthProvider;
 import com.zone.agri.entity.enums.CustomerStatus;
 import com.zone.agri.entity.enums.UserStatus;
 import com.zone.agri.repository.*;
+import lombok.extern.slf4j.Slf4j;
 import lombok.RequiredArgsConstructor;
 import org.apache.commons.lang3.RandomStringUtils;
 import org.springframework.data.domain.Page;
@@ -24,6 +25,7 @@ import java.util.List;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class CustomerService {
 
     private final CustomerRepository customerRepository;
@@ -227,6 +229,47 @@ public class CustomerService {
         dto.setReputationScore(Math.round(reputationScore * 100.0) / 100.0);
 
         return dto;
+    }
+
+    // Hàm này để gọi sau khi cập nhật trạng thái đơn hàng (Hủy, Hoàn trả, Thành công)
+    @Transactional
+    public void evaluateAndHandleCustomerReputation(Long userId) {
+        User user = userRepository.findById(userId).orElse(null);
+        if (user == null || user.getRole().getSlug().equals("ADMIN")) return;
+
+        Long totalOrders = orderRepository.countTotalOrdersByUserId(userId);
+        Long completedOrders = orderRepository.countCompletedOrdersByUserId(userId);
+
+        if (totalOrders == null || totalOrders < 3) {
+            // Chưa đủ dữ liệu (ít hơn 3 đơn) thì khoan hãy phạt
+            return;
+        }
+
+        double reputationScore = (double) (completedOrders != null ? completedOrders : 0) / totalOrders * 100;
+
+        // Xử lý theo Rule
+        if (reputationScore < 30.0 && user.getStatus() == UserStatus.ACTIVE) {
+            // 1. Tự động Khóa
+            user.setStatus(UserStatus.INACTIVE);
+            userRepository.save(user);
+
+            // Gửi email thông báo khóa
+            try {
+                emailService.sendAccountLockedEmail(user.getEmail(), user.getFullName(), reputationScore);
+                log.info("Đã tự động KHÓA tài khoản user_id {} do uy tín quá thấp ({}%)", userId, reputationScore);
+            } catch (Exception e) {
+                log.error("Lỗi gửi mail khóa TK: {}", e.getMessage());
+            }
+
+        } else if (reputationScore < 50.0 && reputationScore >= 30.0) {
+            // 2. Cảnh cáo (Chỉ gửi mail, không khóa)
+            try {
+                emailService.sendWarningEmail(user.getEmail(), user.getFullName(), reputationScore);
+                log.info("Đã gửi cảnh báo tài khoản user_id {} do uy tín thấp ({}%)", userId, reputationScore);
+            } catch (Exception e) {
+                log.error("Lỗi gửi mail cảnh báo: {}", e.getMessage());
+            }
+        }
     }
 
     // Hàm map dữ liệu

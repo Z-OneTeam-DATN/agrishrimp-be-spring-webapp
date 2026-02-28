@@ -1,9 +1,8 @@
 package com.zone.agri.dto.product;
 
-import jakarta.validation.Valid;
-import jakarta.validation.constraints.*;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
 import lombok.Data;
-import java.math.BigDecimal;
 import java.util.List;
 
 @Data
@@ -16,30 +15,7 @@ public class VariantRequest {
     @Size(max = 50, message = "Mã vạch không được vượt quá 50 ký tự")
     private String barcode;
 
-    @NotNull(message = "Giá vốn không được để trống")
-    @DecimalMin(value = "0", message = "Giá vốn phải >= 0")
-    private BigDecimal costPrice;
-
-    @NotNull(message = "Giá bán lẻ không được để trống")
-    @DecimalMin(value = "0", message = "Giá bán lẻ phải >= 0")
-    private BigDecimal price;
-
-    @DecimalMin(value = "0", message = "Giá bán sỉ phải >= 0")
-    private BigDecimal wholesalePrice;
-
-    @Min(value = 0, message = "Tồn kho khởi tạo phải >= 0")
-    private Integer initialStock;
-
-    @DecimalMin(value = "0", message = "Trọng lượng vận chuyển phải >= 0")
-    private BigDecimal shippingWeight;
-
-    @Size(max = 50, message = "Đơn vị không được vượt quá 50 ký tự")
-    private String unit;
-
-    /** Danh sách ID của các giá trị thuộc tính (Màu sắc, Dạng bào chế, Khối lượng, v.v.) */
+    /** Danh sách ID của các giá trị thuộc tính (Phân loại) */
     private List<Long> attributeValueIds;
 
-    /** Bảng quy đổi đơn vị cho biến thể này */
-    @Valid
-    private List<UnitConversionRequest> unitConversions;
 }

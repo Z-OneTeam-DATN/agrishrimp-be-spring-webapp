@@ -10,16 +10,12 @@ import com.zone.agri.repository.*;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
-import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.web.server.ResponseStatusException;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.stream.Collectors;
 
 @Service
@@ -77,10 +73,24 @@ public class InventoryTransferService {
             details.add(detail);
             totalQty += itemReq.getQuantity();
 
-            if (variant.getPrice() != null) {
-                BigDecimal lineTotal = variant.getPrice().multiply(new BigDecimal(itemReq.getQuantity()));
-                totalValue = totalValue.add(lineTotal);
+            // LOGIC LÔ HÀNG ĐỘNG: Ước tính Tổng giá trị phiếu chuyển dựa trên Giá vốn của các lô FIFO ở Kho xuất
+            List<Inventory> sourceBatches = inventoryRepo.findByProductVariantId(variant.getId()).stream()
+                    .filter(inv -> inv.getBranch().getId().equals(fromBranch.getId()) && inv.getQuantity() != null && inv.getQuantity() > 0)
+                    .sorted(Comparator.comparing(Inventory::getId)) // Sắp xếp FIFO
+                    .collect(Collectors.toList());
+
+            int reqQty = itemReq.getQuantity();
+            BigDecimal itemTotalValue = BigDecimal.ZERO;
+
+            for (Inventory batch : sourceBatches) {
+                if (reqQty <= 0) break;
+                int take = Math.min(reqQty, batch.getQuantity());
+                BigDecimal importPrice = batch.getImportPrice() != null ? batch.getImportPrice() : BigDecimal.ZERO;
+                itemTotalValue = itemTotalValue.add(importPrice.multiply(BigDecimal.valueOf(take)));
+                reqQty -= take;
             }
+
+            totalValue = totalValue.add(itemTotalValue);
         }
 
         transfer.setDetails(details);
@@ -103,6 +113,9 @@ public class InventoryTransferService {
         transferRepo.save(transfer);
     }
 
+    // ==========================================
+    // BƯỚC 3: NHẬN HÀNG (TRỪ KHO XUẤT & CỘNG KHO NHẬP THEO LÔ FIFO)
+    // ==========================================
     @Transactional
     public void receiveTransfer(Long id, List<Map<String, Object>> receivedItems) {
         InventoryTransfer transfer = transferRepo.findById(id)
@@ -122,7 +135,7 @@ public class InventoryTransferService {
         for (Map<String, Object> itemData : receivedItems) {
             Long variantId = ((Number) itemData.get("variantId")).longValue();
             Integer qtyReal = ((Number) itemData.get("quantityReal")).intValue();
-            String note = itemData.get( "note") != null ? itemData.get("note").toString() : "";
+            String note = itemData.get("note") != null ? itemData.get("note").toString() : "";
 
             InventoryTransferDetail detail = detailMap.get(variantId);
             if (detail == null) {
@@ -132,12 +145,68 @@ public class InventoryTransferService {
             detail.setQuantityReal(qtyReal);
             detail.setNote(note);
 
+            // LOGIC LÔ HÀNG ĐỘNG: Di chuyển Lô hàng từ Kho A sang Kho B
             if (qtyReal > 0) {
                 Long fromBranchId = transfer.getFromBranch().getId();
                 Long toBranchId = transfer.getToBranch().getId();
 
-                updateInventoryQuantity(fromBranchId, variantId, -qtyReal);
-                updateInventoryQuantity(toBranchId, variantId, qtyReal);
+                int remainingToTransfer = qtyReal;
+
+                // 1. Lấy danh sách Lô hàng đang có ở KHO XUẤT (FIFO) và Khóa (Lock) lại
+                List<Inventory> sourceBatches = inventoryRepo.findForUpdateFIFO(fromBranchId, variantId);
+
+                // 2. Lấy danh sách Lô hàng hiện có ở KHO NHẬN để so khớp
+                List<Inventory> targetBatches = inventoryRepo.findByProductVariantId(variantId).stream()
+                        .filter(inv -> inv.getBranch().getId().equals(toBranchId))
+                        .collect(Collectors.toList());
+
+                for (Inventory sBatch : sourceBatches) {
+                    if (remainingToTransfer <= 0) break;
+                    int available = sBatch.getQuantity();
+                    if (available <= 0) continue;
+
+                    int transferAmount = Math.min(available, remainingToTransfer);
+
+                    // A. TRỪ TỒN KHO XUẤT
+                    sBatch.setQuantity(available - transferAmount);
+                    inventoryRepo.save(sBatch);
+
+                    // B. CỘNG VÀO KHO NHẬN (Mang theo đúng BatchCode và ImportPrice)
+                    Optional<Inventory> existingTargetBatch = targetBatches.stream()
+                            .filter(inv -> Objects.equals(inv.getBatchNumber(), sBatch.getBatchNumber()) &&
+                                    (inv.getImportPrice() != null && sBatch.getImportPrice() != null &&
+                                            inv.getImportPrice().compareTo(sBatch.getImportPrice()) == 0))
+                            .findFirst();
+
+                    if (existingTargetBatch.isPresent()) {
+                        // Nếu kho nhận đã có lô này -> Cộng dồn số lượng
+                        Inventory tBatch = existingTargetBatch.get();
+                        tBatch.setQuantity(tBatch.getQuantity() + transferAmount);
+                        tBatch.setLastReceiptDate(LocalDateTime.now());
+                        inventoryRepo.save(tBatch);
+                    } else {
+                        // Nếu kho nhận chưa từng có lô này -> Tạo dòng Inventory mới
+                        Inventory newTargetBatch = Inventory.builder()
+                                .branch(transfer.getToBranch())
+                                .productVariant(detail.getProductVariant())
+                                .quantity(transferAmount)
+                                .importPrice(sBatch.getImportPrice())
+                                .batchNumber(sBatch.getBatchNumber())
+                                .minStock(0)
+                                .lastCheckedAt(LocalDateTime.now())
+                                .lastReceiptDate(LocalDateTime.now())
+                                .build();
+                        inventoryRepo.save(newTargetBatch);
+                        targetBatches.add(newTargetBatch);
+                    }
+
+                    remainingToTransfer -= transferAmount;
+                }
+
+                if (remainingToTransfer > 0) {
+                    throw new RuntimeException("Lỗi đồng bộ: Kho xuất (" + transfer.getFromBranch().getName() +
+                            ") không đủ số lượng Lô hàng cho sản phẩm ID " + variantId);
+                }
             }
         }
 
@@ -146,11 +215,17 @@ public class InventoryTransferService {
         transferRepo.flush();
     }
 
+    // ==========================================
+    // HÀM LẤY CHI TIẾT
+    // ==========================================
     public TransferDetailResponse getById(Long id) {
         InventoryTransfer transfer = transferRepo.findById(id).orElseThrow();
         return convertToDetailResponse(transfer);
     }
 
+    // ==========================================
+    // HÀM LẤY DANH SÁCH
+    // ==========================================
     public Page<TransferResponse> getTransfers(String keyword, String statusStr, Pageable pageable) {
         InventoryTransferStatus status = null;
         if (statusStr != null && !statusStr.isEmpty() && !statusStr.equalsIgnoreCase("all")) {
@@ -191,43 +266,24 @@ public class InventoryTransferService {
     }
 
     // ==========================================
-    // LOGIC ĐỒNG BỘ: ÁP DỤNG LÔ HÀNG VÀ FIFO
+    // HÀM CONVERT DTO (PRIVATE)
     // ==========================================
-    private void updateInventoryQuantity(Long branchId, Long variantId, Integer quantityChange) {
-        Branch branch = branchRepo.findById(branchId).orElseThrow();
-        ProductVariant variant = variantRepo.findById(variantId).orElseThrow();
-
-        if (quantityChange < 0) {
-            // XUẤT: Áp dụng thuật toán trừ kho FIFO
-            List<Inventory> batches = inventoryRepo.findAvailableBatchesForVariant(branchId, variantId);
-            int remaining = -quantityChange;
-            for (Inventory batch : batches) {
-                if (remaining <= 0) break;
-                int deduct = Math.min(batch.getQuantity(), remaining);
-                batch.setQuantity(batch.getQuantity() - deduct);
-                inventoryRepo.save(batch);
-                remaining -= deduct;
-            }
-            if (remaining > 0) {
-                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Kho " + branch.getName() + " không đủ số lượng để xuất!");
-            }
-        } else if (quantityChange > 0) {
-            // NHẬP: Vì không chỉ định lô trên UI, gán vào lô mặc định tên là TRANSFER
-            Inventory inventory = inventoryRepo.findExactBatch(branch, variant, "TRANSFER", BigDecimal.ZERO)
-                    .orElseGet(() -> {
-                        Inventory newInv = new Inventory();
-                        newInv.setBranch(branch);
-                        newInv.setProductVariant(variant);
-                        newInv.setBatchNumber("TRANSFER");
-                        newInv.setImportPrice(BigDecimal.ZERO);
-                        newInv.setQuantity(0);
-                        return newInv;
-                    });
-
-            inventory.setQuantity(inventory.getQuantity() + quantityChange);
-            inventory.setLastReceiptDate(LocalDateTime.now());
-            inventoryRepo.save(inventory);
-        }
+    private TransferResponse convertToResponse(InventoryTransfer t) {
+        return new TransferResponse(
+                t.getId(),
+                t.getTransferCode(),
+                t.getStatus(),
+                t.getCreatedAt(),
+                t.getTransferDate(),
+                t.getDeadline(),
+                t.getFromBranch() != null ? t.getFromBranch().getName() : "N/A",
+                t.getToBranch() != null ? t.getToBranch().getName() : "N/A",
+                t.getTransporter(),
+                t.getPriority(),
+                t.getTotalQuantity(),
+                t.getDetails() != null ? t.getDetails().size() : 0,
+                t.getTotalValue()
+        );
     }
 
     private TransferDetailResponse convertToDetailResponse(InventoryTransfer t) {
