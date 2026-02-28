@@ -212,20 +212,20 @@ public class DataSeeder implements CommandLineRunner {
         User user2  = saveUser("Trần Thị Cua",      "user2@gmail.com",      "0911000002", "123456", userRole,     null,    Gender.FEMALE, LocalDate.of(1990,  9, 25));
         User user3  = saveUser("Lê Minh Nuôi",      "user3@gmail.com",      "0911000003", "123456", userRole,     null,    Gender.MALE,   LocalDate.of(1995,  2, 18));
 
-        // ── 5. DANH MỤC ──────────────────────────────────────────────────
-        Category catFeed   = categoryRepository.save(cat("Thức Ăn Thủy Sản",         null,      "Thức ăn công nghiệp cho các loài thủy sản nuôi trồng"));
-        Category catChem   = categoryRepository.save(cat("Thuốc & Chế Phẩm Sinh Học", null,      "Thuốc phòng trị bệnh và chế phẩm vi sinh xử lý ao nuôi"));
-        Category catMine   = categoryRepository.save(cat("Khoáng Chất & Dinh Dưỡng",  null,      "Khoáng, vitamin, enzyme bổ sung cho tôm cá"));
-        Category catEquip  = categoryRepository.save(cat("Dụng Cụ & Trang Thiết Bị",  null,      "Thiết bị đo lường và dụng cụ ao nuôi"));
-        Category catSF     = categoryRepository.save(cat("Thức Ăn Tôm",               catFeed,   "Thức ăn chuyên dụng cho tôm thẻ chân trắng và tôm sú"));
-        Category catFF     = categoryRepository.save(cat("Thức Ăn Cá",                catFeed,   "Thức ăn viên nổi/chìm cho cá tra, cá rô phi"));
-        Category catPro    = categoryRepository.save(cat("Chế Phẩm Vi Sinh",           catChem,   "Vi khuẩn có lợi làm sạch đáy ao, giảm khí độc"));
-        Category catMed    = categoryRepository.save(cat("Thuốc Phòng Trị Bệnh",      catChem,   "Thuốc kháng sinh, sát khuẩn, phòng bệnh cho tôm cá"));
-        Category catMin    = categoryRepository.save(cat("Khoáng Chất",               catMine,   "Khoáng đa vi lượng Ca, Mg, K, Na cho tôm lột xác"));
-        Category catVit    = categoryRepository.save(cat("Vitamin & Enzyme",           catMine,   "Vitamin tổng hợp và enzyme hỗ trợ tiêu hóa"));
-        Category catMeas   = categoryRepository.save(cat("Dụng Cụ Đo Lường",          catEquip,  "Máy đo pH, độ mặn, oxy hòa tan, nhiệt độ"));
-        Category catPondE  = categoryRepository.save(cat("Thiết Bị Ao Nuôi",          catEquip,  "Máy bơm, quạt nước, lưới che, vật tư ao nuôi"));
+        // ── 5. DANH MỤC (Đã bỏ tham số description) ──────────────────────────
+        Category catFeed   = categoryRepository.save(cat("Thức Ăn Thủy Sản",         null));
+        Category catChem   = categoryRepository.save(cat("Thuốc & Chế Phẩm Sinh Học", null));
+        Category catMine   = categoryRepository.save(cat("Khoáng Chất & Dinh Dưỡng",  null));
+        Category catEquip  = categoryRepository.save(cat("Dụng Cụ & Trang Thiết Bị",  null));
 
+        Category catSF     = categoryRepository.save(cat("Thức Ăn Tôm",               catFeed));
+        Category catFF     = categoryRepository.save(cat("Thức Ăn Cá",                catFeed));
+        Category catPro    = categoryRepository.save(cat("Chế Phẩm Vi Sinh",           catChem));
+        Category catMed    = categoryRepository.save(cat("Thuốc Phòng Trị Bệnh",      catChem));
+        Category catMin    = categoryRepository.save(cat("Khoáng Chất",               catMine));
+        Category catVit    = categoryRepository.save(cat("Vitamin & Enzyme",           catMine));
+        Category catMeas   = categoryRepository.save(cat("Dụng Cụ Đo Lường",          catEquip));
+        Category catPondE  = categoryRepository.save(cat("Thiết Bị Ao Nuôi",          catEquip));
         // ── 6. THƯƠNG HIỆU ───────────────────────────────────────────────
         Brand bCP      = brandRepository.save(Brand.builder().name("CP Vietnam")   .status(BrandStatus.ACTIVE).build());
         Brand bTomboy  = brandRepository.save(Brand.builder().name("Tomboy Feed")  .status(BrandStatus.ACTIVE).build());
@@ -234,18 +234,26 @@ public class DataSeeder implements CommandLineRunner {
         Brand bGN      = brandRepository.save(Brand.builder().name("Green Nature") .status(BrandStatus.ACTIVE).build());
 
         // ── 7. THUỘC TÍNH & GIÁ TRỊ ──────────────────────────────────────
+        // Chỉ tạo thông tin chung (vỏ) của thuộc tính
         Attribute attrW = attributeRepository.save(Attribute.builder()
-            .name("Trọng Lượng").code("WEIGHT").type(AttributeType.SELECT)
-            .valueList("250g,500g,1kg,5kg,10kg,25kg").status(AttributeStatus.ACTIVE).build());
-        Attribute attrP = attributeRepository.save(Attribute.builder()
-            .name("Quy Cách Đóng Gói").code("PACKAGING").type(AttributeType.SELECT)
-            .valueList("Túi PE,Thùng carton,Bao PP,Chai nhựa").status(AttributeStatus.ACTIVE).build());
+                .name("Trọng Lượng")
+                .code("TRONG_LUONG")
+                .status(AttributeStatus.ACTIVE)
+                .build());
 
+        Attribute attrP = attributeRepository.save(Attribute.builder()
+                .name("Quy Cách Đóng Gói")
+                .code("QUY_CACH_DONG_GOI")
+                .status(AttributeStatus.ACTIVE)
+                .build());
+
+        // Tạo và lưu các giá trị chi tiết vào bảng attribute_values thông qua hàm av()
         AttributeValue av500g  = av(attrW, "500g");
         AttributeValue av1kg   = av(attrW, "1kg");
         AttributeValue av5kg   = av(attrW, "5kg");
         AttributeValue av10kg  = av(attrW, "10kg");
         AttributeValue av25kg  = av(attrW, "25kg");
+
         AttributeValue avBag   = av(attrP, "Túi PE");
         AttributeValue avSack  = av(attrP, "Bao PP");
         AttributeValue avBottle= av(attrP, "Chai nhựa");
@@ -629,9 +637,12 @@ public class DataSeeder implements CommandLineRunner {
             .gender(gender).dateOfBirth(dob).provider(AuthProvider.LOCAL).build());
     }
 
-    private Category cat(String name, Category parent, String desc) {
-        return Category.builder().name(name).parent(parent)
-            .description(desc).status(CategoryStatus.ACTIVE).build();
+    private Category cat(String name, Category parent) {
+        return Category.builder()
+                .name(name)
+                .parent(parent)
+                .status(CategoryStatus.ACTIVE)
+                .build();
     }
 
     private AttributeValue av(Attribute attr, String value) {

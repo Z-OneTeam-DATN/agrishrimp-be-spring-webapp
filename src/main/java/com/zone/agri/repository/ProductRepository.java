@@ -142,5 +142,14 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
             """)
     List<Product> findPublicByIds(@Param("ids") List<Long> ids);
 
+    // Đếm số lượng sản phẩm trực tiếp của 1 danh mục
+    long countByCategoryId(Long categoryId);
+
+    // Phương thức gây lỗi của bạn đây: Cập nhật trạng thái INACTIVE cho tất cả SP thuộc Category ID
+    @Modifying
+    @Query("UPDATE Product p SET p.status = 'INACTIVE' WHERE p.category.id = :categoryId")
+    void deactivateByCategoryId(@Param("categoryId") Long categoryId);
+
+    // Kiểm tra xem danh mục có sản phẩm không (phục vụ logic xóa)
     boolean existsByCategoryId(Long categoryId);
 }

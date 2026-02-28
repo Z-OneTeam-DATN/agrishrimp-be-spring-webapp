@@ -1,6 +1,7 @@
 package com.zone.agri.controller;
 
 import com.zone.agri.dto.admin.CategoryDTO;
+import com.zone.agri.entity.enums.CategoryStatus;
 import com.zone.agri.service.CategoryService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -25,13 +26,14 @@ public class CategoryController {
 
     private final CategoryService categoryService;
 
-    @Operation(summary = "Lấy tất cả danh mục", description = "Trả về danh sách danh mục sản phẩm dạng phẳng (flat list).")
+    @Operation(summary = "Lấy tất cả danh mục", description = "Có hỗ trợ tìm kiếm và lọc")
     @SecurityRequirement(name = "bearerAuth")
     @GetMapping
-    public ResponseEntity<List<CategoryDTO>> getAll() {
-        return ResponseEntity.ok(categoryService.getAllCategories());
+    public ResponseEntity<List<CategoryDTO>> getAll(
+            @RequestParam(required = false) String keyword,
+            @RequestParam(required = false) CategoryStatus status) {
+        return ResponseEntity.ok(categoryService.getAllCategories(keyword, status));
     }
-
     @Operation(summary = "Xem chi tiết danh mục", description = "Lấy thông tin chi tiết của một nhóm hàng.")
     @SecurityRequirement(name = "bearerAuth")
     @ApiResponses({
