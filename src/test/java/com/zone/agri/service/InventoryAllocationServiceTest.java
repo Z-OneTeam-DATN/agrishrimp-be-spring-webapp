@@ -4,6 +4,7 @@ import com.zone.agri.dto.order.CartItemDto;
 import com.zone.agri.dto.order.OutOfStockItemDto;
 import com.zone.agri.dto.order.SubOrderDraftDto;
 import com.zone.agri.entity.Branch;
+import com.zone.agri.entity.Inventory;
 import com.zone.agri.entity.ProductVariant;
 import com.zone.agri.repository.InventoryRepository;
 import com.zone.agri.service.BranchSearchService.BranchWithRealDistance;
@@ -36,7 +37,6 @@ class InventoryAllocationServiceTest {
     @BeforeEach
     void setUp() {
         branch1 = Branch.builder().build();
-        // Set id via reflection workaround - use setter
         setId(branch1, 1L, "id");
         branch1.setName("Chi Nhánh Cần Thơ");
         branch1.setAddressDetail("15 Mậu Thân, Cần Thơ");
@@ -48,13 +48,26 @@ class InventoryAllocationServiceTest {
         branch2.setAddressDetail("21 Trần Hưng Đạo, Sóc Trăng");
         branch2.setDistrictId(1444);
 
-        varA = ProductVariant.builder().sku("SKU-A").price(new BigDecimal("100000")).build();
+        // Biến thể không còn lưu giá, nhưng vẫn setup giả định để map
+        varA = ProductVariant.builder().sku("SKU-A").build();
         setId(varA, 101L, "id");
 
-        varB = ProductVariant.builder().sku("SKU-B").price(new BigDecimal("200000")).build();
+        varB = ProductVariant.builder().sku("SKU-B").build();
         setId(varB, 102L, "id");
 
         variantMap = Map.of(101L, varA, 102L, varB);
+    }
+
+    // Helper tạo Lô hàng (Batch)
+    private Inventory createBatch(Long id, Branch branch, ProductVariant variant, int qty, double importPrice) {
+        Inventory inv = Inventory.builder()
+                .branch(branch)
+                .productVariant(variant)
+                .quantity(qty)
+                .importPrice(new BigDecimal(importPrice))
+                .build();
+        setId(inv, id, "id");
+        return inv;
     }
 
     // ── Case a: 1 chi nhánh đủ hàng ──────────────────────────────
@@ -66,8 +79,13 @@ class InventoryAllocationServiceTest {
                 new CartItemDto(102L, 3)
         );
 
-        Map<Long, Map<Long, Integer>> matrix = new HashMap<>();
-        matrix.put(1L, new HashMap<>(Map.of(101L, 10, 102L, 10)));
+        // Map giả lập Lô Hàng:
+        // Branch 1 có: varA(10 món, vốn 100k), varB(10 món, vốn 200k)
+        Map<Long, Map<Long, List<Inventory>>> matrix = new HashMap<>();
+        Map<Long, List<Inventory>> b1Stock = new HashMap<>();
+        b1Stock.put(101L, new ArrayList<>(List.of(createBatch(1L, branch1, varA, 10, 100000))));
+        b1Stock.put(102L, new ArrayList<>(List.of(createBatch(2L, branch1, varB, 10, 200000))));
+        matrix.put(1L, b1Stock);
 
         List<BranchWithRealDistance> branches = List.of(
                 new BranchWithRealDistance(branch1, 2.5, 300, 5.0)
@@ -81,9 +99,11 @@ class InventoryAllocationServiceTest {
         SubOrderDraftDto subOrder = result.subOrders().get(0);
         assertThat(subOrder.getBranchId()).isEqualTo(1L);
         assertThat(subOrder.getItems()).hasSize(2);
-        assertThat(subOrder.getSubtotal())
-                .isEqualByComparingTo(new BigDecimal("100000").multiply(BigDecimal.valueOf(5))
-                        .add(new BigDecimal("200000").multiply(BigDecimal.valueOf(3))));
+
+        // Giá bán = vốn * 1.3 -> varA = 130k, varB = 260k
+        BigDecimal expectedSubtotal = new BigDecimal("130000").multiply(BigDecimal.valueOf(5))
+                .add(new BigDecimal("260000").multiply(BigDecimal.valueOf(3)));
+        assertThat(subOrder.getSubtotal()).isEqualByComparingTo(expectedSubtotal);
     }
 
     // ── Case b: phải tách 2 chi nhánh ────────────────────────────
@@ -95,9 +115,16 @@ class InventoryAllocationServiceTest {
                 new CartItemDto(102L, 5)   // varB: branch1 đủ
         );
 
-        Map<Long, Map<Long, Integer>> matrix = new HashMap<>();
-        matrix.put(1L, new HashMap<>(Map.of(101L, 6, 102L, 10)));
-        matrix.put(2L, new HashMap<>(Map.of(101L, 8, 102L, 0)));
+        Map<Long, Map<Long, List<Inventory>>> matrix = new HashMap<>();
+
+        Map<Long, List<Inventory>> b1Stock = new HashMap<>();
+        b1Stock.put(101L, new ArrayList<>(List.of(createBatch(1L, branch1, varA, 6, 100000))));
+        b1Stock.put(102L, new ArrayList<>(List.of(createBatch(2L, branch1, varB, 10, 200000))));
+        matrix.put(1L, b1Stock);
+
+        Map<Long, List<Inventory>> b2Stock = new HashMap<>();
+        b2Stock.put(101L, new ArrayList<>(List.of(createBatch(3L, branch2, varA, 8, 100000))));
+        matrix.put(2L, b2Stock);
 
         List<BranchWithRealDistance> branches = List.of(
                 new BranchWithRealDistance(branch1, 2.5, 300, 5.0),
@@ -114,6 +141,7 @@ class InventoryAllocationServiceTest {
 
         SubOrderDraftDto subOrder2 = result.subOrders().get(1);
         assertThat(subOrder2.getBranchId()).isEqualTo(2L);
+
         // Branch2 chỉ giao phần còn thiếu của varA (4 items)
         int varAInBranch2 = subOrder2.getItems().stream()
                 .filter(i -> i.getProductVariantId().equals(101L))
@@ -131,8 +159,10 @@ class InventoryAllocationServiceTest {
                 new CartItemDto(102L, 3)   // không có ở đâu
         );
 
-        Map<Long, Map<Long, Integer>> matrix = new HashMap<>();
-        matrix.put(1L, new HashMap<>(Map.of(101L, 10))); // không có varB
+        Map<Long, Map<Long, List<Inventory>>> matrix = new HashMap<>();
+        Map<Long, List<Inventory>> b1Stock = new HashMap<>();
+        b1Stock.put(101L, new ArrayList<>(List.of(createBatch(1L, branch1, varA, 10, 100000))));
+        matrix.put(1L, b1Stock); // Không có varB
 
         List<BranchWithRealDistance> branches = List.of(
                 new BranchWithRealDistance(branch1, 2.5, 300, 5.0)
@@ -157,9 +187,14 @@ class InventoryAllocationServiceTest {
                 new CartItemDto(101L, 20) // cần 20, branch1 có 8, branch2 có 7 → tổng 15 < 20
         );
 
-        Map<Long, Map<Long, Integer>> matrix = new HashMap<>();
-        matrix.put(1L, new HashMap<>(Map.of(101L, 8)));
-        matrix.put(2L, new HashMap<>(Map.of(101L, 7)));
+        Map<Long, Map<Long, List<Inventory>>> matrix = new HashMap<>();
+        Map<Long, List<Inventory>> b1Stock = new HashMap<>();
+        b1Stock.put(101L, new ArrayList<>(List.of(createBatch(1L, branch1, varA, 8, 100000))));
+        matrix.put(1L, b1Stock);
+
+        Map<Long, List<Inventory>> b2Stock = new HashMap<>();
+        b2Stock.put(101L, new ArrayList<>(List.of(createBatch(2L, branch2, varA, 7, 100000))));
+        matrix.put(2L, b2Stock);
 
         List<BranchWithRealDistance> branches = List.of(
                 new BranchWithRealDistance(branch1, 2.5, 300, 5.0),
@@ -175,7 +210,7 @@ class InventoryAllocationServiceTest {
 
         OutOfStockItemDto outOfStock = result.outOfStockItems().get(0);
         assertThat(outOfStock.getRequestedQty()).isEqualTo(5); // 20 - 8 - 7
-        assertThat(outOfStock.getAvailableQty()).isEqualTo(0);
+        assertThat(outOfStock.getAvailableQty()).isEqualTo(0); // Số dư còn lại là 0
     }
 
     // ── Helper method ─────────────────────────────────────────────

@@ -16,8 +16,8 @@ import java.math.BigDecimal;
 import java.util.*;
 
 /**
- * Thuật toán Greedy tách đơn thông minh.
- * Duyệt danh sách chi nhánh từ gần → xa, phân bổ hàng hóa tối đa tại từng chi nhánh.
+ * Thuật toán Greedy kết hợp Lô hàng (FIFO).
+ * Tự động tính giá bán = giá vốn của lô * % Lợi nhuận hệ thống
  */
 @Service
 @RequiredArgsConstructor
@@ -25,55 +25,41 @@ import java.util.*;
 public class InventoryAllocationService {
 
     private final InventoryRepository inventoryRepository;
+    private final SettingService settingService; // 👉 BỔ SUNG SETTING SERVICE Ở ĐÂY
 
-    /**
-     * Kết quả phân bổ tồn kho.
-     */
     public record AllocationResult(
             List<SubOrderDraftDto> subOrders,
             List<OutOfStockItemDto> outOfStockItems
     ) {}
 
     // ──────────────────────────────────────────────────────────────
-    // Step 1: Build Inventory Matrix từ DB (1 query duy nhất)
+    // Step 1: Build Inventory Matrix (Lưu Danh sách Lô hàng thay vì số lượng)
     // ──────────────────────────────────────────────────────────────
-
-    /**
-     * @return Map&lt;branchId, Map&lt;variantId, quantity&gt;&gt;
-     */
-    public Map<Long, Map<Long, Integer>> buildInventoryMatrix(List<Long> branchIds, List<Long> variantIds) {
+    public Map<Long, Map<Long, List<Inventory>>> buildInventoryMatrix(List<Long> branchIds, List<Long> variantIds) {
         List<Inventory> inventories = inventoryRepository.findInventoryMatrix(branchIds, variantIds);
 
-        Map<Long, Map<Long, Integer>> matrix = new HashMap<>();
+        // Map<BranchId, Map<VariantId, Danh_Sách_Các_Lô_Hàng_Còn_Tồn>>
+        Map<Long, Map<Long, List<Inventory>>> matrix = new HashMap<>();
         for (Inventory inv : inventories) {
             Long branchId = inv.getBranch().getId();
             Long variantId = inv.getProductVariant().getId();
+
             matrix.computeIfAbsent(branchId, k -> new HashMap<>())
-                    .put(variantId, inv.getQuantity() != null ? inv.getQuantity() : 0);
+                    .computeIfAbsent(variantId, k -> new ArrayList<>())
+                    .add(inv); // Tự động sắp xếp theo FIFO do câu query ORDER BY id ASC
         }
         return matrix;
     }
 
     // ──────────────────────────────────────────────────────────────
-    // Step 2: Greedy Allocation
+    // Step 2: Greedy Allocation với Lô Hàng
     // ──────────────────────────────────────────────────────────────
-
-    /**
-     * Phân bổ giỏ hàng vào các chi nhánh theo thứ tự gần → xa.
-     *
-     * @param cart                  giỏ hàng (variantId + quantity)
-     * @param variantMap            map variantId → ProductVariant entity (để lấy tên, giá)
-     * @param branchesSortedByDist  danh sách chi nhánh đã sort theo duration
-     * @param inventoryMatrix       kết quả buildInventoryMatrix()
-     * @return AllocationResult (subOrders + outOfStockItems)
-     */
     public AllocationResult allocate(
             List<CartItemDto> cart,
             Map<Long, ProductVariant> variantMap,
             List<BranchWithRealDistance> branchesSortedByDist,
-            Map<Long, Map<Long, Integer>> inventoryMatrix
+            Map<Long, Map<Long, List<Inventory>>> inventoryMatrix
     ) {
-        // remaining = deep copy của giỏ hàng còn chưa phân bổ
         List<CartItemDto> remaining = new ArrayList<>(cart.stream()
                 .map(item -> new CartItemDto(item.getProductVariantId(), item.getQuantity()))
                 .toList());
@@ -84,7 +70,7 @@ public class InventoryAllocationService {
             if (remaining.isEmpty()) break;
 
             Long branchId = bwr.branch().getId();
-            Map<Long, Integer> branchStock = inventoryMatrix.getOrDefault(branchId, Collections.emptyMap());
+            Map<Long, List<Inventory>> branchBatches = inventoryMatrix.getOrDefault(branchId, Collections.emptyMap());
 
             List<OrderItemDto> allocated = new ArrayList<>();
             List<CartItemDto> stillRemaining = new ArrayList<>();
@@ -92,41 +78,41 @@ public class InventoryAllocationService {
             for (CartItemDto item : remaining) {
                 Long variantId = item.getProductVariantId();
                 int requested = item.getQuantity();
-                int stock = branchStock.getOrDefault(variantId, 0);
 
+                List<Inventory> batches = branchBatches.getOrDefault(variantId, new ArrayList<>());
                 ProductVariant variant = variantMap.get(variantId);
-                BigDecimal unitPrice = (variant != null && variant.getPrice() != null)
-                        ? variant.getPrice() : BigDecimal.ZERO;
-                String variantName = (variant != null && variant.getSku() != null)
-                        ? variant.getSku() : "Unknown";
+                String variantName = (variant != null && variant.getSku() != null) ? variant.getSku() : "Unknown";
                 String variantSku = variant != null ? variant.getSku() : "";
 
-                if (stock >= requested) {
-                    // Chi nhánh đủ hàng — phân bổ toàn bộ
+                // Duyệt qua từng LÔ HÀNG để lấy hàng (FIFO)
+                Iterator<Inventory> batchIterator = batches.iterator();
+                while (batchIterator.hasNext() && requested > 0) {
+                    Inventory batch = batchIterator.next();
+                    int availableInBatch = batch.getQuantity();
+                    if (availableInBatch <= 0) continue;
+
+                    int quantityToTake = Math.min(requested, availableInBatch);
+
+                    // 👉 TỰ ĐỘNG TÍNH GIÁ BÁN = GIÁ VỐN LÔ NÀY * BIÊN LỢI NHUẬN TỪ DB
+                    BigDecimal importPrice = batch.getImportPrice() != null ? batch.getImportPrice() : BigDecimal.ZERO;
+                    BigDecimal unitPrice = importPrice.multiply(settingService.getProfitMultiplier());
+
                     allocated.add(OrderItemDto.builder()
                             .productVariantId(variantId)
                             .variantName(variantName)
                             .variantSku(variantSku)
-                            .quantity(requested)
+                            .quantity(quantityToTake)
                             .unitPrice(unitPrice)
-                            .subtotal(unitPrice.multiply(BigDecimal.valueOf(requested)))
+                            .subtotal(unitPrice.multiply(BigDecimal.valueOf(quantityToTake)))
                             .build());
-                    branchStock.put(variantId, stock - requested); // cập nhật tồn kho đã tiêu thụ
-                } else if (stock > 0) {
-                    // Chi nhánh có hàng nhưng không đủ — phân bổ một phần
-                    allocated.add(OrderItemDto.builder()
-                            .productVariantId(variantId)
-                            .variantName(variantName)
-                            .variantSku(variantSku)
-                            .quantity(stock)
-                            .unitPrice(unitPrice)
-                            .subtotal(unitPrice.multiply(BigDecimal.valueOf(stock)))
-                            .build());
-                    branchStock.put(variantId, 0); // toàn bộ tồn kho đã tiêu thụ
-                    stillRemaining.add(new CartItemDto(variantId, requested - stock));
-                } else {
-                    // Chi nhánh không có hàng
-                    stillRemaining.add(item);
+
+                    // Trừ tồn kho ảo trên RAM
+                    batch.setQuantity(availableInBatch - quantityToTake);
+                    requested -= quantityToTake;
+                }
+
+                if (requested > 0) {
+                    stillRemaining.add(new CartItemDto(variantId, requested)); // Vẫn còn thiếu
                 }
             }
 
@@ -144,14 +130,14 @@ public class InventoryAllocationService {
                         .distanceKm(bwr.distanceKm())
                         .items(allocated)
                         .subtotal(subtotal)
-                        .shippingFee(BigDecimal.ZERO) // sẽ được fill bởi ShippingService
+                        .shippingFee(BigDecimal.ZERO)
                         .build());
             }
 
-            remaining = stillRemaining;
+            remaining = stillRemaining; // Chuyển phần thiếu sang chi nhánh tiếp theo
         }
 
-        // remaining còn lại = hàng không có ở bất kỳ chi nhánh nào
+        // Tạo danh sách OutOfStock cho các item không thể đáp ứng đủ
         List<OutOfStockItemDto> outOfStockItems = remaining.stream()
                 .map(item -> {
                     ProductVariant v = variantMap.get(item.getProductVariantId());
@@ -169,9 +155,10 @@ public class InventoryAllocationService {
         return new AllocationResult(subOrders, outOfStockItems);
     }
 
-    private int calculateTotalAvailable(Long variantId, Map<Long, Map<Long, Integer>> matrix) {
+    private int calculateTotalAvailable(Long variantId, Map<Long, Map<Long, List<Inventory>>> matrix) {
         return matrix.values().stream()
-                .mapToInt(branchMap -> branchMap.getOrDefault(variantId, 0))
+                .flatMap(branchMap -> branchMap.getOrDefault(variantId, Collections.emptyList()).stream())
+                .mapToInt(Inventory::getQuantity)
                 .sum();
     }
 }

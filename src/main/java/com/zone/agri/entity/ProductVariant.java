@@ -4,7 +4,6 @@ import com.zone.agri.entity.enums.VariantStatus;
 import jakarta.persistence.*;
 import lombok.*;
 import lombok.experimental.FieldDefaults;
-import java.math.BigDecimal;
 import java.util.List;
 
 @Entity
@@ -27,21 +26,6 @@ public class ProductVariant {
     @Column(name = "barcode", length = 50)
     String barcode;
 
-    @Column(name = "price", precision = 19, scale = 2)
-    BigDecimal price;
-
-    @Column(name = "import_price", precision = 19, scale = 2)
-    BigDecimal importPrice;
-
-    @Column(name = "wholesale_price", precision = 19, scale = 2)
-    BigDecimal wholesalePrice;
-
-    @Column(name = "quantity")
-    Integer quantity;
-
-    @Column(name = "shipping_weight", precision = 19, scale = 3)
-    BigDecimal shippingWeight;
-
     /** URL ảnh biến thể (lưu secure_url từ Cloudinary) */
     @Column(name = "image_url", length = 500)
     String imageUrl;
@@ -63,15 +47,9 @@ public class ProductVariant {
     @EqualsAndHashCode.Exclude
     Product product;
 
-    /** Thuộc tính động (màu sắc, v.v.) */
+    /** Thuộc tính động (màu sắc, khối lượng, v.v.) */
     @OneToMany(mappedBy = "sku", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
     @ToString.Exclude
     @EqualsAndHashCode.Exclude
     List<SKUAttributeValue> attributeValues;
-
-    /** Bảng quy đổi đơn vị của biến thể này */
-    @OneToMany(mappedBy = "variant", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
-    @ToString.Exclude
-    @EqualsAndHashCode.Exclude
-    List<UnitConversion> unitConversions;
 }

@@ -10,16 +10,12 @@ import com.zone.agri.repository.*;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
-import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.web.server.ResponseStatusException;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.stream.Collectors;
 
 @Service
@@ -65,13 +61,12 @@ public class InventoryTransferService {
         BigDecimal totalValue = BigDecimal.ZERO;
 
         for (TransferItemRequest itemReq : req.getItems()) {
-            // THAY ĐỔI: Tìm sản phẩm bằng SKU thay vì ID
             ProductVariant variant = variantRepo.findBySku(itemReq.getSku())
                     .orElseThrow(() -> new RuntimeException("Sản phẩm với SKU " + itemReq.getSku() + " không tồn tại"));
 
             InventoryTransferDetail detail = InventoryTransferDetail.builder()
                     .inventoryTransfer(transfer)
-                    .productVariant(variant) // Gán đúng variant vừa tìm được theo SKU
+                    .productVariant(variant)
                     .quantity(itemReq.getQuantity())
                     .quantityRequested(itemReq.getQuantity())
                     .quantityReal(0)
@@ -81,10 +76,24 @@ public class InventoryTransferService {
             details.add(detail);
             totalQty += itemReq.getQuantity();
 
-            if (variant.getPrice() != null) {
-                BigDecimal lineTotal = variant.getPrice().multiply(new BigDecimal(itemReq.getQuantity()));
-                totalValue = totalValue.add(lineTotal);
+            // 👉 LOGIC LÔ HÀNG ĐỘNG: Ước tính Tổng giá trị phiếu chuyển dựa trên Giá vốn của các lô FIFO ở Kho xuất
+            List<Inventory> sourceBatches = inventoryRepo.findByProductVariantId(variant.getId()).stream()
+                    .filter(inv -> inv.getBranch().getId().equals(fromBranch.getId()) && inv.getQuantity() != null && inv.getQuantity() > 0)
+                    .sorted(Comparator.comparing(Inventory::getId)) // Sắp xếp FIFO
+                    .collect(Collectors.toList());
+
+            int reqQty = itemReq.getQuantity();
+            BigDecimal itemTotalValue = BigDecimal.ZERO;
+
+            for (Inventory batch : sourceBatches) {
+                if (reqQty <= 0) break;
+                int take = Math.min(reqQty, batch.getQuantity());
+                BigDecimal importPrice = batch.getImportPrice() != null ? batch.getImportPrice() : BigDecimal.ZERO;
+                itemTotalValue = itemTotalValue.add(importPrice.multiply(BigDecimal.valueOf(take)));
+                reqQty -= take;
             }
+
+            totalValue = totalValue.add(itemTotalValue);
         }
 
         transfer.setDetails(details);
@@ -106,17 +115,15 @@ public class InventoryTransferService {
             throw new RuntimeException("Chỉ có thể xuất kho phiếu đang ở trạng thái Chờ Xuất!");
         }
 
-        // CHỈ đổi trạng thái, KHÔNG trừ kho ở bước này nữa
         transfer.setStatus(InventoryTransferStatus.SHIPPING);
         transferRepo.save(transfer);
     }
 
     // ==========================================
-    // BƯỚC 3: NHẬN HÀNG (TRỪ KHO XUẤT & CỘNG KHO NHẬP)
+    // BƯỚC 3: NHẬN HÀNG (TRỪ KHO XUẤT & CỘNG KHO NHẬP THEO LÔ FIFO)
     // ==========================================
     @Transactional
     public void receiveTransfer(Long id, List<Map<String, Object>> receivedItems) {
-        // 1. Lock bản ghi transfer để tránh tranh chấp dữ liệu (Pessimistic Lock nếu cần)
         InventoryTransfer transfer = transferRepo.findById(id)
                 .orElseThrow(() -> new RuntimeException("Không tìm thấy phiếu điều chuyển"));
 
@@ -124,52 +131,98 @@ public class InventoryTransferService {
             throw new RuntimeException("Phiếu phải ở trạng thái Đang vận chuyển mới có thể nhận hàng!");
         }
 
-        // 2. Chuyển list details thành Map để truy xuất cực nhanh và chính xác theo ID sản phẩm
-        // Tránh việc dùng .stream().filter() lặp đi lặp lại trong vòng lặp for
         Map<Long, InventoryTransferDetail> detailMap = transfer.getDetails().stream()
                 .collect(Collectors.toMap(
                         d -> d.getProductVariant().getId(),
                         d -> d,
-                        (existing, replacement) -> existing // Tránh lỗi nếu có sản phẩm trùng trong list
+                        (existing, replacement) -> existing
                 ));
 
         for (Map<String, Object> itemData : receivedItems) {
             Long variantId = ((Number) itemData.get("variantId")).longValue();
             Integer qtyReal = ((Number) itemData.get("quantityReal")).intValue();
-            String note = itemData.get( "note") != null ? itemData.get("note").toString() : "";
+            String note = itemData.get("note") != null ? itemData.get("note").toString() : "";
 
-            // 3. Lấy detail trực tiếp từ Map
             InventoryTransferDetail detail = detailMap.get(variantId);
             if (detail == null) {
                 throw new RuntimeException("Sản phẩm ID " + variantId + " không tồn tại trong phiếu này!");
             }
 
-            // Cập nhật số lượng thực nhận vào detail
             detail.setQuantityReal(qtyReal);
             detail.setNote(note);
 
-            // 4. Cập nhật tồn kho
+            // 👉 LOGIC LÔ HÀNG ĐỘNG: Di chuyển Lô hàng từ Kho A sang Kho B
             if (qtyReal > 0) {
                 Long fromBranchId = transfer.getFromBranch().getId();
                 Long toBranchId = transfer.getToBranch().getId();
 
-                // Thực hiện trừ kho nguồn
-                updateInventoryQuantity(fromBranchId, variantId, -qtyReal);
-                // Thực hiện cộng kho đích
-                updateInventoryQuantity(toBranchId, variantId, qtyReal);
+                int remainingToTransfer = qtyReal;
+
+                // 1. Lấy danh sách Lô hàng đang có ở KHO XUẤT (FIFO) và Khóa (Lock) lại
+                List<Inventory> sourceBatches = inventoryRepo.findForUpdateFIFO(fromBranchId, variantId);
+
+                // 2. Lấy danh sách Lô hàng hiện có ở KHO NHẬN để so khớp
+                List<Inventory> targetBatches = inventoryRepo.findByProductVariantId(variantId).stream()
+                        .filter(inv -> inv.getBranch().getId().equals(toBranchId))
+                        .collect(Collectors.toList());
+
+                for (Inventory sBatch : sourceBatches) {
+                    if (remainingToTransfer <= 0) break;
+                    int available = sBatch.getQuantity();
+                    if (available <= 0) continue;
+
+                    int transferAmount = Math.min(available, remainingToTransfer);
+
+                    // A. TRỪ TỒN KHO XUẤT
+                    sBatch.setQuantity(available - transferAmount);
+                    inventoryRepo.save(sBatch);
+
+                    // B. CỘNG VÀO KHO NHẬN (Mang theo đúng BatchCode và ImportPrice)
+                    Optional<Inventory> existingTargetBatch = targetBatches.stream()
+                            .filter(inv -> Objects.equals(inv.getBatchNumber(), sBatch.getBatchNumber()) &&
+                                    (inv.getImportPrice() != null && sBatch.getImportPrice() != null &&
+                                            inv.getImportPrice().compareTo(sBatch.getImportPrice()) == 0))
+                            .findFirst();
+
+                    if (existingTargetBatch.isPresent()) {
+                        // Nếu kho nhận đã có lô này -> Cộng dồn số lượng
+                        Inventory tBatch = existingTargetBatch.get();
+                        tBatch.setQuantity(tBatch.getQuantity() + transferAmount);
+                        tBatch.setLastReceiptDate(LocalDateTime.now());
+                        inventoryRepo.save(tBatch);
+                    } else {
+                        // Nếu kho nhận chưa từng có lô này -> Tạo dòng Inventory mới
+                        Inventory newTargetBatch = Inventory.builder()
+                                .branch(transfer.getToBranch())
+                                .productVariant(detail.getProductVariant())
+                                .quantity(transferAmount)
+                                .importPrice(sBatch.getImportPrice())
+                                .batchNumber(sBatch.getBatchNumber())
+                                .minStock(0)
+                                .lastCheckedAt(LocalDateTime.now())
+                                .lastReceiptDate(LocalDateTime.now())
+                                .build();
+                        inventoryRepo.save(newTargetBatch);
+                        targetBatches.add(newTargetBatch); // Thêm vào list để vòng lặp sau có thể tìm thấy nếu lặp lại
+                    }
+
+                    remainingToTransfer -= transferAmount;
+                }
+
+                if (remainingToTransfer > 0) {
+                    throw new RuntimeException("Lỗi đồng bộ: Kho xuất (" + transfer.getFromBranch().getName() +
+                            ") không đủ số lượng Lô hàng cho sản phẩm ID " + variantId);
+                }
             }
         }
 
-        // 5. Đổi trạng thái và lưu
         transfer.setStatus(InventoryTransferStatus.COMPLETED);
         transferRepo.save(transfer);
-
-        // Ép Hibernate đẩy dữ liệu xuống DB ngay lập tức để đảm bảo tính nhất quán
         transferRepo.flush();
     }
 
     // ==========================================
-    // HÀM LẤY CHI TIẾT (ĐÃ SỬ DỤNG CONVERT DTO)
+    // HÀM LẤY CHI TIẾT
     // ==========================================
     public TransferDetailResponse getById(Long id) {
         InventoryTransfer transfer = transferRepo.findById(id)
@@ -178,7 +231,7 @@ public class InventoryTransferService {
     }
 
     // ==========================================
-    // HÀM LẤY DANH SÁCH (ĐÃ SỬ DỤNG CONVERT DTO)
+    // HÀM LẤY DANH SÁCH
     // ==========================================
     public Page<TransferResponse> getTransfers(String keyword, String statusStr, Pageable pageable) {
         InventoryTransferStatus status = null;
@@ -189,8 +242,6 @@ public class InventoryTransferService {
                 // Ignore invalid status
             }
         }
-        // Gọi query trong repository (nếu query đó trả về DTO thì không cần convert nữa)
-        // Hiện tại query trong Repository của bạn đã tự tạo TransferResponse rồi.
         return transferRepo.searchTransfers(keyword, status, pageable);
     }
 
@@ -206,7 +257,6 @@ public class InventoryTransferService {
             throw new RuntimeException("Chỉ có thể hủy phiếu đang ở trạng thái Chờ xuất hoặc Đang vận chuyển!");
         }
 
-        // Không cần rollback tồn kho vì lúc duyệt xuất ta không trừ kho nữa
         transfer.setStatus(InventoryTransferStatus.CANCELLED);
         transferRepo.save(transfer);
     }
@@ -241,29 +291,6 @@ public class InventoryTransferService {
         }
 
         transferRepo.delete(transfer);
-    }
-
-    // ==========================================
-    // HÀM BỔ TRỢ: CẬP NHẬT TỒN KHO AN TOÀN
-    // ==========================================
-    private void updateInventoryQuantity(Long branchId, Long variantId, Integer quantityChange) {
-        Inventory inventory = inventoryRepo.findByBranchIdAndProductVariantId(branchId, variantId)
-                .orElseGet(() -> {
-                    Inventory newInv = new Inventory();
-                    newInv.setBranch(branchRepo.findById(branchId).orElseThrow());
-                    newInv.setProductVariant(variantRepo.findById(variantId).orElseThrow());
-                    newInv.setQuantity(0);
-                    return newInv;
-                });
-
-        int newQuantity = inventory.getQuantity() + quantityChange;
-
-        if (newQuantity < 0) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Kho không đủ số lượng để trừ!");
-        }
-
-        inventory.setQuantity(newQuantity);
-        inventoryRepo.save(inventory);
     }
 
     // ==========================================
@@ -307,7 +334,7 @@ public class InventoryTransferService {
                         .variantId(d.getProductVariant().getId())
                         .productName(d.getProductVariant().getProduct().getName())
                         .sku(d.getProductVariant().getSku())
-                        .unit("Cái") // Hoặc lấy từ db
+                        .unit("Cái")
                         .quantityRequested(d.getQuantityRequested())
                         .quantityReal(d.getQuantityReal())
                         .note(d.getNote())

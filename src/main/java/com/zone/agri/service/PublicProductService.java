@@ -15,6 +15,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -22,10 +23,11 @@ import java.util.stream.Collectors;
  * Service phục vụ API công khai (website bán hàng).
  *
  * Nguyên tắc bảo mật dữ liệu:
- *  - Không trả costPrice / importPrice
- *  - Không trả số lượng tồn kho chi tiết / theo chi nhánh
- *  - Không trả warehouseId / branchId
- *  - Chỉ trả sản phẩm ACTIVE, thuộc danh mục ACTIVE, với variant ACTIVE
+ * - Không trả costPrice / importPrice
+ * - Không trả số lượng tồn kho chi tiết / theo chi nhánh / số lô
+ * - Không trả warehouseId / branchId
+ * - Chỉ trả sản phẩm ACTIVE, thuộc danh mục ACTIVE, với variant ACTIVE
+ * - GIÁ BÁN: Lấy từ lô hàng cũ nhất còn tồn (FIFO) * 1.3 (Lợi nhuận 30%)
  */
 @Service
 @RequiredArgsConstructor
@@ -45,7 +47,6 @@ public class PublicProductService {
             Long brandId,
             Pageable pageable) {
 
-        // Bước 1: lấy page IDs (đúng pagination, tránh Hibernate in-memory warning)
         Page<Long> idPage = productRepository.findPublicProductIds(
                 blankToNull(keyword), categoryId, brandId, pageable);
 
@@ -55,13 +56,10 @@ public class PublicProductService {
 
         List<Long> ids = idPage.getContent();
 
-        // Bước 2: fetch đầy đủ dữ liệu cho các IDs
         List<Product> products = productRepository.findPublicByIds(ids);
 
-        // Bước 3: tổng tồn kho theo batch (1 query cho tất cả sản phẩm trên trang)
         Map<Long, Long> stockMap = buildStockMap(ids);
 
-        // Bước 4: map → response, giữ đúng thứ tự của idPage
         Map<Long, Product> productById = products.stream()
                 .collect(Collectors.toMap(Product::getId, p -> p));
 
@@ -99,7 +97,6 @@ public class PublicProductService {
     // PRIVATE HELPERS
     // =========================================================================
 
-    /** Ném NotFoundException (404) nếu sản phẩm không đủ điều kiện hiển thị công khai */
     private void assertPublicVisible(Product product) {
         if (product.getStatus() != ProductStatus.ACTIVE) {
             throw new NotFoundException("Sản phẩm không tồn tại.");
@@ -110,11 +107,6 @@ public class PublicProductService {
         }
     }
 
-    /**
-     * Lấy tổng tồn kho (toàn hệ thống) cho nhiều sản phẩm trong 1 query.
-     * Trả về Map<productId, totalStock>.
-     * Sản phẩm không có record Inventory sẽ không có entry → getOrDefault 0.
-     */
     private Map<Long, Long> buildStockMap(List<Long> productIds) {
         if (productIds.isEmpty()) return Collections.emptyMap();
         return inventoryRepository.sumQuantityGroupByProductIds(productIds)
@@ -125,7 +117,6 @@ public class PublicProductService {
                 ));
     }
 
-    /** Chuyển Product entity → PublicProductResponse (safe, không lộ nội bộ) */
     private PublicProductResponse toPublicResponse(Product product, Map<Long, Long> stockMap) {
         if (product == null) return null;
 
@@ -133,16 +124,15 @@ public class PublicProductService {
 
         List<String> imageUrls = product.getProductImages() != null
                 ? product.getProductImages().stream()
-                        .map(ProductImage::getImageUrl)
-                        .collect(Collectors.toList())
+                .map(ProductImage::getImageUrl)
+                .collect(Collectors.toList())
                 : Collections.emptyList();
 
-        // Chỉ trả variant ACTIVE — filter tại đây, không phụ thuộc DB query
         List<PublicVariantResponse> variants = product.getVariants() != null
                 ? product.getVariants().stream()
-                        .filter(v -> v.getStatus() == VariantStatus.ACTIVE)
-                        .map(this::toPublicVariant)
-                        .collect(Collectors.toList())
+                .filter(v -> v.getStatus() == VariantStatus.ACTIVE)
+                .map(this::toPublicVariant) // Chuyển map xuống hàm dưới để xử lý giá
+                .collect(Collectors.toList())
                 : Collections.emptyList();
 
         PublicProductResponse.CategoryInfo categoryInfo = null;
@@ -171,46 +161,53 @@ public class PublicProductService {
 
     /**
      * Chuyển ProductVariant → PublicVariantResponse.
-     * KHÔNG chứa: costPrice, importPrice, quantity, status, imagePublicId.
+     * Tự động lấy giá vốn lô cũ nhất * 1.3 làm giá bán.
      */
     private PublicVariantResponse toPublicVariant(ProductVariant variant) {
-        List<UnitConversionResponse> conversions = variant.getUnitConversions() != null
-                ? variant.getUnitConversions().stream()
-                        .map(uc -> UnitConversionResponse.builder()
-                                .id(uc.getId())
-                                .fromUnit(uc.getFromUnit())
-                                .toUnit(uc.getToUnit())
-                                .rate(uc.getRate())
-                                .build())
-                        .collect(Collectors.toList())
-                : Collections.emptyList();
 
+        // 👉 XỬ LÝ LÔ HÀNG ĐỂ LẤY GIÁ BÁN
+        // Tìm toàn bộ lô hàng của biến thể này, ưu tiên lô nhập trước (FIFO)
+        List<Inventory> batches = inventoryRepository.findByProductVariantId(variant.getId());
+
+        BigDecimal currentSellingPrice = BigDecimal.ZERO;
+
+        // Lấy lô cũ nhất CÒN HÀNG để tính giá (Bám sát thuật toán tách đơn ở Backend)
+        Optional<Inventory> oldestAvailableBatch = batches.stream()
+                .filter(inv -> inv.getQuantity() != null && inv.getQuantity() > 0)
+                .min(Comparator.comparing(Inventory::getId)); // Tìm ID nhỏ nhất = Lô tạo sớm nhất
+
+        if (oldestAvailableBatch.isPresent()) {
+            BigDecimal importPrice = oldestAvailableBatch.get().getImportPrice() != null
+                    ? oldestAvailableBatch.get().getImportPrice()
+                    : BigDecimal.ZERO;
+            // Công thức lợi nhuận: Giá bán = Giá vốn * 1.3
+            currentSellingPrice = importPrice.multiply(BigDecimal.valueOf(1.3));
+        }
+
+        // Các thuộc tính giữ nguyên
         List<AttributeValueResponse> attrs = variant.getAttributeValues() != null
                 ? variant.getAttributeValues().stream()
-                        .map(sav -> AttributeValueResponse.builder()
-                                .attributeId(sav.getAttribute().getId())
-                                .attributeName(sav.getAttribute().getName())
-                                .attributeCode(sav.getAttribute().getCode())
-                                .valueId(sav.getAttributeValue().getId())
-                                .value(sav.getAttributeValue().getValue())
-                                .build())
-                        .collect(Collectors.toList())
+                .map(sav -> AttributeValueResponse.builder()
+                        .attributeId(sav.getAttribute().getId())
+                        .attributeName(sav.getAttribute().getName())
+                        .attributeCode(sav.getAttribute().getCode())
+                        .valueId(sav.getAttributeValue().getId())
+                        .value(sav.getAttributeValue().getValue())
+                        .build())
+                .collect(Collectors.toList())
                 : Collections.emptyList();
-
-        // unit: lấy fromUnit của conversion đầu tiên nếu có, vì entity không có cột riêng
-        String unit = conversions.isEmpty() ? null : conversions.get(0).getFromUnit();
 
         return PublicVariantResponse.builder()
                 .id(variant.getId())
                 .sku(variant.getSku())
                 .barcode(variant.getBarcode())
-                .price(variant.getPrice())
-                .wholesalePrice(variant.getWholesalePrice())
-                .shippingWeight(variant.getShippingWeight())
-                .unit(unit)
+                .price(currentSellingPrice) // 👉 Truyền giá bán động vào đây
+                .wholesalePrice(null) // Đã ẩn giá sỉ ra public theo chuẩn mới
+                .shippingWeight(null) // Đã ẩn trọng lượng theo chuẩn mới
+                .unit("Cái") // Giá trị mặc định do entity không còn lưu unit
                 .imageUrl(variant.getImageUrl())
                 .attributeValues(attrs)
-                .unitConversions(conversions)
+                .unitConversions(Collections.emptyList()) // Ẩn quy đổi
                 .build();
     }
 

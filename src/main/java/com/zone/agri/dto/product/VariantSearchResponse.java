@@ -13,5 +13,5 @@ public class VariantSearchResponse {
     private String barcode;
     private String productName;
     private String unit;
-    private Integer quantity;
+    private Integer quantity; // Giữ lại quantity vì nó là tổng tồn kho lúc search để xem hàng
 }

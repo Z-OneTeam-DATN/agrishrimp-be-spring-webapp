@@ -3,7 +3,6 @@ package com.zone.agri.service;
 import com.zone.agri.dto.geo.DeliveryInfo;
 import com.zone.agri.dto.geo.ShippingFeeParams;
 import com.zone.agri.dto.geo.ShippingFeeResult;
-import com.zone.agri.dto.order.OrderItemDto;
 import com.zone.agri.dto.order.SubOrderDraftDto;
 import com.zone.agri.entity.ProductVariant;
 import com.zone.agri.repository.ProductVariantRepository;
@@ -13,7 +12,6 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
-import java.math.RoundingMode;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -21,10 +19,6 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
-/**
- * Tính phí ship cho tất cả sub-orders SONG SONG (CompletableFuture.allOf).
- * Mỗi sub-order gọi 1 request tới ShippingProvider.
- */
 @Service
 @RequiredArgsConstructor
 @Slf4j
@@ -38,15 +32,6 @@ public class ShippingService {
 
     private final ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
 
-    /**
-     * Enrich danh sách sub-orders với shipping fee, carrier, estimatedDays.
-     * Gọi API song song — không để lỗi 1 sub-order ảnh hưởng sub-order khác.
-     *
-     * @param subOrders    danh sách draft từ InventoryAllocationService
-     * @param deliveryInfo thông tin điểm giao hàng của khách
-     * @param variantMap   map variantId → entity (để tính weight)
-     * @return danh sách sub-orders đã có shippingFee
-     */
     public List<SubOrderDraftDto> enrichWithShippingFees(
             List<SubOrderDraftDto> subOrders,
             DeliveryInfo deliveryInfo,
@@ -85,16 +70,14 @@ public class ShippingService {
             DeliveryInfo deliveryInfo,
             Map<Long, ProductVariant> variantMap
     ) {
-        // Tính tổng weight (gram) của sub-order này
+        // TÍNH TỔNG TRỌNG LƯỢNG (GRAM)
         int totalWeightGram = draft.getItems().stream()
                 .mapToInt(item -> {
-                    ProductVariant v = variantMap.get(item.getProductVariantId());
-                    if (v == null || v.getShippingWeight() == null) return 500; // default 500g
-                    // shippingWeight lưu theo kg → * 1000 = gram
-                    return v.getShippingWeight()
-                            .multiply(BigDecimal.valueOf(1000))
-                            .setScale(0, RoundingMode.UP)
-                            .intValue() * item.getQuantity();
+                    // Do hệ thống đã cấu trúc lại, xóa cột trọng lượng ở Variant.
+                    // Tạm thời set mặc định 500 gram cho mỗi item để gọi API.
+                    // Tương lai nếu có bảng Product lưu trọng lượng chung, bạn sẽ móc từ đó.
+                    int defaultWeightPerItem = 500;
+                    return defaultWeightPerItem * item.getQuantity();
                 })
                 .sum();
 
@@ -124,6 +107,6 @@ public class ShippingService {
     }
 
     private ShippingProvider resolveProvider() {
-        return ghnProvider; // hiện chỉ hỗ trợ GHN
+        return ghnProvider;
     }
 }

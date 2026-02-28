@@ -27,6 +27,9 @@ public interface InventoryRepository extends JpaRepository<Inventory, Long> {
 
     Optional<Inventory> findByBranchIdAndProductVariantSku(Long branchId, String sku);
 
+    // 👉 HÀM MỚI THÊM CHO PRODUCT SERVICE (Tìm tất cả lô hàng của 1 Variant)
+    List<Inventory> findByProductVariantId(Long variantId);
+
     // ==============================
     // TỔNG TỒN KHO TOÀN HỆ THỐNG THEO PRODUCT
     // ==============================
@@ -42,10 +45,8 @@ public interface InventoryRepository extends JpaRepository<Inventory, Long> {
     // ==============================
     boolean existsByProductVariantProductId(Long productId);
 
-
     // ==============================
     // BATCH: tổng tồn kho cho nhiều sản phẩm (dùng cho API public list)
-    // Trả về Object[]{productId (Long), totalQty (Long)}
     // ==============================
     @Query("""
            SELECT i.productVariant.product.id, COALESCE(SUM(i.quantity), 0)
@@ -68,12 +69,14 @@ public interface InventoryRepository extends JpaRepository<Inventory, Long> {
 
     /**
      * Query gộp tồn kho nhiều chi nhánh + nhiều variant — 1 lần duy nhất.
-     * Dùng để build inventory matrix cho thuật toán greedy allocation.
+     * 👉 ĐÃ THÊM: ORDER BY i.id ASC để lấy lô hàng cũ xuất trước (FIFO).
      */
     @Query("""
            SELECT i FROM Inventory i
            WHERE i.branch.id IN :branchIds
              AND i.productVariant.id IN :variantIds
+             AND i.quantity > 0
+           ORDER BY i.id ASC
            """)
     List<Inventory> findInventoryMatrix(
             @Param("branchIds") List<Long> branchIds,
@@ -84,8 +87,8 @@ public interface InventoryRepository extends JpaRepository<Inventory, Long> {
      * Dùng khi confirm đơn — lock để tránh race condition (overselling).
      */
     @Lock(LockModeType.PESSIMISTIC_WRITE)
-    @Query("SELECT i FROM Inventory i WHERE i.branch.id = :branchId AND i.productVariant.id = :variantId")
-    Optional<Inventory> findForUpdate(
+    @Query("SELECT i FROM Inventory i WHERE i.branch.id = :branchId AND i.productVariant.id = :variantId AND i.quantity > 0 ORDER BY i.id ASC")
+    List<Inventory> findForUpdateFIFO(
             @Param("branchId") Long branchId,
             @Param("variantId") Long variantId
     );

@@ -3,6 +3,8 @@ package com.zone.agri.entity;
 import jakarta.persistence.*;
 import lombok.*;
 import lombok.experimental.FieldDefaults;
+
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 @Entity
@@ -22,6 +24,17 @@ public class Inventory {
     @Column(name = "quantity")
     Integer quantity;
 
+    // --- QUẢN LÝ THEO LÔ VÀ GIÁ ---
+    @Column(name = "batch_number", length = 50)
+    String batchNumber;
+
+    @Column(name = "import_price", precision = 38, scale = 2)
+    BigDecimal importPrice;
+
+    @Column(name = "expiry_date")
+    LocalDateTime expiryDate;
+
+    // --- CẢNH BÁO KHO ---
     @Column(name = "min_stock")
     Integer minStock;
 
@@ -35,7 +48,6 @@ public class Inventory {
     LocalDateTime lastReceiptDate;
 
     // --- KHÓA NGOẠI ---
-
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "branch_id")
     @ToString.Exclude
