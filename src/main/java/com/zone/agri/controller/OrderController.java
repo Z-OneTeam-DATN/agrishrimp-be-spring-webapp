@@ -7,6 +7,7 @@ import com.zone.agri.entity.enums.OrderStatus;
 import com.zone.agri.exception.BadRequestException;
 import com.zone.agri.exception.SignInRequiredException;
 import com.zone.agri.repository.UserRepository;
+import com.zone.agri.security.annotation.RequirePermission;
 import com.zone.agri.service.OrderService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
@@ -26,7 +27,6 @@ import java.util.Map;
 @RequestMapping("/api")
 @RequiredArgsConstructor
 @Tag(name = "Order Management", description = "Quản lý Đặt hàng và Đơn hàng")
-@CrossOrigin(origins = "http://localhost:3000")
 @SecurityRequirement(name = "bearerAuth")
 @Slf4j
 public class OrderController {
@@ -104,6 +104,7 @@ public class OrderController {
     }
 
     @Operation(summary = "Lấy danh sách đơn hàng (Admin)", description = "Lấy toàn bộ đơn hàng, có thể lọc theo trạng thái và tìm kiếm mã đơn.")
+    @RequirePermission("ORDER_VIEW")
     @GetMapping("/admin/all")
     public ResponseEntity<?> getAllOrders(
             @RequestParam(required = false) OrderStatus status,
@@ -112,12 +113,14 @@ public class OrderController {
     }
 
     @Operation(summary = "Lấy chi tiết đơn hàng (Admin)", description = "Admin xem chi tiết toàn bộ thông tin đơn hàng")
+    @RequirePermission("ORDER_VIEW")
     @GetMapping("/admin/{id}")
     public ResponseEntity<OrderResponse> getAdminOrderDetail(@PathVariable Long id) {
         return ResponseEntity.ok(orderService.getAdminOrderDetail(id));
     }
 
     @Operation(summary = "Cập nhật trạng thái đơn hàng (Admin)", description = "Admin duyệt đơn, đóng gói, giao hàng theo quy trình.")
+    @RequirePermission("ORDER_UPDATE")
     @PutMapping("/admin/{id}/status")
     public ResponseEntity<?> updateOrderStatus(
             @PathVariable Long id,
@@ -127,6 +130,7 @@ public class OrderController {
     }
 
     @Operation(summary = "Lấy lịch sử đơn hàng của khách", description = "Admin xem nhật ký giao dịch của một khách hàng cụ thể.")
+    @RequirePermission("ORDER_VIEW")
     @GetMapping("/admin/orders/user/{userId}")
     public ResponseEntity<?> getCustomerOrderHistory(@PathVariable Long userId) {
         List<Order> orders = orderService.getOrdersByUserId(userId);
@@ -152,6 +156,7 @@ public class OrderController {
                     + "Có thể lọc theo trạng thái (status) và tìm kiếm theo mã đơn hoặc tên khách (search). "
                     + "Tài khoản phải được gán vào một chi nhánh (branch_id)."
     )
+    @RequirePermission("ORDER_VIEW")
     @GetMapping("/branch/orders")
     public ResponseEntity<List<BranchOrderResponse>> getBranchOrders(
             @RequestParam(required = false) OrderStatus status,
@@ -168,6 +173,7 @@ public class OrderController {
             description = "Xem chi tiết phần đơn (SubOrder) thuộc chi nhánh của người dùng đang đăng nhập, "
                     + "bao gồm danh sách sản phẩm cần đóng gói và thông tin vận chuyển."
     )
+    @RequirePermission("ORDER_VIEW")
     @GetMapping("/branch/orders/{orderId}")
     public ResponseEntity<BranchOrderResponse> getBranchOrderDetail(@PathVariable Long orderId) {
         User user = getCurrentUser();
@@ -183,6 +189,7 @@ public class OrderController {
                     + "PENDING → CONFIRMED → PROCESSING → SHIPPING → COMPLETED. "
                     + "Trạng thái tổng của đơn hàng sẽ được tự động đồng bộ theo chi nhánh chậm nhất."
     )
+    @RequirePermission("ORDER_UPDATE")
     @PutMapping("/branch/orders/{orderId}/status")
     public ResponseEntity<?> updateBranchSubOrderStatus(
             @PathVariable Long orderId,

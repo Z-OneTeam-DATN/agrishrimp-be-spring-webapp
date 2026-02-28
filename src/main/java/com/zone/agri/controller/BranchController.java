@@ -3,6 +3,7 @@ package com.zone.agri.controller;
 import com.zone.agri.dto.admin.BranchDTO;
 import com.zone.agri.dto.branch.FindNearestBranchRequest;
 import com.zone.agri.dto.branch.NearestBranchResponse;
+import com.zone.agri.security.annotation.RequirePermission;
 import com.zone.agri.service.BranchSearchService;
 import com.zone.agri.service.BranchService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -25,21 +26,24 @@ import java.util.List;
 @RequestMapping("/api/branches")
 @RequiredArgsConstructor
 @Tag(name = "Branch Management", description = "Quản lý chi nhánh, kho bãi và điểm giao dịch")
-@CrossOrigin(origins = "http://localhost:3000")
 public class BranchController {
 
     private final BranchService branchService;
     private final BranchSearchService branchSearchService;
 
+    // VIEW
     @Operation(summary = "Lấy danh sách chi nhánh", description = "Trả về toàn bộ danh sách chi nhánh và kho đang hoạt động.")
     @SecurityRequirement(name = "bearerAuth")
+    @RequirePermission("BRANCH_VIEW")
     @GetMapping()
     public ResponseEntity<List<BranchDTO>> getAll() {
         return ResponseEntity.ok(branchService.getAll());
     }
 
+    // VIEW
     @Operation(summary = "Chi tiết chi nhánh", description = "Lấy thông tin chi tiết của một chi nhánh dựa trên ID.")
     @SecurityRequirement(name = "bearerAuth")
+    @RequirePermission("BRANCH_VIEW")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Tìm thấy chi nhánh", content = @Content(schema = @Schema(implementation = BranchDTO.class))),
             @ApiResponse(responseCode = "404", description = "Không tìm thấy chi nhánh với ID cung cấp")
@@ -51,8 +55,10 @@ public class BranchController {
         return ResponseEntity.ok(branchService.getBranchById(id));
     }
 
+    // CREATE
     @Operation(summary = "Tạo mới chi nhánh", description = "Thêm một chi nhánh hoặc kho mới vào hệ thống.")
     @SecurityRequirement(name = "bearerAuth")
+    @RequirePermission("BRANCH_CREATE")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Tạo thành công", content = @Content(schema = @Schema(implementation = BranchDTO.class))),
             @ApiResponse(responseCode = "400", description = "Dữ liệu không hợp lệ hoặc mã chi nhánh đã tồn tại")
@@ -62,8 +68,11 @@ public class BranchController {
         return ResponseEntity.ok(branchService.create(dto));
     }
 
+
+    // UPDATE
     @Operation(summary = "Cập nhật chi nhánh", description = "Chỉnh sửa thông tin chi nhánh đã tồn tại.")
     @SecurityRequirement(name = "bearerAuth")
+    @RequirePermission("BRANCH_UPDATE")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Cập nhật thành công"),
             @ApiResponse(responseCode = "404", description = "Không tìm thấy chi nhánh")
@@ -76,8 +85,11 @@ public class BranchController {
         return ResponseEntity.ok(branchService.update(id, dto));
     }
 
+
+    // DELETE
     @Operation(summary = "Xóa chi nhánh", description = "Xóa mềm (Soft Delete) hoặc vô hiệu hóa một chi nhánh.")
     @SecurityRequirement(name = "bearerAuth")
+    @RequirePermission("BRANCH_DELETE")
     @ApiResponses({
             @ApiResponse(responseCode = "204", description = "Xóa thành công"),
             @ApiResponse(responseCode = "400", description = "Không thể xóa chi nhánh đang có dữ liệu ràng buộc")
@@ -90,13 +102,17 @@ public class BranchController {
         return ResponseEntity.noContent().build();
     }
 
+    //VIEW
     @Operation(summary = "Kiểm tra tồn kho", description = "Trả về danh sách các chi nhánh có ĐỦ SỐ LƯỢNG cho TẤT CẢ sản phẩm truyền vào.")
     @SecurityRequirement(name = "bearerAuth")
+    @RequirePermission("BRANCH_VIEW")
     @PostMapping("/check-stock")
     public ResponseEntity<List<BranchDTO>> checkStock(@RequestBody List<CheckStockItemRequest> items) {
         return ResponseEntity.ok(branchService.findBranchesWithEnoughStock(items));
     }
 
+
+    //PUBLIC
     @Operation(
             summary = "Tìm chi nhánh gần nhất",
             description = "Tìm danh sách chi nhánh gần nhất với vị trí người dùng theo 3 tầng lọc: "

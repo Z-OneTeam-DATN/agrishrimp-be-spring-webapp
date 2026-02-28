@@ -3,6 +3,7 @@ package com.zone.agri.controller;
 import com.zone.agri.dto.customer.CustomerRequest;
 import com.zone.agri.dto.customer.CustomerResponse;
 import com.zone.agri.entity.Customer;
+import com.zone.agri.security.annotation.RequirePermission;
 import com.zone.agri.service.CustomerService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -25,13 +26,13 @@ import org.springframework.web.bind.annotation.*;
 @RequestMapping("/api/customers")
 @RequiredArgsConstructor
 @Tag(name = "Customer Management", description = "Quản lý hồ sơ khách hàng, nông dân và lịch sử giao dịch")
-@CrossOrigin(origins = "http://localhost:3000")
 public class CustomerController {
 
     private final CustomerService customerService;
 
     @Operation(summary = "Danh sách khách hàng", description = "Tìm kiếm khách hàng theo tên, số điện thoại hoặc mã khách hàng. Hỗ trợ phân trang.")
     @SecurityRequirement(name = "bearerAuth")
+    @RequirePermission("CUSTOMER_VIEW")
     @GetMapping
     public ResponseEntity<Page<CustomerResponse>> getAll(
                                                           @Parameter(description = "Từ khóa tìm kiếm (Tên, SĐT, Email)", example = "Nguyễn Văn A")
@@ -52,6 +53,7 @@ public class CustomerController {
 
     @Operation(summary = "Chi tiết khách hàng", description = "Xem hồ sơ chi tiết, địa chỉ và thông tin liên lạc của khách hàng.")
     @SecurityRequirement(name = "bearerAuth")
+    @RequirePermission("CUSTOMER_VIEW")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Tìm thấy hồ sơ", content = @Content(schema = @Schema(implementation = Customer.class))),
             @ApiResponse(responseCode = "404", description = "Không tìm thấy ID khách hàng")
@@ -63,6 +65,7 @@ public class CustomerController {
 
     @Operation(summary = "Tạo hồ sơ khách hàng mới", description = "Thêm mới khách hàng vào hệ thống. Hệ thống có thể tự động tạo tài khoản User liên kết nếu được cấu hình.")
     @SecurityRequirement(name = "bearerAuth")
+    @RequirePermission("CUSTOMER_CREATE")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Tạo thành công", content = @Content(schema = @Schema(implementation = Customer.class))),
             @ApiResponse(responseCode = "400", description = "Số điện thoại hoặc Email đã tồn tại")
@@ -74,6 +77,7 @@ public class CustomerController {
 
     @Operation(summary = "Cập nhật hồ sơ", description = "Chỉnh sửa thông tin cá nhân, địa chỉ hoặc ghi chú quản lý.")
     @SecurityRequirement(name = "bearerAuth")
+    @RequirePermission("CUSTOMER_UPDATE")
     @PutMapping("/{id}")
     public ResponseEntity<Customer> update(
             @Parameter(description = "ID khách hàng cần sửa", example = "100", required = true)
@@ -85,6 +89,7 @@ public class CustomerController {
 
     @Operation(summary = "Khóa/Mở khóa tài khoản", description = "Đổi trạng thái đăng nhập của khách hàng")
     @SecurityRequirement(name = "bearerAuth")
+    @RequirePermission("CUSTOMER_UPDATE")
     @PatchMapping("/{id}/toggle-status")
     public ResponseEntity<String> toggleStatus(@PathVariable Long id) {
         customerService.toggleUserStatus(id);

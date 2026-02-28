@@ -3,6 +3,7 @@ package com.zone.agri.controller;
 import com.zone.agri.dto.common.MessageResponse;
 import com.zone.agri.dto.supplier.SupplierRequest;
 import com.zone.agri.dto.supplier.SupplierResponse;
+import com.zone.agri.security.annotation.RequirePermission;
 import com.zone.agri.service.SupplierService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -25,13 +26,13 @@ import org.springframework.web.bind.annotation.*;
 @RequestMapping("/api/suppliers")
 @RequiredArgsConstructor
 @Tag(name = "Supplier Management", description = "Quản lý đối tác cung cấp, nhà phân phối và lịch sử nhập hàng")
-@CrossOrigin(origins = "http://localhost:3000")
 public class SupplierController {
 
     private final SupplierService supplierService;
 
     @Operation(summary = "Thêm nhà cung cấp mới", description = "Tạo hồ sơ nhà cung cấp với đầy đủ thông tin pháp lý, liên hệ và tài chính.")
     @SecurityRequirement(name = "bearerAuth")
+    @RequirePermission("SUPPLIER_CREATE")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Tạo thành công", content = @Content(schema = @Schema(implementation = SupplierResponse.class))),
             @ApiResponse(responseCode = "400", description = "Mã số thuế hoặc Email đã tồn tại")
@@ -43,6 +44,7 @@ public class SupplierController {
 
     @Operation(summary = "Danh sách nhà cung cấp", description = "Tìm kiếm, lọc theo trạng thái/danh mục và phân trang danh sách nhà cung cấp.")
     @SecurityRequirement(name = "bearerAuth")
+    @RequirePermission("SUPPLIER_VIEW")
     @GetMapping
     public ResponseEntity<Page<SupplierResponse>> getAllSuppliers(
             @Parameter(description = "Từ khóa tìm kiếm (Tên, MST, SĐT)", example = "Công ty TNHH A")
@@ -62,6 +64,7 @@ public class SupplierController {
 
     @Operation(summary = "Chi tiết nhà cung cấp", description = "Xem hồ sơ chi tiết của một đối tác.")
     @SecurityRequirement(name = "bearerAuth")
+    @RequirePermission("SUPPLIER_VIEW")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Tìm thấy hồ sơ", content = @Content(schema = @Schema(implementation = SupplierResponse.class))),
             @ApiResponse(responseCode = "404", description = "Không tìm thấy ID nhà cung cấp")
@@ -75,6 +78,7 @@ public class SupplierController {
 
     @Operation(summary = "Cập nhật thông tin", description = "Chỉnh sửa thông tin liên hệ, người đại diện hoặc trạng thái hợp tác.")
     @SecurityRequirement(name = "bearerAuth")
+    @RequirePermission("SUPPLIER_UPDATE")
     @PutMapping("/{id}")
     public ResponseEntity<SupplierResponse> updateSupplier(
             @Parameter(description = "ID nhà cung cấp cần sửa", example = "1", required = true)
@@ -86,6 +90,7 @@ public class SupplierController {
 
     @Operation(summary = "Xóa nhà cung cấp", description = "Xóa hoặc vô hiệu hóa nhà cung cấp khỏi danh sách đối tác.")
     @SecurityRequirement(name = "bearerAuth")
+    @RequirePermission("SUPPLIER_DELETE")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Xóa thành công"),
             @ApiResponse(responseCode = "400", description = "Không thể xóa do có đơn nhập hàng liên quan")

@@ -4,13 +4,14 @@ import com.zone.agri.dto.inventory.InventoryReceiptRequest;
 import com.zone.agri.dto.inventory.InventoryReceiptResponse;
 import com.zone.agri.dto.request.inventory.ExportNoteRequest;
 import com.zone.agri.dto.response.InventoryNoteResponse;
-import com.zone.agri.entity.User;
-import com.zone.agri.repository.UserRepository;
+import com.zone.agri.security.annotation.RequirePermission;
 import com.zone.agri.service.InventoryService;
 import com.zone.agri.service.InventoryNoteService;
-
+import io.swagger.v3.oas.annotations.security.SecurityRequirement;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 
@@ -19,96 +20,71 @@ import java.util.List;
 @RestController
 @RequestMapping("/api/inventory")
 @RequiredArgsConstructor
-@CrossOrigin(origins = "http://localhost:3000")
+@Tag(name = "Inventory Management", description = "Quản lý phiếu nhập kho và xuất kho")
 public class InventoryController {
 
     private final InventoryService inventoryService;
     private final InventoryNoteService inventoryNoteService;
-    private final UserRepository userRepository;
 
-    private boolean isCurrentUserAdmin() {
-        String email = SecurityContextHolder.getContext().getAuthentication().getName();
-
-        System.out.println("\n========== DEBUG QUYỀN USER ==========");
-        System.out.println("1. Email đang đăng nhập: " + email);
-
-        return userRepository.findByEmail(email)
-                .map(user -> {
-                    if (user.getRole() != null) {
-                        System.out.println("2. Role ID trong DB: " + user.getRole().getId());
-                        System.out.println("3. Role Slug trong DB: " + user.getRole().getSlug());
-                        // System.out.println("4. Tên Role: " + user.getRole().getName()); // Mở cmt nếu entity Role của bạn có trường name/description
-                    } else {
-                        System.out.println("-> User này KHÔNG CÓ ROLE (Role is null)");
-                    }
-
-                    // Logic check cũ của bạn
-                    boolean isAdmin = user.getRole() != null &&
-                            (user.getRole().getId() == 1L || "ADMIN".equalsIgnoreCase(user.getRole().getSlug()));
-
-                    System.out.println("=> KẾT QUẢ CHECK (Có phải Admin ko?): " + isAdmin);
-                    System.out.println("======================================\n");
-
-                    return isAdmin;
-                })
-                .orElseGet(() -> {
-                    System.out.println("-> LỖI: Không tìm thấy user trong DB với email: " + email);
-                    System.out.println("======================================\n");
-                    return false;
-                });
+    /**
+     * Kiểm tra user hiện tại có authority cụ thể không.
+     * Đọc trực tiếp từ SecurityContext (JWT đã load sẵn) — không query DB.
+     */
+    private boolean hasAuthority(String authority) {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        return auth != null && auth.getAuthorities().stream()
+                .anyMatch(a -> a.getAuthority().equals(authority));
     }
 
     // ==============================
     // PHIẾU NHẬP KHO (RECEIPTS)
     // ==============================
+
+    @SecurityRequirement(name = "bearerAuth")
+    @RequirePermission("IMPORT_CREATE")
     @PostMapping("/receipts")
     public ResponseEntity<InventoryReceiptResponse> createReceipt(@RequestBody InventoryReceiptRequest request) {
-
-        String email = SecurityContextHolder.getContext().getAuthentication().getName();
-        User currentUser = userRepository.findByEmail(email).orElse(null);
-
-        boolean isAdmin = false;
-        if (currentUser != null && currentUser.getRole() != null) {
-            isAdmin = (currentUser.getRole().getId() == 1L || "ADMIN".equalsIgnoreCase(currentUser.getRole().getSlug()));
-        }
-
-        // 2. PHÂN XỬ:
-        if (isAdmin) {
-            // Admin có thể duyệt tự động
+        // Có IMPORT_APPROVE → tự động duyệt luôn (IMPORTED)
+        // Không có              → chờ duyệt (PO)
+        if (hasAuthority("IMPORT_APPROVE")) {
             request.setImportStatus("IMPORTED");
         } else {
-            // NẾU LÀ QUẢN LÝ KHO -> Ép trạng thái về PO (Chờ duyệt), không ném lỗi
             request.setImportStatus("PO");
         }
-
         return ResponseEntity.ok(inventoryService.createReceipt(request));
     }
 
+    @SecurityRequirement(name = "bearerAuth")
+    @RequirePermission("IMPORT_UPDATE")
     @PutMapping("/receipts/{id}")
     public ResponseEntity<InventoryReceiptResponse> updateReceipt(
             @PathVariable Long id,
             @RequestBody InventoryReceiptRequest request) {
-
-        if (!isCurrentUserAdmin()) {
+        if (!hasAuthority("IMPORT_APPROVE")) {
             request.setImportStatus("PO");
         }
         return ResponseEntity.ok(inventoryService.updateReceipt(id, request));
     }
 
+    @SecurityRequirement(name = "bearerAuth")
+    @RequirePermission("IMPORT_DELETE")
     @DeleteMapping("/receipts/{id}")
     public ResponseEntity<String> deleteReceipt(@PathVariable Long id) {
         inventoryService.deleteReceipt(id);
         return ResponseEntity.ok("Xóa phiếu nhập kho thành công.");
     }
 
+    @SecurityRequirement(name = "bearerAuth")
+    @RequirePermission("IMPORT_VIEW")
     @GetMapping("/receipts")
     public ResponseEntity<List<InventoryReceiptResponse>> getAllReceipts() {
         return ResponseEntity.ok(inventoryService.getAllReceipts());
     }
 
+    @SecurityRequirement(name = "bearerAuth")
+    @RequirePermission("IMPORT_VIEW")
     @GetMapping("/receipts/{id}")
-    public ResponseEntity<InventoryReceiptResponse> getReceiptDetail(
-            @PathVariable Long id) {
+    public ResponseEntity<InventoryReceiptResponse> getReceiptDetail(@PathVariable Long id) {
         return ResponseEntity.ok(inventoryService.getReceiptById(id));
     }
 
@@ -116,45 +92,56 @@ public class InventoryController {
     // LỆNH XUẤT KHO (EXPORT)
     // ==============================
 
+    @SecurityRequirement(name = "bearerAuth")
+    @RequirePermission("EXPORT_VIEW")
     @GetMapping("/export-commands")
     public ResponseEntity<?> getAllExportCommands() {
         return ResponseEntity.ok(inventoryNoteService.getAllExportCommands());
     }
 
+    @SecurityRequirement(name = "bearerAuth")
+    @RequirePermission("EXPORT_VIEW")
     @GetMapping("/export-receipts")
     public ResponseEntity<?> getAllExportReceipts() {
         return ResponseEntity.ok(inventoryNoteService.getAllExportReceipts());
     }
 
+    @SecurityRequirement(name = "bearerAuth")
+    @RequirePermission("EXPORT_CREATE")
     @PostMapping("/export-commands")
     public ResponseEntity<?> createExportCommand(@RequestBody ExportNoteRequest request) {
-        // 1. Tạo lệnh PENDING
         InventoryNoteResponse response = inventoryNoteService.createExportCommand(request);
-
-        // 2. ADMIN -> Gọi tiếp hàm chốt phiếu để trừ kho luôn
-        if (isCurrentUserAdmin()) {
+        // Có EXPORT_APPROVE → tự động chốt phiếu & trừ kho
+        if (hasAuthority("EXPORT_APPROVE")) {
             response = inventoryNoteService.completeExportCommand(response.getId());
         }
         return ResponseEntity.ok(response);
     }
 
+    @SecurityRequirement(name = "bearerAuth")
+    @RequirePermission("EXPORT_DELETE")
     @DeleteMapping("/export-commands/{id}")
     public ResponseEntity<?> deleteExportCommand(@PathVariable Long id) {
         inventoryNoteService.deleteExportCommand(id);
         return ResponseEntity.ok("Xóa lệnh xuất thành công");
     }
+
+    @SecurityRequirement(name = "bearerAuth")
+    @RequirePermission("EXPORT_APPROVE")
     @PostMapping("/export-commands/{id}/complete")
     public ResponseEntity<?> completeExportCommand(@PathVariable Long id) {
-        if (!isCurrentUserAdmin()) {
-            throw new RuntimeException("CẢNH BÁO: BẠN KHÔNG PHẢI ADMIN, KHÔNG ĐƯỢC PHÉP DUYỆT XUẤT KHO!");
-        }
         return ResponseEntity.ok(inventoryNoteService.completeExportCommand(id));
     }
+
+    @SecurityRequirement(name = "bearerAuth")
+    @RequirePermission("EXPORT_VIEW")
     @GetMapping("/export-commands/{id}")
     public ResponseEntity<InventoryNoteResponse> getExportCommandDetail(@PathVariable Long id) {
         return ResponseEntity.ok(inventoryNoteService.getExportCommandById(id));
     }
 
+    @SecurityRequirement(name = "bearerAuth")
+    @RequirePermission("EXPORT_UPDATE")
     @PutMapping("/export-commands/{id}")
     public ResponseEntity<?> updateExportCommand(
             @PathVariable Long id,

@@ -2,6 +2,7 @@ package com.zone.agri.controller;
 
 import com.zone.agri.dto.request.EmployeeCreateRequest;
 import com.zone.agri.dto.response.EmployeeResponse;
+import com.zone.agri.security.annotation.RequirePermission;
 import com.zone.agri.service.EmployeeService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -38,6 +39,8 @@ public class EmployeeController {
      * Endpoint: GET /api/employees
      */
     @GetMapping
+    @SecurityRequirement(name = "bearerAuth")
+    @RequirePermission("STAFF_VIEW")
     @Operation(
             summary = "Danh sách nhân viên (Phân trang & Lọc)",
             description = "Lấy danh sách nhân viên với hỗ trợ tìm kiếm, lọc theo chi nhánh, vai trò, trạng thái và phân trang.",
@@ -74,6 +77,8 @@ public class EmployeeController {
      * Endpoint: GET /api/employees/{id}
      */
     @GetMapping("/{id}")
+    @SecurityRequirement(name = "bearerAuth")
+    @RequirePermission("STAFF_VIEW")
     @Operation(
             summary = "Chi tiết nhân viên",
             description = "Lấy thông tin chi tiết của một nhân viên theo ID.",
@@ -92,6 +97,8 @@ public class EmployeeController {
      * Endpoint: POST /api/employees
      */
     @PostMapping
+    @SecurityRequirement(name = "bearerAuth")
+    @RequirePermission("STAFF_CREATE")
     @Operation(
             summary = "Tạo nhân viên mới",
             description = "Tạo tài khoản nhân viên mới với thông tin cá nhân, chi nhánh, và vai trò. " +
@@ -120,6 +127,8 @@ public class EmployeeController {
      * Endpoint: PUT /api/employees/{id}
      */
     @PutMapping("/{id}")
+    @SecurityRequirement(name = "bearerAuth")
+    @RequirePermission("STAFF_UPDATE")
     @Operation(
             summary = "Cập nhật nhân viên",
             description = "Chỉnh sửa thông tin nhân viên. Không thể sửa nhân viên có vai trò hệ thống.",
@@ -143,6 +152,8 @@ public class EmployeeController {
      * Endpoint: DELETE /api/employees/{id}
      */
     @DeleteMapping("/{id}")
+    @SecurityRequirement(name = "bearerAuth")
+    @RequirePermission("STAFF_DELETE")
     @Operation(
             summary = "Xóa nhân viên",
             description = "Xóa (soft delete) nhân viên khỏi hệ thống. Không thể xóa nhân viên có vai trò hệ thống.",

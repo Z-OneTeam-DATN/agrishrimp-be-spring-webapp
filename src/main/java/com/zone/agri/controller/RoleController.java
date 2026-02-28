@@ -3,6 +3,7 @@ package com.zone.agri.controller;
 import com.zone.agri.dto.user.RoleRequest;
 import com.zone.agri.dto.user.RoleResponse;
 import com.zone.agri.entity.Role;
+import com.zone.agri.security.annotation.RequirePermission;
 import com.zone.agri.service.RoleService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -26,6 +27,8 @@ public class RoleController {
     private final RoleService roleService;
 
     @PostMapping
+    @SecurityRequirement(name = "bearerAuth")
+    @RequirePermission("ROLE_CREATE")
     @Operation(
         summary = "Tạo vai trò mới",
         description = "Tạo một vai trò người dùng mới cùng với danh sách các quyền được chọn từ frontend.",
@@ -40,6 +43,7 @@ public class RoleController {
     }
 
     @GetMapping
+    @RequirePermission("ROLE_VIEW")
     @Operation(
         summary = "Danh sách vai trò (Lọc & Tìm kiếm)",
         description = "Hỗ trợ tìm kiếm theo tên/mã và lọc theo trạng thái/nguồn gốc vai trò. Kết quả trả về có phân trang."
@@ -63,6 +67,7 @@ public class RoleController {
     }
 
     @GetMapping("/permissions")
+    @RequirePermission("ROLE_VIEW")
     @Operation(
         summary = "Lấy danh sách quyền hạn",
         description = "Trả về danh sách tất cả các quyền (Module và Action) có trong hệ thống để phục vụ việc phân quyền."
@@ -73,6 +78,8 @@ public class RoleController {
     }
 
     @GetMapping("/{roleId}")
+    @SecurityRequirement(name = "bearerAuth")
+    @RequirePermission("ROLE_VIEW")
     @Operation(
         summary = "Lấy thông tin chi tiết vai trò",
         description = "Trả về thông tin đầy đủ của một vai trò cụ thể bao gồm danh sách quyền.",
@@ -87,6 +94,8 @@ public class RoleController {
     }
 
     @PutMapping("/{roleId}")
+    @SecurityRequirement(name = "bearerAuth")
+    @RequirePermission("ROLE_UPDATE")
     @Operation(
         summary = "Cập nhật vai trò",
         description = "Chỉnh sửa thông tin và quyền hạn của vai trò. Không cho phép sửa vai trò hệ thống (isSystem = true).",
@@ -106,6 +115,8 @@ public class RoleController {
     }
 
     @DeleteMapping("/{roleId}")
+    @SecurityRequirement(name = "bearerAuth")
+    @RequirePermission("ROLE_DELETE")
     @Operation(
         summary = "Xóa vai trò",
         description = "Xóa vai trò khỏi hệ thống. Không cho phép xóa vai trò hệ thống hoặc vai trò đang được sử dụng bởi người dùng.",

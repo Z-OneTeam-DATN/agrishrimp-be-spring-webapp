@@ -8,6 +8,7 @@ import com.zone.agri.dto.product.ProductResponse;
 import com.zone.agri.dto.product.ProductRequest;
 import com.zone.agri.entity.*;
 import com.zone.agri.repository.*;
+import com.zone.agri.security.annotation.RequirePermission;
 import com.zone.agri.service.AttributeService;
 import com.zone.agri.service.ProductService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -28,7 +29,6 @@ import java.util.List;
 @RequestMapping("/api/products")
 @RequiredArgsConstructor
 @Tag(name = "Product Management", description = "Quản lý danh mục sản phẩm, biến thể (SKUs) và kho hàng")
-@CrossOrigin(origins = "http://localhost:3000")
 public class ProductController {
 
     private final ProductService productService;
@@ -50,6 +50,7 @@ public class ProductController {
             """
     )
     @SecurityRequirement(name = "bearerAuth")
+    @RequirePermission("PRODUCT_CREATE")
     @PostMapping(value = "/json", consumes = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<ProductResponse> createJson(
             @RequestBody @Valid CreateProductJsonWrapper wrapper) {
@@ -68,6 +69,7 @@ public class ProductController {
             """
     )
     @SecurityRequirement(name = "bearerAuth")
+    @RequirePermission("PRODUCT_CREATE")
     @PostMapping(value = "/multipart", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<ProductResponse> createMultipart(
             @RequestPart("data")
@@ -89,6 +91,7 @@ public class ProductController {
 
     @Operation(summary = "Lấy danh sách sản phẩm (có lọc)")
     @SecurityRequirement(name = "bearerAuth")
+    @RequirePermission("PRODUCT_VIEW")
     @GetMapping
     public ResponseEntity<List<ProductResponse>> getAll(
             @Parameter(description = "Tìm kiếm theo tên, thương hiệu hoặc mã SKU", example = "Sản phẩm")
@@ -106,6 +109,7 @@ public class ProductController {
 
     @Operation(summary = "Chi tiết sản phẩm")
     @SecurityRequirement(name = "bearerAuth")
+    @RequirePermission("PRODUCT_VIEW")
     @GetMapping("/{id}")
     public ResponseEntity<ProductResponse> getById(
             @Parameter(description = "ID của sản phẩm", example = "1", required = true)
@@ -119,6 +123,7 @@ public class ProductController {
 
     @Operation(summary = "Cập nhật sản phẩm (JSON)")
     @SecurityRequirement(name = "bearerAuth")
+    @RequirePermission("PRODUCT_UPDATE")
     @PutMapping("/{id}")
     public ResponseEntity<ProductResponse> update(
             @Parameter(description = "ID của sản phẩm", example = "1", required = true)
@@ -133,6 +138,7 @@ public class ProductController {
 
     @Operation(summary = "Xóa sản phẩm")
     @SecurityRequirement(name = "bearerAuth")
+    @RequirePermission("PRODUCT_DELETE")
     @DeleteMapping("/{id}")
     public ResponseEntity<ApiResponse<Void>> delete(
             @Parameter(description = "ID của sản phẩm cần xóa", example = "1", required = true)
@@ -143,6 +149,7 @@ public class ProductController {
 
     @Operation(summary = "Ngừng kinh doanh sản phẩm")
     @SecurityRequirement(name = "bearerAuth")
+    @RequirePermission("PRODUCT_UPDATE")
     @PutMapping("/{id}/disable")
     public ResponseEntity<ApiResponse<Void>> disable(
             @Parameter(description = "ID của sản phẩm", example = "1", required = true)
@@ -157,6 +164,7 @@ public class ProductController {
 
     @Operation(summary = "Lấy danh sách danh mục")
     @SecurityRequirement(name = "bearerAuth")
+    @RequirePermission("PRODUCT_VIEW")
     @GetMapping("/categories")
     public ResponseEntity<List<Category>> getAllCategories() {
         return ResponseEntity.ok(categoryRepository.findAll());
@@ -164,6 +172,7 @@ public class ProductController {
 
     @Operation(summary = "Lấy danh sách thương hiệu")
     @SecurityRequirement(name = "bearerAuth")
+    @RequirePermission("PRODUCT_VIEW")
     @GetMapping("/brands")
     public ResponseEntity<List<Brand>> getAllBrands() {
         return ResponseEntity.ok(brandRepository.findAll());
@@ -171,6 +180,7 @@ public class ProductController {
 
     @Operation(summary = "Lấy danh sách Từ điển Thuộc tính động")
     @SecurityRequirement(name = "bearerAuth")
+    @RequirePermission("PRODUCT_VIEW")
     @GetMapping("/attributes")
     public ResponseEntity<List<AttributeDTO>> getAllAttributes() {
         return ResponseEntity.ok(attributeService.getAll());
