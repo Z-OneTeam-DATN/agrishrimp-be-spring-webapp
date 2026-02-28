@@ -14,7 +14,6 @@ import java.util.List;
 @RequestMapping("/api/product-variants")
 @RequiredArgsConstructor
 @Tag(name = "Product Variant Management", description = "Quản lý biến thể sản phẩm")
-@CrossOrigin(origins = "http://localhost:3000")
 public class ProductVariantController {
 
     private final ProductVariantService variantService;

@@ -14,7 +14,6 @@ import java.util.List;
 @RequestMapping("/api/public/home")
 @RequiredArgsConstructor
 @Tag(name = "Home API", description = "API dành cho khách hàng - Trang chủ")
-@CrossOrigin(origins = "*") // Hỗ trợ gọi từ Next.js
 public class HomeController {
 
     private final ProductService productService;

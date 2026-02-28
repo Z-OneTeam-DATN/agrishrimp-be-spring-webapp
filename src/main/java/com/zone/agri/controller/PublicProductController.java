@@ -18,7 +18,6 @@ import java.util.List;
 @RequestMapping("/api/public") // Base path for public APIs
 @RequiredArgsConstructor
 @Tag(name = "Public Product APIs", description = "Các API công khai để lấy thông tin sản phẩm và danh mục")
-@CrossOrigin(origins = "http://localhost:3000")
 public class PublicProductController {
 
     private final ProductService productService;
