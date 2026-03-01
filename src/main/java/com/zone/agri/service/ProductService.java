@@ -113,8 +113,6 @@ public class ProductService {
         }
 
         Product savedProduct = productRepository.save(product);
-
-        // 👉 FIX LỖI JAVA: Bọc List trong HashSet để ép kiểu về Set cho Entity
         List<ProductImage> savedImages = uploadAndSaveProductImages(savedProduct, productImages);
         savedProduct.setProductImages(new HashSet<>(savedImages));
 
@@ -148,16 +146,14 @@ public class ProductService {
             product.setBrand(getOrCreateBrand(request.getBrand()));
         }
 
-        // 👉 1. XÓA ẢNH CHÍNH BỊ BỎ ĐI & THÊM ẢNH MỚI
+        // 1. XỬ LÝ ẢNH CHÍNH
         List<String> keepImages = request.getImages() != null ? request.getImages() : new ArrayList<>();
         if (product.getProductImages() != null) {
-            // Xóa ảnh khỏi DB nếu FE không gửi lại link đó nữa
             product.getProductImages().removeIf(img -> !keepImages.contains(img.getImageUrl()));
         } else {
             product.setProductImages(new HashSet<>());
         }
 
-        // Up ảnh chính MỚI lên Cloudinary
         if (productImages != null) {
             for (MultipartFile file : productImages) {
                 if (file != null && !file.isEmpty()) {
@@ -167,20 +163,23 @@ public class ProductService {
             }
         }
 
-        // 👉 2. CLEAR VARIANT CŨ VÀ FLUSH (Tránh lỗi OptimisticLocking)
-        if (product.getVariants() != null) {
-            product.getVariants().clear();
-        } else {
-            product.setVariants(new HashSet<>());
-        }
-        productRepository.saveAndFlush(product);
+        // TỪ ĐÂY TRỞ XUỐNG LÀ LOGIC CẬP NHẬT BIẾN THỂ MỚI (KHÔNG DÙNG CLEAR NỮA)
 
-        // 👉 3. THÊM VARIANT VÀ UP ẢNH VARIANT MỚI
+        // Tạo một Map chứa các biến thể cũ để dễ bề tra cứu theo SKU
+        Map<String, ProductVariant> existingVariantsMap = new HashMap<>();
+        if (product.getVariants() != null) {
+            for (ProductVariant v : product.getVariants()) {
+                existingVariantsMap.put(v.getSku(), v);
+            }
+        }
+
+        Set<ProductVariant> updatedVariants = new HashSet<>();
+
+        // Duyệt qua danh sách biến thể FE gửi lên
         for (int i = 0; i < request.getVariants().size(); i++) {
             ProductRequest.VariantDto vDto = request.getVariants().get(i);
-            String finalImageUrl = vDto.getImage(); // URL cũ gửi từ FE (nếu có)
+            String finalImageUrl = vDto.getImage();
 
-            // Nếu vị trí index này có file mới -> up lên lấy link mới
             if (variantImages != null && i < variantImages.size()) {
                 MultipartFile vFile = variantImages.get(i);
                 if (vFile != null && !vFile.isEmpty()) {
@@ -189,16 +188,33 @@ public class ProductService {
                 }
             }
 
-            ProductVariant variant = ProductVariant.builder()
-                    .product(product)
-                    .sku(vDto.getSku())
-                    .barcode(vDto.getBarcode())
-                    .imageUrl(finalImageUrl) // Dùng link mới up hoặc link cũ
-                    .status(VariantStatus.ACTIVE)
-                    .build();
+            // Kiểm tra xem biến thể này đã tồn tại trong DB chưa (Dựa vào SKU)
+            ProductVariant variant = existingVariantsMap.get(vDto.getSku());
 
-            ProductVariant savedVariant = variantRepository.save(variant);
+            if (variant != null) {
+                // NẾU ĐÃ TỒN TẠI -> Cập nhật thông tin đè lên, KHÔNG TẠO MỚI
+                variant.setBarcode(vDto.getBarcode());
+                if (finalImageUrl != null) {
+                    variant.setImageUrl(finalImageUrl);
+                }
+                // Xóa list thuộc tính cũ của biến thể này để gán cái mới
+                if (variant.getAttributeValues() != null) {
+                    skuAttributeValueRepository.deleteAll(variant.getAttributeValues());
+                    variant.getAttributeValues().clear();
+                }
+            } else {
+                // NẾU LÀ BIẾN THỂ HOÀN TOÀN MỚI -> Tạo mới
+                variant = ProductVariant.builder()
+                        .product(product)
+                        .sku(vDto.getSku())
+                        .barcode(vDto.getBarcode())
+                        .imageUrl(finalImageUrl)
+                        .status(VariantStatus.ACTIVE)
+                        .build();
+                variant = variantRepository.save(variant);
+            }
 
+            // Cập nhật lại danh sách Thuộc tính (Màu sắc, Kích thước...)
             if (vDto.getAttributeValueIds() != null) {
                 List<SKUAttributeValue> attrList = new ArrayList<>();
                 for (Long valId : vDto.getAttributeValueIds()) {
@@ -206,14 +222,32 @@ public class ProductService {
                             .orElseThrow(() -> new NotFoundException("Thuộc tính ko tồn tại: " + valId));
 
                     SKUAttributeValue savedAttr = skuAttributeValueRepository.save(SKUAttributeValue.builder()
-                            .sku(savedVariant).attribute(attrValue.getAttribute()).attributeValue(attrValue).build());
+                            .sku(variant).attribute(attrValue.getAttribute()).attributeValue(attrValue).build());
                     attrList.add(savedAttr);
                 }
-                savedVariant.setAttributeValues(attrList);
-                variantRepository.save(savedVariant);
+                variant.setAttributeValues(attrList);
+                variantRepository.save(variant);
             }
-            product.getVariants().add(savedVariant);
+
+            updatedVariants.add(variant);
+            // Gỡ biến thể này khỏi Map cũ (Những thằng nào còn sót lại trong Map nghĩa là đã bị FE xóa đi)
+            existingVariantsMap.remove(vDto.getSku());
         }
+
+        // XÓA CÁC BIẾN THỂ BỊ NGƯỜI DÙNG XÓA TRÊN GIAO DIỆN
+        for (ProductVariant deletedVariant : existingVariantsMap.values()) {
+            // Kiểm tra xem có hàng trong kho không, nếu có thì không cho xóa
+            Long currentStock = inventoryRepository.sumQuantityByProductVariantId(deletedVariant.getId());
+            if (currentStock != null && currentStock > 0) {
+                throw new ConflictException("Không thể lưu: Biến thể " + deletedVariant.getSku() + " đã bị xóa trên giao diện nhưng vẫn còn tồn kho.");
+            }
+            // Nếu không có tồn kho thì mới cho phép xóa an toàn
+            deletedVariant.setStatus(VariantStatus.INACTIVE); // Thường là Soft Delete thay vì Hard Delete
+            // variantRepository.delete(deletedVariant); (Không dùng delete để an toàn lịch sử)
+        }
+
+        product.getVariants().clear();
+        product.getVariants().addAll(updatedVariants);
 
         return convertToResponse(productRepository.save(product));
     }
@@ -298,14 +332,14 @@ public class ProductService {
     public ProductResponse convertToResponse(Product product) {
         User currentUser = getCurrentUser();
 
-        // 👉 LẤY HỆ SỐ NHÂN TỪ SETTING SERVICE (Ví dụ: 30% -> 1.3)
+        // LẤY HỆ SỐ NHÂN TỪ SETTING SERVICE (Ví dụ: 30% -> 1.3)
         BigDecimal profitMultiplier = settingService.getProfitMultiplier();
 
         List<String> imageUrls = product.getProductImages() != null ?
                 product.getProductImages().stream().map(ProductImage::getImageUrl).collect(Collectors.toList()) :
                 Collections.emptyList();
 
-        // 👉 TRUYỀN HỆ SỐ profitMultiplier VÀO HÀM MAP BIẾN THẾ
+        // TRUYỀN HỆ SỐ profitMultiplier VÀO HÀM MAP BIẾN THẾ
         List<ProductVariantResponse> variantResponses = product.getVariants() != null ?
                 product.getVariants().stream()
                         .map(variant -> mapVariantToResponse(variant, currentUser, profitMultiplier))
@@ -365,7 +399,6 @@ public class ProductService {
 
         List<Inventory> validBatches = allInventories.stream()
                 .filter(inv -> inv.getQuantity() != null && inv.getQuantity() > 0)
-                // 👉 FIX QUAN TRỌNG: Thêm điều kiện currentUser == null (Khách truy cập Web)
                 .filter(inv -> currentUser == null || isAdmin || (currentBranch != null && inv.getBranch() != null && inv.getBranch().getId().equals(currentBranch.getId())))
                 .collect(Collectors.toList());
 
@@ -472,8 +505,6 @@ public class ProductService {
 
             String imageUrl = null;
             String imagePublicId = null;
-
-            // 👉 FIX 1: Nhận đúng ảnh từ danh sách MultipartFile gửi lên
             if (variantImages != null && i < variantImages.size()) {
                 MultipartFile imgFile = variantImages.get(i);
                 if (imgFile != null && !imgFile.isEmpty()) {
@@ -537,13 +568,16 @@ public class ProductService {
     public List<ProductResponse> getProductsForSale() {
         return productRepository.findProductsForSale().stream()
                 .map(this::convertToResponse)
+                .filter(p -> p.getInventory() != null && p.getInventory() > 0)
                 .collect(Collectors.toList());
     }
 
     public List<ProductResponse> getTopBestSellers(int limit) {
-        Pageable pageable = PageRequest.of(0, limit);
+        Pageable pageable = PageRequest.of(0, limit * 2);
         return productRepository.findTopBestSellers(pageable).stream()
                 .map(this::convertToResponse)
+                .filter(p -> p.getInventory() != null && p.getInventory() > 0)
+                .limit(limit)
                 .collect(Collectors.toList());
     }
 
@@ -571,8 +605,10 @@ public class ProductService {
         List<Long> productIds = productIdsPage.getContent();
 
         if (productIds.isEmpty()) return Collections.emptyList();
+
         return productRepository.findPublicByIds(productIds).stream()
                 .map(this::convertToResponse)
+                .filter(p -> p.getInventory() != null && p.getInventory() > 0)
                 .collect(Collectors.toList());
     }
 
@@ -589,8 +625,10 @@ public class ProductService {
         List<Long> productIds = productIdsPage.getContent();
 
         if (productIds.isEmpty()) return Collections.emptyList();
+
         return productRepository.findPublicByIds(productIds).stream()
                 .map(this::convertToResponse)
+                .filter(p -> p.getInventory() != null && p.getInventory() > 0)
                 .collect(Collectors.toList());
     }
 
@@ -598,13 +636,11 @@ public class ProductService {
     public Page<ProductResponse> getPublicProducts(String keyword, Long categoryId, Long brandId, Pageable pageable) {
         Page<Long> productIdsPage = productRepository.findPublicProductIds(keyword, categoryId, brandId, pageable);
         List<Long> productIds = productIdsPage.getContent();
-
         if (productIds.isEmpty()) return Page.empty(pageable);
-
         List<ProductResponse> productResponses = productRepository.findPublicByIds(productIds).stream()
                 .map(this::convertToResponse)
+                .filter(p -> p.getInventory() != null && p.getInventory() > 0)
                 .collect(Collectors.toList());
-
         return new PageImpl<>(productResponses, pageable, productIdsPage.getTotalElements());
     }
 }
