@@ -16,9 +16,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
-import java.util.Comparator;
 import java.util.List;
-import java.util.Optional;
 import java.util.stream.Collectors;
 
 @Service
@@ -29,11 +27,14 @@ public class CartService {
     private final ProductVariantRepository variantRepo;
     private final UserRepository userRepo;
     private final InventoryRepository inventoryRepository;
-    private final SettingService settingService; // 👉 Bổ sung SettingService
+    private final SettingService settingService;
 
     // 1. Lấy danh sách giỏ hàng của User
     public List<CartItemResponse> getMyCart(Long userId) {
         List<CartItem> items = cartItemRepo.findByUserId(userId);
+
+        // 👉 TỐI ƯU: Lấy hệ số lợi nhuận 1 lần duy nhất ở ngoài vòng lặp
+        BigDecimal profitMultiplier = settingService.getProfitMultiplier();
 
         return items.stream().map(item -> {
             ProductVariant variant = item.getProductVariant();
@@ -46,7 +47,7 @@ public class CartService {
                     .collect(Collectors.joining(", "))
                     : variant.getSku(); // Fallback về SKU nếu không có thuộc tính
 
-            // 👉 LOGIC LÔ HÀNG ĐỘNG: Tính tổng tồn và giá bán
+            // Lấy các lô hàng đang còn tồn
             List<Inventory> batches = inventoryRepository.findByProductVariantId(variant.getId());
 
             int totalStock = batches.stream()
@@ -54,18 +55,15 @@ public class CartService {
                     .mapToInt(Inventory::getQuantity)
                     .sum();
 
-            BigDecimal sellingPrice = BigDecimal.ZERO;
-            Optional<Inventory> oldestBatch = batches.stream()
+            // 👉 SỬA LỖI LỆCH GIÁ: Tìm giá nhập cao nhất giống hệt bên ProductService
+            BigDecimal maxImportPrice = batches.stream()
                     .filter(inv -> inv.getQuantity() != null && inv.getQuantity() > 0)
-                    .min(Comparator.comparing(Inventory::getId)); // FIFO
+                    .map(inv -> inv.getImportPrice() != null ? inv.getImportPrice() : BigDecimal.ZERO)
+                    .max(BigDecimal::compareTo)
+                    .orElse(BigDecimal.ZERO);
 
-            if (oldestBatch.isPresent()) {
-                BigDecimal importPrice = oldestBatch.get().getImportPrice() != null
-                        ? oldestBatch.get().getImportPrice()
-                        : BigDecimal.ZERO;
-                // 👉 TÍNH GIÁ ĐỘNG TỪ CẤU HÌNH HỆ THỐNG
-                sellingPrice = importPrice.multiply(settingService.getProfitMultiplier());
-            }
+            // 👉 Tính giá bán động
+            BigDecimal sellingPrice = maxImportPrice.multiply(profitMultiplier);
 
             return CartItemResponse.builder()
                     .id(item.getId())
@@ -76,9 +74,9 @@ public class CartService {
                     .categoryName(product != null && product.getCategory() != null ? product.getCategory().getName() : "")
                     .brandName(product != null && product.getBrand() != null ? product.getBrand().getName() : "")
                     .productForm("")
-                    .price(sellingPrice) // 👉 Dùng giá bán động
+                    .price(sellingPrice) // 👉 Giá bán động đã đồng bộ 100% với Trang chủ
                     .quantity(item.getQuantity())
-                    .stock(totalStock)   // 👉 Dùng tổng tồn kho động
+                    .stock(totalStock)
                     .image(variant.getImageUrl())
                     .build();
         }).collect(Collectors.toList());
