@@ -41,8 +41,8 @@ public class ProductController {
     // =========================================================================
 
     @Operation(
-        summary = "Tạo sản phẩm mới (JSON)",
-        description = """
+            summary = "Tạo sản phẩm mới (JSON)",
+            description = """
             Tạo sản phẩm không kèm ảnh. Gửi request dạng **application/json**:
             ```json
             { "data": { "name": "...", "categoryId": 1, "variants": [...] } }
@@ -60,8 +60,8 @@ public class ProductController {
     }
 
     @Operation(
-        summary = "Tạo sản phẩm mới (multipart — có ảnh)",
-        description = """
+            summary = "Tạo sản phẩm mới (multipart — có ảnh)",
+            description = """
             Tạo sản phẩm kèm upload ảnh. Gửi request dạng **multipart/form-data**:
             - `data` (part, Content-Type: application/json): JSON của CreateProductRequest
             - `productImages` (part, optional): Danh sách ảnh sản phẩm chính
@@ -118,18 +118,27 @@ public class ProductController {
     }
 
     // =========================================================================
-    // PUT /api/products/{id} — Cập nhật (API cũ – tương thích FE hiện tại)
+    // PUT /api/products/{id} — Cập nhật (Sửa lại thành form-data để nhận ảnh)
     // =========================================================================
 
-    @Operation(summary = "Cập nhật sản phẩm (JSON)")
+    @Operation(summary = "Cập nhật sản phẩm (multipart - có ảnh)")
     @SecurityRequirement(name = "bearerAuth")
     @RequirePermission("PRODUCT_UPDATE")
-    @PutMapping("/{id}")
+    @PutMapping(value = "/{id}", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<ProductResponse> update(
             @Parameter(description = "ID của sản phẩm", example = "1", required = true)
             @PathVariable Long id,
-            @RequestBody ProductRequest request) {
-        return ResponseEntity.ok(productService.updateProduct(id, request));
+
+            @RequestPart("data")
+            ProductRequest request,
+
+            @RequestPart(value = "productImages", required = false)
+            List<MultipartFile> productImages,
+
+            @RequestPart(value = "variantImages", required = false)
+            List<MultipartFile> variantImages) {
+
+        return ResponseEntity.ok(productService.updateProduct(id, request, productImages, variantImages));
     }
 
     // =========================================================================

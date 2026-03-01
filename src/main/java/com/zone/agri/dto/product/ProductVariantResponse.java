@@ -14,6 +14,7 @@ public class ProductVariantResponse {
     private String sku;
     private String barcode;
     private String productName;
+    private BigDecimal price;
     private String imageUrl;
     private VariantStatus status;
     private Integer quantity;
