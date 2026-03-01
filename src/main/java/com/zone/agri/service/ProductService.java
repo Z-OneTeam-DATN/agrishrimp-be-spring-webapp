@@ -1,7 +1,9 @@
 package com.zone.agri.service;
 
 import com.zone.agri.common.CloudinaryService;
+import com.zone.agri.dto.ImageSearchResult;
 import com.zone.agri.dto.admin.CategoryDTO;
+import com.zone.agri.repository.ProductVectorRepository;
 import com.zone.agri.dto.product.*;
 import com.zone.agri.entity.*;
 import com.zone.agri.entity.enums.*;
@@ -50,6 +52,8 @@ public class ProductService {
     private final InventoryTransferRepository inventoryTransferRepository;
     private final CloudinaryService cloudinaryService;
     private final SettingService settingService;
+    private final ImageSearchService imageSearchService;
+    private final ProductVectorRepository productVectorRepository;
 
     // =========================================================================
     // READ METHODS
@@ -120,6 +124,12 @@ public class ProductService {
         savedProduct.setVariants(new HashSet<>(savedVariants));
 
         log.info("Tạo sản phẩm thành công: id={}, name={}", savedProduct.getId(), savedProduct.getName());
+
+        // Auto-index vào AI service (fire-and-forget, không block nếu AI service bị down)
+        if (!savedImages.isEmpty()) {
+            imageSearchService.indexProduct(savedProduct.getId(), savedImages.get(0).getImageUrl());
+        }
+
         return convertToResponse(savedProduct);
     }
 
@@ -148,6 +158,12 @@ public class ProductService {
 
         // 1. XỬ LÝ ẢNH CHÍNH
         List<String> keepImages = request.getImages() != null ? request.getImages() : new ArrayList<>();
+
+        // Lấy URL ảnh đã index lần trước từ product_vectors (null nếu chưa index)
+        String indexedImageUrl = productVectorRepository.findByProductId(id)
+                .map(pv -> pv.getImageUrl())
+                .orElse(null);
+
         if (product.getProductImages() != null) {
             product.getProductImages().removeIf(img -> !keepImages.contains(img.getImageUrl()));
         } else {
@@ -234,22 +250,39 @@ public class ProductService {
             existingVariantsMap.remove(vDto.getSku());
         }
 
-        // XÓA CÁC BIẾN THỂ BỊ NGƯỜI DÙNG XÓA TRÊN GIAO DIỆN
-        for (ProductVariant deletedVariant : existingVariantsMap.values()) {
-            // Kiểm tra xem có hàng trong kho không, nếu có thì không cho xóa
-            Long currentStock = inventoryRepository.sumQuantityByProductVariantId(deletedVariant.getId());
-            if (currentStock != null && currentStock > 0) {
-                throw new ConflictException("Không thể lưu: Biến thể " + deletedVariant.getSku() + " đã bị xóa trên giao diện nhưng vẫn còn tồn kho.");
-            }
-            // Nếu không có tồn kho thì mới cho phép xóa an toàn
-            deletedVariant.setStatus(VariantStatus.INACTIVE); // Thường là Soft Delete thay vì Hard Delete
-            // variantRepository.delete(deletedVariant); (Không dùng delete để an toàn lịch sử)
-        }
+// XÓA CÁC BIẾN THỂ BỊ NGƯỜI DÙNG XÓA TRÊN GIAO DIỆN
+for (ProductVariant deletedVariant : existingVariantsMap.values()) {
+    // Kiểm tra xem có hàng trong kho không, nếu có thì không cho xóa
+    Long currentStock = inventoryRepository.sumQuantityByProductVariantId(deletedVariant.getId());
+    if (currentStock != null && currentStock > 0) {
+        throw new ConflictException("Không thể lưu: Biến thể " + deletedVariant.getSku() + " đã bị xóa trên giao diện nhưng vẫn còn tồn kho.");
+    }
+    // Soft delete — không xóa thật để giữ lịch sử
+    deletedVariant.setStatus(VariantStatus.INACTIVE);
+}
 
-        product.getVariants().clear();
-        product.getVariants().addAll(updatedVariants);
+product.getVariants().clear();
+product.getVariants().addAll(updatedVariants);
 
-        return convertToResponse(productRepository.save(product));
+// Lưu sản phẩm
+Product updatedProduct = productRepository.save(product);
+
+// Re-index AI chỉ khi ảnh thực sự thay đổi (fire-and-forget)
+Set<String> newImageUrls = updatedProduct.getProductImages() != null
+        ? updatedProduct.getProductImages().stream()
+                .map(ProductImage::getImageUrl)
+                .collect(Collectors.toSet())
+        : Collections.emptySet();
+
+boolean newFilesUploaded = productImages != null &&
+        productImages.stream().anyMatch(f -> f != null && !f.isEmpty());
+boolean indexedImageGone = indexedImageUrl != null && !newImageUrls.contains(indexedImageUrl);
+
+if ((newFilesUploaded || indexedImageGone) && !newImageUrls.isEmpty()) {
+    imageSearchService.indexProduct(updatedProduct.getId(), newImageUrls.iterator().next());
+}
+
+return convertToResponse(updatedProduct);
     }
 
     // =========================================================================
@@ -289,6 +322,9 @@ public class ProductService {
 
         productRepository.delete(product);
         log.info("Xóa sản phẩm thành công: id={}", id);
+
+        // Xóa index khỏi AI service (fire-and-forget)
+        imageSearchService.deleteIndex(id);
     }
 
     @Transactional
@@ -315,6 +351,43 @@ public class ProductService {
         }
         productRepository.save(product);
         log.info("Ngừng kinh doanh sản phẩm thành công: id={}", id);
+    }
+
+    // =========================================================================
+    // IMAGE SEARCH
+    // =========================================================================
+
+    /**
+     * Tìm kiếm sản phẩm bằng hình ảnh — forward ảnh sang Python AI service.
+     * Ném exception nếu AI service bị down (caller xử lý 503).
+     */
+    public List<ProductResponse> searchByImage(MultipartFile image) {
+        List<ImageSearchResult> results = imageSearchService.searchByImage(image);
+        return results.stream()
+                .sorted(Comparator.comparingDouble(r -> -r.getScore()))
+                .map(r -> productRepository.findById(r.getProductId()).orElse(null))
+                .filter(Objects::nonNull)
+                .map(this::convertToResponse)
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * Index toàn bộ sản phẩm có ảnh vào AI service — dùng một lần khi deploy.
+     * Trả về số lượng sản phẩm đã được index.
+     */
+    @Transactional(readOnly = true)
+    public int indexAll() {
+        List<Product> products = productRepository.findAllWithDetails();
+        List<Map<String, Object>> payload = products.stream()
+                .filter(p -> p.getProductImages() != null && !p.getProductImages().isEmpty())
+                .map(p -> {
+                    String imageUrl = p.getProductImages().iterator().next().getImageUrl();
+                    return Map.<String, Object>of("productId", p.getId(), "imageUrl", imageUrl);
+                })
+                .collect(Collectors.toList());
+
+        if (payload.isEmpty()) return 0;
+        return imageSearchService.indexBatch(payload);
     }
 
     // =========================================================================
