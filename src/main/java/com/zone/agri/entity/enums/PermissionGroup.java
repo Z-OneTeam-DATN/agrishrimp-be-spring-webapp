@@ -7,5 +7,8 @@ public enum PermissionGroup {
     SALES,
     PRODUCT_CATALOG,
     INVENTORY,
+    INVENTORY_TRANSACTION,
+    PARTNER,
+    SHIPPING,
     SETTING
 }

@@ -254,11 +254,14 @@ public class InventoryService {
         List<String> tagList = new ArrayList<>();
         if (entity.getTags() != null && !entity.getTags().isEmpty()) tagList = Arrays.asList(entity.getTags().split(","));
 
+        // Lấy trước ID của kho xuất để dùng bên trong vòng lặp map items
+        Long partnerBranchId = isInternal ? entity.getPartnerBranch().getId() : null;
+
         return InventoryReceiptResponse.builder()
                 .id(entity.getId())
                 .code(entity.getCode())
                 .importType(isInternal ? "INTERNAL" : "SUPPLIER")
-                .sourceBranchId(isInternal ? entity.getPartnerBranch().getId() : null)
+                .sourceBranchId(partnerBranchId)
                 .status(entity.getStatus() != null ? entity.getStatus().name() : "PENDING")
                 .supplierName(entity.getSupplier() != null ? entity.getSupplier().getName() : "")
                 .supplierCode(entity.getSupplier() != null ? entity.getSupplier().getCode() : "")
@@ -271,18 +274,34 @@ public class InventoryService {
                 .tags(tagList)
                 .createdAt(entity.getCreatedAt())
                 .entryDate(entity.getEntryDate() != null ? entity.getEntryDate().format(DateTimeFormatter.ISO_LOCAL_DATE) : "")
-                .items(entity.getDetails() == null ? new ArrayList<>() : entity.getDetails().stream().map(d ->
-                        InventoryReceiptResponse.ItemResponse.builder()
-                                .productCode(d.getProductVariant() != null ? d.getProductVariant().getSku() : "")
-                                .productName(d.getProductVariant() != null && d.getProductVariant().getProduct() != null ? d.getProductVariant().getProduct().getName() : "")
-                                .quantity(d.getQuantity() != null ? d.getQuantity() : 0)
-                                .price(d.getPrice() != null ? d.getPrice() : BigDecimal.ZERO)
-                                .newSellingPrice(d.getNewSellingPrice())
-                                .lotNumber(d.getBatchNumber())
-                                .expiryDate(d.getExpiryDate() != null ? d.getExpiryDate().format(DateTimeFormatter.ISO_LOCAL_DATE) : "")
-                                .imageUrl(d.getProductVariant() != null ? d.getProductVariant().getImageUrl() : null)
-                                .build()
-                ).collect(Collectors.toList()))
+                .items(entity.getDetails() == null ? new ArrayList<>() : entity.getDetails().stream().map(d -> {
+
+                    // 1. Tính tồn kho xuất (Chỉ áp dụng nếu là phiếu INTERNAL)
+                    Integer currentStock = 0;
+                    if (isInternal && partnerBranchId != null && d.getProductVariant() != null) {
+                        // Gọi repository để tính tổng tồn kho hiện tại của chi nhánh xuất
+                        currentStock = inventoryRepository.sumQuantityByBranchAndVariant(partnerBranchId, d.getProductVariant().getId());
+                        if (currentStock == null) {
+                            currentStock = 0;
+                        }
+                    }
+
+                    // 2. Map vào ItemResponse
+                    return InventoryReceiptResponse.ItemResponse.builder()
+                            .productCode(d.getProductVariant() != null ? d.getProductVariant().getSku() : "")
+                            .productName(d.getProductVariant() != null && d.getProductVariant().getProduct() != null ? d.getProductVariant().getProduct().getName() : "")
+                            .quantity(d.getQuantity() != null ? d.getQuantity() : 0)
+
+                            // 👇 GÁN maxQuantity VÀO ĐÂY
+                            .maxQuantity(currentStock)
+
+                            .price(d.getPrice() != null ? d.getPrice() : BigDecimal.ZERO)
+                            .newSellingPrice(d.getNewSellingPrice())
+                            .lotNumber(d.getBatchNumber())
+                            .expiryDate(d.getExpiryDate() != null ? d.getExpiryDate().format(DateTimeFormatter.ISO_LOCAL_DATE) : "")
+                            .imageUrl(d.getProductVariant() != null ? d.getProductVariant().getImageUrl() : null)
+                            .build();
+                }).collect(Collectors.toList()))
                 .build();
     }
 }
