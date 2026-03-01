@@ -32,6 +32,7 @@ public class InventoryReceiptResponse {
     private LocalDateTime createdAt;
     private List<ItemResponse> items;
 
+
     @Data
     @Builder
     @NoArgsConstructor
@@ -46,5 +47,6 @@ public class InventoryReceiptResponse {
         private String lotNumber;
         private String expiryDate;
         private String imageUrl;
+        private Integer maxQuantity;
     }
 }

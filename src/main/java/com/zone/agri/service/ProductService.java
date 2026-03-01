@@ -370,10 +370,11 @@ public class ProductService {
         int displayQuantity = validBatches.stream().mapToInt(Inventory::getQuantity).sum();
         BigDecimal maxPrice = BigDecimal.ZERO;
 
+        // 👇 THÊM BIẾN NÀY ĐỂ CHỨA GIÁ NHẬP
+        BigDecimal maxImportPrice = BigDecimal.ZERO;
+
         List<ProductVariantResponse.BatchInfoDto> batchDtos = validBatches.stream().map(inv -> {
             BigDecimal importPrice = inv.getImportPrice() != null ? inv.getImportPrice() : BigDecimal.ZERO;
-
-            // 👉 SỬ DỤNG HỆ SỐ TỪ SETTING SERVICE ĐỂ TÍNH GIÁ BÁN
             BigDecimal sellingPrice = importPrice.multiply(multiplier);
 
             return ProductVariantResponse.BatchInfoDto.builder()
@@ -386,10 +387,14 @@ public class ProductService {
                     .build();
         }).collect(Collectors.toList());
 
-        // Tìm giá bán cao nhất trong các lô để đại diện cho Variant
         if (!batchDtos.isEmpty()) {
             maxPrice = batchDtos.stream()
                     .map(ProductVariantResponse.BatchInfoDto::getSellingPrice)
+                    .max(BigDecimal::compareTo)
+                    .orElse(BigDecimal.ZERO);
+            maxImportPrice = batchDtos.stream()
+                    .filter(b -> b.getImportPrice() != null)
+                    .map(ProductVariantResponse.BatchInfoDto::getImportPrice)
                     .max(BigDecimal::compareTo)
                     .orElse(BigDecimal.ZERO);
         }
@@ -411,6 +416,8 @@ public class ProductService {
                 .productName(variant.getProduct() != null ? variant.getProduct().getName() : null)
                 .quantity(displayQuantity)
                 .price(maxPrice)
+                .importPrice(maxImportPrice)
+
                 .imageUrl(variant.getImageUrl())
                 .status(variant.getStatus())
                 .attributeValues(attributeValues)
