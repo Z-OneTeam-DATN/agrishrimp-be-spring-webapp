@@ -1,9 +1,7 @@
 package com.zone.agri.dto.order;
 
 import jakarta.validation.Valid;
-import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotEmpty;
-import jakarta.validation.constraints.NotNull;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -17,15 +15,17 @@ public class PrepareOrderRequest {
     private Double userLat;
     private Double userLng;
 
-    @NotBlank(message = "Địa chỉ giao hàng là bắt buộc")
+    // Optional: chọn từ sổ địa chỉ đã lưu
+    private Long userAddressId;
+
+    // Bắt buộc khi không có userAddressId
+    private String receiverName;
+    private String receiverPhone;
+
+    // Bắt buộc khi không có userAddressId (validation làm trong service)
     private String deliveryAddress;
-
-    @NotNull(message = "deliveryDistrictId là bắt buộc")
     private Integer deliveryDistrictId;
-
     private Integer deliveryProvinceId;
-
-    @NotBlank(message = "deliveryWardCode là bắt buộc")
     private String deliveryWardCode;
 
     @NotEmpty(message = "Giỏ hàng không được rỗng")

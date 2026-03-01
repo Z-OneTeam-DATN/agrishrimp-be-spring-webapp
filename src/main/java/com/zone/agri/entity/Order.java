@@ -74,6 +74,12 @@ public class Order {
     @Column(name = "note", columnDefinition = "TEXT")
     String note;
 
+    @Column(name = "receiver_name", length = 100)
+    String receiverName;
+
+    @Column(name = "receiver_phone", length = 15)
+    String receiverPhone;
+
     // --- payOS ---
 
     @Column(name = "payos_payment_link_id")

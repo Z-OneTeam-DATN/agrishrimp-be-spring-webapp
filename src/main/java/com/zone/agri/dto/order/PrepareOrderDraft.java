@@ -25,6 +25,9 @@ public class PrepareOrderDraft {
     private List<OrderItemDto> finalItems; // Danh sách hàng hóa cuối cùng đã phân bổ
     // --------------------------------------
 
+    private String receiverName;
+    private String receiverPhone;
+
     private Double userLat;
     private Double userLng;
     private String deliveryAddress;

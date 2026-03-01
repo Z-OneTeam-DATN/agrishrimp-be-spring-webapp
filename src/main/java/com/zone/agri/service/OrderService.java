@@ -2,6 +2,7 @@ package com.zone.agri.service;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.zone.agri.dto.geo.CoordinateDto;
 import com.zone.agri.dto.geo.DeliveryInfo;
 import com.zone.agri.dto.order.*;
 import com.zone.agri.entity.*;
@@ -44,11 +45,14 @@ public class OrderService {
     private final SubOrderRepository subOrderRepository;
     private final SubOrderItemRepository subOrderItemRepository;
 
+    private final UserAddressRepository userAddressRepository;
+
     private final BranchSearchService branchSearchService;
     private final InventoryAllocationService allocationService;
     private final ShippingService shippingService;
     private final PayOSService payOSService;
-    private final SettingService settingService; // 👉 Bổ sung SettingService
+    private final SettingService settingService;
+    private final GeocodingService geocodingService;
 
     @Lazy
     private final CustomerService customerService;
@@ -386,26 +390,81 @@ public class OrderService {
     // ══════════════════════════════════════════════════════════════
 
     public PrepareOrderResponse prepareOrder(Long userId, PrepareOrderRequest request) {
+        // --- Resolve địa chỉ giao hàng và thông tin người nhận ---
+        String receiverName;
+        String receiverPhone;
+        String deliveryAddress;
+        Integer deliveryDistrictId;
+        Integer deliveryProvinceId;
+        String deliveryWardCode;
+
+        if (request.getUserAddressId() != null) {
+            // Chọn từ sổ địa chỉ đã lưu
+            com.zone.agri.entity.UserAddress addr = userAddressRepository
+                    .findByIdAndUserId(request.getUserAddressId(), userId)
+                    .orElseThrow(() -> new NotFoundException("Không tìm thấy địa chỉ ID: " + request.getUserAddressId()));
+            receiverName = addr.getReceiverName();
+            receiverPhone = addr.getReceiverPhone();
+            deliveryAddress = addr.getAddressDetail();
+            deliveryDistrictId = addr.getDistrictId() != null ? parseIntSafe(addr.getDistrictId()) : null;
+            deliveryProvinceId = addr.getProvinceId() != null ? parseIntSafe(addr.getProvinceId()) : null;
+            deliveryWardCode = addr.getWardId();
+        } else {
+            // Nhập địa chỉ thủ công — validate bắt buộc
+            if (request.getReceiverName() == null || request.getReceiverName().isBlank())
+                throw new BadRequestException("receiverName là bắt buộc khi không chọn địa chỉ đã lưu");
+            if (request.getReceiverPhone() == null || request.getReceiverPhone().isBlank())
+                throw new BadRequestException("receiverPhone là bắt buộc khi không chọn địa chỉ đã lưu");
+            if (request.getDeliveryAddress() == null || request.getDeliveryAddress().isBlank())
+                throw new BadRequestException("deliveryAddress là bắt buộc khi không chọn địa chỉ đã lưu");
+            if (request.getDeliveryDistrictId() == null)
+                throw new BadRequestException("deliveryDistrictId là bắt buộc khi không chọn địa chỉ đã lưu");
+            if (request.getDeliveryWardCode() == null || request.getDeliveryWardCode().isBlank())
+                throw new BadRequestException("deliveryWardCode là bắt buộc khi không chọn địa chỉ đã lưu");
+            receiverName = request.getReceiverName();
+            receiverPhone = request.getReceiverPhone();
+            deliveryAddress = request.getDeliveryAddress();
+            deliveryDistrictId = request.getDeliveryDistrictId();
+            deliveryProvinceId = request.getDeliveryProvinceId();
+            deliveryWardCode = request.getDeliveryWardCode();
+        }
+
+        // --- Resolve tọa độ ---
+        double userLat;
+        double userLng;
+        if (request.getUserLat() != null && request.getUserLng() != null) {
+            userLat = request.getUserLat();
+            userLng = request.getUserLng();
+        } else {
+            try {
+                CoordinateDto coord = geocodingService.geocode(deliveryAddress);
+                userLat = coord.getLat();
+                userLng = coord.getLng();
+            } catch (Exception e) {
+                log.warn("Geocode thất bại cho địa chỉ '{}', dùng tọa độ mặc định: {}", deliveryAddress, e.getMessage());
+                userLat = 10.0341;
+                userLng = 105.7904;
+            }
+        }
+
+        // --- Thuật toán tìm chi nhánh gần nhất ---
         List<Long> variantIds = request.getCart().stream().map(CartItemDto::getProductVariantId).distinct().toList();
         List<ProductVariant> variants = variantRepository.findAllById(variantIds);
         if (variants.size() != variantIds.size()) throw new NotFoundException("Một hoặc nhiều sản phẩm không tồn tại");
 
         Map<Long, ProductVariant> variantMap = variants.stream().collect(Collectors.toMap(ProductVariant::getId, Function.identity()));
-        double userLat = request.getUserLat() != null ? request.getUserLat() : 10.0341;
-        double userLng = request.getUserLng() != null ? request.getUserLng() : 105.7904;
 
         List<BranchWithRealDistance> nearestBranches = branchSearchService.findNearestBranches(userLat, userLng);
         if (nearestBranches.isEmpty()) throw new NotFoundException("Không có chi nhánh hoạt động");
 
         List<Long> branchIds = nearestBranches.stream().map(bwr -> bwr.branch().getId()).toList();
 
-        // Cập nhật lấy Matrix theo cấu trúc Lô hàng (Batches)
         Map<Long, Map<Long, List<Inventory>>> inventoryMatrix = allocationService.buildInventoryMatrix(branchIds, variantIds);
         AllocationResult allocation = allocationService.allocate(request.getCart(), variantMap, nearestBranches, inventoryMatrix);
 
         DeliveryInfo deliveryInfo = DeliveryInfo.builder()
-                .toDistrictId(request.getDeliveryDistrictId()).toWardCode(request.getDeliveryWardCode())
-                .deliveryAddress(request.getDeliveryAddress()).userLat(userLat).userLng(userLng).build();
+                .toDistrictId(deliveryDistrictId).toWardCode(deliveryWardCode)
+                .deliveryAddress(deliveryAddress).userLat(userLat).userLng(userLng).build();
 
         List<SubOrderDraftDto> enrichedSubOrders = shippingService.enrichWithShippingFees(allocation.subOrders(), deliveryInfo, variantMap);
 
@@ -419,9 +478,10 @@ public class OrderService {
 
         PrepareOrderDraft draft = PrepareOrderDraft.builder()
                 .prepareToken(token).userId(userId).branchId(mainBranchId).finalItems(allFinalItems)
-                .userLat(userLat).userLng(userLng).deliveryAddress(request.getDeliveryAddress())
-                .deliveryDistrictId(request.getDeliveryDistrictId()).deliveryProvinceId(request.getDeliveryProvinceId())
-                .deliveryWardCode(request.getDeliveryWardCode()).subOrders(enrichedSubOrders)
+                .receiverName(receiverName).receiverPhone(receiverPhone)
+                .userLat(userLat).userLng(userLng).deliveryAddress(deliveryAddress)
+                .deliveryDistrictId(deliveryDistrictId).deliveryProvinceId(deliveryProvinceId)
+                .deliveryWardCode(deliveryWardCode).subOrders(enrichedSubOrders)
                 .outOfStockItems(allocation.outOfStockItems()).totalSubtotal(totalSubtotal)
                 .totalShippingFee(totalShippingFee).totalAmount(totalAmount).build();
 
@@ -430,6 +490,14 @@ public class OrderService {
         return PrepareOrderResponse.builder().prepareToken(token).canFulfill(allocation.outOfStockItems().isEmpty())
                 .subOrders(enrichedSubOrders).totalSubtotal(totalSubtotal).totalShippingFee(totalShippingFee)
                 .totalAmount(totalAmount).outOfStockItems(allocation.outOfStockItems()).build();
+    }
+
+    private Integer parseIntSafe(String value) {
+        try {
+            return Integer.parseInt(value);
+        } catch (NumberFormatException e) {
+            return null;
+        }
     }
 
     @Transactional
@@ -445,7 +513,9 @@ public class OrderService {
                 .paymentMethod(paymentMethod).paymentStatus(PaymentStatus.UNPAID).createdAt(LocalDateTime.now())
                 .totalAmount(draft.getTotalSubtotal()).discountAmount(BigDecimal.ZERO).finalAmount(draft.getTotalAmount())
                 .totalShippingFee(draft.getTotalShippingFee()).userLat(draft.getUserLat()).userLng(draft.getUserLng())
-                .deliveryAddress(draft.getDeliveryAddress()).shippingAddress(draft.getDeliveryAddress()).note(request.getNote()).build();
+                .deliveryAddress(draft.getDeliveryAddress()).shippingAddress(draft.getDeliveryAddress())
+                .receiverName(draft.getReceiverName()).receiverPhone(draft.getReceiverPhone())
+                .note(request.getNote()).build();
         Order savedOrder = orderRepository.save(order);
 
         List<SubOrderSummaryDto> subOrderSummaries = new ArrayList<>();
