@@ -1,6 +1,7 @@
 package com.zone.agri.service;
 
 import com.zone.agri.dto.admin.AttributeDTO;
+import com.zone.agri.dto.product.AttributeValueResponse;
 import com.zone.agri.entity.Attribute;
 import com.zone.agri.entity.AttributeValue;
 import com.zone.agri.entity.enums.AttributeStatus;
@@ -85,12 +86,26 @@ public class AttributeService {
         dto.setStatus(entity.getStatus() != null ? entity.getStatus() : AttributeStatus.ACTIVE);
 
         if (entity.getAttributeValues() != null) {
+            // Vẫn trả về List<String> cho form Admin cũ
             List<String> values = entity.getAttributeValues().stream()
                     .map(AttributeValue::getValue)
                     .collect(Collectors.toList());
             dto.setValues(values);
+
+            // 👉 BƠM DỮ LIỆU CÓ CHỨA ID VÀO DTO
+            List<AttributeValueResponse> details = entity.getAttributeValues().stream()
+                    .map(av -> AttributeValueResponse.builder()
+                            .attributeId(entity.getId())
+                            .attributeName(entity.getName())
+                            .attributeCode(entity.getCode())
+                            .valueId(av.getId()) // ĐÂY LÀ CÁI ID QUAN TRỌNG NHẤT FE CẦN!
+                            .value(av.getValue())
+                            .build())
+                    .collect(Collectors.toList());
+            dto.setValueDetails(details);
         } else {
             dto.setValues(Collections.emptyList());
+            dto.setValueDetails(Collections.emptyList());
         }
 
         return dto;

@@ -1,6 +1,5 @@
 package com.zone.agri.service;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zone.agri.common.CloudinaryService;
 import com.zone.agri.dto.admin.CategoryDTO;
 import com.zone.agri.dto.product.*;
@@ -21,6 +20,7 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
+
 
 import java.math.BigDecimal;
 import java.text.Normalizer;
@@ -49,6 +49,7 @@ public class ProductService {
     private final InventoryRepository inventoryRepository;
     private final InventoryTransferRepository inventoryTransferRepository;
     private final CloudinaryService cloudinaryService;
+    private final SettingService settingService;
 
     // =========================================================================
     // READ METHODS
@@ -129,13 +130,11 @@ public class ProductService {
     // =========================================================================
 
     @Transactional
-    public ProductResponse updateProduct(Long id, ProductRequest request) {
+    public ProductResponse updateProduct(Long id, ProductRequest request,
+                                         List<MultipartFile> productImages,
+                                         List<MultipartFile> variantImages) {
         Product product = productRepository.findById(id)
                 .orElseThrow(() -> new NotFoundException("Sản phẩm không tồn tại với ID: " + id));
-
-        if (request.getVariants() == null || request.getVariants().isEmpty()) {
-            throw new BadRequestException("Sản phẩm phải có ít nhất 1 biến thể!");
-        }
 
         product.setName(request.getName());
         product.setOrigin(request.getOrigin());
@@ -145,38 +144,56 @@ public class ProductService {
         if (request.getCategoryId() != null) {
             categoryRepository.findById(request.getCategoryId()).ifPresent(product::setCategory);
         }
-
         if (request.getBrand() != null && !request.getBrand().trim().isEmpty()) {
             product.setBrand(getOrCreateBrand(request.getBrand()));
         }
 
-        Product updatedProduct = productRepository.save(product);
+        // 👉 1. XÓA ẢNH CHÍNH BỊ BỎ ĐI & THÊM ẢNH MỚI
+        List<String> keepImages = request.getImages() != null ? request.getImages() : new ArrayList<>();
+        if (product.getProductImages() != null) {
+            // Xóa ảnh khỏi DB nếu FE không gửi lại link đó nữa
+            product.getProductImages().removeIf(img -> !keepImages.contains(img.getImageUrl()));
+        } else {
+            product.setProductImages(new HashSet<>());
+        }
 
-        productRepository.deleteVariantAttributesByProduct(updatedProduct);
-        productRepository.deleteImagesByProduct(updatedProduct);
-        productRepository.deleteVariantsByProduct(updatedProduct);
-
-        // 👉 Dùng Set để khớp với Entity
-        Set<ProductImage> newImages = new HashSet<>();
-        if (request.getImages() != null) {
-            for (String url : request.getImages()) {
-                ProductImage img = imageRepository.save(ProductImage.builder()
-                        .imageUrl(url)
-                        .product(updatedProduct)
-                        .build());
-                newImages.add(img);
+        // Up ảnh chính MỚI lên Cloudinary
+        if (productImages != null) {
+            for (MultipartFile file : productImages) {
+                if (file != null && !file.isEmpty()) {
+                    CloudinaryService.UploadResult res = cloudinaryService.upload(file, "products/main");
+                    product.getProductImages().add(ProductImage.builder().imageUrl(res.secureUrl()).product(product).build());
+                }
             }
         }
-        updatedProduct.setProductImages(newImages);
 
-        // 👉 Dùng Set để khớp với Entity
-        Set<ProductVariant> newVariants = new HashSet<>();
-        for (ProductRequest.VariantDto vDto : request.getVariants()) {
+        // 👉 2. CLEAR VARIANT CŨ VÀ FLUSH (Tránh lỗi OptimisticLocking)
+        if (product.getVariants() != null) {
+            product.getVariants().clear();
+        } else {
+            product.setVariants(new HashSet<>());
+        }
+        productRepository.saveAndFlush(product);
+
+        // 👉 3. THÊM VARIANT VÀ UP ẢNH VARIANT MỚI
+        for (int i = 0; i < request.getVariants().size(); i++) {
+            ProductRequest.VariantDto vDto = request.getVariants().get(i);
+            String finalImageUrl = vDto.getImage(); // URL cũ gửi từ FE (nếu có)
+
+            // Nếu vị trí index này có file mới -> up lên lấy link mới
+            if (variantImages != null && i < variantImages.size()) {
+                MultipartFile vFile = variantImages.get(i);
+                if (vFile != null && !vFile.isEmpty()) {
+                    CloudinaryService.UploadResult res = cloudinaryService.upload(vFile, "products/variants");
+                    finalImageUrl = res.secureUrl();
+                }
+            }
+
             ProductVariant variant = ProductVariant.builder()
-                    .product(updatedProduct)
+                    .product(product)
                     .sku(vDto.getSku())
                     .barcode(vDto.getBarcode())
-                    .imageUrl(vDto.getImage())
+                    .imageUrl(finalImageUrl) // Dùng link mới up hoặc link cũ
                     .status(VariantStatus.ACTIVE)
                     .build();
 
@@ -186,22 +203,19 @@ public class ProductService {
                 List<SKUAttributeValue> attrList = new ArrayList<>();
                 for (Long valId : vDto.getAttributeValueIds()) {
                     AttributeValue attrValue = attributeValueRepository.findById(valId)
-                            .orElseThrow(() -> new NotFoundException("Giá trị thuộc tính không tồn tại ID: " + valId));
+                            .orElseThrow(() -> new NotFoundException("Thuộc tính ko tồn tại: " + valId));
 
                     SKUAttributeValue savedAttr = skuAttributeValueRepository.save(SKUAttributeValue.builder()
-                            .sku(savedVariant)
-                            .attribute(attrValue.getAttribute())
-                            .attributeValue(attrValue)
-                            .build());
+                            .sku(savedVariant).attribute(attrValue.getAttribute()).attributeValue(attrValue).build());
                     attrList.add(savedAttr);
                 }
                 savedVariant.setAttributeValues(attrList);
+                variantRepository.save(savedVariant);
             }
-            newVariants.add(savedVariant);
+            product.getVariants().add(savedVariant);
         }
-        updatedProduct.setVariants(newVariants);
 
-        return convertToResponse(updatedProduct);
+        return convertToResponse(productRepository.save(product));
     }
 
     // =========================================================================
@@ -284,13 +298,17 @@ public class ProductService {
     public ProductResponse convertToResponse(Product product) {
         User currentUser = getCurrentUser();
 
+        // 👉 LẤY HỆ SỐ NHÂN TỪ SETTING SERVICE (Ví dụ: 30% -> 1.3)
+        BigDecimal profitMultiplier = settingService.getProfitMultiplier();
+
         List<String> imageUrls = product.getProductImages() != null ?
                 product.getProductImages().stream().map(ProductImage::getImageUrl).collect(Collectors.toList()) :
                 Collections.emptyList();
 
+        // 👉 TRUYỀN HỆ SỐ profitMultiplier VÀO HÀM MAP BIẾN THẾ
         List<ProductVariantResponse> variantResponses = product.getVariants() != null ?
                 product.getVariants().stream()
-                        .map(variant -> mapVariantToResponse(variant, currentUser))
+                        .map(variant -> mapVariantToResponse(variant, currentUser, profitMultiplier))
                         .collect(Collectors.toList()) :
                 Collections.emptyList();
 
@@ -298,6 +316,7 @@ public class ProductService {
                 .mapToInt(v -> v.getQuantity() != null ? v.getQuantity() : 0)
                 .sum();
 
+        // ... (Phần map Category và Brand giữ nguyên như code cũ của Huy)
         CategoryDTO categoryDTO = null;
         if (product.getCategory() != null) {
             categoryDTO = new CategoryDTO();
@@ -332,11 +351,12 @@ public class ProductService {
                 .build();
     }
 
+    // 1. Hàm overload để không làm gãy các code cũ đang gọi
     public ProductVariantResponse mapVariantToResponse(ProductVariant variant) {
-        return mapVariantToResponse(variant, getCurrentUser());
+        return mapVariantToResponse(variant, getCurrentUser(), settingService.getProfitMultiplier());
     }
 
-    public ProductVariantResponse mapVariantToResponse(ProductVariant variant, User currentUser) {
+    public ProductVariantResponse mapVariantToResponse(ProductVariant variant, User currentUser, BigDecimal multiplier) {
         boolean isAdmin = currentUser != null && "ADMIN".equals(currentUser.getRole().getSlug());
         Branch currentBranch = currentUser != null ? currentUser.getBranch() : null;
 
@@ -348,10 +368,13 @@ public class ProductService {
                 .collect(Collectors.toList());
 
         int displayQuantity = validBatches.stream().mapToInt(Inventory::getQuantity).sum();
+        BigDecimal maxPrice = BigDecimal.ZERO;
 
         List<ProductVariantResponse.BatchInfoDto> batchDtos = validBatches.stream().map(inv -> {
             BigDecimal importPrice = inv.getImportPrice() != null ? inv.getImportPrice() : BigDecimal.ZERO;
-            BigDecimal sellingPrice = importPrice.multiply(BigDecimal.valueOf(1.3));
+
+            // 👉 SỬ DỤNG HỆ SỐ TỪ SETTING SERVICE ĐỂ TÍNH GIÁ BÁN
+            BigDecimal sellingPrice = importPrice.multiply(multiplier);
 
             return ProductVariantResponse.BatchInfoDto.builder()
                     .inventoryId(inv.getId())
@@ -362,6 +385,14 @@ public class ProductService {
                     .sellingPrice(sellingPrice)
                     .build();
         }).collect(Collectors.toList());
+
+        // Tìm giá bán cao nhất trong các lô để đại diện cho Variant
+        if (!batchDtos.isEmpty()) {
+            maxPrice = batchDtos.stream()
+                    .map(ProductVariantResponse.BatchInfoDto::getSellingPrice)
+                    .max(BigDecimal::compareTo)
+                    .orElse(BigDecimal.ZERO);
+        }
 
         List<AttributeValueResponse> attributeValues = variant.getAttributeValues() != null ?
                 variant.getAttributeValues().stream().map(sav -> AttributeValueResponse.builder()
@@ -379,6 +410,7 @@ public class ProductService {
                 .barcode(variant.getBarcode())
                 .productName(variant.getProduct() != null ? variant.getProduct().getName() : null)
                 .quantity(displayQuantity)
+                .price(maxPrice)
                 .imageUrl(variant.getImageUrl())
                 .status(variant.getStatus())
                 .attributeValues(attributeValues)

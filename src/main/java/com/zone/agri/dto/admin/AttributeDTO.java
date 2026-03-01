@@ -1,5 +1,6 @@
 package com.zone.agri.dto.admin;
 
+import com.zone.agri.dto.product.AttributeValueResponse;
 import com.zone.agri.entity.enums.AttributeStatus;
 import lombok.Data;
 import java.util.List;
@@ -9,7 +10,7 @@ public class AttributeDTO {
     private Long id;
     private String name;
     private String code;
-
     private AttributeStatus status;
     private List<String> values;
+    private List<AttributeValueResponse> valueDetails;
 }
