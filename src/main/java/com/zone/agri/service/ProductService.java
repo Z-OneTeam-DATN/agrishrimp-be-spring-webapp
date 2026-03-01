@@ -357,20 +357,20 @@ public class ProductService {
     }
 
     public ProductVariantResponse mapVariantToResponse(ProductVariant variant, User currentUser, BigDecimal multiplier) {
-        boolean isAdmin = currentUser != null && "ADMIN".equals(currentUser.getRole().getSlug());
+        // Tránh lỗi NullPointerException khi role null
+        boolean isAdmin = currentUser != null && currentUser.getRole() != null && "ADMIN".equals(currentUser.getRole().getSlug());
         Branch currentBranch = currentUser != null ? currentUser.getBranch() : null;
 
         List<Inventory> allInventories = inventoryRepository.findByProductVariantId(variant.getId());
 
         List<Inventory> validBatches = allInventories.stream()
                 .filter(inv -> inv.getQuantity() != null && inv.getQuantity() > 0)
-                .filter(inv -> isAdmin || (currentBranch != null && inv.getBranch().getId().equals(currentBranch.getId())))
+                // 👉 FIX QUAN TRỌNG: Thêm điều kiện currentUser == null (Khách truy cập Web)
+                .filter(inv -> currentUser == null || isAdmin || (currentBranch != null && inv.getBranch() != null && inv.getBranch().getId().equals(currentBranch.getId())))
                 .collect(Collectors.toList());
 
         int displayQuantity = validBatches.stream().mapToInt(Inventory::getQuantity).sum();
         BigDecimal maxPrice = BigDecimal.ZERO;
-
-        // 👇 THÊM BIẾN NÀY ĐỂ CHỨA GIÁ NHẬP
         BigDecimal maxImportPrice = BigDecimal.ZERO;
 
         List<ProductVariantResponse.BatchInfoDto> batchDtos = validBatches.stream().map(inv -> {
@@ -382,7 +382,7 @@ public class ProductService {
                     .branchName(inv.getBranch() != null ? inv.getBranch().getName() : "Kho tổng")
                     .batchNumber(inv.getBatchNumber() != null ? inv.getBatchNumber() : "Chưa xác định")
                     .quantity(inv.getQuantity())
-                    .importPrice(isAdmin ? importPrice : null)
+                    .importPrice(isAdmin ? importPrice : null) // Chỉ Admin mới thấy giá nhập
                     .sellingPrice(sellingPrice)
                     .build();
         }).collect(Collectors.toList());
@@ -417,7 +417,6 @@ public class ProductService {
                 .quantity(displayQuantity)
                 .price(maxPrice)
                 .importPrice(maxImportPrice)
-
                 .imageUrl(variant.getImageUrl())
                 .status(variant.getStatus())
                 .attributeValues(attributeValues)
