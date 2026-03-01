@@ -120,6 +120,10 @@ location:
   max-candidates: 5
   ip-geo-url: http://ip-api.com/json
 
+# 15. IMAGE SEARCH AI SERVICE (Python)
+image-search:
+  base-url: ${IMAGE_SEARCH_URL:http://localhost:5001}
+
 # 14. PAYOS PAYMENT GATEWAY
 payos:
   client-id: 0c87dabd-9af7-4add-879a-19b43b8f1dbb

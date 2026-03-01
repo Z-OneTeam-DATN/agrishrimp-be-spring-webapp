@@ -194,4 +194,37 @@ public class ProductController {
     public ResponseEntity<List<AttributeDTO>> getAllAttributes() {
         return ResponseEntity.ok(attributeService.getAll());
     }
+
+    // =========================================================================
+    // IMAGE SEARCH ENDPOINTS
+    // =========================================================================
+
+    @Operation(
+            summary = "Tìm kiếm sản phẩm bằng hình ảnh",
+            description = """
+            Upload một ảnh, hệ thống sẽ trả về danh sách sản phẩm tương tự được tìm từ AI service.
+            Gửi request dạng **multipart/form-data** với field `image`.
+            Trả 503 nếu AI service bị down.
+            """
+    )
+    @PostMapping(value = "/search-by-image", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<List<ProductResponse>> searchByImage(
+            @RequestPart("image") MultipartFile image) {
+        return ResponseEntity.ok(productService.searchByImage(image));
+    }
+
+    @Operation(
+            summary = "Index toàn bộ sản phẩm vào AI service",
+            description = """
+            Gọi một lần khi deploy để đồng bộ toàn bộ sản phẩm có ảnh vào AI service.
+            Yêu cầu quyền PRODUCT_UPDATE.
+            """
+    )
+    @SecurityRequirement(name = "bearerAuth")
+    @RequirePermission("PRODUCT_UPDATE")
+    @PostMapping("/index-all")
+    public ResponseEntity<ApiResponse<String>> indexAll() {
+        int count = productService.indexAll();
+        return ResponseEntity.ok(ApiResponse.success(null, "Đã index " + count + " sản phẩm vào AI service"));
+    }
 }

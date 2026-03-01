@@ -1,7 +1,9 @@
 package com.zone.agri.service;
 
 import com.zone.agri.common.CloudinaryService;
+import com.zone.agri.dto.ImageSearchResult;
 import com.zone.agri.dto.admin.CategoryDTO;
+import com.zone.agri.repository.ProductVectorRepository;
 import com.zone.agri.dto.product.*;
 import com.zone.agri.entity.*;
 import com.zone.agri.entity.enums.*;
@@ -50,6 +52,8 @@ public class ProductService {
     private final InventoryTransferRepository inventoryTransferRepository;
     private final CloudinaryService cloudinaryService;
     private final SettingService settingService;
+    private final ImageSearchService imageSearchService;
+    private final ProductVectorRepository productVectorRepository;
 
     // =========================================================================
     // READ METHODS
@@ -122,6 +126,12 @@ public class ProductService {
         savedProduct.setVariants(new HashSet<>(savedVariants));
 
         log.info("Tạo sản phẩm thành công: id={}, name={}", savedProduct.getId(), savedProduct.getName());
+
+        // Auto-index vào AI service (fire-and-forget, không block nếu AI service bị down)
+        if (!savedImages.isEmpty()) {
+            imageSearchService.indexProduct(savedProduct.getId(), savedImages.get(0).getImageUrl());
+        }
+
         return convertToResponse(savedProduct);
     }
 
@@ -150,6 +160,12 @@ public class ProductService {
 
         // 👉 1. XÓA ẢNH CHÍNH BỊ BỎ ĐI & THÊM ẢNH MỚI
         List<String> keepImages = request.getImages() != null ? request.getImages() : new ArrayList<>();
+
+        // Lấy URL ảnh đã index lần trước từ product_vectors (null nếu chưa index)
+        String indexedImageUrl = productVectorRepository.findByProductId(id)
+                .map(pv -> pv.getImageUrl())
+                .orElse(null);
+
         if (product.getProductImages() != null) {
             // Xóa ảnh khỏi DB nếu FE không gửi lại link đó nữa
             product.getProductImages().removeIf(img -> !keepImages.contains(img.getImageUrl()));
@@ -215,7 +231,26 @@ public class ProductService {
             product.getVariants().add(savedVariant);
         }
 
-        return convertToResponse(productRepository.save(product));
+        Product updatedProduct = productRepository.save(product);
+
+        // Re-index chỉ khi ảnh thực sự thay đổi (fire-and-forget)
+        // - Có file mới upload, HOẶC
+        // - URL đã index trước đó không còn tồn tại trong bộ ảnh hiện tại
+        Set<String> newImageUrls = updatedProduct.getProductImages() != null
+                ? updatedProduct.getProductImages().stream()
+                        .map(ProductImage::getImageUrl)
+                        .collect(Collectors.toSet())
+                : Collections.emptySet();
+
+        boolean newFilesUploaded = productImages != null &&
+                productImages.stream().anyMatch(f -> f != null && !f.isEmpty());
+        boolean indexedImageGone = indexedImageUrl != null && !newImageUrls.contains(indexedImageUrl);
+
+        if ((newFilesUploaded || indexedImageGone) && !newImageUrls.isEmpty()) {
+            imageSearchService.indexProduct(updatedProduct.getId(), newImageUrls.iterator().next());
+        }
+
+        return convertToResponse(updatedProduct);
     }
 
     // =========================================================================
@@ -255,6 +290,9 @@ public class ProductService {
 
         productRepository.delete(product);
         log.info("Xóa sản phẩm thành công: id={}", id);
+
+        // Xóa index khỏi AI service (fire-and-forget)
+        imageSearchService.deleteIndex(id);
     }
 
     @Transactional
@@ -281,6 +319,43 @@ public class ProductService {
         }
         productRepository.save(product);
         log.info("Ngừng kinh doanh sản phẩm thành công: id={}", id);
+    }
+
+    // =========================================================================
+    // IMAGE SEARCH
+    // =========================================================================
+
+    /**
+     * Tìm kiếm sản phẩm bằng hình ảnh — forward ảnh sang Python AI service.
+     * Ném exception nếu AI service bị down (caller xử lý 503).
+     */
+    public List<ProductResponse> searchByImage(MultipartFile image) {
+        List<ImageSearchResult> results = imageSearchService.searchByImage(image);
+        return results.stream()
+                .sorted(Comparator.comparingDouble(r -> -r.getScore()))
+                .map(r -> productRepository.findById(r.getProductId()).orElse(null))
+                .filter(Objects::nonNull)
+                .map(this::convertToResponse)
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * Index toàn bộ sản phẩm có ảnh vào AI service — dùng một lần khi deploy.
+     * Trả về số lượng sản phẩm đã được index.
+     */
+    @Transactional(readOnly = true)
+    public int indexAll() {
+        List<Product> products = productRepository.findAllWithDetails();
+        List<Map<String, Object>> payload = products.stream()
+                .filter(p -> p.getProductImages() != null && !p.getProductImages().isEmpty())
+                .map(p -> {
+                    String imageUrl = p.getProductImages().iterator().next().getImageUrl();
+                    return Map.<String, Object>of("productId", p.getId(), "imageUrl", imageUrl);
+                })
+                .collect(Collectors.toList());
+
+        if (payload.isEmpty()) return 0;
+        return imageSearchService.indexBatch(payload);
     }
 
     // =========================================================================
