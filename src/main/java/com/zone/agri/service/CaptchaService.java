@@ -46,11 +46,17 @@ public class CaptchaService {
         HttpEntity<MultiValueMap<String, String>> request =
                 new HttpEntity<>(body, headers);
 
-        TurnstileResponse response = restTemplate.postForObject(
-                verifyUrl,
-                request,
-                TurnstileResponse.class
-        );
+        TurnstileResponse response;
+        try {
+            response = restTemplate.postForObject(
+                    verifyUrl,
+                    request,
+                    TurnstileResponse.class
+            );
+        } catch (Exception e) {
+            System.out.println("CAPTCHA REQUEST FAILED: " + e.getMessage());
+            return false;
+        }
 
         System.out.println("TURNSTILE RESPONSE = " + response);
 

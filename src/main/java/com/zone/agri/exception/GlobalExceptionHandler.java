@@ -59,6 +59,12 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(errorResponse);
     }
 
+    // 5. Xử lý lỗi yêu cầu không hợp lệ (400)
+    @ExceptionHandler(BadRequestException.class)
+    public ResponseEntity<Map<String, String>> handleBadRequestException(BadRequestException ex) {
+        return buildResponse(ex.getMessage(), HttpStatus.BAD_REQUEST);
+    }
+
     // 6. CATCH-ALL: Bắt mọi lỗi 500 chưa được định nghĩa
     // Giúp Frontend hiển thị được nội dung lỗi thay vì thông báo "Có lỗi xảy ra" mặc định
     @ExceptionHandler(Exception.class)
