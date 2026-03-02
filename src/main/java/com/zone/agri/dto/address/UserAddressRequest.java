@@ -9,6 +9,10 @@ public class UserAddressRequest {
     private String addressDetail;
     private Long provinceId;
     private Long districtId;
-    private Long wardId;
+    /**
+     * GHN WardCode (string, ví dụ: "550113") — KHÔNG phải WardID (số nguyên).
+     * FE lấy từ API GHN /master-data/ward, dùng trường WardCode, không dùng WardID.
+     */
+    private String wardCode;
     private Boolean isDefault;
 }

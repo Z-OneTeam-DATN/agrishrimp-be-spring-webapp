@@ -440,13 +440,13 @@ public class ProductService {
 
         List<Inventory> validBatches = allInventories.stream()
                 .filter(inv -> inv.getQuantity() != null && inv.getQuantity() > 0)
-                // 👉 FIX QUAN TRỌNG: Thêm điều kiện currentUser == null (Khách truy cập Web)
+                // Chỉ lấy tồn kho từ chi nhánh ACTIVE (Admin xem được tất cả)
+                .filter(inv -> isAdmin || (inv.getBranch() != null && inv.getBranch().getStatus() == BranchStatus.ACTIVE))
+                // Public user thấy tất cả chi nhánh ACTIVE; Staff chỉ thấy chi nhánh của họ
                 .filter(inv -> currentUser == null || isAdmin || (currentBranch != null && inv.getBranch() != null && inv.getBranch().getId().equals(currentBranch.getId())))
                 .collect(Collectors.toList());
 
         int displayQuantity = validBatches.stream().mapToInt(Inventory::getQuantity).sum();
-        BigDecimal maxPrice = BigDecimal.ZERO;
-        BigDecimal maxImportPrice = BigDecimal.ZERO;
 
         List<ProductVariantResponse.BatchInfoDto> batchDtos = validBatches.stream().map(inv -> {
             BigDecimal importPrice = inv.getImportPrice() != null ? inv.getImportPrice() : BigDecimal.ZERO;
@@ -462,17 +462,19 @@ public class ProductService {
                     .build();
         }).collect(Collectors.toList());
 
-        if (!batchDtos.isEmpty()) {
-            maxPrice = batchDtos.stream()
-                    .map(ProductVariantResponse.BatchInfoDto::getSellingPrice)
-                    .max(BigDecimal::compareTo)
-                    .orElse(BigDecimal.ZERO);
-            maxImportPrice = batchDtos.stream()
-                    .filter(b -> b.getImportPrice() != null)
-                    .map(ProductVariantResponse.BatchInfoDto::getImportPrice)
-                    .max(BigDecimal::compareTo)
-                    .orElse(BigDecimal.ZERO);
-        }
+        // null = chưa nhập hàng → FE ẩn giá, không hiển thị "0đ"
+        BigDecimal maxPrice = batchDtos.isEmpty() ? null
+                : batchDtos.stream()
+                        .map(ProductVariantResponse.BatchInfoDto::getSellingPrice)
+                        .max(BigDecimal::compareTo)
+                        .orElse(null);
+
+        BigDecimal maxImportPrice = batchDtos.isEmpty() ? null
+                : batchDtos.stream()
+                        .filter(b -> b.getImportPrice() != null)
+                        .map(ProductVariantResponse.BatchInfoDto::getImportPrice)
+                        .max(BigDecimal::compareTo)
+                        .orElse(null);
 
         List<AttributeValueResponse> attributeValues = variant.getAttributeValues() != null ?
                 variant.getAttributeValues().stream().map(sav -> AttributeValueResponse.builder()
@@ -626,8 +628,12 @@ public class ProductService {
         Product product = productRepository.findBySlug(slug)
                 .orElseThrow(() -> new NotFoundException("Sản phẩm không tồn tại hoặc đã bị xóa."));
 
-        if (product.getStatus() == ProductStatus.INACTIVE) {
-            throw new BadRequestException("Sản phẩm này hiện tại không còn kinh doanh.");
+        if (product.getStatus() != ProductStatus.ACTIVE) {
+            throw new NotFoundException("Sản phẩm không tồn tại hoặc đã ngừng kinh doanh.");
+        }
+
+        if (product.getCategory() == null || product.getCategory().getStatus() != CategoryStatus.ACTIVE) {
+            throw new NotFoundException("Sản phẩm không tồn tại hoặc danh mục đã ngừng hoạt động.");
         }
 
         return convertToResponse(product);

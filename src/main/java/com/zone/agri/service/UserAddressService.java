@@ -41,10 +41,10 @@ public class UserAddressService {
                 .user(user)
                 .receiverName(request.getReceiverName())
                 .receiverPhone(request.getReceiverPhone())
-                .provinceId(String.valueOf(request.getProvinceId())) // Lưu mã API
-                .districtId(String.valueOf(request.getDistrictId())) // Lưu mã API
-                .wardId(String.valueOf(request.getWardId()))         // Lưu mã API
-                .addressDetail(request.getAddressDetail())           // Lưu chuỗi đầy đủ Frontend gửi lên
+                .provinceId(request.getProvinceId() != null ? String.valueOf(request.getProvinceId()) : null)
+                .districtId(request.getDistrictId() != null ? String.valueOf(request.getDistrictId()) : null)
+                .wardId(request.getWardCode())   // wardId column lưu GHN WardCode (string "550113")
+                .addressDetail(request.getAddressDetail())
                 .isDefault(isDefault)
                 .createdAt(LocalDateTime.now())
                 .build();
@@ -68,9 +68,9 @@ public class UserAddressService {
 
         existingAddress.setReceiverName(request.getReceiverName());
         existingAddress.setReceiverPhone(request.getReceiverPhone());
-        existingAddress.setProvinceId(String.valueOf(request.getProvinceId()));
-        existingAddress.setDistrictId(String.valueOf(request.getDistrictId()));
-        existingAddress.setWardId(String.valueOf(request.getWardId()));
+        existingAddress.setProvinceId(request.getProvinceId() != null ? String.valueOf(request.getProvinceId()) : null);
+        existingAddress.setDistrictId(request.getDistrictId() != null ? String.valueOf(request.getDistrictId()) : null);
+        existingAddress.setWardId(request.getWardCode());   // wardId column lưu GHN WardCode
         existingAddress.setAddressDetail(request.getAddressDetail());
         existingAddress.setIsDefault(isDefault);
 

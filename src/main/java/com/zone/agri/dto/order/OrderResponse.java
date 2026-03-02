@@ -13,11 +13,20 @@ public class OrderResponse {
     private String code;
     private String customerName;
     private String customerPhone;
+    /** SĐT người nhận (từ UserAddress) — khác customerPhone (SĐT tài khoản) */
+    private String receiverPhone;
+    /** Tiền hàng (chưa cộng phí ship) */
+    private BigDecimal totalAmount;
+    /** Phí vận chuyển */
+    private BigDecimal shippingFee;
+    /** Tổng thanh toán = totalAmount + shippingFee - discount */
     private BigDecimal finalAmount;
     private String paymentMethod;
     private String paymentStatus;
     private String status;
     private String branchName;
+    private String branchPhone;
+    private String branchAddress;
     private LocalDateTime createdAt;
     private String shippingAddress;
     private String checkoutUrl;

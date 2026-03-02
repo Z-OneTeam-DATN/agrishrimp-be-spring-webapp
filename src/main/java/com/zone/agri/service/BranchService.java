@@ -7,6 +7,7 @@ import com.zone.agri.entity.Branch;
 import com.zone.agri.entity.Inventory;
 import com.zone.agri.entity.User;
 import com.zone.agri.entity.enums.BranchStatus;
+import com.zone.agri.exception.NotFoundException;
 import com.zone.agri.repository.BranchRepository;
 import com.zone.agri.repository.InventoryRepository;
 import com.zone.agri.repository.UserRepository;
@@ -51,6 +52,15 @@ public class BranchService {
         return mapToDTO(branch);
     }
 
+    public BranchDTO getPublicBranchById(Long id) {
+        Branch branch = branchRepository.findById(id)
+                .orElseThrow(() -> new NotFoundException("Chi nhánh không tồn tại."));
+        if (branch.getStatus() != BranchStatus.ACTIVE) {
+            throw new NotFoundException("Chi nhánh không tồn tại hoặc đã ngừng hoạt động.");
+        }
+        return mapToDTO(branch);
+    }
+
     @Transactional
     public BranchDTO create(BranchDTO dto) {
         if (branchRepository.existsByBranchCode(dto.getBranchCode())) {
@@ -67,6 +77,7 @@ public class BranchService {
                 .provinceId(dto.getProvinceId())
                 .districtId(dto.getDistrictId())
                 .wardId(dto.getWardId())
+                .wardCode(dto.getWardCode())
                 .status(dto.getStatus())
                 .build();
 
@@ -104,6 +115,7 @@ public class BranchService {
         branch.setProvinceId(dto.getProvinceId());
         branch.setDistrictId(dto.getDistrictId());
         branch.setWardId(dto.getWardId());
+        branch.setWardCode(dto.getWardCode());
         branch.setStatus(dto.getStatus());
 
         // Re-geocode nếu địa chỉ thay đổi
@@ -242,6 +254,9 @@ public class BranchService {
         dto.setProvinceId(entity.getProvinceId());
         dto.setDistrictId(entity.getDistrictId());
         dto.setWardId(entity.getWardId());
+        dto.setWardCode(entity.getWardCode());
+        dto.setLat(entity.getLat());
+        dto.setLng(entity.getLng());
         dto.setStatus(entity.getStatus());
 
         if (entity.getUsers() != null) {

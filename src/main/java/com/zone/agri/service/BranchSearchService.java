@@ -5,7 +5,6 @@ import com.zone.agri.dto.geo.RoutingResult;
 import com.zone.agri.entity.Branch;
 import com.zone.agri.entity.enums.BranchStatus;
 import com.zone.agri.repository.BranchRepository;
-import com.zone.agri.utils.BoundingBoxUtils;
 import com.zone.agri.utils.HaversineUtils;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -17,13 +16,14 @@ import java.util.Comparator;
 import java.util.List;
 
 /**
- * Tìm chi nhánh gần nhất theo 3 tầng lọc:
+ * Tìm chi nhánh theo thứ tự gần nhất:
  * <ol>
- *   <li>Bounding Box — filter nhanh theo lat/lng range (dùng DB index)</li>
- *   <li>Haversine — sort chính xác hơn, lấy top N</li>
- *   <li>Distance Matrix API — lấy thời gian thực, sort theo duration</li>
+ *   <li>Lấy TẤT CẢ chi nhánh ACTIVE</li>
+ *   <li>Haversine — sort theo khoảng cách tăng dần (không giới hạn)</li>
+ *   <li>Distance Matrix API — enrich top N gần nhất bằng thời gian thực;
+ *       các chi nhánh còn lại dùng Haversine estimate</li>
  * </ol>
- * Luôn đảm bảo trả về ít nhất 1 chi nhánh (fallback toàn bộ ACTIVE nếu cần).
+ * Allocation sẽ thử lần lượt từng chi nhánh — gần trước, xa sau.
  */
 @Service
 @RequiredArgsConstructor
@@ -33,11 +33,9 @@ public class BranchSearchService {
     private final BranchRepository branchRepository;
     private final OpenRouteServiceProvider routingProvider;
 
-    @Value("${location.default-radius-km:15}")
-    private double defaultRadiusKm;
-
+    /** Số chi nhánh gần nhất được gọi ORS để lấy thời gian thực (tiết kiệm API quota). */
     @Value("${location.max-candidates:5}")
-    private int maxCandidates;
+    private int orsTopN;
 
     // ──────────────────────────────────────────────────────────────
     // Internal records
@@ -57,130 +55,93 @@ public class BranchSearchService {
     // ──────────────────────────────────────────────────────────────
 
     /**
-     * Tìm danh sách chi nhánh gần nhất với người dùng.
-     * Luôn trả về ít nhất 1 chi nhánh — fallback toàn bộ ACTIVE nếu bounding box thất bại
-     * (ví dụ: chi nhánh chưa được geocode chưa có lat/lng).
-     *
-     * @param userLat vĩ độ người dùng
-     * @param userLng kinh độ người dùng
-     * @return danh sách chi nhánh sorted theo duration/distance tăng dần
+     * Trả về TẤT CẢ chi nhánh ACTIVE, sorted theo khoảng cách tăng dần.
+     * ORS chỉ được gọi cho top {@code orsTopN} gần nhất; các chi nhánh còn lại
+     * dùng Haversine estimate để tránh tốn API quota.
      */
     public List<BranchWithRealDistance> findNearestBranches(double userLat, double userLng) {
-        double radius = defaultRadiusKm;
+        List<Branch> allActive = branchRepository.findByStatus(BranchStatus.ACTIVE);
 
-        // Tầng 1 — Bounding Box (chỉ branches đã geocode)
-        List<Branch> candidates = findCandidates(userLat, userLng, radius);
-
-        // Mở rộng radius x2 nếu không thấy
-        if (candidates.isEmpty()) {
-            radius = radius * 2;
-            candidates = findCandidates(userLat, userLng, radius);
-            if (!candidates.isEmpty()) {
-                log.info("Bounding box mở rộng {}km tìm được {} chi nhánh", radius, candidates.size());
-            }
-        }
-
-        // Final fallback: TẤT CẢ chi nhánh ACTIVE (kể cả chưa geocode)
-        if (candidates.isEmpty()) {
-            log.warn("Không có chi nhánh trong bounding box {}km, fallback toàn bộ ACTIVE branches", radius);
-            candidates = branchRepository.findByStatus(BranchStatus.ACTIVE);
-        }
-
-        if (candidates.isEmpty()) {
+        if (allActive.isEmpty()) {
             log.error("Hệ thống không có chi nhánh nào đang hoạt động!");
             return List.of();
         }
 
-        // Tầng 2 — Haversine sort (handle null lat/lng → sort về sau cùng)
-        List<BranchWithDistance> top = sortByHaversine(userLat, userLng, candidates, maxCandidates);
+        // Haversine sort toàn bộ (không giới hạn)
+        List<BranchWithDistance> sorted = sortByHaversine(userLat, userLng, allActive);
 
-        // Tầng 3 — Distance Matrix API (chỉ cho branches có tọa độ hợp lệ)
-        return enrichWithRealDistance(userLat, userLng, top);
+        // ORS enrich top N, Haversine fallback cho phần còn lại
+        return enrichWithRealDistance(userLat, userLng, sorted);
     }
 
     // ──────────────────────────────────────────────────────────────
-    // Tầng 1 — Bounding Box
+    // Haversine sort — toàn bộ, không giới hạn
     // ──────────────────────────────────────────────────────────────
 
-    List<Branch> findCandidates(double userLat, double userLng, double radiusKm) {
-        BoundingBoxUtils.BoundingBox box = BoundingBoxUtils.calculate(userLat, userLng, radiusKm);
-        return branchRepository.findBranchesInBoundingBox(
-                BranchStatus.ACTIVE,
-                box.minLat(), box.maxLat(),
-                box.minLng(), box.maxLng()
-        );
-    }
-
-    // ──────────────────────────────────────────────────────────────
-    // Tầng 2 — Haversine sort
-    // ──────────────────────────────────────────────────────────────
-
-    List<BranchWithDistance> sortByHaversine(double userLat, double userLng,
-                                             List<Branch> candidates, int limit) {
+    List<BranchWithDistance> sortByHaversine(double userLat, double userLng, List<Branch> candidates) {
         return candidates.stream()
                 .map(b -> {
-                    // Branches chưa geocode (null lat/lng) → đặt về cuối danh sách
                     double dist = (b.getLat() != null && b.getLng() != null)
                             ? HaversineUtils.distanceKm(userLat, userLng, b.getLat(), b.getLng())
                             : Double.MAX_VALUE;
                     return new BranchWithDistance(b, dist);
                 })
                 .sorted(Comparator.comparingDouble(BranchWithDistance::distanceKm))
-                .limit(limit)
                 .toList();
     }
 
     // ──────────────────────────────────────────────────────────────
-    // Tầng 3 — Distance Matrix API (1 request cho tất cả)
+    // ORS enrich — top N dùng Distance Matrix API, phần còn lại Haversine
     // ──────────────────────────────────────────────────────────────
 
     List<BranchWithRealDistance> enrichWithRealDistance(double userLat, double userLng,
-                                                        List<BranchWithDistance> top) {
-        // Tách branches có tọa độ và không có tọa độ
-        List<BranchWithDistance> withCoords = top.stream()
+                                                        List<BranchWithDistance> all) {
+        List<BranchWithDistance> withCoords = all.stream()
                 .filter(bwd -> bwd.branch().getLat() != null && bwd.branch().getLng() != null)
                 .toList();
-        List<BranchWithDistance> withoutCoords = top.stream()
+        List<BranchWithDistance> withoutCoords = all.stream()
                 .filter(bwd -> bwd.branch().getLat() == null || bwd.branch().getLng() == null)
                 .toList();
 
         List<BranchWithRealDistance> result = new ArrayList<>();
 
-        // Gọi ORS chỉ cho branches có tọa độ
         if (!withCoords.isEmpty()) {
-            CoordinateDto origin = new CoordinateDto(userLat, userLng);
-            List<CoordinateDto> destinations = withCoords.stream()
-                    .map(bwd -> new CoordinateDto(bwd.branch().getLat(), bwd.branch().getLng()))
-                    .toList();
+            // Chỉ gọi ORS cho orsTopN gần nhất để tiết kiệm API quota
+            List<BranchWithDistance> orsGroup      = withCoords.stream().limit(orsTopN).toList();
+            List<BranchWithDistance> haversineGroup = withCoords.stream().skip(orsTopN).toList();
 
             List<Double> durations = null;
             try {
-                RoutingResult routingResult = routingProvider.getDistanceMatrix(origin, destinations);
-                durations = routingResult.getDurations();
+                CoordinateDto origin = new CoordinateDto(userLat, userLng);
+                List<CoordinateDto> destinations = orsGroup.stream()
+                        .map(bwd -> new CoordinateDto(bwd.branch().getLat(), bwd.branch().getLng()))
+                        .toList();
+                durations = routingProvider.getDistanceMatrix(origin, destinations).getDurations();
             } catch (Exception e) {
                 log.warn("ORS distance matrix thất bại, dùng Haversine fallback: {}", e.getMessage());
             }
 
-            for (int i = 0; i < withCoords.size(); i++) {
-                BranchWithDistance bwd = withCoords.get(i);
+            for (int i = 0; i < orsGroup.size(); i++) {
+                BranchWithDistance bwd = orsGroup.get(i);
                 double durationSec = (durations != null && i < durations.size() && durations.get(i) >= 0)
                         ? durations.get(i)
-                        : bwd.distanceKm() * 120; // Fallback: ~120s/km
-                result.add(new BranchWithRealDistance(
-                        bwd.branch(), bwd.distanceKm(), durationSec, durationSec / 60.0));
+                        : bwd.distanceKm() * 120;
+                result.add(new BranchWithRealDistance(bwd.branch(), bwd.distanceKm(), durationSec, durationSec / 60.0));
+            }
+
+            // Chi nhánh xa hơn orsTopN — Haversine estimate (120s/km)
+            for (BranchWithDistance bwd : haversineGroup) {
+                double durationSec = bwd.distanceKm() * 120;
+                result.add(new BranchWithRealDistance(bwd.branch(), bwd.distanceKm(), durationSec, durationSec / 60.0));
             }
         }
 
-        // Branches không có tọa độ — gán duration lớn (sort về cuối)
+        // Branches chưa geocode — sort về cuối
         for (BranchWithDistance bwd : withoutCoords) {
-            double fallbackDuration = 999_999;
-            log.debug("Branch '{}' (id={}) chưa geocode, gán fallback duration {}s",
-                    bwd.branch().getName(), bwd.branch().getId(), fallbackDuration);
-            result.add(new BranchWithRealDistance(
-                    bwd.branch(), bwd.distanceKm(), fallbackDuration, fallbackDuration / 60.0));
+            log.debug("Branch '{}' (id={}) chưa geocode, sort về cuối", bwd.branch().getName(), bwd.branch().getId());
+            result.add(new BranchWithRealDistance(bwd.branch(), bwd.distanceKm(), 999_999, 999_999 / 60.0));
         }
 
-        // Sort theo duration tăng dần (có tọa độ trước, không có tọa độ sau)
         result.sort(Comparator.comparingDouble(BranchWithRealDistance::durationSeconds));
         return result;
     }

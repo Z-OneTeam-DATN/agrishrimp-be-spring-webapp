@@ -32,9 +32,6 @@ public class PublicBranchController {
     public ResponseEntity<BranchDTO> getPublicBranchDetail(
             @Parameter(description = "ID của chi nhánh", example = "1", required = true)
             @PathVariable Long id) {
-        BranchDTO branch = branchService.getBranchById(id);
-        // Có thể thêm kiểm tra status ở đây nếu muốn bảo mật hơn, 
-        // nhưng hiện tại getBranchById trả về theo ID bất kể status.
-        return ResponseEntity.ok(branch);
+        return ResponseEntity.ok(branchService.getPublicBranchById(id));
     }
 }

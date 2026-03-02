@@ -65,21 +65,27 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
     Optional<Brand> findBrandByName(@Param("name") String name);
 
 
-    // Lấy danh sách sản phẩm đang kinh doanh và còn hàng
+    // Lấy danh sách sản phẩm đang kinh doanh và còn hàng tại chi nhánh ACTIVE
     @Query("SELECT p FROM Product p " +
+            "JOIN p.category c " +
             "JOIN p.variants v " +
             "JOIN Inventory i ON i.productVariant.id = v.id " +
-            "WHERE p.status = 'ACTIVE' AND v.status = 'ACTIVE' " +
+            "WHERE p.status = 'ACTIVE' AND c.status = 'ACTIVE' " +
+            "AND v.status = 'ACTIVE' " +
+            "AND i.branch.status = com.zone.agri.entity.enums.BranchStatus.ACTIVE " +
             "GROUP BY p.id " +
             "HAVING SUM(i.quantity) > 0")
     List<Product> findProductsForSale();
 
-    // Lấy Top bán chạy dựa trên số lượng trong OrderItem
+    // Lấy Top bán chạy dựa trên số lượng trong OrderItem, chỉ tính chi nhánh ACTIVE
     @Query("SELECT p FROM Product p " +
+            "JOIN p.category c " +
             "JOIN p.variants v " +
             "JOIN OrderItem oi ON oi.productVariant.id = v.id " +
             "JOIN Inventory i ON i.productVariant.id = v.id " +
-            "WHERE p.status = 'ACTIVE' AND v.status = 'ACTIVE' " +
+            "WHERE p.status = 'ACTIVE' AND c.status = 'ACTIVE' " +
+            "AND v.status = 'ACTIVE' " +
+            "AND i.branch.status = com.zone.agri.entity.enums.BranchStatus.ACTIVE " +
             "GROUP BY p.id " +
             "HAVING SUM(i.quantity) > 0 " +
             "ORDER BY SUM(oi.quantity) DESC")
@@ -110,6 +116,14 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
               AND (:keyword IS NULL OR LOWER(p.name) LIKE LOWER(CONCAT('%', :keyword, '%')))
               AND (:categoryId IS NULL OR c.id = :categoryId)
               AND (:brandId IS NULL OR b.id = :brandId)
+              AND EXISTS (
+                SELECT 1 FROM ProductVariant v
+                JOIN Inventory i ON i.productVariant.id = v.id
+                WHERE v.product.id = p.id
+                  AND v.status = com.zone.agri.entity.enums.VariantStatus.ACTIVE
+                  AND i.branch.status = com.zone.agri.entity.enums.BranchStatus.ACTIVE
+                  AND i.quantity > 0
+              )
             ORDER BY p.createdAt DESC
             """,
            countQuery = """
@@ -121,6 +135,14 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
               AND (:keyword IS NULL OR LOWER(p.name) LIKE LOWER(CONCAT('%', :keyword, '%')))
               AND (:categoryId IS NULL OR c.id = :categoryId)
               AND (:brandId IS NULL OR b.id = :brandId)
+              AND EXISTS (
+                SELECT 1 FROM ProductVariant v
+                JOIN Inventory i ON i.productVariant.id = v.id
+                WHERE v.product.id = p.id
+                  AND v.status = com.zone.agri.entity.enums.VariantStatus.ACTIVE
+                  AND i.branch.status = com.zone.agri.entity.enums.BranchStatus.ACTIVE
+                  AND i.quantity > 0
+              )
             """)
     Page<Long> findPublicProductIds(
             @Param("keyword") String keyword,

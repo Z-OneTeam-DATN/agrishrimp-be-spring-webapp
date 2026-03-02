@@ -305,11 +305,18 @@ public class OrderService {
         }
 
         String branchName;
+        String branchPhone = null;
+        String branchAddress = null;
+
         if (order.getBranch() != null) {
-            branchName = order.getBranch().getName();
+            branchName   = order.getBranch().getName();
+            branchPhone  = order.getBranch().getPhone();
+            branchAddress = order.getBranch().getAddressDetail();
         } else if (order.getSubOrders() != null && order.getSubOrders().size() == 1) {
             Branch singleBranch = order.getSubOrders().get(0).getBranch();
-            branchName = singleBranch != null ? singleBranch.getName() : "Nhiều chi nhánh";
+            branchName    = singleBranch != null ? singleBranch.getName()          : "Nhiều chi nhánh";
+            branchPhone   = singleBranch != null ? singleBranch.getPhone()         : null;
+            branchAddress = singleBranch != null ? singleBranch.getAddressDetail() : null;
         } else if (order.getSubOrders() != null && order.getSubOrders().size() > 1) {
             branchName = "Nhiều chi nhánh";
         } else {
@@ -321,11 +328,16 @@ public class OrderService {
                 .code(order.getCode())
                 .customerName(order.getUser() != null ? order.getUser().getFullName() : "")
                 .customerPhone(order.getUser() != null ? order.getUser().getPhoneNumber() : "")
+                .receiverPhone(order.getReceiverPhone())
+                .totalAmount(order.getTotalAmount() != null ? order.getTotalAmount() : BigDecimal.ZERO)
+                .shippingFee(order.getTotalShippingFee() != null ? order.getTotalShippingFee() : BigDecimal.ZERO)
                 .finalAmount(order.getFinalAmount() != null ? order.getFinalAmount() : BigDecimal.ZERO)
                 .paymentMethod(order.getPaymentMethod() != null ? order.getPaymentMethod().name() : "")
                 .paymentStatus(order.getPaymentStatus() != null ? order.getPaymentStatus().name() : "")
                 .status(order.getStatus() != null ? order.getStatus().name() : "")
                 .branchName(branchName)
+                .branchPhone(branchPhone)
+                .branchAddress(branchAddress)
                 .createdAt(order.getCreatedAt())
                 .shippingAddress(order.getShippingAddress())
                 .checkoutUrl(order.getPayosCheckoutUrl())
@@ -390,44 +402,17 @@ public class OrderService {
     // ══════════════════════════════════════════════════════════════
 
     public PrepareOrderResponse prepareOrder(Long userId, PrepareOrderRequest request) {
-        // --- Resolve địa chỉ giao hàng và thông tin người nhận ---
-        String receiverName;
-        String receiverPhone;
-        String deliveryAddress;
-        Integer deliveryDistrictId;
-        Integer deliveryProvinceId;
-        String deliveryWardCode;
+        // --- Resolve địa chỉ giao hàng từ sổ địa chỉ đã lưu ---
+        com.zone.agri.entity.UserAddress addr = userAddressRepository
+                .findByIdAndUserId(request.getUserAddressId(), userId)
+                .orElseThrow(() -> new NotFoundException("Không tìm thấy địa chỉ trong sổ địa chỉ của bạn. ID: " + request.getUserAddressId()));
 
-        if (request.getUserAddressId() != null) {
-            // Chọn từ sổ địa chỉ đã lưu
-            com.zone.agri.entity.UserAddress addr = userAddressRepository
-                    .findByIdAndUserId(request.getUserAddressId(), userId)
-                    .orElseThrow(() -> new NotFoundException("Không tìm thấy địa chỉ ID: " + request.getUserAddressId()));
-            receiverName = addr.getReceiverName();
-            receiverPhone = addr.getReceiverPhone();
-            deliveryAddress = addr.getAddressDetail();
-            deliveryDistrictId = addr.getDistrictId() != null ? parseIntSafe(addr.getDistrictId()) : null;
-            deliveryProvinceId = addr.getProvinceId() != null ? parseIntSafe(addr.getProvinceId()) : null;
-            deliveryWardCode = addr.getWardId();
-        } else {
-            // Nhập địa chỉ thủ công — validate bắt buộc
-            if (request.getReceiverName() == null || request.getReceiverName().isBlank())
-                throw new BadRequestException("receiverName là bắt buộc khi không chọn địa chỉ đã lưu");
-            if (request.getReceiverPhone() == null || request.getReceiverPhone().isBlank())
-                throw new BadRequestException("receiverPhone là bắt buộc khi không chọn địa chỉ đã lưu");
-            if (request.getDeliveryAddress() == null || request.getDeliveryAddress().isBlank())
-                throw new BadRequestException("deliveryAddress là bắt buộc khi không chọn địa chỉ đã lưu");
-            if (request.getDeliveryDistrictId() == null)
-                throw new BadRequestException("deliveryDistrictId là bắt buộc khi không chọn địa chỉ đã lưu");
-            if (request.getDeliveryWardCode() == null || request.getDeliveryWardCode().isBlank())
-                throw new BadRequestException("deliveryWardCode là bắt buộc khi không chọn địa chỉ đã lưu");
-            receiverName = request.getReceiverName();
-            receiverPhone = request.getReceiverPhone();
-            deliveryAddress = request.getDeliveryAddress();
-            deliveryDistrictId = request.getDeliveryDistrictId();
-            deliveryProvinceId = request.getDeliveryProvinceId();
-            deliveryWardCode = request.getDeliveryWardCode();
-        }
+        String receiverName = addr.getReceiverName();
+        String receiverPhone = addr.getReceiverPhone();
+        String deliveryAddress = addr.getAddressDetail();
+        Integer deliveryDistrictId = addr.getDistrictId() != null ? parseIntSafe(addr.getDistrictId()) : null;
+        Integer deliveryProvinceId = addr.getProvinceId() != null ? parseIntSafe(addr.getProvinceId()) : null;
+        String deliveryWardCode = addr.getWardId();
 
         // --- Resolve tọa độ ---
         double userLat;
@@ -448,7 +433,19 @@ public class OrderService {
         }
 
         // --- Thuật toán tìm chi nhánh gần nhất ---
-        List<Long> variantIds = request.getCart().stream().map(CartItemDto::getProductVariantId).distinct().toList();
+        List<CartItemDto> finalCart = request.getCart();
+        if (finalCart == null || finalCart.isEmpty()) {
+            // Tự động lấy từ DB nếu FE không gửi danh sách chọn lọc
+            List<com.zone.agri.entity.CartItem> dbItems = cartItemRepository.findByUserId(userId);
+            if (dbItems.isEmpty()) throw new BadRequestException("Giỏ hàng của bạn đang trống");
+            
+            finalCart = dbItems.stream()
+                    .map(item -> new CartItemDto(item.getProductVariant().getId(), 
+                                                 item.getQuantity()))
+                    .collect(Collectors.toList());
+        }
+
+        List<Long> variantIds = finalCart.stream().map(CartItemDto::getProductVariantId).distinct().toList();
         List<ProductVariant> variants = variantRepository.findAllById(variantIds);
         if (variants.size() != variantIds.size()) throw new NotFoundException("Một hoặc nhiều sản phẩm không tồn tại");
 
@@ -460,7 +457,7 @@ public class OrderService {
         List<Long> branchIds = nearestBranches.stream().map(bwr -> bwr.branch().getId()).toList();
 
         Map<Long, Map<Long, List<Inventory>>> inventoryMatrix = allocationService.buildInventoryMatrix(branchIds, variantIds);
-        AllocationResult allocation = allocationService.allocate(request.getCart(), variantMap, nearestBranches, inventoryMatrix);
+        AllocationResult allocation = allocationService.allocate(finalCart, variantMap, nearestBranches, inventoryMatrix);
 
         DeliveryInfo deliveryInfo = DeliveryInfo.builder()
                 .toDistrictId(deliveryDistrictId).toWardCode(deliveryWardCode)

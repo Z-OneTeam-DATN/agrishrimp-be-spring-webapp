@@ -63,6 +63,17 @@ public class GHNShippingProvider implements ShippingProvider {
 
     @SuppressWarnings("unchecked")
     private ShippingFeeResult doCalculate(ShippingFeeParams params) {
+        // Validate bắt buộc trước khi gọi GHN — tránh lãng phí API call
+        if (params.getFromDistrictId() == null) {
+            throw new RuntimeException("fromDistrictId null — chi nhánh chưa cấu hình mã quận GHN");
+        }
+        if (params.getToDistrictId() == null) {
+            throw new RuntimeException("toDistrictId null — địa chỉ người nhận thiếu mã quận");
+        }
+        if (params.getToWardCode() == null || params.getToWardCode().isBlank()) {
+            throw new RuntimeException("toWardCode null — địa chỉ người nhận thiếu mã phường GHN (WardCode)");
+        }
+
         String url = baseUrl + "/shipping-order/fee";
 
         HttpHeaders headers = new HttpHeaders();
@@ -78,11 +89,16 @@ public class GHNShippingProvider implements ShippingProvider {
         body.put("cod_value", params.getCodAmount());
         body.put("service_type_id", 2); // Giao hàng tiêu chuẩn
 
+        log.debug("GHN fee request: from_district={}, to_district={}, to_ward_code={}, weight={}g",
+                params.getFromDistrictId(), params.getToDistrictId(), params.getToWardCode(), params.getWeightGram());
+
         HttpEntity<Map<String, Object>> request = new HttpEntity<>(body, headers);
         Map<String, Object> response = restTemplate.postForObject(url, request, Map.class);
 
         if (response == null || !"200".equals(String.valueOf(response.get("code")))) {
-            throw new RuntimeException("GHN API error: " + (response != null ? response.get("message") : "null response"));
+            String ghnMsg = response != null ? String.valueOf(response.get("message")) : "null response";
+            String ghnCode = response != null ? String.valueOf(response.get("code")) : "N/A";
+            throw new RuntimeException("GHN API error code=" + ghnCode + " message=" + ghnMsg);
         }
 
         Map<String, Object> data = (Map<String, Object>) response.get("data");

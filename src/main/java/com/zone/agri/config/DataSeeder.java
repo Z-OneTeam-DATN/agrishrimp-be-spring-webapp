@@ -406,7 +406,9 @@ public class DataSeeder implements CommandLineRunner {
         inv(pv5a,  branch1,100, bd(75_000),  "LOT-CN1-VIT-001",  15, now);
         inv(pv6a,  branch1, 50, bd(85_000),  "LOT-CN1-VOIA-001", 10, now);
         inv(pv7a,  branch1, 40, bd(220_000), "LOT-CN1-BIO-001",  10, now);
+        inv(pv2a,  branch1, 60, bd(35_000),  "LOT-CN1-TBY-500G-001", 10, now);
 
+        inv(pv2a,  branch2, 40, bd(35_000),  "LOT-CN2-TBY-500G-001", 10, now);
         inv(pv2b,  branch2, 40, bd(130_000), "LOT-CN2-TBY-001",  10, now);
         inv(pv5b,  branch2, 50, bd(330_000), "LOT-CN2-VIT-001",  10, now);
         inv(pv6a,  branch2, 80, bd(85_000),  "LOT-CN2-VOIA-001", 10, now);
@@ -633,8 +635,7 @@ public class DataSeeder implements CommandLineRunner {
         // ── 12. ĐƠN HÀNG ────────────────────────────────────────────────
         Order o1 = orderRepository.save(Order.builder()
                 .code("DH-2024-001").branch(branch1).user(user1).status(OrderStatus.COMPLETED)
-                .paymentMethod(PaymentMethod.TRANSFER).paymentStatus(PaymentStatus.PAID)
-                .shippingAddress("Cà Mau").totalAmount(bd(420_000)).discountAmount(BigDecimal.ZERO).finalAmount(bd(420_000))
+                .paymentMethod(PaymentMethod.COD).paymentStatus(PaymentStatus.PAID)                .shippingAddress("Cà Mau").totalAmount(bd(420_000)).discountAmount(BigDecimal.ZERO).finalAmount(bd(420_000))
                 .createdAt(now.minusDays(15)).build());
 
         // Tính giá bán giả lập cho OrderItem (Giá Vốn * 1.3) = 140,000 * 1.3 = 182,000

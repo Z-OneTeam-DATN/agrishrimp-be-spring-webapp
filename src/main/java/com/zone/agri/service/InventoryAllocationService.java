@@ -36,9 +36,11 @@ public class InventoryAllocationService {
     // Step 1: Build Inventory Matrix (Lưu Danh sách Lô hàng thay vì số lượng)
     // ──────────────────────────────────────────────────────────────
     public Map<Long, Map<Long, List<Inventory>>> buildInventoryMatrix(List<Long> branchIds, List<Long> variantIds) {
-        List<Inventory> inventories = inventoryRepository.findInventoryMatrix(branchIds, variantIds);
+        // Dùng raw query để giữ nguyên từng lô riêng lẻ với importPrice đúng.
+        // KHÔNG dùng findInventoryMatrix vì hàm đó gom lô → importPrice bị null → giá = 0đ.
+        List<Inventory> inventories = inventoryRepository.rawFindInventoryMatrix(branchIds, variantIds);
 
-        // Map<BranchId, Map<VariantId, Danh_Sách_Các_Lô_Hàng_Còn_Tồn>>
+        // Map<BranchId, Map<VariantId, Danh_Sách_Lô_FIFO>>
         Map<Long, Map<Long, List<Inventory>>> matrix = new HashMap<>();
         for (Inventory inv : inventories) {
             Long branchId = inv.getBranch().getId();
@@ -46,7 +48,7 @@ public class InventoryAllocationService {
 
             matrix.computeIfAbsent(branchId, k -> new HashMap<>())
                     .computeIfAbsent(variantId, k -> new ArrayList<>())
-                    .add(inv); // Tự động sắp xếp theo FIFO do câu query ORDER BY id ASC
+                    .add(inv); // ORDER BY i.id ASC từ query → lô cũ nhất (nhập trước) xuất trước
         }
         return matrix;
     }
@@ -60,6 +62,9 @@ public class InventoryAllocationService {
             List<BranchWithRealDistance> branchesSortedByDist,
             Map<Long, Map<Long, List<Inventory>>> inventoryMatrix
     ) {
+        // Lấy hệ số lợi nhuận 1 lần duy nhất — tránh N query DB trong vòng lặp lô
+        BigDecimal profitMultiplier = settingService.getProfitMultiplier();
+
         List<CartItemDto> remaining = new ArrayList<>(cart.stream()
                 .map(item -> new CartItemDto(item.getProductVariantId(), item.getQuantity()))
                 .toList());
@@ -93,9 +98,9 @@ public class InventoryAllocationService {
 
                     int quantityToTake = Math.min(requested, availableInBatch);
 
-                    // 👉 TỰ ĐỘNG TÍNH GIÁ BÁN = GIÁ VỐN LÔ NÀY * BIÊN LỢI NHUẬN TỪ DB
+                    // Giá bán = giá vốn lô này × biên lợi nhuận admin cài (FIFO: lô cũ nhất ra trước)
                     BigDecimal importPrice = batch.getImportPrice() != null ? batch.getImportPrice() : BigDecimal.ZERO;
-                    BigDecimal unitPrice = importPrice.multiply(settingService.getProfitMultiplier());
+                    BigDecimal unitPrice = importPrice.multiply(profitMultiplier);
 
                     allocated.add(OrderItemDto.builder()
                             .productVariantId(variantId)

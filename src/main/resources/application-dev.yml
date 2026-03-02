@@ -112,7 +112,7 @@ shipping:
   ghn:
     token: ${GHN_API_KEY:0c84d3ad-125f-11f1-8935-9e298af4d523}
     shop-id: ${GHN_SHOP_ID:6287754}
-    url: https://dev-online-gateway.ghn.vn/shiip/public-api/v2
+    url: https://online-gateway.ghn.vn/shiip/public-api/v2
 
 # 13. LOCATION / SEARCH CONFIG
 location:
