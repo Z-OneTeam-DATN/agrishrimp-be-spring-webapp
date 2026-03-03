@@ -21,18 +21,16 @@ public class GlobalExceptionHandler {
         return buildResponse(ex.getMessage(), HttpStatus.NOT_FOUND);
     }
 
-    @ExceptionHandler(DataIntegrityViolationException.class)
-    public ResponseEntity<Map<String, String>> handleDataIntegrityViolation(DataIntegrityViolationException ex) {
-        return buildResponse("Dữ liệu đã tồn tại hoặc vi phạm ràng buộc hệ thống. Vui lòng kiểm tra lại (có thể do trùng tên)!", HttpStatus.CONFLICT);
+    // 2. Xử lý lỗi xung đột / trùng lặp (409) - Đã gộp chung để FE dễ bắt
+    @ExceptionHandler({ConflictException.class, DataIntegrityViolationException.class})
+    public ResponseEntity<Map<String, String>> handleConflictException(Exception ex) {
+        String message = (ex instanceof ConflictException)
+                ? ex.getMessage()
+                : "Tên danh mục này đã tồn tại trong hệ thống!";
+        return buildResponse(message, HttpStatus.CONFLICT);
     }
 
-    // 2. Xử lý lỗi xung đột (409) - Rất quan trọng để báo lỗi "Trùng tên danh mục"
-    @ExceptionHandler(ConflictException.class)
-    public ResponseEntity<Map<String, String>> handleConflictException(ConflictException ex) {
-        return buildResponse(ex.getMessage(), HttpStatus.CONFLICT);
-    }
-
-    // 3. Xử lý lỗi Validation (400) - Khi dùng @Valid ở Controller
+    // 3. Xử lý lỗi Validation (400)
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<Map<String, String>> handleValidationExceptions(MethodArgumentNotValidException ex) {
         String errorMessage = ex.getBindingResult()
@@ -43,38 +41,25 @@ public class GlobalExceptionHandler {
         return buildResponse("Dữ liệu không hợp lệ: " + errorMessage, HttpStatus.BAD_REQUEST);
     }
 
-    // 4. Xử lý lỗi JSON sai định dạng hoặc thừa trường (400)
-    // Đặc biệt hữu ích khi bạn đã xóa cột 'description' nhưng Frontend vẫn gửi lên
+    // 4. Xử lý lỗi JSON sai định dạng (400)
     @ExceptionHandler(HttpMessageNotReadableException.class)
     public ResponseEntity<Map<String, String>> handleReadableException(HttpMessageNotReadableException ex) {
-        return buildResponse("Yêu cầu không hợp lệ: JSON sai định dạng hoặc chứa trường không tồn tại.", HttpStatus.BAD_REQUEST);
+        return buildResponse("Yêu cầu không hợp lệ: Dữ liệu gửi lên sai định dạng.", HttpStatus.BAD_REQUEST);
     }
 
-    @ExceptionHandler(IllegalArgumentException.class)
-    public ResponseEntity<Map<String, String>> handleIllegalArgumentException(IllegalArgumentException ex) {
-        Map<String, String> errorResponse = new HashMap<>();
-        // Đẩy message lỗi về Frontend
-        errorResponse.put("message", ex.getMessage());
-        // QUAN TRỌNG: Trả về 400 BAD_REQUEST, KHÔNG trả về 500
-        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(errorResponse);
-    }
-
-    // 5. Xử lý lỗi yêu cầu không hợp lệ (400)
-    @ExceptionHandler(BadRequestException.class)
-    public ResponseEntity<Map<String, String>> handleBadRequestException(BadRequestException ex) {
+    // 5. Xử lý lỗi yêu cầu không hợp lệ chung (400)
+    @ExceptionHandler({BadRequestException.class, IllegalArgumentException.class})
+    public ResponseEntity<Map<String, String>> handleBadRequestException(Exception ex) {
         return buildResponse(ex.getMessage(), HttpStatus.BAD_REQUEST);
     }
 
-    // 6. CATCH-ALL: Bắt mọi lỗi 500 chưa được định nghĩa
-    // Giúp Frontend hiển thị được nội dung lỗi thay vì thông báo "Có lỗi xảy ra" mặc định
+    // 6. CATCH-ALL: Lỗi hệ thống (500)
     @ExceptionHandler(Exception.class)
     public ResponseEntity<Map<String, String>> handleGeneralException(Exception ex) {
-        // Log chi tiết lỗi ra console của Backend để bạn dễ debug
-        ex.printStackTrace();
+        ex.printStackTrace(); // Giữ lại log để debug
         return buildResponse("Lỗi hệ thống: " + ex.getMessage(), HttpStatus.INTERNAL_SERVER_ERROR);
     }
 
-    // Hàm helper giúp tạo phản hồi JSON đồng nhất với key "message"
     private ResponseEntity<Map<String, String>> buildResponse(String message, HttpStatus status) {
         Map<String, String> errorResponse = new HashMap<>();
         errorResponse.put("message", message);
