@@ -24,7 +24,7 @@ spring:
 
   jpa:
     hibernate:
-      ddl-auto: ${SPRING_JPA_HIBERNATE_DDL_AUTO:validate}
+      ddl-auto: ${SPRING_JPA_HIBERNATE_DDL_AUTO:update}
     show-sql: false
     properties:
       hibernate:
@@ -72,9 +72,9 @@ app:
     same-site: ${APP_COOKIE_SAME_SITE:Lax}
 
 cloudinary:
-  cloud-name: ${CLOUDINARY_CLOUD_NAME:}
-  api-key: ${CLOUDINARY_API_KEY:}
-  api-secret: ${CLOUDINARY_API_SECRET:}
+  cloud-name: ${CLOUDINARY_CLOUD_NAME:demevvyp4}
+  api-key: ${CLOUDINARY_API_KEY:176599529831455}
+  api-secret: ${CLOUDINARY_API_SECRET:PqDexQ59PWJ8pOWeqN_BjimFYuY}
   folder: agrishrimp/products
 
 payos:

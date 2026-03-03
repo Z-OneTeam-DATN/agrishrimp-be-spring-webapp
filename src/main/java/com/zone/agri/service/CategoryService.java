@@ -83,7 +83,11 @@ public class CategoryService {
         category.setStatus(dto.getStatus());
 
         if (dto.getImageUrl() != null && dto.getImageUrl().startsWith("data:image")) {
+            // Nếu là file mới (Base64) -> Upload lên Cloudinary
             category.setImageUrl(cloudinaryService.uploadImage(dto.getImageUrl()));
+        } else {
+            // Nếu là URL bình thường (từ Frontend gửi lại) hoặc null -> Giữ nguyên URL
+            category.setImageUrl(dto.getImageUrl());
         }
 
         if (dto.getParentId() != null) {
