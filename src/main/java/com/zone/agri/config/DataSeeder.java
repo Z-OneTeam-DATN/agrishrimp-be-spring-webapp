@@ -7,7 +7,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.context.annotation.Profile;
-import org.springframework.core.annotation.Order;
+// Đã xóa dòng import org.springframework.core.annotation.Order; để tránh xung đột
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
@@ -15,11 +15,10 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.util.List;
 
 @Component
 @Profile("dev")
-@Order(2)
+@org.springframework.core.annotation.Order(2) // Sử dụng đường dẫn tuyệt đối cho Annotation của Spring
 @RequiredArgsConstructor
 @Slf4j
 public class DataSeeder implements CommandLineRunner {
