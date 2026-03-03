@@ -7,6 +7,7 @@ import com.zone.agri.repository.*;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.CommandLineRunner;
+
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
@@ -18,7 +19,9 @@ import java.time.LocalDateTime;
 import java.util.Set;
 
 @Component
+
 @org.springframework.core.annotation.Order(1)
+
 @RequiredArgsConstructor
 @Slf4j
 public class DataSeeder implements CommandLineRunner {
@@ -525,6 +528,7 @@ public class DataSeeder implements CommandLineRunner {
         customerRepository.save(Customer.builder().user(user2).name("Trần Thị Cua").phone("0911000002").email("user2@gmail.com").gender(CustomerGender.FEMALE).provinceId("94").addressDetail("Sóc Trăng").status(CustomerStatus.ACTIVE).build());
         customerRepository.save(Customer.builder().user(user3).name("Lê Minh Nuôi").phone("0911000003").email("user3@gmail.com").gender(CustomerGender.MALE).provinceId("95").addressDetail("Bạc Liêu").status(CustomerStatus.ACTIVE).build());
         customerRepository.save(Customer.builder().user(user4).name("Phạm Hữu Cá").phone("0911000004").email("user4@gmail.com").gender(CustomerGender.MALE).provinceId("92").addressDetail("Cần Thơ").status(CustomerStatus.ACTIVE).build());
+
 
         // ── 13. ĐƠN HÀNG ────────────────────────────────────────────────
         // Đơn 1: Cần Thơ, đã giao
