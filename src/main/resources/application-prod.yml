@@ -4,10 +4,10 @@ server:
 spring:
   application:
     name: agri-shrimp
+
   error:
     include-stacktrace: never
 
-spring:
   main:
     allow-bean-definition-overriding: true
 
@@ -89,6 +89,7 @@ geocoding:
   trackasia:
     api-key: ${TRACKASIA_API_KEY:63a1ec0fafba9b6c88391772034153b56c}
     url: https://api.trackasia.vn/api/geocode/search
+    autocomplete-url: https://api.trackasia.vn/api/geocode/autocomplete
   nominatim:
     url: https://nominatim.openstreetmap.org/search
 
