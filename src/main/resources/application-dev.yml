@@ -33,6 +33,11 @@ spring:
   main:
     allow-bean-definition-overriding: true
 
+  servlet:
+    multipart:
+      max-file-size: 50MB
+      max-request-size: 50MB
+
   # 8. CẤU HÌNH MAIL SERVER (ĐÃ SỬA: PHẢI NẰM DƯỚI SPRING)
   mail:
     host: smtp.gmail.com

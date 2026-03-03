@@ -88,6 +88,7 @@ services:
       # Security & SDKs (passed via env)
       SECURITY_JWT_SECRET_KEY: ${JWT_SECRET}
       SECURITY_JWT_ISSUER: ${JWT_ISSUER}
+      APP_TURNSTILE_SECRET_KEY: ${APP_TURNSTILE_SECRET_KEY}
       CLOUDINARY_CLOUD_NAME: ${CLOUDINARY_CLOUD_NAME}
       CLOUDINARY_API_KEY: ${CLOUDINARY_API_KEY}
       CLOUDINARY_API_SECRET: ${CLOUDINARY_API_SECRET}
@@ -103,6 +104,10 @@ services:
       APP_COOKIE_SECURE: ${APP_COOKIE_SECURE:-true}
       # Hibernate (validate = chỉ kiểm tra schema, không tự ALTER; update = tự ALTER khi có thay đổi entity)
       SPRING_JPA_HIBERNATE_DDL_AUTO: ${HIBERNATE_DDL_AUTO:-validate}
+      # AWS (optional — for S3)
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:}
+      AWS_REGION: ${AWS_REGION:-ap-southeast-1}
       # Python AI Service
       IMAGE_SEARCH_URL: http://image-search:5001
 
