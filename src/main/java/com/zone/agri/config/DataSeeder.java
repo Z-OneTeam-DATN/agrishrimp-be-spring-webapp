@@ -16,6 +16,9 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 
+import org.springframework.core.env.Environment;
+
+import java.util.Arrays;
 import java.util.Set;
 
 @Component
@@ -25,6 +28,8 @@ import java.util.Set;
 @RequiredArgsConstructor
 @Slf4j
 public class DataSeeder implements CommandLineRunner {
+
+    private final Environment environment;
 
     private final RoleRepository roleRepository;
     private final PermissionRepository permissionRepository;
@@ -52,10 +57,16 @@ public class DataSeeder implements CommandLineRunner {
     @Override
     @Transactional
     public void run(String... args) {
+        boolean isDevProfile = Arrays.asList(environment.getActiveProfiles()).contains("dev");
+
         // Kiểm tra nếu đã có dữ liệu vai trò (dữ liệu thiết yếu)
         if (roleRepository.count() > 0) {
-            log.info(">>> Dữ liệu hệ thống đã tồn tại. Kiểm tra dữ liệu demo...");
-            seedDemoData();
+            if (isDevProfile) {
+                log.info(">>> Dữ liệu hệ thống đã tồn tại. Kiểm tra dữ liệu demo...");
+                seedDemoData();
+            } else {
+                log.info(">>> Dữ liệu hệ thống đã tồn tại. Bỏ qua demo data (profile: prod).");
+            }
             return;
         }
 
@@ -222,8 +233,12 @@ public class DataSeeder implements CommandLineRunner {
 
         log.info(">>> KHỞI TẠO DỮ LIỆU HỆ THỐNG HOÀN TẤT.");
 
-        // Tiếp tục khởi tạo dữ liệu demo nếu cần
-        seedDemoData();
+        // Chỉ seed demo data khi chạy ở môi trường dev
+        if (isDevProfile) {
+            seedDemoData();
+        } else {
+            log.info(">>> Bỏ qua dữ liệu demo (profile: prod).");
+        }
     }
 
     private void seedDemoData() {
