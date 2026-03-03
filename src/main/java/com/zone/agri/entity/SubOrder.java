@@ -63,4 +63,13 @@ public class SubOrder extends BaseEntity {
     @ToString.Exclude
     @EqualsAndHashCode.Exclude
     List<SubOrderItem> items;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "handover_id")
+    @ToString.Exclude
+    @EqualsAndHashCode.Exclude
+    Handover handover;
+
+    @Column(name = "tracking_code", length = 100)
+    String trackingCode;
 }

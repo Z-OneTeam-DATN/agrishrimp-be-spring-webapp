@@ -8,6 +8,7 @@ import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
 import java.util.Collection;
 import java.util.List;
 
@@ -42,4 +43,36 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
     List<Order> findByStatusOrderByCreatedAtDesc(OrderStatus status);
 
     List<Order> findAllByOrderByCreatedAtDesc();
+
+    // Tính tổng doanh thu (Đơn hàng đã hoàn thành)
+    @Query("SELECT SUM(o.finalAmount) FROM Order o WHERE o.status = 'COMPLETED' " +
+            "AND o.createdAt BETWEEN :startDate AND :endDate " +
+            "AND (:branchId IS NULL OR o.branch.id = :branchId)")
+    BigDecimal sumRevenue(@Param("startDate") LocalDateTime startDate,
+                          @Param("endDate") LocalDateTime endDate,
+                          @Param("branchId") Long branchId);
+
+    // Tính tổng tiền hàng bị trả lại (Đơn hàng bị RETURNED)
+    @Query("SELECT SUM(o.totalAmount) FROM Order o WHERE o.status = 'RETURNED' " +
+            "AND o.createdAt BETWEEN :startDate AND :endDate " +
+            "AND (:branchId IS NULL OR o.branch.id = :branchId)")
+    BigDecimal sumReturnedGoods(@Param("startDate") LocalDateTime startDate,
+                                @Param("endDate") LocalDateTime endDate,
+                                @Param("branchId") Long branchId);
+
+    // Tính tổng phí ship thu của khách
+    @Query("SELECT SUM(o.totalShippingFee) FROM Order o WHERE o.status = 'COMPLETED' " +
+            "AND o.createdAt BETWEEN :startDate AND :endDate " +
+            "AND (:branchId IS NULL OR o.branch.id = :branchId)")
+    BigDecimal sumShippingFee(@Param("startDate") LocalDateTime startDate,
+                              @Param("endDate") LocalDateTime endDate,
+                              @Param("branchId") Long branchId);
+
+    // Tính tổng chiết khấu cho khách
+    @Query("SELECT SUM(o.discountAmount) FROM Order o WHERE o.status = 'COMPLETED' " +
+            "AND o.createdAt BETWEEN :startDate AND :endDate " +
+            "AND (:branchId IS NULL OR o.branch.id = :branchId)")
+    BigDecimal sumDiscount(@Param("startDate") LocalDateTime startDate,
+                           @Param("endDate") LocalDateTime endDate,
+                           @Param("branchId") Long branchId);
 }
