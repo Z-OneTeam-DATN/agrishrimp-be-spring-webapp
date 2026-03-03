@@ -4,6 +4,9 @@ server:
     include-stacktrace: never
 
 spring:
+  main:
+    allow-bean-definition-overriding: true
+
   servlet:
     multipart:
       max-file-size: 50MB
@@ -58,8 +61,8 @@ app:
   google:
     client-id: ${APP_GOOGLE_CLIENT_ID:716238456770-avu71bkjh5nngpq1j5gs7euull9kn663.apps.googleusercontent.com}
   cookie:
-    secure: false
-    same-site: Lax
+    secure: ${APP_COOKIE_SECURE:true}
+    same-site: ${APP_COOKIE_SAME_SITE:Lax}
 
 cloudinary:
   cloud-name: ${CLOUDINARY_CLOUD_NAME:}
