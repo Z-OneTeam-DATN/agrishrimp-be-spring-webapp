@@ -1,6 +1,7 @@
 package com.zone.agri.config;
 
 import com.zone.agri.entity.*;
+import com.zone.agri.entity.Order;
 import com.zone.agri.entity.enums.*;
 import com.zone.agri.repository.*;
 import lombok.RequiredArgsConstructor;
