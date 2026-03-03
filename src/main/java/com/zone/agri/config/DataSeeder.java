@@ -7,7 +7,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.context.annotation.Profile;
-import org.springframework.core.annotation.Order;
+// Bỏ dòng import org.springframework.core.annotation.Order; đi
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
@@ -19,7 +19,7 @@ import java.util.List;
 
 @Component
 @Profile("dev")
-@Order(2)
+@org.springframework.core.annotation.Order(2) // <-- SỬA TẠI ĐÂY: Gọi đích danh Annotation của Spring
 @RequiredArgsConstructor
 @Slf4j
 public class DataSeeder implements CommandLineRunner {
@@ -479,6 +479,7 @@ public class DataSeeder implements CommandLineRunner {
         customerRepository.save(Customer.builder().user(user2).name("Trần Thị Cua").phone("0911000002").email("user2@gmail.com").gender(CustomerGender.FEMALE).provinceId("94").addressDetail("Sóc Trăng").status(CustomerStatus.ACTIVE).build());
 
         // ── 12. ĐƠN HÀNG ────────────────────────────────────────────────
+        // SỬA TẠI ĐÂY: Xóa đoạn com.zone.agri.entity. để Order trở về là Entity bình thường
         Order o1 = orderRepository.save(Order.builder()
                 .code("DH-2024-001").branch(branch1).user(user1).status(OrderStatus.COMPLETED)
                 .paymentMethod(PaymentMethod.COD).paymentStatus(PaymentStatus.PAID)                .shippingAddress("Cà Mau").totalAmount(bd(420_000)).discountAmount(BigDecimal.ZERO).finalAmount(bd(420_000))
