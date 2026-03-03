@@ -1,9 +1,16 @@
 server:
   port: 8080
+
+spring:
+  application:
+    name: agri-shrimp
   error:
     include-stacktrace: never
 
 spring:
+  main:
+    allow-bean-definition-overriding: true
+
   servlet:
     multipart:
       max-file-size: 50MB
@@ -17,7 +24,7 @@ spring:
 
   jpa:
     hibernate:
-      ddl-auto: ${SPRING_JPA_HIBERNATE_DDL_AUTO:validate}
+      ddl-auto: ${SPRING_JPA_HIBERNATE_DDL_AUTO:update}
     show-sql: false
     properties:
       hibernate:
@@ -41,6 +48,9 @@ spring:
           auth: true
           starttls:
             enable: true
+          connectiontimeout: 5000
+          timeout: 3000
+          writetimeout: 5000
 
 security:
   jwt:
@@ -58,13 +68,13 @@ app:
   google:
     client-id: ${APP_GOOGLE_CLIENT_ID:716238456770-avu71bkjh5nngpq1j5gs7euull9kn663.apps.googleusercontent.com}
   cookie:
-    secure: false
-    same-site: Lax
+    secure: ${APP_COOKIE_SECURE:true}
+    same-site: ${APP_COOKIE_SAME_SITE:Lax}
 
 cloudinary:
-  cloud-name: ${CLOUDINARY_CLOUD_NAME:}
-  api-key: ${CLOUDINARY_API_KEY:}
-  api-secret: ${CLOUDINARY_API_SECRET:}
+  cloud-name: ${CLOUDINARY_CLOUD_NAME:demevvyp4}
+  api-key: ${CLOUDINARY_API_KEY:176599529831455}
+  api-secret: ${CLOUDINARY_API_SECRET:PqDexQ59PWJ8pOWeqN_BjimFYuY}
   folder: agrishrimp/products
 
 payos:
@@ -93,7 +103,7 @@ routing:
 shipping:
   provider: ghn
   ghn:
-    token: ${GHN_TOKEN:0c84d3ad-125f-11f1-8935-9e298af4d523}
+    token: ${GHN_API_KEY:0c84d3ad-125f-11f1-8935-9e298af4d523}
     shop-id: ${GHN_SHOP_ID:6287754}
     url: https://online-gateway.ghn.vn/shiip/public-api/v2
 

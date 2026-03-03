@@ -25,7 +25,8 @@
       "Bash(python3:*)",
       "Bash(python:*)",
       "Bash(do sed:*)",
-      "Bash(JAVA_HOME=\"/c/Users/Bao Nhien/.jdks/openjdk-25\" ./mvnw compile:*)"
+      "Bash(JAVA_HOME=\"/c/Users/Bao Nhien/.jdks/openjdk-25\" ./mvnw compile:*)",
+      "Bash(rm:*)"
     ]
   }
 }
