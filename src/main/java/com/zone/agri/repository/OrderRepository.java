@@ -36,6 +36,14 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
     BigDecimal sumTotalSpentByUserId(@Param("userId") Long userId);
 
     // Thêm hàm này để lấy lịch sử đơn hàng của 1 khách hàng cụ thể
+    @Query("SELECT COUNT(o) > 0 FROM Order o " +
+            "WHERE o.id = :orderId AND o.user.id = :userId " +
+            "AND (" +
+            "  (o.status = 'COMPLETED' AND EXISTS (SELECT 1 FROM o.orderItems oi WHERE oi.productVariant.product.id = :productId)) " +
+            "  OR EXISTS (SELECT 1 FROM o.subOrders so JOIN so.items si WHERE so.status = 'COMPLETED' AND si.productVariant.product.id = :productId)" +
+            ")")
+    boolean existsCompletedOrderWithProduct(@Param("orderId") Long orderId, @Param("userId") Long userId, @Param("productId") Long productId);
+
     List<Order> findByUserIdOrderByCreatedAtDesc(Long userId);
 
     List<Order> findByUserIdAndStatusOrderByCreatedAtDesc(Long userId, OrderStatus status);

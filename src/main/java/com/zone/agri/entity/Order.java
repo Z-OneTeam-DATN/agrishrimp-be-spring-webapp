@@ -125,4 +125,9 @@ public class Order {
     @ToString.Exclude
     @EqualsAndHashCode.Exclude
     List<SubOrder> subOrders;
-}
+
+    @OneToMany(mappedBy = "order", fetch = FetchType.LAZY, cascade = CascadeType.ALL)
+    @ToString.Exclude
+    @EqualsAndHashCode.Exclude
+    List<Review> reviews;
+    }

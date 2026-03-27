@@ -49,6 +49,7 @@ public class OrderService {
     private final InventoryTransactionRepository transactionRepository;
 
     private final UserAddressRepository userAddressRepository;
+    private final ReviewRepository reviewRepository; // Added
 
     private final BranchSearchService branchSearchService;
     private final InventoryAllocationService allocationService;
@@ -352,10 +353,12 @@ public class OrderService {
         String pName = "Sản phẩm không xác định";
         String pSku = "N/A";
         String pImg = null;
+        Long productId = null;
 
         if (item.getProductVariant() != null) {
             pSku = item.getProductVariant().getSku();
             if (item.getProductVariant().getProduct() != null) {
+                productId = item.getProductVariant().getProduct().getId();
                 pName = item.getProductVariant().getProduct().getName();
                 if (item.getProductVariant().getProduct().getProductImages() != null && !item.getProductVariant().getProduct().getProductImages().isEmpty()) {
                     pImg = item.getProductVariant().getProduct().getProductImages().iterator().next().getImageUrl();
@@ -363,14 +366,22 @@ public class OrderService {
             }
         }
 
+        boolean canReview = false;
+        if (item.getOrder() != null && item.getOrder().getStatus() == OrderStatus.COMPLETED && productId != null) {
+            Long userId = item.getOrder().getUser().getId();
+            canReview = !reviewRepository.existsByOrderIdAndProductIdAndUserId(item.getOrder().getId(), productId, userId);
+        }
+
         return OrderItemResponse.builder()
                 .id(item.getId())
+                .productId(productId)
                 .productName(pName)
                 .sku(pSku)
                 .image(pImg)
                 .quantity(item.getQuantity())
                 .price(item.getPrice() != null ? item.getPrice() : BigDecimal.ZERO)
                 .totalPrice(item.getPrice() != null ? item.getPrice().multiply(new BigDecimal(item.getQuantity())) : BigDecimal.ZERO)
+                .canReview(canReview)
                 .build();
     }
 
@@ -378,10 +389,12 @@ public class OrderService {
         String pName = "Sản phẩm không xác định";
         String pSku = "N/A";
         String pImg = null;
+        Long productId = null;
 
         if (item.getProductVariant() != null) {
             pSku = item.getProductVariant().getSku();
             if (item.getProductVariant().getProduct() != null) {
+                productId = item.getProductVariant().getProduct().getId();
                 pName = item.getProductVariant().getProduct().getName();
                 if (item.getProductVariant().getProduct().getProductImages() != null && !item.getProductVariant().getProduct().getProductImages().isEmpty()) {
                     pImg = item.getProductVariant().getProduct().getProductImages().iterator().next().getImageUrl();
@@ -389,14 +402,22 @@ public class OrderService {
             }
         }
 
+        boolean canReview = false;
+        if (item.getSubOrder() != null && item.getSubOrder().getStatus() == OrderStatus.COMPLETED && productId != null) {
+            Long userId = item.getSubOrder().getOrder().getUser().getId();
+            canReview = !reviewRepository.existsByOrderIdAndProductIdAndUserId(item.getSubOrder().getOrder().getId(), productId, userId);
+        }
+
         return OrderItemResponse.builder()
                 .id(item.getId())
+                .productId(productId)
                 .productName(pName)
                 .sku(pSku)
                 .image(pImg)
                 .quantity(item.getQuantity())
                 .price(item.getUnitPrice() != null ? item.getUnitPrice() : BigDecimal.ZERO)
                 .totalPrice(item.getUnitPrice() != null ? item.getUnitPrice().multiply(new BigDecimal(item.getQuantity())) : BigDecimal.ZERO)
+                .canReview(canReview)
                 .build();
     }
 

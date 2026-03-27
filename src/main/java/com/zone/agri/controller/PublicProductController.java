@@ -1,7 +1,9 @@
 package com.zone.agri.controller;
 
 import com.zone.agri.dto.response.product.ProductResponse;
+import com.zone.agri.dto.response.review.ReviewResponse;
 import com.zone.agri.service.ProductService;
+import com.zone.agri.service.ReviewService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -21,6 +23,25 @@ import java.util.List;
 public class PublicProductController {
 
     private final ProductService productService;
+    private final ReviewService reviewService;
+
+    @Operation(summary = "Lấy danh sách đánh giá của sản phẩm",
+               description = "Trả về danh sách các đánh giá đã được phê duyệt của một sản phẩm. Không yêu cầu xác thực.")
+    @GetMapping("/products/{productId}/reviews")
+    public ResponseEntity<List<ReviewResponse>> getProductReviews(
+            @Parameter(description = "ID của sản phẩm", example = "1", required = true)
+            @PathVariable Long productId) {
+        return ResponseEntity.ok(reviewService.getReviewsByProductId(productId));
+    }
+
+    @Operation(summary = "Lấy danh sách đánh giá của sản phẩm theo slug",
+               description = "Trả về danh sách các đánh giá đã được phê duyệt của một sản phẩm dựa trên slug. Không yêu cầu xác thực.")
+    @GetMapping("/products/slug/{slug}/reviews")
+    public ResponseEntity<List<ReviewResponse>> getProductReviewsBySlug(
+            @Parameter(description = "Slug của sản phẩm", example = "thuc-an-tom-tomboy-t12", required = true)
+            @PathVariable String slug) {
+        return ResponseEntity.ok(reviewService.getReviewsByProductSlug(slug));
+    }
 
     @Operation(summary = "Lấy danh sách sản phẩm đang hoạt động theo danh mục",
                description = "Trả về danh sách sản phẩm đang hoạt động thuộc một danh mục cụ thể. Không yêu cầu xác thực.")
@@ -52,6 +73,15 @@ public class PublicProductController {
             @RequestParam(required = false) Long brandId, // Thêm tham số brandId
             @PageableDefault(size = 10, page = 0) Pageable pageable) {
         return ResponseEntity.ok(productService.getPublicProducts(keyword, categoryId, brandId, pageable));
+    }
+
+    @Operation(summary = "Chi tiết sản phẩm theo ID",
+               description = "Trả về chi tiết sản phẩm dựa trên ID. Không yêu cầu xác thực.")
+    @GetMapping("/products/{id}")
+    public ResponseEntity<ProductResponse> getProductDetailById(
+            @Parameter(description = "ID của sản phẩm", example = "1", required = true)
+            @PathVariable Long id) {
+        return ResponseEntity.ok(productService.getById(id));
     }
 
     @Operation(summary = "Lấy chi tiết sản phẩm theo slug",

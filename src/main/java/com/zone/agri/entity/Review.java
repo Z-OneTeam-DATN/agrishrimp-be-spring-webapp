@@ -53,6 +53,12 @@ public class Review {
     @EqualsAndHashCode.Exclude
     Order order;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "product_id")
+    @ToString.Exclude
+    @EqualsAndHashCode.Exclude
+    Product product;
+
     @OneToMany(mappedBy = "review", fetch = FetchType.LAZY, cascade = CascadeType.ALL)
     @ToString.Exclude
     List<ReviewImage> reviewImages;
