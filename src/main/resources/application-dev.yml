@@ -38,7 +38,7 @@ spring:
       max-file-size: 50MB
       max-request-size: 50MB
 
-  # 8. CẤU HÌNH MAIL SERVER (ĐÃ SỬA: PHẢI NẰM DƯỚI SPRING)
+  # 8. CẤU HÌNH MAIL SERVER
   mail:
     host: smtp.gmail.com
     port: 587
@@ -75,7 +75,7 @@ app:
     secure: false     # true khi deploy HTTPS
     same-site: Lax
 
-# 7. CẤU HÌNH AWS (ĐỂ RIÊNG RA KHỎI SPRING)
+# 7. CẤU HÌNH AWS
 cloud:
   aws:
     accessKey: ${AWS_ACCESS_KEY_ID:}

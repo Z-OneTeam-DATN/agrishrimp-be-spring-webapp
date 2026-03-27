@@ -1,10 +1,9 @@
-
 spring:
   application:
     name: agri-shrimp
   profiles:
     active:
-      prod
+      dev
 
 management:
   endpoints:
