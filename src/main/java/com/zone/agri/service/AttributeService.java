@@ -1,7 +1,7 @@
 package com.zone.agri.service;
 
-import com.zone.agri.dto.admin.AttributeDTO;
-import com.zone.agri.dto.product.AttributeValueResponse;
+import com.zone.agri.dto.response.admin.AttributeDTO;
+import com.zone.agri.dto.response.product.AttributeValueResponse;
 import com.zone.agri.entity.Attribute;
 import com.zone.agri.entity.AttributeValue;
 import com.zone.agri.entity.enums.AttributeStatus;
@@ -85,23 +85,22 @@ public class AttributeService {
         dto.setCode(entity.getCode());
         dto.setStatus(entity.getStatus() != null ? entity.getStatus() : AttributeStatus.ACTIVE);
 
-        if (entity.getAttributeValues() != null) {
-            // Vẫn trả về List<String> cho form Admin cũ
-            List<String> values = entity.getAttributeValues().stream()
-                    .map(AttributeValue::getValue)
-                    .collect(Collectors.toList());
-            dto.setValues(values);
+        List<AttributeValue> attributeValues = entity.getAttributeValues();
+        if (attributeValues != null && !attributeValues.isEmpty()) {
+            List<AttributeValueResponse> details = new ArrayList<>();
+            List<String> values = new ArrayList<>();
 
-            // 👉 BƠM DỮ LIỆU CÓ CHỨA ID VÀO DTO
-            List<AttributeValueResponse> details = entity.getAttributeValues().stream()
-                    .map(av -> AttributeValueResponse.builder()
-                            .attributeId(entity.getId())
-                            .attributeName(entity.getName())
-                            .attributeCode(entity.getCode())
-                            .valueId(av.getId()) // ĐÂY LÀ CÁI ID QUAN TRỌNG NHẤT FE CẦN!
-                            .value(av.getValue())
-                            .build())
-                    .collect(Collectors.toList());
+            for (AttributeValue av : attributeValues) {
+                values.add(av.getValue());
+                details.add(AttributeValueResponse.builder()
+                        .attributeId(entity.getId())
+                        .attributeName(entity.getName())
+                        .attributeCode(entity.getCode())
+                        .valueId(av.getId())
+                        .value(av.getValue())
+                        .build());
+            }
+            dto.setValues(values);
             dto.setValueDetails(details);
         } else {
             dto.setValues(Collections.emptyList());
@@ -113,26 +112,26 @@ public class AttributeService {
 
     private void mapToEntity(Attribute entity, AttributeDTO dto) {
         entity.setName(dto.getName());
-        entity.setCode(dto.getCode().toUpperCase()); // Luôn ép hoa mã code
+        if (dto.getCode() != null) {
+            entity.setCode(dto.getCode().trim().toUpperCase());
+        }
         entity.setStatus(dto.getStatus() != null ? dto.getStatus() : AttributeStatus.ACTIVE);
 
         if (entity.getAttributeValues() == null) {
             entity.setAttributeValues(new ArrayList<>());
         }
-
         entity.getAttributeValues().clear();
 
-        if (dto.getValues() != null && !dto.getValues().isEmpty()) {
-            List<AttributeValue> newValues = dto.getValues().stream()
+        if (dto.getValues() != null) {
+            dto.getValues().stream()
                     .map(String::trim)
                     .filter(s -> !s.isEmpty())
+                    .distinct() // Tránh lưu trùng giá trị trong cùng 1 thuộc tính
                     .map(val -> AttributeValue.builder()
                             .attribute(entity)
                             .value(val)
                             .build())
-                    .collect(Collectors.toList());
-
-            entity.getAttributeValues().addAll(newValues);
+                    .forEach(entity.getAttributeValues()::add);
         }
     }
 }

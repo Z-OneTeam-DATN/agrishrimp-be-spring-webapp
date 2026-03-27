@@ -1,8 +1,8 @@
 package com.zone.agri.controller;
 
-import com.zone.agri.dto.user.ProfileUpdateRequest;
-import com.zone.agri.dto.user.UserRequest;
-import com.zone.agri.dto.user.UserResponse;
+import com.zone.agri.dto.request.user.ProfileUpdateRequest;
+import com.zone.agri.dto.request.user.UserRequest;
+import com.zone.agri.dto.response.user.UserResponse;
 import com.zone.agri.security.annotation.RequirePermission;
 import com.zone.agri.service.UserService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -43,7 +43,7 @@ public class UserController {
     @Operation(summary = "Tự cập nhật Profile cá nhân", description = "Trả về dữ liệu mới nhất để Frontend đồng bộ UI")
     @SecurityRequirement(name = "bearerAuth")
     @PostMapping("/edit-profile")
-    public ResponseEntity<UserResponse> updateMyProfile(@RequestBody ProfileUpdateRequest request) {
+    public ResponseEntity<UserResponse> updateMyProfile(@Valid @RequestBody ProfileUpdateRequest request) {
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
         String contact = auth.getName();
 
@@ -96,7 +96,7 @@ public class UserController {
     @Operation(summary = "Đổi mật khẩu cá nhân")
     @SecurityRequirement(name = "bearerAuth")
     @PostMapping("/change-password")
-    public ResponseEntity<?> changePassword(@RequestBody com.zone.agri.dto.user.ChangePasswordRequest request) {
+    public ResponseEntity<?> changePassword(@Valid @RequestBody com.zone.agri.dto.request.user.ChangePasswordRequest request) {
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
         String contact = auth.getName();
         userService.changePassword(contact, request);

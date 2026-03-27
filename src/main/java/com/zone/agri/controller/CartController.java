@@ -9,11 +9,14 @@ import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.NotNull;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.Map;
@@ -22,6 +25,7 @@ import java.util.Map;
 @RequestMapping("/api/cart")
 @RequiredArgsConstructor
 @Tag(name = "Cart Management", description = "Quản lý giỏ hàng của người dùng (Yêu cầu đăng nhập)")
+@Validated
 public class CartController {
 
     private final CartService cartService;
@@ -73,10 +77,10 @@ public class CartController {
     @PostMapping("/update")
     public ResponseEntity<?> updateQuantity(
             @Parameter(description = "ID của phân loại sản phẩm (Variant ID)", example = "5", required = true)
-            @RequestParam Long variantId,
+            @RequestParam @NotNull(message = "ID biến thể không được để trống") Long variantId,
 
             @Parameter(description = "Số lượng thay đổi (Ví dụ: 1 để cộng thêm, -1 để trừ đi)", example = "1", required = true)
-            @RequestParam Integer delta) {
+            @RequestParam @NotNull(message = "Số lượng thay đổi không được để trống") Integer delta) {
         try {
             cartService.updateCartQuantity(getCurrentUserId(), variantId, delta);
             return ResponseEntity.ok(Map.of("message", "Đã cập nhật giỏ hàng"));

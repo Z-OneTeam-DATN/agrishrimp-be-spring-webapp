@@ -1,6 +1,6 @@
 package com.zone.agri.controller;
 
-import com.zone.agri.dto.user.MePermissionsResponse;
+import com.zone.agri.dto.response.user.MePermissionsResponse;
 import com.zone.agri.security.CustomUserDetail;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;

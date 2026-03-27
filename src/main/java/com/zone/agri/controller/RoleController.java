@@ -1,7 +1,7 @@
 package com.zone.agri.controller;
 
-import com.zone.agri.dto.user.RoleRequest;
-import com.zone.agri.dto.user.RoleResponse;
+import com.zone.agri.dto.request.user.RoleRequest;
+import com.zone.agri.dto.response.user.RoleResponse;
 import com.zone.agri.entity.Role;
 import com.zone.agri.security.annotation.RequirePermission;
 import com.zone.agri.service.RoleService;

@@ -1,8 +1,8 @@
 package com.zone.agri.controller;
 
-import com.zone.agri.dto.transfer.TransferDetailResponse;
-import com.zone.agri.dto.transfer.TransferRequest;
-import com.zone.agri.dto.transfer.TransferResponse;
+import com.zone.agri.dto.response.transfer.TransferDetailResponse;
+import com.zone.agri.dto.request.transfer.TransferRequest;
+import com.zone.agri.dto.response.transfer.TransferResponse;
 import com.zone.agri.entity.InventoryTransfer;
 import com.zone.agri.security.annotation.RequirePermission;
 import com.zone.agri.service.InventoryTransferService;
@@ -14,6 +14,7 @@ import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -70,7 +71,7 @@ public class InventoryTransferController {
             @ApiResponse(responseCode = "400", description = "Dữ liệu không hợp lệ")
     })
     @PostMapping
-    public ResponseEntity<InventoryTransfer> createTransfer(@RequestBody TransferRequest request) {
+    public ResponseEntity<InventoryTransfer> createTransfer(@Valid @RequestBody TransferRequest request) {
         InventoryTransfer transfer = transferService.createTransfer(request);
 
         // Có TRANSFER_APPROVE → tự động xuất kho (SHIPPING)

@@ -1,6 +1,6 @@
 package com.zone.agri.repository;
 
-import com.zone.agri.dto.geo.CoordinateDto;
+import com.zone.agri.dto.response.geo.CoordinateDto;
 
 import java.util.Optional;
 

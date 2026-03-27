@@ -1,7 +1,7 @@
 package com.zone.agri.service;
 
-import com.zone.agri.dto.supplier.BankAccountResponse;
-import com.zone.agri.dto.supplier.VietQrResponse;
+import com.zone.agri.dto.response.supplier.BankAccountResponse;
+import com.zone.agri.dto.response.supplier.VietQrResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;

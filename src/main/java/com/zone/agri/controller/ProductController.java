@@ -1,11 +1,11 @@
 package com.zone.agri.controller;
 
-import com.zone.agri.dto.common.ApiResponse;
-import com.zone.agri.dto.admin.AttributeDTO;
-import com.zone.agri.dto.product.CreateProductJsonWrapper;
-import com.zone.agri.dto.product.CreateProductRequest;
-import com.zone.agri.dto.product.ProductResponse;
-import com.zone.agri.dto.product.ProductRequest;
+import com.zone.agri.dto.response.common.ApiResponse;
+import com.zone.agri.dto.response.admin.AttributeDTO;
+import com.zone.agri.dto.request.product.CreateProductJsonWrapper;
+import com.zone.agri.dto.request.product.CreateProductRequest;
+import com.zone.agri.dto.response.product.ProductResponse;
+import com.zone.agri.dto.request.product.ProductRequest;
 import com.zone.agri.entity.*;
 import com.zone.agri.repository.*;
 import com.zone.agri.security.annotation.RequirePermission;
@@ -130,7 +130,7 @@ public class ProductController {
             @PathVariable Long id,
 
             @RequestPart("data")
-            ProductRequest request,
+            @Valid ProductRequest request,
 
             @RequestPart(value = "productImages", required = false)
             List<MultipartFile> productImages,

@@ -1,8 +1,8 @@
 package com.zone.agri.controller;
 
-import com.zone.agri.dto.common.MessageResponse;
-import com.zone.agri.dto.supplier.SupplierRequest;
-import com.zone.agri.dto.supplier.SupplierResponse;
+import com.zone.agri.dto.response.common.MessageResponse;
+import com.zone.agri.dto.request.supplier.SupplierRequest;
+import com.zone.agri.dto.response.supplier.SupplierResponse;
 import com.zone.agri.security.annotation.RequirePermission;
 import com.zone.agri.service.SupplierService;
 import io.swagger.v3.oas.annotations.Operation;

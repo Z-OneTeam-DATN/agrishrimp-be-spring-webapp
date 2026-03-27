@@ -2,7 +2,7 @@ package com.zone.agri.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import com.zone.agri.dto.payment.PayOSApiResponse;
+import com.zone.agri.dto.response.payment.PayOSApiResponse;
 import com.zone.agri.entity.Order;
 import com.zone.agri.entity.enums.PaymentStatus;
 import com.zone.agri.repository.OrderRepository;

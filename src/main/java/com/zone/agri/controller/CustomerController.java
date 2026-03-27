@@ -1,7 +1,7 @@
 package com.zone.agri.controller;
 
-import com.zone.agri.dto.customer.CustomerRequest;
-import com.zone.agri.dto.customer.CustomerResponse;
+import com.zone.agri.dto.request.customer.CustomerRequest;
+import com.zone.agri.dto.response.customer.CustomerResponse;
 import com.zone.agri.entity.Customer;
 import com.zone.agri.security.annotation.RequirePermission;
 import com.zone.agri.service.CustomerService;

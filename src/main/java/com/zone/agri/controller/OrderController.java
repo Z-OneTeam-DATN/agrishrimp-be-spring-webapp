@@ -1,6 +1,7 @@
 package com.zone.agri.controller;
 
-import com.zone.agri.dto.order.*;
+import com.zone.agri.dto.request.order.*;
+import com.zone.agri.dto.response.order.*;
 import com.zone.agri.entity.Order;
 import com.zone.agri.entity.User;
 import com.zone.agri.entity.enums.OrderStatus;
@@ -67,7 +68,7 @@ public class OrderController {
                     + "Đã thay thế bởi /prepare + /confirm."
     )
     @PostMapping("/orders/checkout")
-    public ResponseEntity<?> placeOrder(@RequestBody CheckoutRequest request) {
+    public ResponseEntity<?> placeOrder(@Valid @RequestBody CheckoutRequest request) {
         Long userId = getCurrentUserId();
         orderService.placeOrder(userId, request);
         return ResponseEntity.ok(Map.of("message", "Đặt hàng thành công!"));

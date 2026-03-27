@@ -1,6 +1,6 @@
 package com.zone.agri.controller;
 
-import com.zone.agri.dto.supplier.VietQrResponse;
+import com.zone.agri.dto.response.supplier.VietQrResponse;
 import com.zone.agri.service.ExternalApiService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;

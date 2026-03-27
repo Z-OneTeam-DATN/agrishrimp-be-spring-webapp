@@ -1,14 +1,17 @@
 package com.zone.agri.controller;
 
-import com.zone.agri.dto.inventory.InventoryReceiptRequest;
-import com.zone.agri.dto.inventory.InventoryReceiptResponse;
+import com.zone.agri.dto.request.inventory.CheckNoteRequest;
+import com.zone.agri.dto.request.inventory.InventoryReceiptRequest;
+import com.zone.agri.dto.response.inventory.InventoryReceiptResponse;
 import com.zone.agri.dto.request.inventory.ExportNoteRequest;
-import com.zone.agri.dto.response.InventoryNoteResponse;
+import com.zone.agri.dto.response.inventory.InventoryNoteResponse;
+import com.zone.agri.dto.response.inventory.InventorySearchResponse;
 import com.zone.agri.security.annotation.RequirePermission;
 import com.zone.agri.service.InventoryService;
 import com.zone.agri.service.InventoryNoteService;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
@@ -20,7 +23,7 @@ import java.util.List;
 @RestController
 @RequestMapping("/api/inventory")
 @RequiredArgsConstructor
-@Tag(name = "Inventory Management", description = "Quản lý phiếu nhập kho và xuất kho")
+@Tag(name = "Inventory Management", description = "Quản lý phiếu nhập kho, xuất kho và kiểm kho")
 public class InventoryController {
 
     private final InventoryService inventoryService;
@@ -43,9 +46,7 @@ public class InventoryController {
     @SecurityRequirement(name = "bearerAuth")
     @RequirePermission("IMPORT_CREATE")
     @PostMapping("/receipts")
-    public ResponseEntity<InventoryReceiptResponse> createReceipt(@RequestBody InventoryReceiptRequest request) {
-        // Có IMPORT_APPROVE → tự động duyệt luôn (IMPORTED)
-        // Không có              → chờ duyệt (PO)
+    public ResponseEntity<InventoryReceiptResponse> createReceipt(@Valid @RequestBody InventoryReceiptRequest request) {
         if (hasAuthority("IMPORT_APPROVE")) {
             request.setImportStatus("IMPORTED");
         } else {
@@ -59,7 +60,7 @@ public class InventoryController {
     @PutMapping("/receipts/{id}")
     public ResponseEntity<InventoryReceiptResponse> updateReceipt(
             @PathVariable Long id,
-            @RequestBody InventoryReceiptRequest request) {
+            @Valid @RequestBody InventoryReceiptRequest request) {
         if (!hasAuthority("IMPORT_APPROVE")) {
             request.setImportStatus("PO");
         }
@@ -109,7 +110,7 @@ public class InventoryController {
     @SecurityRequirement(name = "bearerAuth")
     @RequirePermission("EXPORT_CREATE")
     @PostMapping("/export-commands")
-    public ResponseEntity<?> createExportCommand(@RequestBody ExportNoteRequest request) {
+    public ResponseEntity<?> createExportCommand(@Valid @RequestBody ExportNoteRequest request) {
         InventoryNoteResponse response = inventoryNoteService.createExportCommand(request);
         // Có EXPORT_APPROVE → tự động chốt phiếu & trừ kho
         if (hasAuthority("EXPORT_APPROVE")) {
@@ -145,7 +146,7 @@ public class InventoryController {
     @PutMapping("/export-commands/{id}")
     public ResponseEntity<?> updateExportCommand(
             @PathVariable Long id,
-            @RequestBody ExportNoteRequest request) {
+            @Valid @RequestBody ExportNoteRequest request) {
         return ResponseEntity.ok(inventoryNoteService.updateExportCommand(id, request));
     }
 }

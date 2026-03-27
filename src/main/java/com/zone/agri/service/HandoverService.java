@@ -1,8 +1,8 @@
 package com.zone.agri.service;
 
-import com.zone.agri.dto.order.HandoverCreateRequest;
-import com.zone.agri.dto.order.HandoverDetailResponse;
-import com.zone.agri.dto.order.HandoverResponse;
+import com.zone.agri.dto.request.order.HandoverCreateRequest;
+import com.zone.agri.dto.response.order.HandoverDetailResponse;
+import com.zone.agri.dto.response.order.HandoverResponse;
 import com.zone.agri.entity.*;
 import com.zone.agri.entity.enums.OrderStatus;
 import com.zone.agri.entity.enums.PaymentMethod;

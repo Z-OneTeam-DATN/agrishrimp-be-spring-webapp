@@ -1,11 +1,11 @@
 package com.zone.agri.controller;
 
-import com.zone.agri.dto.auth.AuthResponse;
-import com.zone.agri.dto.auth.GoogleLoginRequest;
-import com.zone.agri.dto.auth.LoginRequest;
-import com.zone.agri.dto.auth.SignupRequest;
-import com.zone.agri.dto.auth.TokenRefreshRequest;
-import com.zone.agri.dto.common.MessageResponse;
+import com.zone.agri.dto.response.auth.AuthResponse;
+import com.zone.agri.dto.request.auth.GoogleLoginRequest;
+import com.zone.agri.dto.request.auth.LoginRequest;
+import com.zone.agri.dto.request.auth.SignupRequest;
+import com.zone.agri.dto.request.auth.TokenRefreshRequest;
+import com.zone.agri.dto.response.common.MessageResponse;
 import com.zone.agri.exception.CustomAuthenticationException;
 import com.zone.agri.security.CustomUserDetail;
 import com.zone.agri.security.CustomUserDetailsService;
@@ -13,7 +13,7 @@ import com.zone.agri.service.AuthService;
 import com.zone.agri.utils.CookieUtils;
 import com.zone.agri.utils.JwtUtils;
 import com.zone.agri.common.AuthUtils;
-import com.zone.agri.dto.user.UserDetail;
+import com.zone.agri.dto.response.user.UserDetail;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -73,7 +73,7 @@ public class AuthController {
                 .gender(user.getGender())
                 .avatarUrl(user.getAvatarUrl())
                 .status(user.getStatus())
-                .role(user.getRole() != null ? new com.zone.agri.dto.user.RoleDto(user.getRole()) : null)
+                .role(user.getRole() != null ? new com.zone.agri.dto.response.user.RoleDto(user.getRole()) : null)
                 .createdAt(user.getCreatedAt())
                 .updatedAt(user.getUpdatedAt())
                 .build();
@@ -132,7 +132,7 @@ public class AuthController {
     })
     @PostMapping("/google-login")
     public ResponseEntity<AuthResponse> googleLogin(
-            @RequestBody GoogleLoginRequest request,
+            @Valid @RequestBody GoogleLoginRequest request,
             HttpServletResponse response
     ) {
         AuthResponse authResponse = authService.loginWithGoogle(request);
@@ -201,7 +201,7 @@ public class AuthController {
             @ApiResponse(responseCode = "401", description = "Refresh Token không hợp lệ hoặc đã hết hạn"),
     })
     @PostMapping("/refresh")
-    public ResponseEntity<AuthResponse> refresh(@RequestBody TokenRefreshRequest request) {
+    public ResponseEntity<AuthResponse> refresh(@Valid @RequestBody TokenRefreshRequest request) {
         String refreshToken = request.getRefreshToken();
 
         if (refreshToken == null || !jwtUtils.validateToken(refreshToken)) {

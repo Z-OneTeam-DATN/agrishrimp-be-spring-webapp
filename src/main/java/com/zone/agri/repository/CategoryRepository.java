@@ -24,7 +24,6 @@ public interface CategoryRepository extends JpaRepository<Category, Long> {
     List<Category> findByStatus(CategoryStatus status);
 
 
-
     // API Tìm kiếm và lọc danh mục
     @Query("SELECT c FROM Category c WHERE " +
             "(:keyword IS NULL OR LOWER(c.name) LIKE LOWER(CONCAT('%', :keyword, '%'))) AND " +

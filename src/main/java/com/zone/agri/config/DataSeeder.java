@@ -123,6 +123,12 @@ public class DataSeeder implements CommandLineRunner {
         Permission aCusU = pAct("Sửa khách hàng", "CUSTOMER_UPDATE", PermissionGroup.SALES, mCus);
         Permission aCusD = pAct("Xóa khách hàng", "CUSTOMER_DELETE", PermissionGroup.SALES, mCus);
 
+        Permission mVou  = pMod("Quản lý mã giảm giá", "VOUCHER", PermissionGroup.SALES);
+        Permission aVouV = pAct("Xem mã giảm giá", "VOUCHER_VIEW", PermissionGroup.SALES, mVou);
+        Permission aVouC = pAct("Thêm mã giảm giá", "VOUCHER_CREATE", PermissionGroup.SALES, mVou);
+        Permission aVouU = pAct("Sửa mã giảm giá", "VOUCHER_UPDATE", PermissionGroup.SALES, mVou);
+        Permission aVouD = pAct("Xóa mã giảm giá", "VOUCHER_DELETE", PermissionGroup.SALES, mVou);
+
         // GROUP PRODUCT_CATALOG
         Permission mProd  = pMod("Quản lý sản phẩm", "PRODUCT", PermissionGroup.PRODUCT_CATALOG);
         Permission aProdV = pAct("Xem sản phẩm", "PRODUCT_VIEW", PermissionGroup.PRODUCT_CATALOG, mProd);
@@ -192,6 +198,7 @@ public class DataSeeder implements CommandLineRunner {
                 aExpV, aExpC, aExpA, aExpU, aExpX, aExpD,
                 aTrfV, aTrfC, aTrfA, aTrfU, aTrfX, aTrfD,
                 aCusV, aCusC, aCusU, aCusD,
+                aVouV, aVouC, aVouU, aVouD,
                 aSupV, aSupC, aSupU, aSupD,
                 aOrdV, aOrdC, aOrdU, aOrdD, aOrdCnf, aOrdShip, aOrdX, aOrdDone, aOrdRefund, aOrdExport,
                 aSetV, aSetU
@@ -207,6 +214,7 @@ public class DataSeeder implements CommandLineRunner {
                 aExpV, aExpC, aExpU, aExpX, aExpD,
                 aTrfV, aTrfC, aTrfU, aTrfX, aTrfD,
                 aCusV, aCusC, aCusU, aCusD,
+                aVouV, aVouC, aVouU,
                 aOrdV, aOrdC, aOrdU, aOrdCnf, aOrdShip, aOrdX, aOrdDone, aOrdExport
         ));
 

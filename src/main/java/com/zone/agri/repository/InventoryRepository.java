@@ -3,6 +3,7 @@ package com.zone.agri.repository;
 import com.zone.agri.entity.Branch;
 import com.zone.agri.entity.Inventory;
 import com.zone.agri.entity.ProductVariant;
+import com.zone.agri.dto.response.inventory.InventorySearchResponse;
 import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
@@ -33,12 +34,29 @@ public interface InventoryRepository extends JpaRepository<Inventory, Long> {
             @Param("importPrice") BigDecimal importPrice
     );
 
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT i FROM Inventory i WHERE i.branch = :branch AND i.productVariant = :variant " +
+            "AND (i.batchNumber = :batchNumber OR (i.batchNumber IS NULL AND :batchNumber IS NULL)) " +
+            "AND (i.importPrice = :importPrice OR (i.importPrice IS NULL AND :importPrice IS NULL))")
+    Optional<Inventory> findExactBatchWithLock(
+            @Param("branch") Branch branch,
+            @Param("variant") ProductVariant variant,
+            @Param("batchNumber") String batchNumber,
+            @Param("importPrice") BigDecimal importPrice
+    );
+
     @Query("SELECT i FROM Inventory i WHERE i.branch.id = :branchId AND i.productVariant.id = :variantId AND i.quantity > 0 " +
             "ORDER BY i.expiryDate ASC, i.lastReceiptDate ASC")
     List<Inventory> findAvailableBatchesForVariant(@Param("branchId") Long branchId, @Param("variantId") Long variantId);
 
     @Query("SELECT COALESCE(SUM(i.quantity), 0) FROM Inventory i WHERE i.branch.id = :branchId AND i.productVariant.id = :variantId")
     Integer sumQuantityByBranchAndVariant(@Param("branchId") Long branchId, @Param("variantId") Long variantId);
+
+    @Query("SELECT COALESCE(SUM(i.quantity), 0) FROM Inventory i WHERE i.branch.id = :branchId AND i.productVariant.id = :variantId AND i.batchNumber = :batchNumber")
+    Integer sumQuantityByBranchAndVariantAndBatch(@Param("branchId") Long branchId, @Param("variantId") Long variantId, @Param("batchNumber") String batchNumber);
+
+    @Query("SELECT i FROM Inventory i WHERE i.branch.id = :branchId AND i.productVariant.id = :variantId AND i.batchNumber = :batchNumber")
+    List<Inventory> findExactBatchListByNumber(@Param("branchId") Long branchId, @Param("variantId") Long variantId, @Param("batchNumber") String batchNumber);
 
     Optional<Inventory> findByBranchAndProductVariantAndBatchNumberAndImportPrice(
             Branch branch, ProductVariant variant, String batchNumber, BigDecimal importPrice
@@ -76,6 +94,28 @@ public interface InventoryRepository extends JpaRepository<Inventory, Long> {
            """)
     List<Object[]> sumQuantityGroupByProductIds(@Param("productIds") List<Long> productIds);
 
+
+    @Query("""
+           SELECT new com.zone.agri.dto.response.inventory.InventorySearchResponse(
+               pv.id, p.name, pv.customSpecs, pv.sku, pv.barcode,
+               i.batchNumber, i.quantity, i.importPrice, i.shelfLocation,
+               i.expiryDate, pv.imageUrl
+           )
+           FROM Inventory i
+           JOIN i.productVariant pv
+           JOIN pv.product p
+           WHERE pv.status = com.zone.agri.entity.enums.VariantStatus.ACTIVE
+             AND (:branchId IS NULL OR i.branch.id = :branchId)
+             AND (
+                 :keyword IS NULL OR :keyword = ''
+                 OR LOWER(p.name) LIKE LOWER(CONCAT('%', :keyword, '%'))
+                 OR LOWER(pv.customSpecs) LIKE LOWER(CONCAT('%', :keyword, '%'))
+                 OR LOWER(pv.sku) LIKE LOWER(CONCAT('%', :keyword, '%'))
+                 OR LOWER(pv.barcode) LIKE LOWER(CONCAT('%', :keyword, '%'))
+                 OR LOWER(i.batchNumber) LIKE LOWER(CONCAT('%', :keyword, '%'))
+             )
+           """)
+    List<InventorySearchResponse> searchInventoryForCheck(@Param("keyword") String keyword, @Param("branchId") Long branchId);
 
     // ==============================================================
     // 2. ADAPTER: VIẾT LẠI CÁC HÀM CŨ ĐỂ KHÔNG LÀM LỖI CODE NGƯỜI KHÁC

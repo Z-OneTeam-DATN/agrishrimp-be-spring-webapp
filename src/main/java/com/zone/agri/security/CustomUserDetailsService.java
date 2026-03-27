@@ -1,7 +1,7 @@
 package com.zone.agri.security;
 
-import com.zone.agri.dto.user.RoleDto;
-import com.zone.agri.dto.user.UserDetail;
+import com.zone.agri.dto.response.user.RoleDto;
+import com.zone.agri.dto.response.user.UserDetail;
 import com.zone.agri.entity.User;
 import com.zone.agri.entity.enums.UserStatus;
 import com.zone.agri.repository.UserRepository;

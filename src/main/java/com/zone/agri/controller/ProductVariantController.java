@@ -1,6 +1,6 @@
 package com.zone.agri.controller;
 
-import com.zone.agri.dto.product.ProductVariantResponse;
+import com.zone.agri.dto.response.product.ProductVariantResponse;
 import com.zone.agri.service.ProductVariantService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;

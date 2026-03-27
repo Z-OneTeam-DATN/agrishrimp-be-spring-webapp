@@ -1,6 +1,6 @@
 package com.zone.agri.controller;
 
-import com.zone.agri.dto.admin.CategoryDTO;
+import com.zone.agri.dto.response.admin.CategoryDTO;
 import com.zone.agri.service.CategoryService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;

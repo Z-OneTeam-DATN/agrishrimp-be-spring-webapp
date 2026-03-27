@@ -1,6 +1,6 @@
 package com.zone.agri.common;
 
-import com.zone.agri.dto.user.UserDetail;
+import com.zone.agri.dto.response.user.UserDetail;
 import com.zone.agri.exception.Forbidden;
 import com.zone.agri.exception.SignInRequiredException;
 import org.springframework.stereotype.Component;

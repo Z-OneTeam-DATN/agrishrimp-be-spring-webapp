@@ -1,7 +1,7 @@
 package com.zone.agri.controller;
 
-import com.zone.agri.dto.request.EmployeeCreateRequest;
-import com.zone.agri.dto.response.EmployeeResponse;
+import com.zone.agri.dto.request.employee.EmployeeCreateRequest;
+import com.zone.agri.dto.response.employee.EmployeeResponse;
 import com.zone.agri.security.annotation.RequirePermission;
 import com.zone.agri.service.EmployeeService;
 import io.swagger.v3.oas.annotations.Operation;

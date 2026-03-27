@@ -1,6 +1,6 @@
 package com.zone.agri.service;
 
-import com.zone.agri.dto.product.ProductVariantResponse;
+import com.zone.agri.dto.response.product.ProductVariantResponse;
 import com.zone.agri.entity.Inventory;
 import com.zone.agri.repository.InventoryRepository;
 import com.zone.agri.repository.ProductVariantRepository;

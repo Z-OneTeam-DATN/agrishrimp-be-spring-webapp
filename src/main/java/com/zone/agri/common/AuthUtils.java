@@ -1,6 +1,6 @@
 package com.zone.agri.common;
 
-import com.zone.agri.dto.user.UserDetail;
+import com.zone.agri.dto.response.user.UserDetail;
 import com.zone.agri.security.CustomUserDetail;
 import java.util.Optional;
 import org.springframework.security.core.Authentication;

@@ -1,12 +1,13 @@
 package com.zone.agri.controller;
 
-import com.zone.agri.dto.address.UserAddressRequest;
+import com.zone.agri.dto.request.address.UserAddressRequest;
 import com.zone.agri.entity.User;
 import com.zone.agri.repository.UserRepository;
 import com.zone.agri.service.UserAddressService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -60,7 +61,7 @@ public class UserAddressController {
 
     @Operation(summary = "Thêm địa chỉ mới", description = "Tạo một địa chỉ nhận hàng mới")
     @PostMapping
-    public ResponseEntity<?> addAddress(@RequestBody UserAddressRequest request) {
+    public ResponseEntity<?> addAddress(@Valid @RequestBody UserAddressRequest request) {
         try {
             addressService.addAddress(getCurrentUserId(), request);
             return ResponseEntity.ok(Map.of("message", "Thêm địa chỉ thành công"));
@@ -74,7 +75,7 @@ public class UserAddressController {
 
     @Operation(summary = "Cập nhật địa chỉ", description = "Chỉnh sửa thông tin địa chỉ đã có")
     @PutMapping("/{id}")
-    public ResponseEntity<?> updateAddress(@PathVariable Long id, @RequestBody UserAddressRequest request) {
+    public ResponseEntity<?> updateAddress(@PathVariable Long id, @Valid @RequestBody UserAddressRequest request) {
         try {
             addressService.updateAddress(getCurrentUserId(), id, request);
             return ResponseEntity.ok(Map.of("message", "Cập nhật địa chỉ thành công"));
