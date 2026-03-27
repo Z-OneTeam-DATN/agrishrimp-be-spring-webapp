@@ -1,7 +1,7 @@
 package com.zone.agri.service;
 
-import com.zone.agri.dto.user.RoleRequest;
-import com.zone.agri.dto.user.RoleResponse;
+import com.zone.agri.dto.request.user.RoleRequest;
+import com.zone.agri.dto.response.user.RoleResponse;
 import com.zone.agri.entity.Permission;
 import com.zone.agri.entity.Role;
 import com.zone.agri.exception.BadRequestException;

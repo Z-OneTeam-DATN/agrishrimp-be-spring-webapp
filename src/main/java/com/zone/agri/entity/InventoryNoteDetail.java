@@ -38,6 +38,10 @@ public class InventoryNoteDetail {
     @Column(name = "expiry_date")
     LocalDateTime expiryDate;
 
+    // Thêm thuộc tính note vào đây
+    @Column(name = "note",  columnDefinition = "TEXT")
+    String note;
+
     @Column(name = "new_selling_price", precision = 38, scale = 2)
     BigDecimal newSellingPrice;
 

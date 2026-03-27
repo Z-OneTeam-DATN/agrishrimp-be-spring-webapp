@@ -1,6 +1,6 @@
 package com.zone.agri.service;
 
-import com.zone.agri.dto.product.*;
+import com.zone.agri.dto.response.product.*;
 import com.zone.agri.entity.*;
 import com.zone.agri.entity.enums.CategoryStatus;
 import com.zone.agri.entity.enums.ProductStatus;

@@ -1,9 +1,9 @@
 package com.zone.agri.service;
 
-import com.zone.agri.dto.geo.DeliveryInfo;
-import com.zone.agri.dto.geo.ShippingFeeParams;
-import com.zone.agri.dto.geo.ShippingFeeResult;
-import com.zone.agri.dto.order.SubOrderDraftDto;
+import com.zone.agri.dto.response.geo.DeliveryInfo;
+import com.zone.agri.dto.request.geo.ShippingFeeParams;
+import com.zone.agri.dto.response.geo.ShippingFeeResult;
+import com.zone.agri.dto.response.order.SubOrderDraftDto;
 import com.zone.agri.entity.ProductVariant;
 import com.zone.agri.repository.ProductVariantRepository;
 import com.zone.agri.repository.ShippingProvider;

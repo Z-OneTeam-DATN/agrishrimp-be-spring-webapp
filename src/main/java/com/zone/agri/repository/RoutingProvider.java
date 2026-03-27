@@ -1,7 +1,7 @@
 package com.zone.agri.repository;
 
-import com.zone.agri.dto.geo.CoordinateDto;
-import com.zone.agri.dto.geo.RoutingResult;
+import com.zone.agri.dto.response.geo.CoordinateDto;
+import com.zone.agri.dto.response.geo.RoutingResult;
 
 import java.util.List;
 

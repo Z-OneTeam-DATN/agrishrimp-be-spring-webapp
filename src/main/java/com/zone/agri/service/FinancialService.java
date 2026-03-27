@@ -1,7 +1,7 @@
 package com.zone.agri.service;
 
-import com.zone.agri.dto.response.ProfitLossResponse;
-import com.zone.agri.dto.response.SupplierDebtResponse;
+import com.zone.agri.dto.response.financial.ProfitLossResponse;
+import com.zone.agri.dto.response.supplier.SupplierDebtResponse;
 import com.zone.agri.repository.OrderRepository;
 import com.zone.agri.repository.SupplierRepository;
 import lombok.RequiredArgsConstructor;

@@ -1,6 +1,6 @@
 package com.zone.agri.controller;
 
-import com.zone.agri.dto.admin.BranchDTO;
+import com.zone.agri.dto.response.admin.BranchDTO;
 import com.zone.agri.service.BranchService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;

@@ -1,6 +1,6 @@
 package com.zone.agri.service;
 
-import com.zone.agri.dto.ImageSearchResult;
+import com.zone.agri.dto.response.ImageSearchResult;
 import com.zone.agri.entity.ProductVector;
 import com.zone.agri.repository.ProductVectorRepository;
 import lombok.RequiredArgsConstructor;

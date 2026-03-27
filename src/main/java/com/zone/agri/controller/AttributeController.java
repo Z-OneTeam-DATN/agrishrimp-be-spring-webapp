@@ -1,6 +1,6 @@
 package com.zone.agri.controller;
 
-import com.zone.agri.dto.admin.AttributeDTO;
+import com.zone.agri.dto.response.admin.AttributeDTO;
 import com.zone.agri.security.annotation.RequirePermission;
 import com.zone.agri.service.AttributeService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -11,6 +11,7 @@ import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -51,7 +52,7 @@ public class AttributeController {
     @SecurityRequirement(name = "bearerAuth")
     @RequirePermission("ATTRIBUTE_CREATE")
     @PostMapping
-    public ResponseEntity<?> create(@RequestBody AttributeDTO dto) {
+    public ResponseEntity<?> create(@Valid @RequestBody AttributeDTO dto) {
         return ResponseEntity.ok(service.create(dto));
     }
 
@@ -62,7 +63,7 @@ public class AttributeController {
     public ResponseEntity<?> update(
             @Parameter(description = "ID thuộc tính", example = "1")
             @PathVariable Long id,
-            @RequestBody AttributeDTO dto) {
+            @Valid @RequestBody AttributeDTO dto) {
         return ResponseEntity.ok(service.update(id, dto));
     }
 

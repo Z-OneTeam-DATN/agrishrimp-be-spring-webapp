@@ -1,7 +1,7 @@
 package com.zone.agri.service;
 
-import com.zone.agri.dto.geo.ShippingFeeParams;
-import com.zone.agri.dto.geo.ShippingFeeResult;
+import com.zone.agri.dto.request.geo.ShippingFeeParams;
+import com.zone.agri.dto.response.geo.ShippingFeeResult;
 import com.zone.agri.repository.ShippingProvider;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;

@@ -1,6 +1,6 @@
 package com.zone.agri.service;
 
-import com.zone.agri.dto.address.UserAddressRequest;
+import com.zone.agri.dto.request.address.UserAddressRequest;
 import com.zone.agri.entity.User;
 import com.zone.agri.entity.UserAddress;
 import com.zone.agri.repository.UserAddressRepository;

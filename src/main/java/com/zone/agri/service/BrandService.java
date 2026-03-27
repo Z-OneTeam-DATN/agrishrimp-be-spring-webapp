@@ -1,6 +1,6 @@
 package com.zone.agri.service;
 
-import com.zone.agri.dto.product.BrandResponse;
+import com.zone.agri.dto.response.product.BrandResponse;
 import com.zone.agri.entity.Brand;
 import com.zone.agri.entity.enums.BrandStatus;
 import com.zone.agri.repository.BrandRepository;

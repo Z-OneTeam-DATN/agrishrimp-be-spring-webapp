@@ -1,6 +1,6 @@
 package com.zone.agri.controller;
 
-import com.zone.agri.dto.geo.AddressSuggestionDto;
+import com.zone.agri.dto.response.geo.AddressSuggestionDto;
 import com.zone.agri.service.TrackAsiaGeocodingProvider;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;

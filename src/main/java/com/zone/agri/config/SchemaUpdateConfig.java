@@ -27,6 +27,11 @@ public class SchemaUpdateConfig {
                 "Patch orders.payment_method ENUM thêm PAYOS",
                 "ALTER TABLE orders MODIFY COLUMN payment_method ENUM('CASH','TRANSFER','COD','PAYOS')"
             );
+
+            applyPatch(
+                "Patch inventory_notes.type ENUM thêm CHECK",
+                "ALTER TABLE inventory_notes MODIFY COLUMN type ENUM('IMPORT','EXPORT','CHECK')"
+            );
         };
     }
 

@@ -1,9 +1,9 @@
 package com.zone.agri.service;
 
-import com.zone.agri.dto.auth.AuthResponse;
-import com.zone.agri.dto.auth.GoogleLoginRequest;
-import com.zone.agri.dto.auth.LoginRequest;
-import com.zone.agri.dto.auth.SignupRequest;
+import com.zone.agri.dto.response.auth.AuthResponse;
+import com.zone.agri.dto.request.auth.GoogleLoginRequest;
+import com.zone.agri.dto.request.auth.LoginRequest;
+import com.zone.agri.dto.request.auth.SignupRequest;
 import com.zone.agri.entity.Role;
 import com.zone.agri.entity.User;
 import com.zone.agri.entity.enums.AuthProvider;

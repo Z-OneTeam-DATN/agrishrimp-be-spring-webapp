@@ -1,8 +1,8 @@
 package com.zone.agri.service;
 
-import com.zone.agri.dto.supplier.SupplierImportDto;
-import com.zone.agri.dto.supplier.SupplierRequest;
-import com.zone.agri.dto.supplier.SupplierResponse;
+import com.zone.agri.dto.request.supplier.SupplierImportDto;
+import com.zone.agri.dto.request.supplier.SupplierRequest;
+import com.zone.agri.dto.response.supplier.SupplierResponse;
 import com.zone.agri.entity.InventoryNote;
 import com.zone.agri.entity.Supplier;
 import com.zone.agri.entity.enums.SupplierStatus;

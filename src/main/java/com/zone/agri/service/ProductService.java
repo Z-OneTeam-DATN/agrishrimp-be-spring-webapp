@@ -1,10 +1,11 @@
 package com.zone.agri.service;
 
 import com.zone.agri.common.CloudinaryService;
-import com.zone.agri.dto.ImageSearchResult;
-import com.zone.agri.dto.admin.CategoryDTO;
+import com.zone.agri.dto.response.ImageSearchResult;
+import com.zone.agri.dto.response.admin.CategoryDTO;
 import com.zone.agri.repository.ProductVectorRepository;
-import com.zone.agri.dto.product.*;
+import com.zone.agri.dto.request.product.*;
+import com.zone.agri.dto.response.product.*;
 import com.zone.agri.entity.*;
 import com.zone.agri.entity.enums.*;
 import com.zone.agri.exception.BadRequestException;

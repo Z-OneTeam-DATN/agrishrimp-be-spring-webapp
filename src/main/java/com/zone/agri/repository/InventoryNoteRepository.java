@@ -21,6 +21,33 @@ public interface InventoryNoteRepository extends JpaRepository<InventoryNote, Lo
         LEFT JOIN FETCH inote.partnerBranch 
         LEFT JOIN FETCH inote.supplier 
         LEFT JOIN FETCH inote.createdBy
+        WHERE inote.type = :type
+        ORDER BY inote.createdAt DESC
+    """)
+    List<InventoryNote> findAllByTypeWithPartners(@Param("type") InventoryNoteType type);
+
+    @Query("""
+        SELECT DISTINCT inote 
+        FROM InventoryNote inote 
+        LEFT JOIN FETCH inote.branch 
+        LEFT JOIN FETCH inote.partnerBranch 
+        LEFT JOIN FETCH inote.supplier 
+        LEFT JOIN FETCH inote.createdBy
+        WHERE inote.type = :type AND inote.branch.id = :branchId
+        ORDER BY inote.createdAt DESC
+    """)
+    List<InventoryNote> findAllByTypeAndBranchWithPartners(
+            @Param("type") InventoryNoteType type,
+            @Param("branchId") Long branchId
+    );
+
+    @Query("""
+        SELECT DISTINCT inote 
+        FROM InventoryNote inote 
+        LEFT JOIN FETCH inote.branch 
+        LEFT JOIN FETCH inote.partnerBranch 
+        LEFT JOIN FETCH inote.supplier 
+        LEFT JOIN FETCH inote.createdBy
         WHERE inote.type = :type AND inote.status = :status
         ORDER BY inote.createdAt DESC
     """)

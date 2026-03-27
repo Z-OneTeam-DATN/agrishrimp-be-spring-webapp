@@ -2,13 +2,15 @@ package com.zone.agri.service;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.zone.agri.dto.geo.CoordinateDto;
-import com.zone.agri.dto.geo.DeliveryInfo;
-import com.zone.agri.dto.order.*;
+import com.zone.agri.dto.response.geo.CoordinateDto;
+import com.zone.agri.dto.response.geo.DeliveryInfo;
+import com.zone.agri.dto.request.order.*;
+import com.zone.agri.dto.response.order.*;
 import com.zone.agri.entity.*;
 import com.zone.agri.entity.enums.OrderStatus;
 import com.zone.agri.entity.enums.PaymentMethod;
 import com.zone.agri.entity.enums.PaymentStatus;
+import com.zone.agri.entity.enums.TransactionType;
 import com.zone.agri.exception.BadRequestException;
 import com.zone.agri.exception.ConflictException;
 import com.zone.agri.exception.NotFoundException;
@@ -44,6 +46,7 @@ public class OrderService {
     private final CartItemRepository cartItemRepository;
     private final SubOrderRepository subOrderRepository;
     private final SubOrderItemRepository subOrderItemRepository;
+    private final InventoryTransactionRepository transactionRepository;
 
     private final UserAddressRepository userAddressRepository;
 
@@ -541,12 +544,25 @@ public class OrderService {
 
                 for (Inventory batch : batches) {
                     if (remainingToDeduct <= 0) break;
-                    int available = batch.getQuantity();
+                    int available = Objects.requireNonNullElse(batch.getQuantity(), 0);
                     if (available <= 0) continue;
 
                     int deductAmount = Math.min(available, remainingToDeduct);
-                    batch.setQuantity(available - deductAmount);
+                    int newQty = available - deductAmount;
+                    batch.setQuantity(newQty);
                     inventoryRepository.save(batch);
+
+                    // Ghi log biến động kho (Bán hàng)
+                    transactionRepository.save(InventoryTransaction.builder()
+                            .type(TransactionType.SALE)
+                            .quantityChange(-deductAmount)
+                            .newBalance(newQty)
+                            .referenceCode(order.getCode())
+                            .reason("Bán hàng (Đơn: " + order.getCode() + ")")
+                            .createdAt(LocalDateTime.now())
+                            .inventory(batch)
+                            .build());
+
                     remainingToDeduct -= deductAmount;
                 }
 
@@ -564,7 +580,7 @@ public class OrderService {
         String checkoutUrl = null;
         if (PaymentMethod.PAYOS.equals(paymentMethod)) {
             try {
-                com.zone.agri.dto.payment.PayOSApiResponse.PayOSLinkData payosData = payOSService.createPaymentLink(savedOrder);
+                com.zone.agri.dto.response.payment.PayOSApiResponse.PayOSLinkData payosData = payOSService.createPaymentLink(savedOrder);
                 savedOrder.setPayosPaymentLinkId(payosData.getPaymentLinkId());
                 savedOrder.setPayosCheckoutUrl(payosData.getCheckoutUrl());
                 orderRepository.save(savedOrder);
@@ -629,12 +645,25 @@ public class OrderService {
 
             for (Inventory batch : batches) {
                 if (remainingToDeduct <= 0) break;
-                int available = batch.getQuantity();
+                int available = Objects.requireNonNullElse(batch.getQuantity(), 0);
                 if (available <= 0) continue;
 
                 int deduct = Math.min(available, remainingToDeduct);
-                batch.setQuantity(available - deduct);
+                int newQty = available - deduct;
+                batch.setQuantity(newQty);
                 inventoryRepository.save(batch);
+
+                // Ghi log biến động kho (Bán hàng - PlaceOrder)
+                transactionRepository.save(InventoryTransaction.builder()
+                        .type(TransactionType.SALE)
+                        .quantityChange(-deduct)
+                        .newBalance(newQty)
+                        .referenceCode(savedOrder.getCode())
+                        .reason("Bán hàng trực tiếp (Đơn: " + savedOrder.getCode() + ")")
+                        .createdAt(LocalDateTime.now())
+                        .inventory(batch)
+                        .build());
+
                 remainingToDeduct -= deduct;
 
                 // Tính giá bán lô này

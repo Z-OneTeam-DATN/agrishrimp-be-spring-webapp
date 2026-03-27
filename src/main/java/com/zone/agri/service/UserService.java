@@ -1,9 +1,9 @@
 package com.zone.agri.service;
 
 import com.zone.agri.common.CloudinaryService;
-import com.zone.agri.dto.user.ProfileUpdateRequest;
-import com.zone.agri.dto.user.UserRequest;
-import com.zone.agri.dto.user.UserResponse;
+import com.zone.agri.dto.request.user.ProfileUpdateRequest;
+import com.zone.agri.dto.request.user.UserRequest;
+import com.zone.agri.dto.response.user.UserResponse;
 import com.zone.agri.entity.Branch;
 import com.zone.agri.entity.Role;
 import com.zone.agri.entity.User;
@@ -96,7 +96,7 @@ public class UserService {
      * ✅ THÊM MỚI: Đổi mật khẩu cá nhân
      */
     @Transactional
-    public void changePassword(String contact, com.zone.agri.dto.user.ChangePasswordRequest request) {
+    public void changePassword(String contact, com.zone.agri.dto.request.user.ChangePasswordRequest request) {
         User user = userRepository.findByEmail(contact)
                 .or(() -> userRepository.findByPhoneNumber(contact))
                 .orElseThrow(() -> new NotFoundException("Không tìm thấy người dùng hiện tại"));

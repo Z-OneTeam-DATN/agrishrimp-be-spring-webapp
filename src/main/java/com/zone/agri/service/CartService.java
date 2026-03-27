@@ -1,15 +1,17 @@
 package com.zone.agri.service;
 
-import com.zone.agri.dto.cart.CartItemResponse;
+import com.zone.agri.dto.response.cart.CartItemResponse;
 import com.zone.agri.entity.CartItem;
 import com.zone.agri.entity.Inventory;
 import com.zone.agri.entity.Product;
 import com.zone.agri.entity.ProductVariant;
 import com.zone.agri.entity.User;
+import com.zone.agri.entity.SKUAttributeValue;
 import com.zone.agri.exception.BadRequestException;
 import com.zone.agri.repository.CartItemRepository;
 import com.zone.agri.repository.InventoryRepository;
 import com.zone.agri.repository.ProductVariantRepository;
+import com.zone.agri.repository.SKUAttributeValueRepository;
 import com.zone.agri.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -17,6 +19,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 @Service
@@ -27,42 +30,60 @@ public class CartService {
     private final ProductVariantRepository variantRepo;
     private final UserRepository userRepo;
     private final InventoryRepository inventoryRepository;
+    private final SKUAttributeValueRepository skuAttributeValueRepo;
     private final SettingService settingService;
 
     // 1. Lấy danh sách giỏ hàng của User
     public List<CartItemResponse> getMyCart(Long userId) {
-        List<CartItem> items = cartItemRepo.findByUserId(userId);
+        // TỐI ƯU: Sử dụng JOIN FETCH để tránh N+1 cho basic relations
+        List<CartItem> items = cartItemRepo.findByUserIdWithDetails(userId);
+        if (items.isEmpty()) return List.of();
 
-        // 👉 TỐI ƯU: Lấy hệ số lợi nhuận 1 lần duy nhất ở ngoài vòng lặp
+        List<Long> variantIds = items.stream()
+                .map(item -> item.getProductVariant().getId())
+                .distinct()
+                .toList();
+
+        // TỐI ƯU: Lấy hệ số lợi nhuận 1 lần duy nhất ở ngoài vòng lặp
         BigDecimal profitMultiplier = settingService.getProfitMultiplier();
+
+        // TỐI ƯU: Batch fetch Inventory và SKUAttributeValues
+        List<Inventory> allInventories = inventoryRepository.rawFindByProductVariantIdIn(variantIds);
+        Map<Long, List<Inventory>> inventoryMap = allInventories.stream()
+                .collect(Collectors.groupingBy(inv -> inv.getProductVariant().getId()));
+
+        List<SKUAttributeValue> allAttributes = skuAttributeValueRepo.findBySkuIdIn(variantIds);
+        Map<Long, List<SKUAttributeValue>> attributeMap = allAttributes.stream()
+                .collect(Collectors.groupingBy(sav -> sav.getSku().getId()));
 
         return items.stream().map(item -> {
             ProductVariant variant = item.getProductVariant();
             Product product = variant.getProduct();
 
-            // Tạo tên phân loại đầy đủ từ các thuộc tính (VD: Màu sắc: Đỏ, Kích thước: L)
-            String variantName = (variant.getAttributeValues() != null && !variant.getAttributeValues().isEmpty())
-                    ? variant.getAttributeValues().stream()
+            // Tạo tên phân loại đầy đủ từ các thuộc tính đã pre-fetch
+            List<SKUAttributeValue> attributes = attributeMap.getOrDefault(variant.getId(), List.of());
+            String variantName = !attributes.isEmpty()
+                    ? attributes.stream()
                     .map(sav -> sav.getAttribute().getName() + ": " + sav.getAttributeValue().getValue())
                     .collect(Collectors.joining(", "))
-                    : variant.getSku(); // Fallback về SKU nếu không có thuộc tính
+                    : variant.getSku();
 
-            // Lấy các lô hàng đang còn tồn
-            List<Inventory> batches = inventoryRepository.findByProductVariantId(variant.getId());
+            // Lấy các lô hàng đang còn tồn từ map
+            List<Inventory> batches = inventoryMap.getOrDefault(variant.getId(), List.of());
 
             int totalStock = batches.stream()
                     .filter(inv -> inv.getQuantity() != null && inv.getQuantity() > 0)
                     .mapToInt(Inventory::getQuantity)
                     .sum();
 
-            // 👉 SỬA LỖI LỆCH GIÁ: Tìm giá nhập cao nhất giống hệt bên ProductService
+            // Tìm giá nhập cao nhất
             BigDecimal maxImportPrice = batches.stream()
                     .filter(inv -> inv.getQuantity() != null && inv.getQuantity() > 0)
                     .map(inv -> inv.getImportPrice() != null ? inv.getImportPrice() : BigDecimal.ZERO)
                     .max(BigDecimal::compareTo)
                     .orElse(BigDecimal.ZERO);
 
-            // 👉 Tính giá bán động
+            // Tính giá bán động
             BigDecimal sellingPrice = maxImportPrice.multiply(profitMultiplier);
 
             return CartItemResponse.builder()
@@ -73,13 +94,12 @@ public class CartService {
                     .variantName(variantName)
                     .categoryName(product != null && product.getCategory() != null ? product.getCategory().getName() : "")
                     .brandName(product != null && product.getBrand() != null ? product.getBrand().getName() : "")
-                    .productForm("")
-                    .price(sellingPrice) // 👉 Giá bán động đã đồng bộ 100% với Trang chủ
+                    .price(sellingPrice)
                     .quantity(item.getQuantity())
                     .stock(totalStock)
                     .image(variant.getImageUrl())
                     .build();
-        }).collect(Collectors.toList());
+        }).toList();
     }
 
     // 2. Thêm hoặc Cập nhật số lượng (+/-)
@@ -88,27 +108,23 @@ public class CartService {
         User user = userRepo.findById(userId).orElseThrow(() -> new BadRequestException("Không tìm thấy User"));
         ProductVariant variant = variantRepo.findById(variantId).orElseThrow(() -> new BadRequestException("Không tìm thấy sản phẩm"));
 
-        // Tìm xem sản phẩm đã có trong giỏ chưa
         CartItem cartItem = cartItemRepo.findByUserIdAndProductVariantId(userId, variantId)
                 .orElseGet(() -> CartItem.builder()
                         .user(user)
                         .productVariant(variant)
-                        .quantity(0) // Khởi tạo = 0 nếu chưa có
+                        .quantity(0)
                         .build());
 
         int newQuantity = cartItem.getQuantity() + delta;
 
         if (newQuantity <= 0) {
-            // Nếu giảm về 0 hoặc âm thì xóa luôn khỏi giỏ
             if (cartItem.getId() != null) {
                 cartItemRepo.delete(cartItem);
             }
         } else {
-            // 👉 KIỂM TRA TỒN KHO TRƯỚC KHI CHO THÊM VÀO GIỎ
-            int totalStock = inventoryRepository.findByProductVariantId(variantId).stream()
-                    .filter(inv -> inv.getQuantity() != null && inv.getQuantity() > 0)
-                    .mapToInt(Inventory::getQuantity)
-                    .sum();
+            // TỐI ƯU: Sử dụng query SUM tại DB thay vì load toàn bộ object Inventory
+            Integer totalStock = inventoryRepository.sumQuantityByVariantId(variantId);
+            if (totalStock == null) totalStock = 0;
 
             if (newQuantity > totalStock) {
                 throw new BadRequestException("Số lượng yêu cầu vượt quá tồn kho hiện tại (" + totalStock + " sản phẩm).");

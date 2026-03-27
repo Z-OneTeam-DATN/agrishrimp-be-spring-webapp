@@ -1,7 +1,7 @@
 package com.zone.agri.service;
 
-import com.zone.agri.dto.geo.AddressSuggestionDto;
-import com.zone.agri.dto.geo.CoordinateDto;
+import com.zone.agri.dto.response.geo.AddressSuggestionDto;
+import com.zone.agri.dto.response.geo.CoordinateDto;
 import com.zone.agri.repository.GeocodingProvider;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;

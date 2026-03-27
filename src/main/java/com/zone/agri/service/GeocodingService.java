@@ -1,6 +1,6 @@
 package com.zone.agri.service;
 
-import com.zone.agri.dto.geo.CoordinateDto;
+import com.zone.agri.dto.response.geo.CoordinateDto;
 import com.zone.agri.exception.BadRequestException;
 import com.zone.agri.repository.GeocodingProvider;
 import lombok.RequiredArgsConstructor;

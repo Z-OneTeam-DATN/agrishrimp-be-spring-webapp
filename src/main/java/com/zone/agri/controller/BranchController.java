@@ -1,8 +1,8 @@
 package com.zone.agri.controller;
 
-import com.zone.agri.dto.admin.BranchDTO;
-import com.zone.agri.dto.branch.FindNearestBranchRequest;
-import com.zone.agri.dto.branch.NearestBranchResponse;
+import com.zone.agri.dto.response.admin.BranchDTO;
+import com.zone.agri.dto.request.branch.FindNearestBranchRequest;
+import com.zone.agri.dto.response.branch.NearestBranchResponse;
 import com.zone.agri.security.annotation.RequirePermission;
 import com.zone.agri.service.BranchSearchService;
 import com.zone.agri.service.BranchService;
@@ -18,7 +18,7 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
-import com.zone.agri.dto.branch.CheckStockItemRequest;
+import com.zone.agri.dto.request.branch.CheckStockItemRequest;
 
 import java.util.List;
 
@@ -64,7 +64,7 @@ public class BranchController {
             @ApiResponse(responseCode = "400", description = "Dữ liệu không hợp lệ hoặc mã chi nhánh đã tồn tại")
     })
     @PostMapping
-    public ResponseEntity<BranchDTO> create(@RequestBody BranchDTO dto) {
+    public ResponseEntity<BranchDTO> create(@Valid @RequestBody BranchDTO dto) {
         return ResponseEntity.ok(branchService.create(dto));
     }
 
@@ -81,7 +81,7 @@ public class BranchController {
     public ResponseEntity<BranchDTO> update(
             @Parameter(description = "ID của chi nhánh cần sửa", example = "1", required = true)
             @PathVariable Long id,
-            @RequestBody BranchDTO dto) {
+            @Valid @RequestBody BranchDTO dto) {
         return ResponseEntity.ok(branchService.update(id, dto));
     }
 
@@ -107,7 +107,7 @@ public class BranchController {
     @SecurityRequirement(name = "bearerAuth")
     @RequirePermission("BRANCH_VIEW")
     @PostMapping("/check-stock")
-    public ResponseEntity<List<BranchDTO>> checkStock(@RequestBody List<CheckStockItemRequest> items) {
+    public ResponseEntity<List<BranchDTO>> checkStock(@RequestBody List<@Valid CheckStockItemRequest> items) {
         return ResponseEntity.ok(branchService.findBranchesWithEnoughStock(items));
     }
 

@@ -1,8 +1,8 @@
 package com.zone.agri.service;
 
-import com.zone.agri.dto.admin.BranchDTO;
-import com.zone.agri.dto.branch.CheckStockItemRequest;
-import com.zone.agri.dto.geo.CoordinateDto;
+import com.zone.agri.dto.response.admin.BranchDTO;
+import com.zone.agri.dto.request.branch.CheckStockItemRequest;
+import com.zone.agri.dto.response.geo.CoordinateDto;
 import com.zone.agri.entity.Branch;
 import com.zone.agri.entity.Inventory;
 import com.zone.agri.entity.User;
@@ -67,19 +67,8 @@ public class BranchService {
             throw new RuntimeException("Lỗi: Mã chi nhánh [" + dto.getBranchCode() + "] đã tồn tại!");
         }
 
-        Branch branch = Branch.builder()
-                .branchCode(dto.getBranchCode())
-                .branchType(dto.getBranchType())
-                .name(dto.getName())
-                .phone(dto.getPhone())
-                .email(dto.getEmail())
-                .addressDetail(dto.getAddressDetail())
-                .provinceId(dto.getProvinceId())
-                .districtId(dto.getDistrictId())
-                .wardId(dto.getWardId())
-                .wardCode(dto.getWardCode())
-                .status(dto.getStatus())
-                .build();
+        Branch branch = new Branch();
+        mapToEntity(branch, dto);
 
         // Geocode địa chỉ → lat/lng (chỉ gọi trong admin flow)
         geocodeBranchSilently(branch);
@@ -106,20 +95,10 @@ public class BranchService {
         // Lưu địa chỉ cũ để so sánh trước khi set
         String oldAddress = branch.getAddressDetail();
 
-        branch.setName(dto.getName());
-        branch.setBranchCode(dto.getBranchCode());
-        branch.setBranchType(dto.getBranchType());
-        branch.setPhone(dto.getPhone());
-        branch.setEmail(dto.getEmail());
-        branch.setAddressDetail(dto.getAddressDetail());
-        branch.setProvinceId(dto.getProvinceId());
-        branch.setDistrictId(dto.getDistrictId());
-        branch.setWardId(dto.getWardId());
-        branch.setWardCode(dto.getWardCode());
-        branch.setStatus(dto.getStatus());
+        mapToEntity(branch, dto);
 
         // Re-geocode nếu địa chỉ thay đổi
-        if (!dto.getAddressDetail().equals(oldAddress)) {
+        if (dto.getAddressDetail() != null && !dto.getAddressDetail().equals(oldAddress)) {
             geocodeBranchSilently(branch);
         }
 
@@ -127,6 +106,20 @@ public class BranchService {
         updateBranchManagers(branch, dto.getManagerIds());
 
         return mapToDTO(branchRepository.save(branch));
+    }
+
+    private void mapToEntity(Branch entity, BranchDTO dto) {
+        entity.setName(dto.getName());
+        entity.setBranchCode(dto.getBranchCode());
+        entity.setBranchType(dto.getBranchType());
+        entity.setPhone(dto.getPhone());
+        entity.setEmail(dto.getEmail());
+        entity.setAddressDetail(dto.getAddressDetail());
+        entity.setProvinceId(dto.getProvinceId());
+        entity.setDistrictId(dto.getDistrictId());
+        entity.setWardId(dto.getWardId());
+        entity.setWardCode(dto.getWardCode());
+        entity.setStatus(dto.getStatus());
     }
 
     private void updateBranchManagers(Branch branch, List<Long> managerIds) {
@@ -141,6 +134,8 @@ public class BranchService {
             List<User> newManagers = userRepository.findAllById(managerIds);
             newManagers.forEach(user -> user.setBranch(branch));
             branch.setUsers(newManagers);
+        } else if (branch.getUsers() != null) {
+            branch.getUsers().clear();
         }
     }
 
@@ -177,52 +172,33 @@ public class BranchService {
         // 2. Gọi DB ĐÚNG 1 LẦN để lấy toàn bộ tồn kho của các sản phẩm này tại TẤT CẢ chi nhánh
         List<Inventory> inventories = inventoryRepository.findByProductVariantIdIn(variantIds);
 
-        // 3. Gom nhóm tồn kho theo từng Chi nhánh (Key là Branch, Value là List<Inventory> của Branch đó)
-        Map<Branch, List<Inventory>> branchInventoryMap = inventories.stream()
-                .collect(Collectors.groupingBy(Inventory::getBranch));
-
-        List<BranchDTO> eligibleBranches = new ArrayList<>();
+        // 3. Gom nhóm tồn kho theo từng Chi nhánh (Key là Branch, Value là Map<VariantId, Quantity>)
+        // Tối ưu lookup bằng cách chuyển list tồn kho thành Map<Long, Integer>
+        Map<Branch, Map<Long, Integer>> branchInventoryMap = inventories.stream()
+                .collect(Collectors.groupingBy(
+                        Inventory::getBranch,
+                        Collectors.toMap(
+                                inv -> inv.getProductVariant().getId(),
+                                Inventory::getQuantity,
+                                Integer::sum // handle duplicate variantId if any
+                        )
+                ));
 
         // 4. Quét từng chi nhánh xem có "vượt qua bài test" không
-        for (Map.Entry<Branch, List<Inventory>> entry : branchInventoryMap.entrySet()) {
-            Branch branch = entry.getKey();
-            List<Inventory> branchStock = entry.getValue();
-
-            // Chỉ xét các chi nhánh đang hoạt động (Giả sử Huy có Enum status là ACTIVE)
-            if (!"ACTIVE".equals(branch.getStatus().name())) continue;
-
-            boolean hasEnoughStockForAll = true;
-
-            // Kiểm tra TỪNG MÓN HÀNG trong giỏ đối chiếu với kho của chi nhánh này
-            for (CheckStockItemRequest requestedItem : items) {
-
-                // Tìm tồn kho thực tế của món hàng này trong chi nhánh
-                Optional<Inventory> stockOfItem = branchStock.stream()
-                        .filter(inv -> inv.getProductVariant().getId().equals(requestedItem.getVariantId()))
-                        .findFirst();
-
-                // Nếu chi nhánh KHÔNG CÓ món này, HOẶC số lượng nhỏ hơn số khách đặt -> Rớt bài test!
-                if (stockOfItem.isEmpty() || stockOfItem.get().getQuantity() < requestedItem.getQuantity()) {
-                    hasEnoughStockForAll = false;
-                    break; // Dừng luôn vòng lặp kiểm tra sản phẩm, chuyển qua chi nhánh tiếp theo
-                }
-            }
-
-            // Nếu xuất sắc vượt qua bài test (đủ hàng cho toàn bộ sản phẩm)
-            if (hasEnoughStockForAll) {
-                // Chuyển Branch Entity sang DTO (Huy chỉnh lại hàm map cho đúng với code của Huy nhé)
-                BranchDTO dto = new BranchDTO();
-                dto.setId(branch.getId());
-                dto.setName(branch.getName());
-                dto.setProvinceId(branch.getProvinceId());
-                dto.setAddressDetail(branch.getAddressDetail());
-                // ... map các field khác nếu cần
-
-                eligibleBranches.add(dto);
-            }
-        }
-
-        return eligibleBranches;
+        return branchInventoryMap.entrySet().stream()
+                .filter(entry -> entry.getKey().getStatus() == BranchStatus.ACTIVE)
+                .filter(entry -> {
+                    Map<Long, Integer> branchStock = entry.getValue();
+                    for (CheckStockItemRequest requestedItem : items) {
+                        Integer currentStock = branchStock.getOrDefault(requestedItem.getVariantId(), 0);
+                        if (currentStock < requestedItem.getQuantity()) {
+                            return false;
+                        }
+                    }
+                    return true;
+                })
+                .map(entry -> mapToDTO(entry.getKey()))
+                .toList();
     }
 
     /**

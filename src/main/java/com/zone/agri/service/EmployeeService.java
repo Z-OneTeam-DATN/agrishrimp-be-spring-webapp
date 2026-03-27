@@ -1,7 +1,7 @@
 package com.zone.agri.service;
 
-import com.zone.agri.dto.request.EmployeeCreateRequest;
-import com.zone.agri.dto.response.EmployeeResponse;
+import com.zone.agri.dto.request.employee.EmployeeCreateRequest;
+import com.zone.agri.dto.response.employee.EmployeeResponse;
 import com.zone.agri.entity.Branch;
 import com.zone.agri.entity.Role;
 import com.zone.agri.entity.User;
@@ -38,22 +38,20 @@ public class EmployeeService {
         log.info("Creating new employee with email: {}", request.getEmail());
 
         // 1. Validate
-        validateUniqueFields(request.getEmail(), request.getPhoneNumber()); // Đã sửa thành getPhoneNumber()
+        validateUniqueFields(null, request.getEmail(), request.getPhoneNumber());
 
         Branch branch = branchRepository.findById(request.getBranchId())
                 .orElseThrow(() -> new NotFoundException("Không tìm thấy chi nhánh"));
         Role role = roleRepository.findById(request.getRoleId())
                 .orElseThrow(() -> new NotFoundException("Không tìm thấy vai trò"));
 
-        // 2. Mã hóa mật khẩu (Lấy từ FE gửi lên, nếu trống thì lấy DEFAULT)
+        // 2. Password handling
         String rawPassword = (request.getPassword() != null && !request.getPassword().isBlank())
                 ? request.getPassword()
                 : DEFAULT_PASSWORD;
         String hashedPassword = passwordEncoder.encode(rawPassword);
 
-        UserStatus status = "active".equalsIgnoreCase(request.getStatus()) ? UserStatus.ACTIVE : UserStatus.INACTIVE;
-
-        // 3. Build Entity (Ánh xạ thêm CCCD, Ngày sinh, Giới tính)
+        // 3. Map and Save
         User employee = User.builder()
                 .fullName(request.getFullName())
                 .email(request.getEmail())
@@ -63,32 +61,52 @@ public class EmployeeService {
                 .gender(request.getGender())
                 .passwordHash(hashedPassword)
                 .avatarUrl(request.getAvatarUrl())
-                .status(status)
+                .status(parseStatus(request.getStatus()))
                 .branch(branch)
                 .role(role)
                 .build();
 
-        // 4. Lưu User vào DB (Vì DB của Huy chưa thiết kế cột employeeCode nên ta không gọi hàm set nữa)
         User savedEmployee = userRepository.save(employee);
 
-        // 5. Gửi Email thông báo (Gọi đúng tên hàm sendAccountInfo trong EmailService)
-        try {
-            emailService.sendAccountInfo(savedEmployee.getEmail(), savedEmployee.getFullName(), rawPassword);
-            log.info("Đã gửi email cấp tài khoản cho: {}", savedEmployee.getEmail());
-        } catch (Exception e) {
-            log.error("Lỗi khi gửi email: ", e);
-            // Không throw exception ở đây để không làm rollback việc tạo user nếu mail bị lỗi mạng
-        }
+        // 4. Send Email
+        sendEmailSilently(savedEmployee, rawPassword);
 
         log.info("Employee created successfully with ID: {}", savedEmployee.getId());
         return mapToResponse(savedEmployee);
     }
 
-    private void validateUniqueFields(String email, String phone) {
-        if (userRepository.existsByEmail(email)) {
+    private UserStatus parseStatus(String status) {
+        if (status == null || status.isBlank()) return UserStatus.ACTIVE;
+        try {
+            return "active".equalsIgnoreCase(status) ? UserStatus.ACTIVE : UserStatus.INACTIVE;
+        } catch (Exception e) {
+            return UserStatus.ACTIVE;
+        }
+    }
+
+    private void sendEmailSilently(User user, String password) {
+        try {
+            emailService.sendAccountInfo(user.getEmail(), user.getFullName(), password);
+            log.info("Đã gửi email cấp tài khoản cho: {}", user.getEmail());
+        } catch (Exception e) {
+            log.error("Lỗi khi gửi email cho {}: {}", user.getEmail(), e.getMessage());
+        }
+    }
+
+    private void validateUniqueFields(Long id, String email, String phone) {
+        boolean emailExists = (id == null) 
+            ? userRepository.existsByEmail(email) 
+            : userRepository.existsByEmailAndIdNot(email, id);
+            
+        if (emailExists) {
             throw new ConflictException("Email này đã được sử dụng trong hệ thống");
         }
-        if (userRepository.existsByPhoneNumber(phone)) {
+
+        boolean phoneExists = (id == null)
+            ? userRepository.existsByPhoneNumber(phone)
+            : userRepository.existsByPhoneNumberAndIdNot(phone, id);
+
+        if (phoneExists) {
             throw new ConflictException("Số điện thoại này đã được sử dụng trong hệ thống");
         }
     }
@@ -103,14 +121,14 @@ public class EmployeeService {
             }
         }
         String searchKeyword = (keyword == null || keyword.isBlank()) ? null : keyword.trim();
-        Page<User> users = userRepository.findAllWithFilter(searchKeyword, roleId, branchId, userStatus, pageable);
-        return users.map(this::mapToResponse);
+        return userRepository.findAllWithFilter(searchKeyword, roleId, branchId, userStatus, pageable)
+                .map(this::mapToResponse);
     }
 
     public EmployeeResponse getEmployeeById(Long employeeId) {
-        User employee = userRepository.findById(employeeId)
+        return userRepository.findById(employeeId)
+                .map(this::mapToResponse)
                 .orElseThrow(() -> new NotFoundException("Không tìm thấy nhân viên với ID: " + employeeId));
-        return mapToResponse(employee);
     }
 
     @Transactional
@@ -118,14 +136,12 @@ public class EmployeeService {
         User existingEmployee = userRepository.findById(employeeId)
                 .orElseThrow(() -> new NotFoundException("Không tìm thấy nhân viên với ID: " + employeeId));
 
-        validateUniqueFieldsForUpdate(employeeId, request.getEmail(), request.getPhoneNumber());
+        validateUniqueFields(employeeId, request.getEmail(), request.getPhoneNumber());
 
         Branch branch = branchRepository.findById(request.getBranchId())
                 .orElseThrow(() -> new NotFoundException("Không tìm thấy chi nhánh"));
         Role role = roleRepository.findById(request.getRoleId())
                 .orElseThrow(() -> new NotFoundException("Không tìm thấy vai trò"));
-
-        UserStatus status = "active".equalsIgnoreCase(request.getStatus()) ? UserStatus.ACTIVE : UserStatus.INACTIVE;
 
         existingEmployee.setFullName(request.getFullName());
         existingEmployee.setEmail(request.getEmail());
@@ -134,7 +150,7 @@ public class EmployeeService {
         existingEmployee.setDateOfBirth(request.getDateOfBirth());
         existingEmployee.setGender(request.getGender());
         existingEmployee.setAvatarUrl(request.getAvatarUrl());
-        existingEmployee.setStatus(status);
+        existingEmployee.setStatus(parseStatus(request.getStatus()));
         existingEmployee.setBranch(branch);
         existingEmployee.setRole(role);
 
@@ -142,8 +158,7 @@ public class EmployeeService {
             existingEmployee.setPasswordHash(passwordEncoder.encode(request.getPassword()));
         }
 
-        User updatedEmployee = userRepository.save(existingEmployee);
-        return mapToResponse(updatedEmployee);
+        return mapToResponse(userRepository.save(existingEmployee));
     }
 
     @Transactional
@@ -156,15 +171,6 @@ public class EmployeeService {
         }
         employee.setStatus(UserStatus.INACTIVE);
         userRepository.save(employee);
-    }
-
-    private void validateUniqueFieldsForUpdate(Long employeeId, String email, String phone) {
-        if (userRepository.existsByEmailAndIdNot(email, employeeId)) {
-            throw new ConflictException("Email này đã được nhân viên khác sử dụng");
-        }
-        if (userRepository.existsByPhoneNumberAndIdNot(phone, employeeId)) {
-            throw new ConflictException("Số điện thoại này đã được nhân viên khác sử dụng");
-        }
     }
 
     private EmployeeResponse mapToResponse(User user) {
@@ -180,7 +186,7 @@ public class EmployeeService {
                 .avatarUrl(user.getAvatarUrl())
                 .status(user.getStatus())
                 .dateOfBirth(user.getDateOfBirth())
-                .startDate(null)
+                .createdAt(user.getCreatedAt())
                 .branch(user.getBranch() != null ? EmployeeResponse.BranchInfo.builder()
                         .id(user.getBranch().getId())
                         .name(user.getBranch().getName())
@@ -191,7 +197,6 @@ public class EmployeeService {
                         .displayName(user.getRole().getDisplayName())
                         .slug(user.getRole().getSlug())
                         .build() : null)
-                .createdAt(user.getCreatedAt())
                 .build();
     }
 }

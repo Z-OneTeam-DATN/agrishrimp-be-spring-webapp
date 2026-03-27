@@ -1,7 +1,7 @@
 package com.zone.agri.controller;
 
-import com.zone.agri.dto.response.ProfitLossResponse;
-import com.zone.agri.dto.response.SupplierDebtResponse;
+import com.zone.agri.dto.response.financial.ProfitLossResponse;
+import com.zone.agri.dto.response.supplier.SupplierDebtResponse;
 import com.zone.agri.service.FinancialService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.format.annotation.DateTimeFormat;

@@ -27,7 +27,7 @@ public class InventoryNote {
     String code;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "type", columnDefinition = "ENUM('IMPORT', 'EXPORT')")
+    @Column(name = "type", columnDefinition = "ENUM('IMPORT', 'EXPORT', 'CHECK')")
     InventoryNoteType type;
 
     @Column(name = "reason", columnDefinition = "TEXT")
@@ -60,6 +60,15 @@ public class InventoryNote {
 
     @Column(name = "debt_amount", precision = 38, scale = 2)
     BigDecimal debtAmount;
+
+    @Column(name = "check_type", length = 50)
+    String checkType;
+
+    @Column(name = "check_date")
+    LocalDateTime checkDate;
+
+    @Column(name = "checked_by", length = 255)
+    String checkedBy;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "branch_id")

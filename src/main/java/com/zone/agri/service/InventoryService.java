@@ -1,10 +1,13 @@
 package com.zone.agri.service;
 
-import com.zone.agri.dto.inventory.InventoryReceiptRequest;
-import com.zone.agri.dto.inventory.InventoryReceiptResponse;
+import com.zone.agri.dto.request.inventory.InventoryReceiptRequest;
+import com.zone.agri.dto.response.inventory.InventoryReceiptResponse;
 import com.zone.agri.entity.*;
 import com.zone.agri.entity.enums.InventoryNoteStatus;
 import com.zone.agri.entity.enums.InventoryNoteType;
+import com.zone.agri.entity.enums.TransactionType;
+import com.zone.agri.exception.BadRequestException;
+import com.zone.agri.exception.NotFoundException;
 import com.zone.agri.repository.*;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -16,9 +19,7 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
+import java.util.*;
 import java.util.stream.Collectors;
 
 @Service
@@ -30,13 +31,14 @@ public class InventoryService {
     private final ProductVariantRepository variantRepository;
     private final BranchRepository branchRepository;
     private final SupplierRepository supplierRepository;
+    private final InventoryTransactionRepository transactionRepository;
     private final com.zone.agri.common.WarehouseContext warehouseContext;
 
     // --- 1. TẠO PHIẾU MỚI ---
     @Transactional
     public InventoryReceiptResponse createReceipt(InventoryReceiptRequest request) {
         Branch destBranch = branchRepository.findByName(request.getBranchName())
-                .orElseThrow(() -> new RuntimeException("Chi nhánh không tồn tại: " + request.getBranchName()));
+                .orElseThrow(() -> new NotFoundException("Chi nhánh không tồn tại: " + request.getBranchName()));
 
         if ("SUPPLIER".equals(request.getImportType()) && !"WAREHOUSE".equalsIgnoreCase(destBranch.getBranchType())) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Lỗi: Chỉ có KHO TỔNG mới được phép nhập hàng trực tiếp từ NCC.");
@@ -45,32 +47,10 @@ public class InventoryService {
         InventoryNote noteEntity = new InventoryNote();
         noteEntity.setCode(request.getReceiptCode());
         noteEntity.setType(InventoryNoteType.IMPORT);
-        noteEntity.setStatus(request.getImportStatus().equals("IMPORTED") ? InventoryNoteStatus.COMPLETED : InventoryNoteStatus.PENDING);
-        noteEntity.setBranch(destBranch);
-        noteEntity.setNote(request.getNote());
-        noteEntity.setDeliverer(request.getDeliverer());
-        noteEntity.setPaymentAmount(request.getPaymentAmount() != null ? request.getPaymentAmount() : BigDecimal.ZERO);
         noteEntity.setCreatedAt(LocalDateTime.now());
-
-        if (request.getEntryDate() != null && !request.getEntryDate().isEmpty()) {
-            noteEntity.setEntryDate(LocalDate.parse(request.getEntryDate()).atStartOfDay());
-        }
-
-        if (request.getTags() != null && !request.getTags().isEmpty()) {
-            noteEntity.setTags(String.join(",", request.getTags()));
-        }
-
-        if ("INTERNAL".equals(request.getImportType())) {
-            Branch sourceBranch = branchRepository.findById(request.getSourceBranchId())
-                    .orElseThrow(() -> new RuntimeException("Kho xuất đi không tồn tại"));
-            noteEntity.setPartnerBranch(sourceBranch);
-        } else {
-            Supplier supplier = supplierRepository.findByCode(request.getSupplierCode())
-                    .orElseThrow(() -> new RuntimeException("Nhà cung cấp không tồn tại"));
-            noteEntity.setSupplier(supplier);
-        }
-
         noteEntity.setDetails(new ArrayList<>());
+
+        updateMetadata(noteEntity, request, destBranch);
         processItemsAndStock(noteEntity, request.getItems(), request.getImportType());
 
         return mapToResponse(noteRepository.save(noteEntity));
@@ -80,38 +60,18 @@ public class InventoryService {
     @Transactional
     public InventoryReceiptResponse updateReceipt(Long id, InventoryReceiptRequest request) {
         InventoryNote existingNote = noteRepository.findById(id)
-                .orElseThrow(() -> new RuntimeException("Không tìm thấy phiếu ID: " + id));
+                .orElseThrow(() -> new NotFoundException("Không tìm thấy phiếu ID: " + id));
 
         if (existingNote.getStatus() == InventoryNoteStatus.COMPLETED) {
-            throw new RuntimeException("Phiếu đã nhập kho thành công, không thể sửa đổi.");
+            throw new BadRequestException("Phiếu đã nhập kho thành công, không thể sửa đổi.");
         }
 
         Branch destBranch = branchRepository.findByName(request.getBranchName())
-                .orElseThrow(() -> new RuntimeException("Chi nhánh không tồn tại: " + request.getBranchName()));
+                .orElseThrow(() -> new NotFoundException("Chi nhánh không tồn tại: " + request.getBranchName()));
 
-        existingNote.setBranch(destBranch);
-        existingNote.setNote(request.getNote());
-        existingNote.setDeliverer(request.getDeliverer());
-        existingNote.setPaymentAmount(request.getPaymentAmount() != null ? request.getPaymentAmount() : BigDecimal.ZERO);
+        updateMetadata(existingNote, request, destBranch);
 
-        if (request.getEntryDate() != null && !request.getEntryDate().isEmpty()) {
-            existingNote.setEntryDate(LocalDate.parse(request.getEntryDate()).atStartOfDay());
-        }
-
-        existingNote.setTags(request.getTags() != null ? String.join(",", request.getTags()) : null);
-
-        if ("INTERNAL".equals(request.getImportType())) {
-            existingNote.setPartnerBranch(branchRepository.findById(request.getSourceBranchId()).orElse(null));
-            existingNote.setSupplier(null);
-        } else {
-            existingNote.setSupplier(supplierRepository.findByCode(request.getSupplierCode()).orElse(null));
-            existingNote.setPartnerBranch(null);
-        }
-
-        if ("IMPORTED".equals(request.getImportStatus())) {
-            existingNote.setStatus(InventoryNoteStatus.COMPLETED);
-        }
-
+        // Clear and re-process items
         existingNote.getDetails().clear();
         noteRepository.flush();
 
@@ -119,42 +79,65 @@ public class InventoryService {
         return mapToResponse(noteRepository.save(existingNote));
     }
 
-    // --- 3. XÓA PHIẾU (ROLLBACK TỒN KHO NẾU ĐÃ NHẬP) ---
+    private void updateMetadata(InventoryNote note, InventoryReceiptRequest request, Branch destBranch) {
+        note.setBranch(destBranch);
+        note.setNote(request.getNote());
+        note.setDeliverer(request.getDeliverer());
+        note.setPaymentAmount(Objects.requireNonNullElse(request.getPaymentAmount(), BigDecimal.ZERO));
+        note.setStatus("IMPORTED".equals(request.getImportStatus()) ? InventoryNoteStatus.COMPLETED : InventoryNoteStatus.PENDING);
+
+        if (request.getEntryDate() != null && !request.getEntryDate().isBlank()) {
+            note.setEntryDate(LocalDate.parse(request.getEntryDate()).atStartOfDay());
+        }
+
+        if (request.getTags() != null && !request.getTags().isEmpty()) {
+            note.setTags(String.join(",", request.getTags()));
+        } else {
+            note.setTags(null);
+        }
+
+        if ("INTERNAL".equals(request.getImportType())) {
+            Branch sourceBranch = branchRepository.findById(request.getSourceBranchId())
+                    .orElseThrow(() -> new NotFoundException("Kho xuất đi không tồn tại"));
+            note.setPartnerBranch(sourceBranch);
+            note.setSupplier(null);
+        } else {
+            Supplier supplier = supplierRepository.findByCode(request.getSupplierCode())
+                    .orElseThrow(() -> new NotFoundException("Nhà cung cấp không tồn tại"));
+            note.setSupplier(supplier);
+            note.setPartnerBranch(null);
+        }
+    }
+
+    // --- 3. XÓA PHIẾU (CHẶN NẾU ĐÃ NHẬP KHO) ---
     @Transactional
     public void deleteReceipt(Long id) {
         InventoryNote note = noteRepository.findById(id)
-                .orElseThrow(() -> new RuntimeException("Không tìm thấy phiếu ID: " + id));
+                .orElseThrow(() -> new NotFoundException("Không tìm thấy phiếu ID: " + id));
 
         if (note.getStatus() == InventoryNoteStatus.COMPLETED) {
-            boolean isInternal = note.getPartnerBranch() != null;
-            for (InventoryNoteDetail detail : note.getDetails()) {
-                // Đảo ngược quá trình: Trừ kho đích
-                updateStockBalanceExactBatch(note.getBranch(), detail.getProductVariant(), detail.getBatchNumber(), detail.getPrice(), detail.getExpiryDate(), -detail.getQuantityReal());
-
-                if (isInternal) {
-                    // Nếu là nội bộ, hoàn lại hàng vào kho xuất (Đưa vào lô mặc định TRANSFER_RETURN vì ta không lưu vết lô cũ lúc trừ FIFO)
-                    updateStockBalanceExactBatch(note.getPartnerBranch(), detail.getProductVariant(), "TRANSFER_RETURN", detail.getPrice(), detail.getExpiryDate(), detail.getQuantityReal());
-                }
-            }
+            throw new BadRequestException("Không thể xóa phiếu đã hoàn thành nhập kho. Vui lòng sử dụng phiếu xuất trả hoặc điều chỉnh kho để đảm bảo tính nhất quán dữ liệu.");
         }
         noteRepository.delete(note);
     }
 
     // --- LOGIC DÙNG CHUNG: XỬ LÝ ITEMS & CỘNG KHO ---
     private void processItemsAndStock(InventoryNote note, List<InventoryReceiptRequest.ItemRequest> items, String importType) {
+        if (items == null) return;
+        
         BigDecimal totalAmount = BigDecimal.ZERO;
 
         for (InventoryReceiptRequest.ItemRequest itemDTO : items) {
             ProductVariant variant = variantRepository.findBySku(itemDTO.getProductCode())
-                    .orElseThrow(() -> new RuntimeException("SKU không tồn tại: " + itemDTO.getProductCode()));
+                    .orElseThrow(() -> new NotFoundException("SKU không tồn tại: " + itemDTO.getProductCode()));
 
             BigDecimal itemSubtotal = itemDTO.getImportPrice().multiply(BigDecimal.valueOf(itemDTO.getPlannedQuantity()));
             totalAmount = totalAmount.add(itemSubtotal);
 
-            LocalDateTime expiry = (itemDTO.getExpiryDate() != null && !itemDTO.getExpiryDate().isEmpty())
+            LocalDateTime expiry = (itemDTO.getExpiryDate() != null && !itemDTO.getExpiryDate().isBlank())
                     ? LocalDate.parse(itemDTO.getExpiryDate()).atStartOfDay() : null;
 
-            String batch = (itemDTO.getLotNumber() == null || itemDTO.getLotNumber().isEmpty()) ? "DEFAULT" : itemDTO.getLotNumber();
+            String batch = (itemDTO.getLotNumber() == null || itemDTO.getLotNumber().isBlank()) ? "DEFAULT" : itemDTO.getLotNumber();
 
             InventoryNoteDetail detailEntity = InventoryNoteDetail.builder()
                     .inventoryNote(note)
@@ -171,11 +154,11 @@ public class InventoryService {
 
             if (note.getStatus() == InventoryNoteStatus.COMPLETED) {
                 // 1. Nhập vào ĐÚNG lô tại kho nhận
-                updateStockBalanceExactBatch(note.getBranch(), variant, batch, detailEntity.getPrice(), expiry, itemDTO.getPlannedQuantity());
+                updateStockBalanceExactBatch(note, note.getBranch(), variant, batch, detailEntity.getPrice(), expiry, itemDTO.getPlannedQuantity(), TransactionType.IMPORT);
 
                 // 2. Trừ kho xuất (NẾU NHẬP NỘI BỘ -> PHẢI TRỪ FIFO)
                 if ("INTERNAL".equals(importType) && note.getPartnerBranch() != null) {
-                    deductStockFifo(note.getPartnerBranch(), variant, itemDTO.getPlannedQuantity());
+                    deductStockFifo(note, note.getPartnerBranch(), variant, itemDTO.getPlannedQuantity());
                 }
             }
         }
@@ -184,50 +167,82 @@ public class InventoryService {
     }
 
     // Hàm cập nhật đích danh một Lô (Dùng cho nhập kho)
-    private void updateStockBalanceExactBatch(Branch branch, ProductVariant variant, String batchNumber, BigDecimal importPrice, LocalDateTime expiryDate, Integer quantityChange) {
-        Inventory inv = inventoryRepository.findExactBatch(branch, variant, batchNumber, importPrice)
-                .orElseGet(() -> Inventory.builder()
+    private void updateStockBalanceExactBatch(InventoryNote note, Branch branch, ProductVariant variant, String batchNumber, BigDecimal importPrice, LocalDateTime expiryDate, Integer quantityChange, TransactionType type) {
+        // Dùng findExactBatchWithLock để tránh Race Condition
+        Inventory inv = inventoryRepository.findExactBatchWithLock(branch, variant, batchNumber, importPrice)
+                .orElseGet(() -> {
+                    Inventory newInv = Inventory.builder()
                         .branch(branch)
                         .productVariant(variant)
                         .batchNumber(batchNumber)
                         .importPrice(importPrice)
                         .expiryDate(expiryDate)
                         .quantity(0)
-                        .build());
+                        .build();
+                    return inventoryRepository.save(newInv); // Lưu trước để có ID cho Transaction
+                });
 
-        int newQuantity = inv.getQuantity() + quantityChange;
+        int oldQuantity = Objects.requireNonNullElse(inv.getQuantity(), 0);
+        int newQuantity = oldQuantity + quantityChange;
         if (newQuantity < 0) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Kho " + branch.getName() + " không đủ hàng ở lô " + batchNumber);
+            throw new BadRequestException("Kho " + branch.getName() + " không đủ hàng ở lô " + batchNumber);
         }
         inv.setQuantity(newQuantity);
         inv.setLastReceiptDate(LocalDateTime.now());
-        inventoryRepository.save(inv);
+        inv = inventoryRepository.save(inv);
+
+        // Ghi log biến động kho
+        InventoryTransaction tx = InventoryTransaction.builder()
+                .type(type)
+                .quantityChange(quantityChange)
+                .newBalance(newQuantity)
+                .referenceCode(note != null ? note.getCode() : null)
+                .reason(note != null ? "Phiếu kho: " + note.getCode() : "Cập nhật hệ thống")
+                .createdAt(LocalDateTime.now())
+                .inventory(inv)
+                .inventoryNote(note)
+                .build();
+        transactionRepository.save(tx);
     }
 
     // Hàm trừ kho theo nguyên tắc FIFO (Dùng khi xuất kho/chuyển nội bộ)
-    private void deductStockFifo(Branch branch, ProductVariant variant, int quantityToDeduct) {
-        // 1. Kiểm tra tổng tồn kho
-        Integer totalStock = inventoryRepository.sumQuantityByBranchAndVariant(branch.getId(), variant.getId());
-        if (totalStock == null || totalStock < quantityToDeduct) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Kho " + branch.getName() + " chỉ còn " + (totalStock == null ? 0 : totalStock) + " sản phẩm " + variant.getSku() + ", không đủ để điều chuyển.");
+    private void deductStockFifo(InventoryNote note, Branch branch, ProductVariant variant, int quantityToDeduct) {
+        // Dùng findForUpdateFIFO (đã có @Lock) để tránh Race Condition
+        List<Inventory> batches = inventoryRepository.findForUpdateFIFO(branch.getId(), variant.getId());
+        
+        int totalAvailable = batches.stream().mapToInt(i -> Objects.requireNonNullElse(i.getQuantity(), 0)).sum();
+        if (totalAvailable < quantityToDeduct) {
+            throw new BadRequestException("Kho " + branch.getName() + " không đủ hàng để điều chuyển sản phẩm " + variant.getSku());
         }
 
-        // 2. Lấy danh sách lô theo thứ tự cũ xuất trước
-        List<Inventory> batches = inventoryRepository.findAvailableBatchesForVariant(branch.getId(), variant.getId());
         int remaining = quantityToDeduct;
-
         for (Inventory batch : batches) {
             if (remaining <= 0) break;
-
             int deduct = Math.min(batch.getQuantity(), remaining);
-            batch.setQuantity(batch.getQuantity() - deduct);
+            int oldQty = batch.getQuantity();
+            int newQty = oldQty - deduct;
+            
+            batch.setQuantity(newQty);
             inventoryRepository.save(batch);
+
+            // Ghi log biến động kho cho từng lô
+            InventoryTransaction tx = InventoryTransaction.builder()
+                    .type(TransactionType.TRANSFER_OUT)
+                    .quantityChange(-deduct)
+                    .newBalance(newQty)
+                    .referenceCode(note != null ? note.getCode() : null)
+                    .reason(note != null ? "Xuất kho FIFO từ phiếu: " + note.getCode() : "Xuất kho FIFO")
+                    .createdAt(LocalDateTime.now())
+                    .inventory(batch)
+                    .inventoryNote(note)
+                    .build();
+            transactionRepository.save(tx);
 
             remaining -= deduct;
         }
 
         if (remaining > 0) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Lỗi đồng bộ: Kho " + branch.getName() + " bị hụt hàng trong lúc xử lý.");
+            throw new BadRequestException("Lỗi hụt hàng trong lúc xử lý tại kho " + branch.getName());
         }
     }
 
@@ -235,26 +250,35 @@ public class InventoryService {
     @Transactional(readOnly = true)
     public List<InventoryReceiptResponse> getAllReceipts() {
         Long warehouseId = warehouseContext.resolveWarehouseId();
-        List<InventoryNote> notes = (warehouseId == null) ? noteRepository.findAll() : noteRepository.findAllByBranchId(warehouseId);
+        List<InventoryNote> notes = (warehouseId == null) 
+                ? noteRepository.findAllByTypeWithPartners(InventoryNoteType.IMPORT)
+                : noteRepository.findAllByTypeAndBranchWithPartners(InventoryNoteType.IMPORT, warehouseId);
 
         return notes.stream()
-                .filter(note -> note.getType() == InventoryNoteType.IMPORT)
                 .map(this::mapToResponse)
                 .collect(Collectors.toList());
     }
 
     @Transactional(readOnly = true)
     public InventoryReceiptResponse getReceiptById(Long id) {
-        return mapToResponse(noteRepository.findById(id).orElseThrow());
+        return noteRepository.findById(id)
+                .map(this::mapToResponse)
+                .orElseThrow(() -> new NotFoundException("Không tìm thấy phiếu ID: " + id));
+    }
+
+    @Transactional(readOnly = true)
+    public List<com.zone.agri.dto.response.inventory.InventorySearchResponse> searchInventoryForCheck(String keyword) {
+        Long branchId = warehouseContext.resolveWarehouseId();
+        return inventoryRepository.searchInventoryForCheck(keyword, branchId);
     }
 
     private InventoryReceiptResponse mapToResponse(InventoryNote entity) {
         if (entity == null) return null;
         boolean isInternal = entity.getPartnerBranch() != null;
-        List<String> tagList = new ArrayList<>();
-        if (entity.getTags() != null && !entity.getTags().isEmpty()) tagList = Arrays.asList(entity.getTags().split(","));
+        List<String> tagList = (entity.getTags() != null && !entity.getTags().isBlank()) 
+                ? Arrays.asList(entity.getTags().split(",")) 
+                : new ArrayList<>();
 
-        // Lấy trước ID của kho xuất để dùng bên trong vòng lặp map items
         Long partnerBranchId = isInternal ? entity.getPartnerBranch().getId() : null;
 
         return InventoryReceiptResponse.builder()
@@ -266,40 +290,31 @@ public class InventoryService {
                 .supplierName(entity.getSupplier() != null ? entity.getSupplier().getName() : "")
                 .supplierCode(entity.getSupplier() != null ? entity.getSupplier().getCode() : "")
                 .branchName(entity.getBranch() != null ? entity.getBranch().getName() : "N/A")
-                .totalAmount(entity.getTotalAmount() != null ? entity.getTotalAmount() : BigDecimal.ZERO)
-                .paymentAmount(entity.getPaymentAmount() != null ? entity.getPaymentAmount() : BigDecimal.ZERO)
-                .debtAmount(entity.getDebtAmount() != null ? entity.getDebtAmount() : BigDecimal.ZERO)
+                .totalAmount(Objects.requireNonNullElse(entity.getTotalAmount(), BigDecimal.ZERO))
+                .paymentAmount(Objects.requireNonNullElse(entity.getPaymentAmount(), BigDecimal.ZERO))
+                .debtAmount(Objects.requireNonNullElse(entity.getDebtAmount(), BigDecimal.ZERO))
                 .deliverer(entity.getDeliverer())
                 .note(entity.getNote())
                 .tags(tagList)
                 .createdAt(entity.getCreatedAt())
                 .entryDate(entity.getEntryDate() != null ? entity.getEntryDate().format(DateTimeFormatter.ISO_LOCAL_DATE) : "")
                 .items(entity.getDetails() == null ? new ArrayList<>() : entity.getDetails().stream().map(d -> {
-
-                    // 1. Tính tồn kho xuất (Chỉ áp dụng nếu là phiếu INTERNAL)
+                    ProductVariant variant = d.getProductVariant();
                     Integer currentStock = 0;
-                    if (isInternal && partnerBranchId != null && d.getProductVariant() != null) {
-                        // Gọi repository để tính tổng tồn kho hiện tại của chi nhánh xuất
-                        currentStock = inventoryRepository.sumQuantityByBranchAndVariant(partnerBranchId, d.getProductVariant().getId());
-                        if (currentStock == null) {
-                            currentStock = 0;
-                        }
+                    if (isInternal && partnerBranchId != null && variant != null) {
+                        currentStock = Objects.requireNonNullElse(inventoryRepository.sumQuantityByBranchAndVariant(partnerBranchId, variant.getId()), 0);
                     }
 
-                    // 2. Map vào ItemResponse
                     return InventoryReceiptResponse.ItemResponse.builder()
-                            .productCode(d.getProductVariant() != null ? d.getProductVariant().getSku() : "")
-                            .productName(d.getProductVariant() != null && d.getProductVariant().getProduct() != null ? d.getProductVariant().getProduct().getName() : "")
-                            .quantity(d.getQuantity() != null ? d.getQuantity() : 0)
-
-                            // 👇 GÁN maxQuantity VÀO ĐÂY
+                            .productCode(variant != null ? variant.getSku() : "")
+                            .productName(variant != null && variant.getProduct() != null ? variant.getProduct().getName() : "")
+                            .quantity(Objects.requireNonNullElse(d.getQuantity(), 0))
                             .maxQuantity(currentStock)
-
-                            .price(d.getPrice() != null ? d.getPrice() : BigDecimal.ZERO)
+                            .price(Objects.requireNonNullElse(d.getPrice(), BigDecimal.ZERO))
                             .newSellingPrice(d.getNewSellingPrice())
                             .lotNumber(d.getBatchNumber())
                             .expiryDate(d.getExpiryDate() != null ? d.getExpiryDate().format(DateTimeFormatter.ISO_LOCAL_DATE) : "")
-                            .imageUrl(d.getProductVariant() != null ? d.getProductVariant().getImageUrl() : null)
+                            .imageUrl(variant != null ? variant.getImageUrl() : null)
                             .build();
                 }).collect(Collectors.toList()))
                 .build();

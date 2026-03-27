@@ -9,6 +9,7 @@ import java.util.List;
 @Repository
 public interface SKUAttributeValueRepository extends JpaRepository<SKUAttributeValue, Long> {
     List<SKUAttributeValue> findBySkuId(Long skuId);
+    List<SKUAttributeValue> findBySkuIdIn(List<Long> skuIds);
     void deleteBySkuId(Long skuId);
     boolean existsByAttributeId(Long attributeId);
 }

@@ -1,6 +1,6 @@
 package com.zone.agri.repository;
 
-import com.zone.agri.dto.transfer.TransferResponse;
+import com.zone.agri.dto.response.transfer.TransferResponse;
 import com.zone.agri.entity.InventoryTransfer;
 import com.zone.agri.entity.enums.InventoryTransferStatus;
 import org.springframework.data.domain.Page;
@@ -26,7 +26,7 @@ public interface InventoryTransferRepository extends JpaRepository<InventoryTran
     );
 
     // Search + phân trang
-    @Query("SELECT new com.zone.agri.dto.transfer.TransferResponse(" +
+    @Query("SELECT new com.zone.agri.dto.response.transfer.TransferResponse(" +
             "t.id, t.transferCode, t.status, t.createdAt, " +
             "t.transferDate, t.deadline, " +
             "fb.name, tb.name, t.transporter, t.priority, " +

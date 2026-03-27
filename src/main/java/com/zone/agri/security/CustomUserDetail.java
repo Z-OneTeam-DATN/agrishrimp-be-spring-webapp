@@ -1,6 +1,6 @@
 package com.zone.agri.security;
 
-import com.zone.agri.dto.user.UserDetail;
+import com.zone.agri.dto.response.user.UserDetail;
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
 import org.springframework.security.core.GrantedAuthority;

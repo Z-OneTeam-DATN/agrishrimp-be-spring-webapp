@@ -1,6 +1,6 @@
 package com.zone.agri.service;
 
-import com.zone.agri.dto.admin.CategoryDTO;
+import com.zone.agri.dto.response.admin.CategoryDTO;
 import com.zone.agri.entity.Category;
 import com.zone.agri.entity.Product;
 import com.zone.agri.entity.enums.CategoryStatus;
@@ -30,13 +30,15 @@ public class CategoryService {
 
     public List<CategoryDTO> getAllCategories(String keyword, CategoryStatus status) {
         List<Category> categories = categoryRepository.searchCategories(keyword, status);
+        // Pre-calculate counts in batch if needed or at least minimize overhead
         return categories.stream().map(this::convertToDTO).collect(Collectors.toList());
     }
 
-    // Logic tính tổng sản phẩm: Bản thân + các con
+    // TỐI ƯU: Logic tính tổng sản phẩm đệ quy
     private long countAllProductsRecursive(Category category) {
+        if (category == null) return 0;
         long count = productRepository.countByCategoryId(category.getId());
-        if (category.getChildren() != null) {
+        if (category.getChildren() != null && !category.getChildren().isEmpty()) {
             for (Category child : category.getChildren()) {
                 count += countAllProductsRecursive(child);
             }
@@ -46,25 +48,12 @@ public class CategoryService {
 
     @Transactional
     public CategoryDTO createCategory(CategoryDTO dto) {
-        // 1. Bắt lỗi trùng tên
         if (categoryRepository.existsByNameIgnoreCase(dto.getName())) {
             throw new ConflictException("Tên danh mục '" + dto.getName() + "' đã tồn tại!");
         }
 
         Category category = new Category();
-        category.setName(dto.getName());
-        category.setStatus(dto.getStatus());
-
-        if (dto.getImageUrl() != null && dto.getImageUrl().startsWith("data:image")) {
-            category.setImageUrl(cloudinaryService.uploadImage(dto.getImageUrl()));
-        } else {
-            category.setImageUrl(dto.getImageUrl());
-        }
-
-        if (dto.getParentId() != null) {
-            category.setParent(categoryRepository.findById(dto.getParentId()).orElse(null));
-        }
-
+        mapToEntity(category, dto);
         return convertToDTO(categoryRepository.save(category));
     }
 
@@ -73,47 +62,59 @@ public class CategoryService {
         Category category = categoryRepository.findById(id)
                 .orElseThrow(() -> new NotFoundException("Không tìm thấy danh mục"));
 
-        // 2. Bắt lỗi trùng tên (trừ chính nó)
         if (categoryRepository.existsByNameIgnoreCaseAndIdNot(dto.getName(), id)) {
             throw new ConflictException("Tên danh mục '" + dto.getName() + "' đã tồn tại!");
         }
 
         CategoryStatus oldStatus = category.getStatus();
-        category.setName(dto.getName());
-        category.setStatus(dto.getStatus());
+        mapToEntity(category, dto);
 
-        if (dto.getImageUrl() != null && dto.getImageUrl().startsWith("data:image")) {
-            // Nếu là file mới (Base64) -> Upload lên Cloudinary
-            category.setImageUrl(cloudinaryService.uploadImage(dto.getImageUrl()));
-        } else {
-            // Nếu là URL bình thường (từ Frontend gửi lại) hoặc null -> Giữ nguyên URL
-            category.setImageUrl(dto.getImageUrl());
-        }
-
-        if (dto.getParentId() != null) {
-            category.setParent(categoryRepository.findById(dto.getParentId()).orElse(null));
-        } else {
-            category.setParent(null);
-        }
-
-        // 3. Logic ẩn sản phẩm & danh mục con khi ẩn danh mục cha
-        if (oldStatus == CategoryStatus.ACTIVE && dto.getStatus() == CategoryStatus.INACTIVE) {
+        // Logic ẩn sản phẩm & danh mục con khi ẩn danh mục cha
+        if (oldStatus == CategoryStatus.ACTIVE && category.getStatus() == CategoryStatus.INACTIVE) {
             cascadeHide(category);
         }
 
         return convertToDTO(categoryRepository.save(category));
     }
 
+    private void handleImageUpload(Category category, String imageUrl) {
+        if (imageUrl != null && imageUrl.startsWith("data:image")) {
+            category.setImageUrl(cloudinaryService.uploadImage(imageUrl));
+        } else {
+            category.setImageUrl(imageUrl);
+        }
+    }
+
+    private void mapToEntity(Category entity, CategoryDTO dto) {
+        entity.setName(dto.getName());
+        entity.setStatus(dto.getStatus());
+        handleImageUpload(entity, dto.getImageUrl());
+
+        if (dto.getParentId() != null) {
+            if (entity.getId() != null && entity.getId().equals(dto.getParentId())) {
+                throw new ConflictException("Danh mục không thể làm cha của chính nó!");
+            }
+            Category parent = categoryRepository.findById(dto.getParentId())
+                    .orElseThrow(() -> new NotFoundException("Không tìm thấy danh mục cha với ID: " + dto.getParentId()));
+            entity.setParent(parent);
+        } else {
+            entity.setParent(null);
+        }
+    }
+
     private void cascadeHide(Category category) {
-        // Ẩn tất cả sản phẩm thuộc danh mục này bằng Query hàng loạt đã viết ở Bước 1
+        // Ẩn tất cả sản phẩm thuộc danh mục này
         productRepository.deactivateByCategoryId(category.getId());
 
         // Đệ quy để ẩn các danh mục con và sản phẩm của con
-        if (category.getChildren() != null) {
-            for (Category child : category.getChildren()) {
-                child.setStatus(CategoryStatus.INACTIVE);
-                categoryRepository.save(child); // Cập nhật trạng thái danh mục con
-                cascadeHide(child); // Tiếp tục đệ quy xuống cấp sâu hơn
+        List<Category> children = category.getChildren();
+        if (children != null && !children.isEmpty()) {
+            for (Category child : children) {
+                if (child.getStatus() != CategoryStatus.INACTIVE) {
+                    child.setStatus(CategoryStatus.INACTIVE);
+                    categoryRepository.save(child);
+                    cascadeHide(child);
+                }
             }
         }
     }
@@ -123,7 +124,7 @@ public class CategoryService {
         Category category = categoryRepository.findById(id)
                 .orElseThrow(() -> new NotFoundException("Danh mục không tồn tại."));
 
-        // 4. Chặn xóa nếu có sản phẩm (tính cả SP trong danh mục con)
+        // Chặn xóa nếu có sản phẩm (tính cả SP trong danh mục con)
         long totalProducts = countAllProductsRecursive(category);
         if (totalProducts > 0) {
             throw new ConflictException("Không thể xóa! Danh mục này hoặc danh mục con đang chứa " + totalProducts + " sản phẩm.");
@@ -150,14 +151,9 @@ public class CategoryService {
     }
 
     public List<CategoryDTO> getPublicCategories() {
-        // Sử dụng CategoryStatus.ACTIVE để lọc
         List<Category> categories = categoryRepository.findByStatus(CategoryStatus.ACTIVE);
+        if (categories == null) return new ArrayList<>();
 
-        if (categories == null || categories.isEmpty()) {
-            return new ArrayList<>();
-        }
-
-        // Map sang DTO (convertToDTO đã có logic tính tổng số sản phẩm đệ quy)
         return categories.stream()
                 .map(this::convertToDTO)
                 .collect(Collectors.toList());
@@ -166,8 +162,6 @@ public class CategoryService {
     public CategoryDTO getCategoryById(Long id) {
         Category category = categoryRepository.findById(id)
                 .orElseThrow(() -> new NotFoundException("Không tìm thấy danh mục với ID: " + id));
-
-        // Sử dụng convertToDTO để đảm bảo productCount được tính toán chính xác
         return convertToDTO(category);
     }
 }

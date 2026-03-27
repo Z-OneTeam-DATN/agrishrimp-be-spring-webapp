@@ -1,7 +1,7 @@
 package com.zone.agri.service;
 
-import com.zone.agri.dto.geo.CoordinateDto;
-import com.zone.agri.dto.geo.RoutingResult;
+import com.zone.agri.dto.response.geo.CoordinateDto;
+import com.zone.agri.dto.response.geo.RoutingResult;
 import com.zone.agri.entity.Branch;
 import com.zone.agri.entity.enums.BranchStatus;
 import com.zone.agri.repository.BranchRepository;
@@ -96,24 +96,27 @@ public class BranchSearchService {
 
     List<BranchWithRealDistance> enrichWithRealDistance(double userLat, double userLng,
                                                         List<BranchWithDistance> all) {
-        List<BranchWithDistance> withCoords = all.stream()
-                .filter(bwd -> bwd.branch().getLat() != null && bwd.branch().getLng() != null)
-                .toList();
-        List<BranchWithDistance> withoutCoords = all.stream()
-                .filter(bwd -> bwd.branch().getLat() == null || bwd.branch().getLng() == null)
-                .toList();
-
         List<BranchWithRealDistance> result = new ArrayList<>();
+        List<BranchWithDistance> withCoords = new ArrayList<>();
+        List<BranchWithDistance> withoutCoords = new ArrayList<>();
+
+        for (BranchWithDistance bwd : all) {
+            if (bwd.branch().getLat() != null && bwd.branch().getLng() != null) {
+                withCoords.add(bwd);
+            } else {
+                withoutCoords.add(bwd);
+            }
+        }
 
         if (!withCoords.isEmpty()) {
-            // Chỉ gọi ORS cho orsTopN gần nhất để tiết kiệm API quota
-            List<BranchWithDistance> orsGroup      = withCoords.stream().limit(orsTopN).toList();
-            List<BranchWithDistance> haversineGroup = withCoords.stream().skip(orsTopN).toList();
+            int limit = Math.min(withCoords.size(), orsTopN);
+            List<BranchWithDistance> orsCandidates = withCoords.subList(0, limit);
+            List<BranchWithDistance> fallbackCandidates = withCoords.subList(limit, withCoords.size());
 
             List<Double> durations = null;
             try {
                 CoordinateDto origin = new CoordinateDto(userLat, userLng);
-                List<CoordinateDto> destinations = orsGroup.stream()
+                List<CoordinateDto> destinations = orsCandidates.stream()
                         .map(bwd -> new CoordinateDto(bwd.branch().getLat(), bwd.branch().getLng()))
                         .toList();
                 durations = routingProvider.getDistanceMatrix(origin, destinations).getDurations();
@@ -121,28 +124,36 @@ public class BranchSearchService {
                 log.warn("ORS distance matrix thất bại, dùng Haversine fallback: {}", e.getMessage());
             }
 
-            for (int i = 0; i < orsGroup.size(); i++) {
-                BranchWithDistance bwd = orsGroup.get(i);
+            // Process ORS candidates
+            for (int i = 0; i < orsCandidates.size(); i++) {
+                BranchWithDistance bwd = orsCandidates.get(i);
                 double durationSec = (durations != null && i < durations.size() && durations.get(i) >= 0)
                         ? durations.get(i)
-                        : bwd.distanceKm() * 120;
-                result.add(new BranchWithRealDistance(bwd.branch(), bwd.distanceKm(), durationSec, durationSec / 60.0));
+                        : estimateDuration(bwd.distanceKm());
+                result.add(createRealDistance(bwd, durationSec));
             }
 
-            // Chi nhánh xa hơn orsTopN — Haversine estimate (120s/km)
-            for (BranchWithDistance bwd : haversineGroup) {
-                double durationSec = bwd.distanceKm() * 120;
-                result.add(new BranchWithRealDistance(bwd.branch(), bwd.distanceKm(), durationSec, durationSec / 60.0));
+            // Process fallback candidates
+            for (BranchWithDistance bwd : fallbackCandidates) {
+                result.add(createRealDistance(bwd, estimateDuration(bwd.distanceKm())));
             }
         }
 
         // Branches chưa geocode — sort về cuối
         for (BranchWithDistance bwd : withoutCoords) {
             log.debug("Branch '{}' (id={}) chưa geocode, sort về cuối", bwd.branch().getName(), bwd.branch().getId());
-            result.add(new BranchWithRealDistance(bwd.branch(), bwd.distanceKm(), 999_999, 999_999 / 60.0));
+            result.add(createRealDistance(bwd, 999_999));
         }
 
         result.sort(Comparator.comparingDouble(BranchWithRealDistance::durationSeconds));
         return result;
+    }
+
+    private double estimateDuration(double distanceKm) {
+        return distanceKm * 120; // 120s/km estimate
+    }
+
+    private BranchWithRealDistance createRealDistance(BranchWithDistance bwd, double durationSec) {
+        return new BranchWithRealDistance(bwd.branch(), bwd.distanceKm(), durationSec, durationSec / 60.0);
     }
 }
