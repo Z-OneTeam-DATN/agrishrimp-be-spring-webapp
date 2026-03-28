@@ -117,6 +117,25 @@ public interface InventoryRepository extends JpaRepository<Inventory, Long> {
            """)
     List<InventorySearchResponse> searchInventoryForCheck(@Param("keyword") String keyword, @Param("branchId") Long branchId);
 
+    @Query("SELECT COUNT(DISTINCT i.productVariant.product.id) FROM Inventory i " +
+            "WHERE (:branchId IS NULL OR i.branch.id = :branchId)")
+    long countDistinctProducts(@Param("branchId") Long branchId);
+
+    @Query("SELECT COUNT(DISTINCT i.productVariant.product.id) FROM Inventory i " +
+            "WHERE (:branchId IS NULL OR i.branch.id = :branchId) " +
+            "GROUP BY i.productVariant.product.id " +
+            "HAVING SUM(i.quantity) > 0 AND SUM(i.quantity) <= :threshold")
+    List<Long> getLowStockProductIds(@Param("threshold") int threshold, @Param("branchId") Long branchId);
+
+    @Query("SELECT COUNT(DISTINCT p.id) FROM Product p " +
+            "WHERE p.id NOT IN (SELECT DISTINCT i.productVariant.product.id FROM Inventory i " +
+            "WHERE (:branchId IS NULL OR i.branch.id = :branchId) AND i.quantity > 0)")
+    long countOutOfStockProducts(@Param("branchId") Long branchId);
+
+    @Query("SELECT COALESCE(SUM(i.quantity * i.importPrice), 0) FROM Inventory i " +
+            "WHERE (:branchId IS NULL OR i.branch.id = :branchId)")
+    BigDecimal sumTotalValue(@Param("branchId") Long branchId);
+
     // ==============================================================
     // 2. ADAPTER: VIẾT LẠI CÁC HÀM CŨ ĐỂ KHÔNG LÀM LỖI CODE NGƯỜI KHÁC
     // ==============================================================

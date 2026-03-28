@@ -2,6 +2,7 @@ package com.zone.agri.repository;
 
 import com.zone.agri.entity.Order;
 import com.zone.agri.entity.enums.OrderStatus;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -42,15 +43,75 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
 
     List<Order> findByStatusOrderByCreatedAtDesc(OrderStatus status);
 
+    @Query("SELECT o FROM Order o WHERE o.status = :status " +
+            "AND (:branchId IS NULL OR o.branch.id = :branchId) " +
+            "ORDER BY o.createdAt DESC")
+    List<Order> findPendingOrders(@Param("status") OrderStatus status, 
+                                  @Param("branchId") Long branchId, 
+                                  Pageable pageable);
+
+    @Query("SELECT COUNT(o) FROM Order o WHERE o.status = :status " +
+            "AND (:branchId IS NULL OR o.branch.id = :branchId)")
+    long countByStatus(@Param("status") OrderStatus status, @Param("branchId") Long branchId);
+
+    @Query("SELECT o FROM Order o WHERE (:branchId IS NULL OR o.branch.id = :branchId) ORDER BY o.createdAt DESC")
+    List<Order> findRecentOrders(@Param("branchId") Long branchId, Pageable pageable);
+
     List<Order> findAllByOrderByCreatedAtDesc();
 
-    // Tính tổng doanh thu (Đơn hàng đã hoàn thành)
-    @Query("SELECT SUM(o.finalAmount) FROM Order o WHERE o.status = 'COMPLETED' " +
+    @Query("SELECT COUNT(o) FROM Order o WHERE o.status <> com.zone.agri.entity.enums.OrderStatus.CANCELLED " +
+            "AND (:branchId IS NULL OR o.branch.id = :branchId)")
+    long countAllOrdersExceptCancelled(@Param("branchId") Long branchId);
+
+    @Query("SELECT COUNT(o) FROM Order o WHERE o.status IN (com.zone.agri.entity.enums.OrderStatus.COMPLETED, com.zone.agri.entity.enums.OrderStatus.SHIPPING) " +
             "AND o.createdAt BETWEEN :startDate AND :endDate " +
             "AND (:branchId IS NULL OR o.branch.id = :branchId)")
-    BigDecimal sumRevenue(@Param("startDate") LocalDateTime startDate,
-                          @Param("endDate") LocalDateTime endDate,
-                          @Param("branchId") Long branchId);
+    long countSuccessOrders(@Param("startDate") LocalDateTime startDate,
+                            @Param("endDate") LocalDateTime endDate,
+                            @Param("branchId") Long branchId);
+
+    @Query("SELECT SUM(o.finalAmount) FROM Order o WHERE o.status IN (com.zone.agri.entity.enums.OrderStatus.COMPLETED, com.zone.agri.entity.enums.OrderStatus.SHIPPING) " +
+            "AND o.createdAt BETWEEN :startDate AND :endDate " +
+            "AND (:branchId IS NULL OR o.branch.id = :branchId)")
+    BigDecimal sumTotalRevenue(@Param("startDate") LocalDateTime startDate,
+                               @Param("endDate") LocalDateTime endDate,
+                               @Param("branchId") Long branchId);
+
+    // Tính tổng giá vốn (COGS) cho cả COMPLETED và SHIPPING
+    @Query("SELECT SUM(ABS(it.quantityChange) * i.importPrice) " +
+            "FROM Order o " +
+            "JOIN InventoryTransaction it ON it.referenceCode = o.code " +
+            "JOIN it.inventory i " +
+            "WHERE o.status IN (com.zone.agri.entity.enums.OrderStatus.COMPLETED, com.zone.agri.entity.enums.OrderStatus.SHIPPING) " +
+            "AND it.quantityChange < 0 " +
+            "AND o.createdAt BETWEEN :startDate AND :endDate " +
+            "AND (:branchId IS NULL OR i.branch.id = :branchId)")
+    BigDecimal sumTotalCost(@Param("startDate") LocalDateTime startDate,
+                            @Param("endDate") LocalDateTime endDate,
+                            @Param("branchId") Long branchId);
+
+    @Query("SELECT CAST(o.createdAt AS date) as date, SUM(o.finalAmount) as revenue, COUNT(o) as orderCount " +
+            "FROM Order o WHERE o.status IN (com.zone.agri.entity.enums.OrderStatus.COMPLETED, com.zone.agri.entity.enums.OrderStatus.SHIPPING) " +
+            "AND o.createdAt BETWEEN :startDate AND :endDate " +
+            "AND (:branchId IS NULL OR o.branch.id = :branchId) " +
+            "GROUP BY CAST(o.createdAt AS date) " +
+            "ORDER BY CAST(o.createdAt AS date) ASC")
+    List<Object[]> getDailyStats(@Param("startDate") LocalDateTime startDate,
+                                 @Param("endDate") LocalDateTime endDate,
+                                 @Param("branchId") Long branchId);
+
+    @Query("SELECT CAST(o.createdAt AS date) as date, SUM(ABS(it.quantityChange) * i.importPrice) as cost " +
+            "FROM InventoryTransaction it " +
+            "JOIN it.inventory i " +
+            "JOIN Order o ON it.referenceCode = o.code " +
+            "WHERE o.status IN (com.zone.agri.entity.enums.OrderStatus.COMPLETED, com.zone.agri.entity.enums.OrderStatus.SHIPPING) " +
+            "AND it.quantityChange < 0 " +
+            "AND o.createdAt BETWEEN :startDate AND :endDate " +
+            "AND (:branchId IS NULL OR i.branch.id = :branchId) " +
+            "GROUP BY CAST(o.createdAt AS date)")
+    List<Object[]> getDailyCosts(@Param("startDate") LocalDateTime startDate,
+                                 @Param("endDate") LocalDateTime endDate,
+                                 @Param("branchId") Long branchId);
 
     // Tính tổng tiền hàng bị trả lại (Đơn hàng bị RETURNED)
     @Query("SELECT SUM(o.totalAmount) FROM Order o WHERE o.status = 'RETURNED' " +

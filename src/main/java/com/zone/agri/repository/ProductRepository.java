@@ -11,6 +11,8 @@ import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import org.springframework.data.domain.Pageable;
+
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.Optional;
 
@@ -174,4 +176,53 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
 
     // Kiểm tra xem danh mục có sản phẩm không (phục vụ logic xóa)
     boolean existsByCategoryId(Long categoryId);
+
+
+    @Query("SELECT COUNT(p) FROM Product p WHERE p.status = 'ACTIVE'")
+    long countActiveProducts();
+
+    // 3. Tỷ trọng doanh thu theo danh mục (Admin - Toàn hệ thống)
+    interface CategorySalesProjection {
+        Long getCategoryId();
+        String getCategoryName();
+        BigDecimal getTotalRevenue();
+        Long getTotalQuantity();
+    }
+
+    @Query("SELECT c.id AS categoryId, c.name AS categoryName, " +
+            "SUM(oi.price * oi.quantity) AS totalRevenue, " +
+            "SUM(oi.quantity) AS totalQuantity " +
+            "FROM OrderItem oi " +
+            "JOIN oi.productVariant pv " +
+            "JOIN pv.product p " +
+            "JOIN p.category c " +
+            "JOIN oi.order o " +
+            "WHERE o.status IN (com.zone.agri.entity.enums.OrderStatus.COMPLETED, com.zone.agri.entity.enums.OrderStatus.SHIPPING) " +
+            "GROUP BY c.id, c.name " +
+            "ORDER BY totalRevenue DESC")
+    List<CategorySalesProjection> getCategorySalesSystemWide();
+
+    // 1. Dùng Interface này để hứng dữ liệu trả về từ câu Query
+    interface TopProductProjection {
+        Long getProductId();
+        String getProductName();
+        Long getQuantitySold();
+        BigDecimal getRevenue();
+        String getImageUrl();
+    }
+
+    // 2. Câu Query gom nhóm sản phẩm, tính tổng số lượng bán và tổng tiền (Từ SubOrder để chính xác chi nhánh)
+    @Query("SELECT p.id AS productId, p.name AS productName, " +
+            "SUM(si.quantity) AS quantitySold, " +
+            "SUM(si.unitPrice * si.quantity) AS revenue, " +
+            "MAX(pv.imageUrl) AS imageUrl " +
+            "FROM SubOrderItem si " +
+            "JOIN si.subOrder s " +
+            "JOIN si.productVariant pv " +
+            "JOIN pv.product p " +
+            "WHERE s.status IN (com.zone.agri.entity.enums.OrderStatus.COMPLETED, com.zone.agri.entity.enums.OrderStatus.SHIPPING) " +
+            "AND (:branchId IS NULL OR s.branch.id = :branchId) " +
+            "GROUP BY p.id, p.name " +
+            "ORDER BY quantitySold DESC")
+    List<TopProductProjection> getTopSellingProducts(@Param("branchId") Long branchId, Pageable pageable);
 }

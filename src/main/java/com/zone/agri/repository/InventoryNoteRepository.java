@@ -96,6 +96,10 @@ public interface InventoryNoteRepository extends JpaRepository<InventoryNote, Lo
     """)
     Optional<InventoryNote> findByCodeWithDetails(@Param("code") String code);
 
+    @Query("SELECT in FROM InventoryNote in WHERE (:branchId IS NULL OR in.branch.id = :branchId) " +
+            "ORDER BY in.createdAt DESC")
+    List<InventoryNote> findRecentNotes(@Param("branchId") Long branchId, org.springframework.data.domain.Pageable pageable);
+
     // Lấy danh sách phiếu theo chi nhánh
     @Query("""
         SELECT in 

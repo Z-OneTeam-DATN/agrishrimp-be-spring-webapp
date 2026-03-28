@@ -155,16 +155,28 @@ public class OrderService {
         if (next == OrderStatus.CANCELLED) return;
         switch (current) {
             case PENDING:
-                if (next != OrderStatus.CONFIRMED) throw new BadRequestException("Đơn hàng mới cần được 'Xác nhận' trước.");
+                if (next != OrderStatus.CONFIRMED && next != OrderStatus.AWAITING_PAYMENT) 
+                    throw new BadRequestException("Đơn hàng mới cần được 'Xác nhận' hoặc 'Chờ thanh toán'.");
+                break;
+            case AWAITING_PAYMENT:
+                if (next != OrderStatus.CONFIRMED) 
+                    throw new BadRequestException("Đơn hàng chờ thanh toán cần được 'Xác nhận' sau khi thanh toán xong.");
                 break;
             case CONFIRMED:
-                if (next != OrderStatus.PROCESSING) throw new BadRequestException("Đơn hàng đã xác nhận phải chuyển sang 'Đang xử lý'.");
+                if (next != OrderStatus.PROCESSING) 
+                    throw new BadRequestException("Đơn hàng đã xác nhận phải chuyển sang 'Đang đóng gói'.");
                 break;
             case PROCESSING:
-                if (next != OrderStatus.SHIPPING) throw new BadRequestException("Đơn hàng đang xử lý phải chuyển sang 'Đang giao'.");
+                if (next != OrderStatus.READY_FOR_PICKUP && next != OrderStatus.SHIPPING) 
+                    throw new BadRequestException("Đơn hàng đang đóng gói phải chuyển sang 'Chờ lấy hàng' hoặc 'Đang giao'.");
+                break;
+            case READY_FOR_PICKUP:
+                if (next != OrderStatus.SHIPPING) 
+                    throw new BadRequestException("Đơn hàng chờ lấy hàng phải chuyển sang 'Đang giao'.");
                 break;
             case SHIPPING:
-                if (next != OrderStatus.COMPLETED && next != OrderStatus.RETURNED) throw new BadRequestException("Đơn đang giao chỉ có thể chuyển sang 'Hoàn thành' hoặc 'Trả hàng'.");
+                if (next != OrderStatus.COMPLETED && next != OrderStatus.RETURNED) 
+                    throw new BadRequestException("Đơn đang giao chỉ có thể chuyển sang 'Hoàn thành' hoặc 'Trả hàng'.");
                 break;
         }
     }
@@ -217,15 +229,20 @@ public class OrderService {
         validateStatusTransition(currentStatus, newStatus);
 
         subOrder.setStatus(newStatus);
-        subOrderRepository.save(subOrder);
+        subOrderRepository.saveAndFlush(subOrder); // Đảm bảo lưu xuống DB ngay lập tức
 
-        syncMasterOrderStatus(subOrder.getOrder());
+        // Đồng bộ ngược lên đơn hàng Master
+        syncMasterOrderStatus(subOrder.getOrder().getId());
     }
 
-    private void syncMasterOrderStatus(Order order) {
-        List<SubOrder> allSubs = subOrderRepository.findByOrderId(order.getId());
+    private void syncMasterOrderStatus(Long orderId) {
+        Order order = orderRepository.findById(orderId)
+                .orElseThrow(() -> new NotFoundException("Không tìm thấy đơn hàng tổng"));
+                
+        List<SubOrder> allSubs = subOrderRepository.findByOrderId(orderId);
         if (allSubs.isEmpty()) return;
 
+        // Chỉ xét các SubOrder không bị hủy hoặc trả hàng
         List<SubOrder> activeSubs = allSubs.stream()
                 .filter(s -> s.getStatus() != OrderStatus.CANCELLED && s.getStatus() != OrderStatus.RETURNED)
                 .collect(Collectors.toList());
@@ -237,6 +254,7 @@ public class OrderService {
             newMasterStatus = OrderStatus.COMPLETED;
             order.setPaymentStatus(PaymentStatus.PAID);
         } else {
+            // Lấy trạng thái "chậm nhất" của các chi nhánh (Trọng số nhỏ nhất)
             newMasterStatus = activeSubs.stream()
                     .map(SubOrder::getStatus)
                     .min(Comparator.comparingInt(this::statusWeight))
@@ -244,8 +262,9 @@ public class OrderService {
         }
 
         order.setStatus(newMasterStatus);
-        orderRepository.save(order);
+        orderRepository.saveAndFlush(order); // Lưu và flush ngay lập tức
 
+        // Ghi nhật ký hoạt động khách hàng nếu đơn hàng đóng
         if (newMasterStatus == OrderStatus.COMPLETED || newMasterStatus == OrderStatus.CANCELLED || newMasterStatus == OrderStatus.RETURNED) {
             customerService.evaluateAndHandleCustomerReputation(order.getUser().getId());
         }
@@ -253,12 +272,14 @@ public class OrderService {
 
     private int statusWeight(OrderStatus s) {
         return switch (s) {
-            case PENDING    -> 0;
-            case CONFIRMED  -> 1;
-            case PROCESSING -> 2;
-            case SHIPPING   -> 3;
-            case COMPLETED  -> 4;
-            default         -> 5;
+            case PENDING          -> 0;
+            case AWAITING_PAYMENT -> 1;
+            case CONFIRMED        -> 2;
+            case PROCESSING       -> 3;
+            case READY_FOR_PICKUP -> 4;
+            case SHIPPING         -> 5;
+            case COMPLETED        -> 6;
+            default               -> 7;
         };
     }
 
