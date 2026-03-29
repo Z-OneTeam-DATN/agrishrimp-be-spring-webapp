@@ -27,6 +27,20 @@ public class VoucherController {
 
     private final VoucherService voucherService;
 
+    // ==========================================
+    // API CÔNG KHAI (KHÔNG YÊU CẦU ĐĂNG NHẬP)
+    // ==========================================
+    @Operation(summary = "Lấy tất cả voucher công khai", description = "Lấy danh sách các voucher đang kích hoạt (ACTIVE) cho người dùng.")
+    @GetMapping("/public")
+    public ResponseEntity<ApiResponse<List<VoucherResponse>>> getPublicVouchers() {
+        List<VoucherResponse> data = voucherService.getPublicVouchers();
+        return ResponseEntity.ok(ApiResponse.success(data, "Lấy danh sách voucher công khai thành công"));
+    }
+
+
+    // ==========================================
+    // API QUẢN TRỊ (YÊU CẦU QUYỀN ADMIN)
+    // ==========================================
     @Operation(summary = "Lấy tất cả voucher", description = "Hỗ trợ tìm kiếm theo mã và lọc theo trạng thái")
     @SecurityRequirement(name = "bearerAuth")
     @RequirePermission("VOUCHER_VIEW")
