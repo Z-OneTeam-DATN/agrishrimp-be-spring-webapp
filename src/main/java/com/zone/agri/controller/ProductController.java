@@ -167,6 +167,17 @@ public class ProductController {
         return ResponseEntity.ok(ApiResponse.success(null, "Ngừng kinh doanh sản phẩm thành công"));
     }
 
+    @Operation(summary = "Kích hoạt kinh doanh lại sản phẩm", description = "Chuyển trạng thái sản phẩm từ INACTIVE sang ACTIVE")
+    @SecurityRequirement(name = "bearerAuth")
+    @RequirePermission("PRODUCT_UPDATE")
+    @PutMapping("/{id}/enable")
+    public ResponseEntity<ApiResponse<Void>> enable(
+            @Parameter(description = "ID của sản phẩm", example = "1", required = true)
+            @PathVariable Long id) {
+        productService.enableProduct(id);
+        return ResponseEntity.ok(ApiResponse.success(null, "Kích hoạt kinh doanh sản phẩm thành công."));
+    }
+
     // =========================================================================
     // Form-data helpers (dropdown cho UI)
     // =========================================================================

@@ -354,6 +354,32 @@ return convertToResponse(updatedProduct);
         log.info("Ngừng kinh doanh sản phẩm thành công: id={}", id);
     }
 
+    @Transactional
+    public void enableProduct(Long id) {
+        Product product = productRepository.findById(id)
+                .orElseThrow(() -> new NotFoundException("Không tìm thấy sản phẩm có ID: " + id));
+
+        // Kiểm tra danh mục sản phẩm có đang bị khóa (INACTIVE) không
+        Category category = product.getCategory();
+        if (category != null) {
+            Category current = category;
+            while (current != null) {
+                if (CategoryStatus.INACTIVE.equals(current.getStatus())) {
+                    throw new BadRequestException("Không thể kinh doanh lại do danh mục sản phẩm '" + current.getName() + "' đang bị khóa.");
+                }
+                current = current.getParent();
+            }
+        }
+
+        product.setStatus(ProductStatus.ACTIVE);
+        if (product.getVariants() != null) {
+            product.getVariants().forEach(v -> v.setStatus(VariantStatus.ACTIVE));
+        }
+
+        productRepository.save(product);
+        log.info("Kích hoạt kinh doanh sản phẩm thành công: id={}", id);
+    }
+
     // =========================================================================
     // IMAGE SEARCH
     // =========================================================================
