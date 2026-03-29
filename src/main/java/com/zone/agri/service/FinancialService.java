@@ -29,14 +29,13 @@ public class FinancialService {
         LocalDateTime start = (startDate != null) ? startDate.atStartOfDay() : LocalDateTime.of(2000, 1, 1, 0, 0);
         LocalDateTime end = (endDate != null) ? endDate.atTime(23, 59, 59) : LocalDateTime.now();
 
-        BigDecimal revenue = getSafeBigDecimal(orderRepository.sumRevenue(start, end, branchId));
+        BigDecimal revenue = getSafeBigDecimal(orderRepository.sumTotalRevenue(start, end, branchId));
         BigDecimal returnedGoods = getSafeBigDecimal(orderRepository.sumReturnedGoods(start, end, branchId));
         BigDecimal shippingFee = getSafeBigDecimal(orderRepository.sumShippingFee(start, end, branchId));
         BigDecimal discount = getSafeBigDecimal(orderRepository.sumDiscount(start, end, branchId));
 
-        // Tạm tính giá vốn = 60% doanh thu thuần
-        BigDecimal netRevenue = revenue.subtract(returnedGoods);
-        BigDecimal cogs = netRevenue.multiply(BigDecimal.valueOf(0.6));
+        // Tính giá vốn (COGS) chuẩn từ Repository
+        BigDecimal cogs = getSafeBigDecimal(orderRepository.sumTotalCost(start, end, branchId));
 
         return ProfitLossResponse.builder()
                 .revenue(revenue)

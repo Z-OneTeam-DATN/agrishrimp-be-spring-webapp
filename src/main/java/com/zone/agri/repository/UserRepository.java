@@ -9,6 +9,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.util.List;
 import java.util.Optional;
 
 @Repository
@@ -31,6 +32,15 @@ public interface UserRepository extends JpaRepository<User, Long> {
             @Param("branchId") Long branchId,
             @Param("status") com.zone.agri.entity.enums.UserStatus status,
             Pageable pageable);
+
+    @Query("SELECT u FROM User u WHERE u.role.slug IN ('CUSTOMER', 'USER') " +
+            "AND (:branchId IS NULL OR u.branch.id = :branchId) " +
+            "ORDER BY u.createdAt DESC")
+    List<User> findRecentCustomers(@Param("branchId") Long branchId, Pageable pageable);
+
+    @Query("SELECT COUNT(u) FROM User u WHERE u.role.slug IN ('CUSTOMER', 'USER') " +
+            "AND (:branchId IS NULL OR u.branch.id = :branchId)")
+    long countCustomers(@Param("branchId") Long branchId);
 
     boolean existsByEmailAndIdNot(String email, Long id);
     boolean existsByPhoneNumberAndIdNot(String phoneNumber, Long id);
