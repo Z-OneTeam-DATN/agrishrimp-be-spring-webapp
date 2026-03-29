@@ -16,6 +16,7 @@ public interface ReviewRepository extends JpaRepository<Review, Long> {
     @org.springframework.data.jpa.repository.Query("SELECT AVG(r.rating) FROM Review r WHERE r.product.id = :productId AND r.status = 'VISIBLE'")
     Double averageRatingByProductId(@org.springframework.data.repository.query.Param("productId") Long productId);
 
+    @org.springframework.data.jpa.repository.EntityGraph(attributePaths = {"reviewImages", "user", "product"})
     List<Review> findByProductIdAndStatusOrderByCreatedAtDesc(Long productId, com.zone.agri.entity.enums.ReviewStatus status);
 
     @org.springframework.data.jpa.repository.Query("SELECT COUNT(o) > 0 FROM Order o " +

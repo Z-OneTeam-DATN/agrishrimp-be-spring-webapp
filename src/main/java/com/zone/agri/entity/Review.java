@@ -61,5 +61,6 @@ public class Review {
 
     @OneToMany(mappedBy = "review", fetch = FetchType.LAZY, cascade = CascadeType.ALL)
     @ToString.Exclude
-    List<ReviewImage> reviewImages;
+    @Builder.Default
+    List<ReviewImage> reviewImages = new java.util.ArrayList<>();
 }
