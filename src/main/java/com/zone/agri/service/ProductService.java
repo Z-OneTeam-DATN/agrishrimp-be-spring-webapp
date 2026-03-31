@@ -492,7 +492,16 @@ return convertToResponse(updatedProduct);
 
     public ProductVariantResponse mapVariantToResponse(ProductVariant variant, User currentUser, BigDecimal multiplier) {
         // Tránh lỗi NullPointerException khi role null
-        boolean isAdmin = currentUser != null && currentUser.getRole() != null && "ADMIN".equals(currentUser.getRole().getSlug());
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        boolean hasExportPermission = auth != null && auth.getAuthorities().stream()
+                .anyMatch(a -> a.getAuthority().equals("EXPORT_CREATE") || a.getAuthority().equals("TRANSFER_CREATE"));
+
+        String roleSlug = (currentUser != null && currentUser.getRole() != null) ? currentUser.getRole().getSlug().toUpperCase() : "";
+        boolean isAdmin = "ADMIN".equals(roleSlug);
+        boolean isManager = "MANAGER".equals(roleSlug) || "BRANCH_MANAGER".equals(roleSlug);
+        
+        boolean canSeeImportPrice = isAdmin || isManager || hasExportPermission;
+
         Branch currentBranch = currentUser != null ? currentUser.getBranch() : null;
 
         List<Inventory> allInventories = inventoryRepository.findByProductVariantId(variant.getId());
@@ -501,7 +510,7 @@ return convertToResponse(updatedProduct);
                 .filter(inv -> inv.getQuantity() != null && inv.getQuantity() > 0)
                 // Chỉ lấy tồn kho từ chi nhánh ACTIVE (Admin xem được tất cả)
                 .filter(inv -> isAdmin || (inv.getBranch() != null && inv.getBranch().getStatus() == BranchStatus.ACTIVE))
-                // Public user thấy tất cả chi nhánh ACTIVE; Staff chỉ thấy chi nhánh của họ
+                // Public user thấy tất cả chi nhánh ACTIVE; Staff/Manager chỉ thấy chi nhánh của họ
                 .filter(inv -> currentUser == null || isAdmin || (currentBranch != null && inv.getBranch() != null && inv.getBranch().getId().equals(currentBranch.getId())))
                 .collect(Collectors.toList());
 
@@ -516,8 +525,9 @@ return convertToResponse(updatedProduct);
                     .branchName(inv.getBranch() != null ? inv.getBranch().getName() : "Kho tổng")
                     .batchNumber(inv.getBatchNumber() != null ? inv.getBatchNumber() : "Chưa xác định")
                     .quantity(inv.getQuantity())
-                    .importPrice(isAdmin ? importPrice : null) // Chỉ Admin mới thấy giá nhập
+                    .importPrice(canSeeImportPrice ? importPrice : null) // Admin/Manager/Exporter được thấy giá nhập
                     .sellingPrice(sellingPrice)
+                    .expiryDate(inv.getExpiryDate() != null ? inv.getExpiryDate().toLocalDate().toString() : null)
                     .build();
         }).collect(Collectors.toList());
 

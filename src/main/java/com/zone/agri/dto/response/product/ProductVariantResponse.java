@@ -31,7 +31,8 @@ public class ProductVariantResponse {
         private String branchName;     // Tên chi nhánh giữ lô này
         private String batchNumber;    // Số lô (từ Inventory Note Detail)
         private Integer quantity;      // Tồn kho hiện tại của lô này
-        private BigDecimal importPrice;// Giá vốn (Chỉ Admin mới có data này, NV sẽ null)
+        private BigDecimal importPrice;// Giá vốn (Chỉ Admin/Manager mới có data này, NV sẽ null)
         private BigDecimal sellingPrice; // Giá bán (Auto = importPrice * Hệ số lợi nhuận)
+        private String expiryDate;     // Ngày hết hạn (ISO-8601 string)
     }
 }

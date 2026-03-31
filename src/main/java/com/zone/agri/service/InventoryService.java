@@ -40,8 +40,8 @@ public class InventoryService {
         Branch destBranch = branchRepository.findByName(request.getBranchName())
                 .orElseThrow(() -> new NotFoundException("Chi nhánh không tồn tại: " + request.getBranchName()));
 
-        if ("SUPPLIER".equals(request.getImportType()) && !"WAREHOUSE".equalsIgnoreCase(destBranch.getBranchType())) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Lỗi: Chỉ có KHO TỔNG mới được phép nhập hàng trực tiếp từ NCC.");
+        if ("SUPPLIER".equals(request.getImportType()) && request.getSupplierCode() == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Lỗi: Nhập từ NCC phải có mã nhà cung cấp.");
         }
 
         InventoryNote noteEntity = new InventoryNote();
@@ -51,6 +51,7 @@ public class InventoryService {
         noteEntity.setDetails(new ArrayList<>());
 
         updateMetadata(noteEntity, request, destBranch);
+        noteEntity = noteRepository.save(noteEntity); // Lưu trước để lấy ID, tránh lỗi TransientObjectException khi lưu Transaction
         processItemsAndStock(noteEntity, request.getItems(), request.getImportType());
 
         return mapToResponse(noteRepository.save(noteEntity));

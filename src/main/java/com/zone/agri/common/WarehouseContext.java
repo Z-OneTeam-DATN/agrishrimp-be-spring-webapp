@@ -23,11 +23,7 @@ public class WarehouseContext {
 
         return switch (slug) {
             case "ADMIN" -> null;
-            case "MANAGER", "BRANCH_MANAGER" -> {
-                Long bid = user.getBranchId();
-                if (bid == null) throw new Forbidden("Quản lý chưa được gán chi nhánh");
-                yield bid;
-            }
+            case "MANAGER", "BRANCH_MANAGER" -> user.getBranchId(); // null means all branches
             default -> throw new Forbidden("Không có quyền truy cập kho");
         };
     }
