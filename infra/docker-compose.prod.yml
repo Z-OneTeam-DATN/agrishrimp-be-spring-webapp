@@ -130,7 +130,7 @@ services:
       - agrishrimp-net
     healthcheck:
       test: ["CMD-SHELL",
-             "curl -sf http://localhost:8004/actuator/health | grep -q '\"status\":\"UP\"'"]
+             "wget -qO- http://localhost:8004/actuator/health | grep -q '\"status\":\"UP\"'"]
       interval: 30s
       timeout: 10s
       retries: 3
