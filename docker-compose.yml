@@ -113,6 +113,10 @@ services:
       AWS_REGION: ${AWS_REGION:-ap-southeast-1}
       # Python AI Service
       IMAGE_SEARCH_URL: http://ai-visual-search:5001
+      # Geocoding / Routing
+      TRACKASIA_API_KEY: ${TRACKASIA_API_KEY}
+      TRACKASIA_AUTOCOMPLETE_URL: ${TRACKASIA_AUTOCOMPLETE_URL:-https://api.trackasia.vn/api/geocode/autocomplete}
+      
 
 volumes:
   mysql_data:
