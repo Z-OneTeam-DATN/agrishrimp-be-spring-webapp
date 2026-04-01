@@ -2,7 +2,7 @@
 # =============================================================
 # healthcheck.sh — Kiểm tra sức khoẻ tất cả services
 # Chạy: bash healthcheck.sh
-# Dùng trong cron: */5 * * * * /opt/agrishrimp/scripts/healthcheck.sh >> /var/log/agrishrimp-health.log 2>&1
+# Dùng trong cron: */5 * * * * /home/bnhien40/agrishrimp/scripts/healthcheck.sh >> /var/log/agrishrimp-health.log 2>&1
 # =============================================================
 set -uo pipefail
 

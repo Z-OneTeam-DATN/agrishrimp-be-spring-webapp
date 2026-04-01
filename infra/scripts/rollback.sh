@@ -17,7 +17,7 @@
 # =============================================================
 set -euo pipefail
 
-DEPLOY_DIR="/opt/agrishrimp"
+DEPLOY_DIR="/home/bnhien40/agrishrimp"
 REGISTRY="ghcr.io/z-oneteam-datn"
 
 SERVICE="${1:-}"

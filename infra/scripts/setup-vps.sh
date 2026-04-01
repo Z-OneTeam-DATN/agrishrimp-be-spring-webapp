@@ -6,7 +6,7 @@
 # =============================================================
 set -euo pipefail
 
-DEPLOY_DIR="/opt/agrishrimp"
+DEPLOY_DIR="/home/bnhien40/agrishrimp"
 NGINX_CONF="/etc/nginx/sites-available/agrishrimp"
 
 echo "======================================"

@@ -91,7 +91,7 @@ jobs:
           IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
         run: |
           set -e
-          cd /opt/agrishrimp
+          cd /home/bnhien40/agrishrimp
 
           CURRENT_IMAGE=$(docker inspect --format='{{index .RepoDigests 0}}' agrishrimp-api 2>/dev/null || echo "none")
 
