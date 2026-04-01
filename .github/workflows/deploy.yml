@@ -11,7 +11,7 @@ concurrency:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository_owner }}/agrishrimp-be-spring-webapp
+  IMAGE_NAME: z-oneteam-datn/agrishrimp-be-spring-webapp
   APP_PORT: 8004
   JAVA_VERSION: '21'
 
