@@ -116,6 +116,7 @@ services:
       # Geocoding / Routing
       TRACKASIA_API_KEY: ${TRACKASIA_API_KEY}
       TRACKASIA_AUTOCOMPLETE_URL: ${TRACKASIA_AUTOCOMPLETE_URL:-https://api.trackasia.vn/api/geocode/autocomplete}
+      ORS_API_KEY: ${ORS_API_KEY}
       
 
 volumes:
