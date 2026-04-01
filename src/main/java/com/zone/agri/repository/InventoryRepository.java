@@ -94,6 +94,15 @@ public interface InventoryRepository extends JpaRepository<Inventory, Long> {
            """)
     List<Object[]> sumQuantityGroupByProductIds(@Param("productIds") List<Long> productIds);
 
+    // --- MINI APP: lấy giá nhập thấp nhất (còn hàng) theo batch productIds ---
+    @Query("""
+           SELECT i.productVariant.product.id, MIN(i.importPrice)
+           FROM Inventory i
+           WHERE i.productVariant.product.id IN :productIds AND i.quantity > 0
+           GROUP BY i.productVariant.product.id
+           """)
+    List<Object[]> findMinImportPriceGroupByProductIds(@Param("productIds") List<Long> productIds);
+
 
     @Query("""
            SELECT new com.zone.agri.dto.response.inventory.InventorySearchResponse(

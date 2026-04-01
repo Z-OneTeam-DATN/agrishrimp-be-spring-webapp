@@ -142,7 +142,7 @@ spring:
 ### 6) Gọi thử API
 
 ```bash
-curl -X POST http://localhost:8080/api/auth/signup \
+curl -X POST http://localhost:8004/api/auth/signup \
   -H "Content-Type: application/json" \
   -d '{"email":"student@example.com","password":"123456"}'
 ```

@@ -26,6 +26,6 @@ COPY --from=build /app/target/*.jar app.jar
 # -Xmx: Set max heap size (can be overridden via environment)
 ENV JAVA_OPTS="-XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0 -Djava.security.egd=file:/dev/./urandom"
 
-EXPOSE 8080
+EXPOSE 8004
 
 ENTRYPOINT ["sh", "-c", "java $JAVA_OPTS -jar app.jar"]

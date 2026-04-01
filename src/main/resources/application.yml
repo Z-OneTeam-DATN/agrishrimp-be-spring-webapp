@@ -2,8 +2,7 @@ spring:
   application:
     name: agri-shrimp
   profiles:
-    active:
-      dev
+    active: ${SPRING_PROFILES_ACTIVE:prod}
 
 management:
   endpoints:

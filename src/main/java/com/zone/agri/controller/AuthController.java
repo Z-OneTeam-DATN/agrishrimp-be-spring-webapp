@@ -1,6 +1,8 @@
 package com.zone.agri.controller;
 
+import com.zone.agri.dto.request.auth.ZaloAuthRequest;
 import com.zone.agri.dto.response.auth.AuthResponse;
+import com.zone.agri.dto.response.auth.ZaloAuthResponse;
 import com.zone.agri.dto.request.auth.GoogleLoginRequest;
 import com.zone.agri.dto.request.auth.LoginRequest;
 import com.zone.agri.dto.request.auth.SignupRequest;
@@ -138,6 +140,22 @@ public class AuthController {
         AuthResponse authResponse = authService.loginWithGoogle(request);
         cookieUtils.setAuthCookies(response, authResponse.getAccessToken(), authResponse.getRefreshToken());
         return ResponseEntity.ok(authResponse);
+    }
+
+    // ---------------------------------------------------------
+    // POST /api/auth/zalo/auth — Đăng nhập Zalo Mini App
+    // ---------------------------------------------------------
+    @Operation(summary = "Đăng nhập Zalo Mini App",
+               description = "Xác thực người dùng từ Zalo Mini App bằng userId + zaloAccessToken + phoneToken. Tự động tạo tài khoản nếu chưa tồn tại.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Đăng nhập thành công", content = @Content(schema = @Schema(implementation = ZaloAuthResponse.class))),
+            @ApiResponse(responseCode = "400", description = "Token không hợp lệ, userId không khớp, hoặc không lấy được SĐT"),
+            @ApiResponse(responseCode = "401", description = "Tài khoản bị vô hiệu hoá hoặc chưa xác thực"),
+    })
+    @PostMapping("/zalo/auth")
+    public ResponseEntity<ZaloAuthResponse> zaloAuth(@Valid @RequestBody ZaloAuthRequest request) {
+        ZaloAuthResponse response = authService.loginWithZaloUserInfo(request);
+        return ResponseEntity.ok(response);
     }
 
     // ---------------------------------------------------------

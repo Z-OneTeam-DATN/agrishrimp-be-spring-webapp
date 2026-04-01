@@ -1,1 +1,1 @@
-docker-compose up -d db_agrishrimp redis_agrishrimp
+docker-compose up -d agri-shrimp-db redis_agrishrimp

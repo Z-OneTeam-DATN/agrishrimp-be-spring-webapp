@@ -127,9 +127,8 @@ public class ProductService {
         log.info("Tạo sản phẩm thành công: id={}, name={}", savedProduct.getId(), savedProduct.getName());
 
         // Auto-index vào AI service (fire-and-forget, không block nếu AI service bị down)
-        if (!savedImages.isEmpty()) {
-            imageSearchService.indexProduct(savedProduct.getId(), savedImages.get(0).getImageUrl());
-        }
+        resolveIndexImageUrl(savedProduct)
+                .ifPresent(imageUrl -> imageSearchService.indexProduct(savedProduct.getId(), imageUrl));
 
         return convertToResponse(savedProduct);
     }
@@ -164,6 +163,9 @@ public class ProductService {
         String indexedImageUrl = productVectorRepository.findByProductId(id)
                 .map(pv -> pv.getImageUrl())
                 .orElse(null);
+        String requestedIndexImageUrl = null;
+        boolean mainImageChanged = false;
+        boolean variantImageChanged = false;
 
         if (product.getProductImages() != null) {
             product.getProductImages().removeIf(img -> !keepImages.contains(img.getImageUrl()));
@@ -176,6 +178,10 @@ public class ProductService {
                 if (file != null && !file.isEmpty()) {
                     CloudinaryService.UploadResult res = cloudinaryService.upload(file, "products/main");
                     product.getProductImages().add(ProductImage.builder().imageUrl(res.secureUrl()).product(product).build());
+                    mainImageChanged = true;
+                    if (requestedIndexImageUrl == null) {
+                        requestedIndexImageUrl = res.secureUrl();
+                    }
                 }
             }
         }
@@ -207,6 +213,7 @@ public class ProductService {
 
             // Kiểm tra xem biến thể này đã tồn tại trong DB chưa (Dựa vào SKU)
             ProductVariant variant = existingVariantsMap.get(vDto.getSku());
+            String previousVariantImageUrl = variant != null ? variant.getImageUrl() : null;
 
             if (variant != null) {
                 // NẾU ĐÃ TỒN TẠI -> Cập nhật thông tin đè lên, KHÔNG TẠO MỚI
@@ -246,6 +253,13 @@ public class ProductService {
                 variantRepository.save(variant);
             }
 
+            if (!mainImageChanged && finalImageUrl != null && !Objects.equals(previousVariantImageUrl, finalImageUrl)) {
+                variantImageChanged = true;
+                if (requestedIndexImageUrl == null) {
+                    requestedIndexImageUrl = finalImageUrl;
+                }
+            }
+
             updatedVariants.add(variant);
             // Gỡ biến thể này khỏi Map cũ (Những thằng nào còn sót lại trong Map nghĩa là đã bị FE xóa đi)
             existingVariantsMap.remove(vDto.getSku());
@@ -268,19 +282,18 @@ product.getVariants().addAll(updatedVariants);
 // Lưu sản phẩm
 Product updatedProduct = productRepository.save(product);
 
-// Re-index AI chỉ khi ảnh thực sự thay đổi (fire-and-forget)
-Set<String> newImageUrls = updatedProduct.getProductImages() != null
-        ? updatedProduct.getProductImages().stream()
-                .map(ProductImage::getImageUrl)
-                .collect(Collectors.toSet())
-        : Collections.emptySet();
+// Re-index AI khi ảnh chính hoặc ảnh biến thể thay đổi, hoặc khi ảnh đang index không còn tồn tại
+String resolvedIndexImageUrl = resolveIndexImageUrl(updatedProduct).orElse(null);
+Set<String> availableImageUrls = collectIndexImageUrls(updatedProduct);
+boolean indexedImageGone = indexedImageUrl != null && !availableImageUrls.contains(indexedImageUrl);
+String nextIndexImageUrl = requestedIndexImageUrl != null ? requestedIndexImageUrl : resolvedIndexImageUrl;
 
-boolean newFilesUploaded = productImages != null &&
-        productImages.stream().anyMatch(f -> f != null && !f.isEmpty());
-boolean indexedImageGone = indexedImageUrl != null && !newImageUrls.contains(indexedImageUrl);
-
-if ((newFilesUploaded || indexedImageGone) && !newImageUrls.isEmpty()) {
-    imageSearchService.indexProduct(updatedProduct.getId(), newImageUrls.iterator().next());
+if ((mainImageChanged || variantImageChanged) && nextIndexImageUrl != null) {
+    imageSearchService.indexProduct(updatedProduct.getId(), nextIndexImageUrl);
+} else if (indexedImageGone && resolvedIndexImageUrl != null) {
+    imageSearchService.indexProduct(updatedProduct.getId(), resolvedIndexImageUrl);
+} else if (indexedImageUrl != null && resolvedIndexImageUrl == null) {
+    imageSearchService.deleteIndex(updatedProduct.getId());
 }
 
 return convertToResponse(updatedProduct);
@@ -406,11 +419,10 @@ return convertToResponse(updatedProduct);
     public int indexAll() {
         List<Product> products = productRepository.findAllWithDetails();
         List<Map<String, Object>> payload = products.stream()
-                .filter(p -> p.getProductImages() != null && !p.getProductImages().isEmpty())
-                .map(p -> {
-                    String imageUrl = p.getProductImages().iterator().next().getImageUrl();
-                    return Map.<String, Object>of("productId", p.getId(), "imageUrl", imageUrl);
-                })
+                .map(p -> resolveIndexImageUrl(p)
+                        .map(imageUrl -> Map.<String, Object>of("productId", p.getId(), "imageUrl", imageUrl))
+                        .orElse(null))
+                .filter(Objects::nonNull)
                 .collect(Collectors.toList());
 
         if (payload.isEmpty()) return 0;
@@ -427,6 +439,60 @@ return convertToResponse(updatedProduct);
             return null;
         }
         return userRepository.findByEmail(auth.getName()).orElse(null);
+    }
+
+    private Optional<String> resolveIndexImageUrl(Product product) {
+        if (product == null) {
+            return Optional.empty();
+        }
+
+        Optional<String> mainImageUrl = Optional.ofNullable(product.getProductImages())
+                .orElse(Collections.emptySet())
+                .stream()
+                .sorted(Comparator.comparing(ProductImage::getId, Comparator.nullsLast(Long::compareTo)))
+                .map(ProductImage::getImageUrl)
+                .filter(Objects::nonNull)
+                .filter(url -> !url.isBlank())
+                .findFirst();
+
+        if (mainImageUrl.isPresent()) {
+            return mainImageUrl;
+        }
+
+        return Optional.ofNullable(product.getVariants())
+                .orElse(Collections.emptySet())
+                .stream()
+                .sorted(Comparator.comparing(ProductVariant::getId, Comparator.nullsLast(Long::compareTo)))
+                .map(ProductVariant::getImageUrl)
+                .filter(Objects::nonNull)
+                .filter(url -> !url.isBlank())
+                .findFirst();
+    }
+
+    private Set<String> collectIndexImageUrls(Product product) {
+        if (product == null) {
+            return Collections.emptySet();
+        }
+
+        Set<String> imageUrls = new LinkedHashSet<>();
+
+        Optional.ofNullable(product.getProductImages())
+                .orElse(Collections.emptySet())
+                .stream()
+                .map(ProductImage::getImageUrl)
+                .filter(Objects::nonNull)
+                .filter(url -> !url.isBlank())
+                .forEach(imageUrls::add);
+
+        Optional.ofNullable(product.getVariants())
+                .orElse(Collections.emptySet())
+                .stream()
+                .map(ProductVariant::getImageUrl)
+                .filter(Objects::nonNull)
+                .filter(url -> !url.isBlank())
+                .forEach(imageUrls::add);
+
+        return imageUrls;
     }
 
     public ProductResponse convertToResponse(Product product) {

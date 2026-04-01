@@ -18,7 +18,7 @@ public class GhnController {
     private final RestTemplate restTemplate;
     private final TrackAsiaGeocodingProvider trackAsiaProvider;
 
-    @Value("${shipping.ghn.token:0c84d3ad-125f-11f1-8935-9e298af4d523}")
+    @Value("${shipping.ghn.token}")
     private String ghnToken;
 
     private static final String BASE_URL = "https://online-gateway.ghn.vn/shiip/public-api/master-data";

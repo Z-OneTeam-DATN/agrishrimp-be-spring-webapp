@@ -1,5 +1,5 @@
 server:
-  port: 8080
+  port: ${SERVER_PORT:8004}
 
 spring:
   application:
@@ -13,18 +13,18 @@ spring:
 
   servlet:
     multipart:
-      max-file-size: 50MB
-      max-request-size: 50MB
+      max-file-size: ${SPRING_SERVLET_MULTIPART_MAX_FILE_SIZE:50MB}
+      max-request-size: ${SPRING_SERVLET_MULTIPART_MAX_REQUEST_SIZE:50MB}
 
   datasource:
-    url: jdbc:mysql://agri-shrimp-db:3306/agri_shrimp_db?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
-    username: ${SPRING_DATASOURCE_USERNAME:root}
-    password: ${SPRING_DATASOURCE_PASSWORD:123456zoneteam}
+    url: ${SPRING_DATASOURCE_URL:jdbc:mysql://db:3306/agri_shrimp_db?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC}
+    username: ${SPRING_DATASOURCE_USERNAME:agri_user}
+    password: ${SPRING_DATASOURCE_PASSWORD}
     driver-class-name: com.mysql.cj.jdbc.Driver
 
   jpa:
     hibernate:
-      ddl-auto: ${SPRING_JPA_HIBERNATE_DDL_AUTO:update}
+      ddl-auto: ${SPRING_JPA_HIBERNATE_DDL_AUTO:validate}
     show-sql: false
     properties:
       hibernate:
@@ -33,15 +33,15 @@ spring:
 
   data:
     redis:
-      host: ${SPRING_DATA_REDIS_HOST:localhost}
+      host: ${SPRING_DATA_REDIS_HOST:redis}
       port: ${SPRING_DATA_REDIS_PORT:6379}
       password: ${SPRING_DATA_REDIS_PASSWORD:}
 
   mail:
-    host: smtp.gmail.com
-    port: 587
-    username: ${SPRING_MAIL_USERNAME:}
-    password: ${SPRING_MAIL_PASSWORD:}
+    host: ${SPRING_MAIL_HOST:smtp.gmail.com}
+    port: ${SPRING_MAIL_PORT:587}
+    username: ${SPRING_MAIL_USERNAME}
+    password: ${SPRING_MAIL_PASSWORD}
     properties:
       mail:
         smtp:
@@ -54,66 +54,79 @@ spring:
 
 security:
   jwt:
-    secret-key: ${SECURITY_JWT_SECRET_KEY:404E635266556A586E3272357538782F413F4428472B4B6250645367566B5970}
+    secret-key: ${SECURITY_JWT_SECRET_KEY}
     issuer: ${SECURITY_JWT_ISSUER:agri-shrimp}
-    expiry-time-in-seconds: 86400
-    refreshable-duration: 604800
+    expiry-time-in-seconds: ${SECURITY_JWT_EXPIRY_SECONDS:86400}
+    refreshable-duration: ${SECURITY_JWT_REFRESHABLE_DURATION_SECONDS:604800}
 
 app:
   cors:
-    allowed-origins: ${APP_CORS_ALLOWED_ORIGINS:http://localhost:3000,http://localhost:8080}
+    allowed-origins: ${APP_CORS_ALLOWED_ORIGINS:https://agrishrimp.io.vn}
   turnstile:
-    secret-key: ${APP_TURNSTILE_SECRET_KEY:0x4AAAAAACWEfgMhY3lG-CqER4Ayl1OtWOY}
-    url: "https://challenges.cloudflare.com/turnstile/v0/siteverify"
+    secret-key: ${APP_TURNSTILE_SECRET_KEY}
+    url: https://challenges.cloudflare.com/turnstile/v0/siteverify
   google:
-    client-id: ${APP_GOOGLE_CLIENT_ID:716238456770-avu71bkjh5nngpq1j5gs7euull9kn663.apps.googleusercontent.com}
+    client-id: ${APP_GOOGLE_CLIENT_ID}
   cookie:
     secure: ${APP_COOKIE_SECURE:true}
     same-site: ${APP_COOKIE_SAME_SITE:Lax}
+  web-base-url: ${APP_WEB_BASE_URL:https://agrishrimp.io.vn}
+  server:
+    url: ${APP_SERVER_URL:https://api.agrishrimp.io.vn}
 
 cloudinary:
-  cloud-name: ${CLOUDINARY_CLOUD_NAME:demevvyp4}
-  api-key: ${CLOUDINARY_API_KEY:176599529831455}
-  api-secret: ${CLOUDINARY_API_SECRET:PqDexQ59PWJ8pOWeqN_BjimFYuY}
-  folder: agrishrimp/products
+  cloud-name: ${CLOUDINARY_CLOUD_NAME}
+  api-key: ${CLOUDINARY_API_KEY}
+  api-secret: ${CLOUDINARY_API_SECRET}
+  folder: ${CLOUDINARY_FOLDER:agrishrimp/products}
 
 payos:
-  client-id: ${PAYOS_CLIENT_ID:}
-  api-key: ${PAYOS_API_KEY:}
-  checksum-key: ${PAYOS_CHECKSUM_KEY:}
-  return-url: ${PAYOS_RETURN_URL:http://localhost:3000/order-success}
-  cancel-url: ${PAYOS_CANCEL_URL:http://localhost:3000/order-cancel}
+  client-id: ${PAYOS_CLIENT_ID}
+  api-key: ${PAYOS_API_KEY}
+  checksum-key: ${PAYOS_CHECKSUM_KEY}
+  return-url: ${PAYOS_RETURN_URL:https://agrishrimp.io.vn/order-success}
+  cancel-url: ${PAYOS_CANCEL_URL:https://agrishrimp.io.vn/order-cancel}
 
 geocoding:
-  provider: trackasia
+  provider: ${GEOCODING_PROVIDER:trackasia}
   trackasia:
-    api-key: ${TRACKASIA_API_KEY:63a1ec0fafba9b6c88391772034153b56c}
+    api-key: ${TRACKASIA_API_KEY}
     url: https://api.trackasia.vn/api/geocode/search
+    autocomplete-url: ${TRACKASIA_AUTOCOMPLETE_URL:https://api.trackasia.vn/api/geocode/autocomplete}
   nominatim:
     url: https://nominatim.openstreetmap.org/search
 
 routing:
-  provider: ors
+  provider: ${ROUTING_PROVIDER:ors}
   ors:
-    api-key: ${ORS_API_KEY:eyJvcmciOiI1YjNjZTM1OTc4NTExMTAwMDFjZjYyNDgiLCJpZCI6IjQ0OGZjMDBmNjdjZjQwNTliMzcxNjYwMDgwNjU5ODk0IiwiaCI6Im11cm11cjY0In0=}
+    api-key: ${ORS_API_KEY}
     url: https://api.openrouteservice.org/v2/matrix/driving-car
   trackasia:
-    api-key: ${TRACKASIA_ROUTING_KEY:63a1ec0fafba9b6c88391772034153b56c}
+    api-key: ${TRACKASIA_ROUTING_KEY}
 
 shipping:
-  provider: ghn
+  provider: ${SHIPPING_PROVIDER:ghn}
   ghn:
-    token: ${GHN_API_KEY:0c84d3ad-125f-11f1-8935-9e298af4d523}
-    shop-id: ${GHN_SHOP_ID:6287754}
+    token: ${GHN_API_KEY}
+    shop-id: ${GHN_SHOP_ID}
     url: https://online-gateway.ghn.vn/shiip/public-api/v2
 
 location:
-  default-radius-km: 15
-  max-candidates: 5
-  ip-geo-url: http://ip-api.com/json
+  default-radius-km: ${LOCATION_DEFAULT_RADIUS_KM:15}
+  max-candidates: ${LOCATION_MAX_CANDIDATES:5}
+  ip-geo-url: ${LOCATION_IP_GEO_URL:http://ip-api.com/json}
 
 image-search:
-  base-url: ${IMAGE_SEARCH_URL:http://localhost:5001}
+  base-url: ${IMAGE_SEARCH_URL:http://ai-visual-search:5001}
+
+# Out of scope for this step. Keep placeholders so production config is complete later.
+ai:
+  base-url: ${AI_BASE_URL:}
+  predict-path: ${AI_PREDICT_PATH:/ai/predict-image}
+  prescription-path: ${AI_PRESCRIPTION_PATH:/ai/generate-prescription}
+
+zalo:
+  app-secret: ${ZALO_APP_SECRET}
 
 cloud:
   aws:
@@ -121,8 +134,8 @@ cloud:
     secretKey: ${AWS_SECRET_ACCESS_KEY:}
     region: ${AWS_REGION:ap-southeast-1}
   s3:
-    bucket-name: agri-shrimp-storage
-    upload-dir: webapp
+    bucket-name: ${AWS_S3_BUCKET_NAME:agri-shrimp-storage}
+    upload-dir: ${AWS_S3_UPLOAD_DIR:webapp}
     region: ${AWS_REGION:ap-southeast-1}
 
 logging:

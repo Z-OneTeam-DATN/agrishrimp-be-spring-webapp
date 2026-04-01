@@ -32,6 +32,11 @@ public class SchemaUpdateConfig {
                 "Patch inventory_notes.type ENUM thêm CHECK",
                 "ALTER TABLE inventory_notes MODIFY COLUMN type ENUM('IMPORT','EXPORT','CHECK')"
             );
+
+            applyPatch(
+                "Patch users.auth_provider ENUM thêm ZALO",
+                "ALTER TABLE users MODIFY COLUMN auth_provider ENUM('LOCAL','GOOGLE','ZALO')"
+            );
         };
     }
 
