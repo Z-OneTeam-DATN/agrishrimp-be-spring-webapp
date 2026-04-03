@@ -1,22 +1,25 @@
 package com.zone.agri.service;
 
-import com.zone.agri.dto.response.admin.AttributeDTO;
-import com.zone.agri.dto.response.product.AttributeValueResponse;
-import com.zone.agri.entity.Attribute;
-import com.zone.agri.entity.AttributeValue;
-import com.zone.agri.entity.enums.AttributeStatus;
-import com.zone.agri.repository.AttributeRepository;
-import com.zone.agri.repository.SKUAttributeValueRepository;
-import com.zone.agri.exception.ConflictException;
-import lombok.RequiredArgsConstructor;
-import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
-
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 import java.util.stream.Collectors;
+
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import com.zone.agri.dto.response.admin.AttributeDTO;
+import com.zone.agri.dto.response.product.AttributeValueResponse;
+import com.zone.agri.entity.Attribute;
+import com.zone.agri.entity.AttributeValue;
+import com.zone.agri.entity.enums.AttributeStatus;
+import com.zone.agri.exception.ConflictException;
+import com.zone.agri.repository.AttributeRepository;
+import com.zone.agri.repository.SKUAttributeValueRepository;
+
+import lombok.RequiredArgsConstructor;
 
 @Service
 @RequiredArgsConstructor
@@ -62,14 +65,19 @@ public class AttributeService {
         }
 
         mapToEntity(attr, dto);
-        return toDTO(repository.save(attr));
+        try {
+            return toDTO(repository.saveAndFlush(attr));
+        } catch (DataIntegrityViolationException e) {
+            throw new ConflictException("Không thể lưu: Có giá trị thuộc tính bạn vừa xóa đang được gắn cho biến thể sản phẩm!");
+        }
     }
 
     @Transactional
     public void delete(Long id) {
         boolean isUsedInProducts = skuAttributeValueRepository.existsByAttributeId(id);
         if (isUsedInProducts) {
-            throw new ConflictException("Không thể xóa thuộc tính này vì nó đang được gắn cho các biến thể sản phẩm. Vui lòng chuyển trạng thái sang 'Tạm ngừng' thay vì xóa.");
+            throw new ConflictException(
+                    "Không thể xóa thuộc tính này vì nó đang được gắn cho các biến thể sản phẩm. Vui lòng chuyển trạng thái sang 'Tạm ngừng' thay vì xóa.");
         }
         repository.deleteById(id);
     }
@@ -120,18 +128,30 @@ public class AttributeService {
         if (entity.getAttributeValues() == null) {
             entity.setAttributeValues(new ArrayList<>());
         }
-        entity.getAttributeValues().clear();
 
-        if (dto.getValues() != null) {
-            dto.getValues().stream()
-                    .map(String::trim)
-                    .filter(s -> !s.isEmpty())
-                    .distinct() // Tránh lưu trùng giá trị trong cùng 1 thuộc tính
-                    .map(val -> AttributeValue.builder()
-                            .attribute(entity)
-                            .value(val)
-                            .build())
-                    .forEach(entity.getAttributeValues()::add);
+        List<String> newValues = dto.getValues() != null ? dto.getValues().stream()
+                .map(String::trim)
+                .filter(s -> !s.isEmpty())
+                .distinct()
+                .collect(Collectors.toList())
+                : new ArrayList<>();
+
+        // 1. Loại bỏ các giá trị không còn xuất hiện trong danh sách mới truyền lên
+        entity.getAttributeValues().removeIf(av -> !newValues.contains(av.getValue()));
+
+        // 2. Lấy danh sách các giá trị đang có (sau khi đã lọc ở bước 1)
+        List<String> existingValues = entity.getAttributeValues().stream()
+                .map(AttributeValue::getValue)
+                .collect(Collectors.toList());
+
+        // 3. Thêm mới những giá trị người dùng vừa gõ thêm
+        for (String val : newValues) {
+            if (!existingValues.contains(val)) {
+                entity.getAttributeValues().add(AttributeValue.builder()
+                        .attribute(entity)
+                        .value(val)
+                        .build());
+            }
         }
     }
 }
