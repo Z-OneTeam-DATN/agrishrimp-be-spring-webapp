@@ -382,23 +382,41 @@ public class AuthService {
 
         Map<?, ?> body;
         try {
+            log.info("Verifying Zalo Access Token for userId: {}", expectedUserId);
             ResponseEntity<Map> response = restTemplate.exchange(
                     ZALO_VERIFY_URL, HttpMethod.GET, entity, Map.class
             );
             body = response.getBody();
+            log.info("Zalo Verify Token Response: {}", body);
         } catch (Exception e) {
-            log.error("Lỗi khi verify Zalo access token: {}", e.getMessage());
-            throw new BadRequestException("Zalo access token không hợp lệ hoặc đã hết hạn");
+            log.error("Lỗi thực thi khi verify Zalo token: {}", e.getMessage());
+            throw new BadRequestException("Lỗi kết nối khi xác thực Zalo token: " + e.getMessage());
         }
 
-        if (body == null || body.get("id") == null) {
-            throw new BadRequestException("Không lấy được thông tin user từ Zalo");
+        if (body == null) {
+            throw new BadRequestException("Zalo không trả về dữ liệu khi xác thực token");
+        }
+
+        // Kiểm tra lỗi từ Zalo
+        if (body.containsKey("error")) {
+            Object errObj = body.get("error");
+            int errorCode = (errObj instanceof Integer) ? (Integer) errObj : Integer.parseInt(String.valueOf(errObj));
+            if (errorCode != 0) {
+                String errorMsg = String.valueOf(body.get("message"));
+                log.error("Zalo Verify Token Error: code={}, message={}", errorCode, errorMsg);
+                throw new BadRequestException("Zalo Verify Token Error (" + errorCode + "): " + errorMsg);
+            }
+        }
+
+        if (body.get("id") == null) {
+            log.warn("Zalo verify token success but 'id' field is missing: {}", body);
+            throw new BadRequestException("Không lấy được thông tin user ID từ Zalo");
         }
 
         String returnedId = String.valueOf(body.get("id"));
         if (!expectedUserId.equals(returnedId)) {
             log.warn("Zalo userId không khớp: expected={}, returned={}", expectedUserId, returnedId);
-            throw new BadRequestException("userId không khớp với Zalo access token");
+            throw new BadRequestException("User ID cung cấp không khớp với Access Token từ Zalo");
         }
     }
 
