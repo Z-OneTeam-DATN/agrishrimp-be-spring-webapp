@@ -12,14 +12,18 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.zone.agri.dto.request.employee.EmployeeCreateRequest;
+import com.zone.agri.dto.request.employee.OcrCccdRequest;
 import com.zone.agri.dto.response.employee.EmployeeResponse;
+import com.zone.agri.dto.response.employee.OcrCccdResponse;
 import com.zone.agri.security.annotation.RequirePermission;
 import com.zone.agri.service.EmployeeService;
+import com.zone.agri.service.OcrService;
 
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -31,6 +35,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.web.multipart.MultipartFile;
 
 /**
  * REST Controller for Employee management
@@ -43,6 +48,7 @@ import lombok.extern.slf4j.Slf4j;
 public class EmployeeController {
 
         private final EmployeeService employeeService;
+        private final OcrService ocrService;
 
         /**
          * Get paginated employee list with filters
@@ -164,5 +170,34 @@ public class EmployeeController {
                 log.info("Looking up citizen ID: {}", citizenId);
                 var response = employeeService.lookupByCitizenId(citizenId);
                 return ResponseEntity.ok(response);
+        }
+
+        /**
+         * Extract CCCD information from uploaded image using OCR
+         * Endpoint: POST /api/employees/ocr-cccd
+         */
+        @PostMapping(value = "/ocr-cccd", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+        @Operation(summary = "OCR trích xuất thông tin từ ảnh CCCD", description = "Upload ảnh mặt trước CCCD để tự động trích xuất thông tin (họ tên, ngày sinh, giới tính, địa chỉ)", responses = {
+                        @ApiResponse(responseCode = "200", description = "OCR thành công", content = @Content(schema = @Schema(implementation = OcrCccdResponse.class))),
+                        @ApiResponse(responseCode = "400", description = "Ảnh không hợp lệ"),
+                        @ApiResponse(responseCode = "500", description = "Lỗi xử lý OCR")
+        })
+        public ResponseEntity<OcrCccdResponse> extractCccdFromImage(
+                        @Parameter(description = "Ảnh mặt trước CCCD (PNG, JPG, JPEG)") @RequestParam("image") MultipartFile image) {
+
+                // Validate image
+                if (image.isEmpty()) {
+                        return ResponseEntity.badRequest().build();
+                }
+
+                // Check file type
+                String contentType = image.getContentType();
+                if (contentType == null || !contentType.startsWith("image/")) {
+                        return ResponseEntity.badRequest().build();
+                }
+
+                log.info("Processing OCR for CCCD image: {}", image.getOriginalFilename());
+                OcrCccdResponse result = ocrService.extractCccdInfo(image);
+                return ResponseEntity.ok(result);
         }
 }
