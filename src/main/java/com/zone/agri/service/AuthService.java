@@ -414,17 +414,35 @@ public class AuthService {
 
         Map<?, ?> body;
         try {
+            log.info("Calling Zalo Phone API with access_token and code/phoneToken");
             ResponseEntity<Map> response = restTemplate.exchange(
                     ZALO_PHONE_URL, HttpMethod.GET, entity, Map.class
             );
             body = response.getBody();
+            log.info("Zalo Phone API Raw Response: {}", body);
         } catch (Exception e) {
-            log.error("Lỗi khi lấy số điện thoại từ Zalo: {}", e.getMessage());
-            throw new BadRequestException("Không thể lấy số điện thoại từ Zalo");
+            log.error("Lỗi thực thi khi gọi Zalo API: {}", e.getMessage());
+            throw new BadRequestException("Lỗi kết nối hoặc xử lý Zalo API: " + e.getMessage());
         }
 
-        if (body == null || body.get("data") == null) {
-            throw new BadRequestException("Zalo không trả về thông tin số điện thoại");
+        if (body == null) {
+            throw new BadRequestException("Zalo trả về response rỗng");
+        }
+
+        // Kiểm tra lỗi nghiệp vụ từ Zalo (error != 0)
+        if (body.containsKey("error")) {
+            Object errObj = body.get("error");
+            int errorCode = (errObj instanceof Integer) ? (Integer) errObj : Integer.parseInt(String.valueOf(errObj));
+            if (errorCode != 0) {
+                String errorMsg = String.valueOf(body.get("message"));
+                log.error("Zalo API Error: code={}, message={}", errorCode, errorMsg);
+                throw new BadRequestException("Zalo API Error (" + errorCode + "): " + errorMsg);
+            }
+        }
+
+        if (body.get("data") == null) {
+            log.warn("Zalo response success but 'data' field is missing: {}", body);
+            throw new BadRequestException("Zalo không trả về thông tin số điện thoại (data is null)");
         }
 
         @SuppressWarnings("unchecked")
@@ -432,6 +450,7 @@ public class AuthService {
         Object numberObj = data.get("number");
 
         if (numberObj == null || String.valueOf(numberObj).isBlank()) {
+            log.warn("Zalo 'data' found but 'number' is empty: {}", data);
             throw new BadRequestException("Số điện thoại từ Zalo bị rỗng hoặc không hợp lệ");
         }
 
