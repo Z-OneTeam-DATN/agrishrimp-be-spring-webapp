@@ -103,6 +103,36 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
             "ORDER BY SUM(oi.quantity) DESC")
     List<Product> findTopBestSellers(Pageable pageable);
 
+    @Query("""
+            SELECT p.id, SUM(oi.quantity)
+            FROM OrderItem oi
+            JOIN oi.order o
+            JOIN oi.productVariant pv
+            JOIN pv.product p
+            WHERE p.id IN :productIds
+              AND o.status IN (
+                com.zone.agri.entity.enums.OrderStatus.COMPLETED,
+                com.zone.agri.entity.enums.OrderStatus.SHIPPING
+              )
+            GROUP BY p.id
+            """)
+    List<Object[]> sumLegacySoldQuantityByProductIds(@Param("productIds") List<Long> productIds);
+
+    @Query("""
+            SELECT p.id, SUM(si.quantity)
+            FROM SubOrderItem si
+            JOIN si.subOrder s
+            JOIN si.productVariant pv
+            JOIN pv.product p
+            WHERE p.id IN :productIds
+              AND s.status IN (
+                com.zone.agri.entity.enums.OrderStatus.COMPLETED,
+                com.zone.agri.entity.enums.OrderStatus.SHIPPING
+              )
+            GROUP BY p.id
+            """)
+    List<Object[]> sumSubOrderSoldQuantityByProductIds(@Param("productIds") List<Long> productIds);
+
     // Tìm theo Slug cho trang chi tiết
     Optional<Product> findBySlug(String slug);
 

@@ -21,6 +21,9 @@ public class PublicProductResponse {
     private String description;
     private String origin;
     private String baseSku;
+    private Long soldCount;
+    private Float ratingAverage;
+    private Integer reviewCount;
 
     /** Danh mục — chỉ trả id + name, không trả status hay dữ liệu nội bộ */
     private CategoryInfo category;

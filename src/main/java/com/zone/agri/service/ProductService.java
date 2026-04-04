@@ -495,7 +495,38 @@ return convertToResponse(updatedProduct);
         return imageUrls;
     }
 
+    private Map<Long, Long> buildSoldCountMap(List<Long> productIds) {
+        if (productIds == null || productIds.isEmpty()) {
+            return Collections.emptyMap();
+        }
+
+        Map<Long, Long> soldCountMap = new LinkedHashMap<>();
+
+        productRepository.sumLegacySoldQuantityByProductIds(productIds)
+                .forEach(row -> soldCountMap.merge(
+                        ((Number) row[0]).longValue(),
+                        ((Number) row[1]).longValue(),
+                        Long::sum
+                ));
+
+        productRepository.sumSubOrderSoldQuantityByProductIds(productIds)
+                .forEach(row -> soldCountMap.merge(
+                        ((Number) row[0]).longValue(),
+                        ((Number) row[1]).longValue(),
+                        Long::sum
+                ));
+
+        return soldCountMap;
+    }
+
     public ProductResponse convertToResponse(Product product) {
+        if (product == null) {
+            return null;
+        }
+        return convertToResponse(product, buildSoldCountMap(List.of(product.getId())));
+    }
+
+    private ProductResponse convertToResponse(Product product, Map<Long, Long> soldCountMap) {
         User currentUser = getCurrentUser();
 
         // LẤY HỆ SỐ NHÂN TỪ SETTING SERVICE (Ví dụ: 30% -> 1.3)
@@ -537,12 +568,16 @@ return convertToResponse(updatedProduct);
                 .id(product.getId())
                 .name(product.getName())
                 .slug(product.getSlug())
+                .shortDesc(product.getShortDesc())
                 .description(product.getDescription())
                 .status(product.getStatus() != null ? product.getStatus().name() : null)
                 .origin(product.getOrigin())
                 .baseSku(product.getBaseSku())
                 .categoryName(product.getCategory() != null ? product.getCategory().getName() : null)
                 .brandName(product.getBrand() != null ? product.getBrand().getName() : null)
+                .soldCount(soldCountMap.getOrDefault(product.getId(), 0L))
+                .ratingAverage(product.getRatingAverage())
+                .reviewCount(product.getReviewCount())
                 .category(categoryDTO)
                 .brand(brandResponse)
                 .inventory(totalInventory)
@@ -745,16 +780,26 @@ return convertToResponse(updatedProduct);
     }
 
     public List<ProductResponse> getProductsForSale() {
-        return productRepository.findProductsForSale().stream()
-                .map(this::convertToResponse)
+        List<Product> products = productRepository.findProductsForSale();
+        Map<Long, Long> soldCountMap = buildSoldCountMap(
+                products.stream().map(Product::getId).toList()
+        );
+
+        return products.stream()
+                .map(product -> convertToResponse(product, soldCountMap))
                 .filter(p -> p.getInventory() != null && p.getInventory() > 0)
                 .collect(Collectors.toList());
     }
 
     public List<ProductResponse> getTopBestSellers(int limit) {
         Pageable pageable = PageRequest.of(0, limit * 2);
-        return productRepository.findTopBestSellers(pageable).stream()
-                .map(this::convertToResponse)
+        List<Product> products = productRepository.findTopBestSellers(pageable);
+        Map<Long, Long> soldCountMap = buildSoldCountMap(
+                products.stream().map(Product::getId).toList()
+        );
+
+        return products.stream()
+                .map(product -> convertToResponse(product, soldCountMap))
                 .filter(p -> p.getInventory() != null && p.getInventory() > 0)
                 .limit(limit)
                 .collect(Collectors.toList());
@@ -789,8 +834,11 @@ return convertToResponse(updatedProduct);
 
         if (productIds.isEmpty()) return Collections.emptyList();
 
-        return productRepository.findPublicByIds(productIds).stream()
-                .map(this::convertToResponse)
+        List<Product> products = productRepository.findPublicByIds(productIds);
+        Map<Long, Long> soldCountMap = buildSoldCountMap(productIds);
+
+        return products.stream()
+                .map(product -> convertToResponse(product, soldCountMap))
                 .filter(p -> p.getInventory() != null && p.getInventory() > 0)
                 .collect(Collectors.toList());
     }
@@ -809,8 +857,11 @@ return convertToResponse(updatedProduct);
 
         if (productIds.isEmpty()) return Collections.emptyList();
 
-        return productRepository.findPublicByIds(productIds).stream()
-                .map(this::convertToResponse)
+        List<Product> products = productRepository.findPublicByIds(productIds);
+        Map<Long, Long> soldCountMap = buildSoldCountMap(productIds);
+
+        return products.stream()
+                .map(product -> convertToResponse(product, soldCountMap))
                 .filter(p -> p.getInventory() != null && p.getInventory() > 0)
                 .collect(Collectors.toList());
     }
@@ -820,8 +871,9 @@ return convertToResponse(updatedProduct);
         Page<Long> productIdsPage = productRepository.findPublicProductIds(keyword, categoryId, brandId, pageable);
         List<Long> productIds = productIdsPage.getContent();
         if (productIds.isEmpty()) return Page.empty(pageable);
+        Map<Long, Long> soldCountMap = buildSoldCountMap(productIds);
         List<ProductResponse> productResponses = productRepository.findPublicByIds(productIds).stream()
-                .map(this::convertToResponse)
+                .map(product -> convertToResponse(product, soldCountMap))
                 .filter(p -> p.getInventory() != null && p.getInventory() > 0)
                 .collect(Collectors.toList());
         return new PageImpl<>(productResponses, pageable, productIdsPage.getTotalElements());
