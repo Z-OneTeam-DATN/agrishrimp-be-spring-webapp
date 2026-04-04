@@ -180,7 +180,11 @@ public class EmployeeService {
         if (employee.getRole() != null && Boolean.TRUE.equals(employee.getRole().getIsSystem())) {
             throw new Forbidden("Không thể xóa nhân viên có vai trò hệ thống");
         }
-        employee.setStatus(UserStatus.INACTIVE);
+
+        // Toggle status: ACTIVE <-> INACTIVE
+        UserStatus currentStatus = employee.getStatus();
+        UserStatus newStatus = (currentStatus == UserStatus.ACTIVE) ? UserStatus.INACTIVE : UserStatus.ACTIVE;
+        employee.setStatus(newStatus);
         userRepository.save(employee);
     }
 
