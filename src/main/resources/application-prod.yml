@@ -52,6 +52,9 @@ spring:
           timeout: 3000
           writetimeout: 5000
 
+sendgrid:
+  api-key: ${SENDGRID_API_KEY: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}
+
 security:
   jwt:
     secret-key: ${SECURITY_JWT_SECRET_KEY}
