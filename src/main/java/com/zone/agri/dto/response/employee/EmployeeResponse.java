@@ -39,7 +39,7 @@ public class EmployeeResponse {
     private String citizenId;
 
     @Schema(description = "Địa chỉ thường trú")
-    private String address;
+    private String addressDetail;
 
     @Schema(description = "Ngày sinh")
     private LocalDate dateOfBirth;

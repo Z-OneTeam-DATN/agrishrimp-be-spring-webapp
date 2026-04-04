@@ -63,6 +63,8 @@ public class EmployeeService {
                 .citizenId(request.getCitizenId())
                 .dateOfBirth(request.getDateOfBirth())
                 .gender(request.getGender())
+                .addressDetail(request.getAddressDetail())
+                .startDate(request.getStartDate())
                 .passwordHash(hashedPassword)
                 .avatarUrl(request.getAvatarUrl())
                 .status(parseStatus(request.getStatus()))
@@ -156,6 +158,8 @@ public class EmployeeService {
         existingEmployee.setCitizenId(request.getCitizenId());
         existingEmployee.setDateOfBirth(request.getDateOfBirth());
         existingEmployee.setGender(request.getGender());
+        existingEmployee.setAddressDetail(request.getAddressDetail());
+        existingEmployee.setStartDate(request.getStartDate());
         existingEmployee.setAvatarUrl(request.getAvatarUrl());
         existingEmployee.setStatus(parseStatus(request.getStatus()));
         existingEmployee.setBranch(branch);
@@ -191,11 +195,11 @@ public class EmployeeService {
                 .email(user.getEmail())
                 .phoneNumber(user.getPhoneNumber())
                 .citizenId(user.getCitizenId())
-                .address(null) // Address chưa được implement trong User entity
+                .addressDetail(user.getAddressDetail())
                 .avatarUrl(user.getAvatarUrl())
                 .status(user.getStatus())
                 .dateOfBirth(user.getDateOfBirth())
-                .startDate(null) // StartDate chưa được implement trong User entity
+                .startDate(user.getStartDate())
                 .createdAt(user.getCreatedAt())
                 .branch(user.getBranch() != null ? EmployeeResponse.BranchInfo.builder()
                         .id(user.getBranch().getId())
@@ -218,7 +222,7 @@ public class EmployeeService {
                 .fullName(user.getFullName())
                 .dateOfBirth(user.getDateOfBirth())
                 .gender(user.getGender() != null ? user.getGender().name() : null)
-                .address(null) // Address chưa được implement trong User entity
+                .address(user.getAddressDetail())
                 .build();
     }
 }
