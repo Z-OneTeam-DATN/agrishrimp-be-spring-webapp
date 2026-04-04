@@ -35,6 +35,9 @@ public class EmployeeResponse {
     @Schema(description = "Số điện thoại")
     private String phoneNumber;
 
+    @Schema(description = "Số CCCD/CMND")
+    private String citizenId;
+
     @Schema(description = "Địa chỉ thường trú")
     private String address;
 
