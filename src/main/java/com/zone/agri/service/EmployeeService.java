@@ -1,10 +1,17 @@
 package com.zone.agri.service;
 
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
 import com.zone.agri.dto.request.employee.EmployeeCreateRequest;
 import com.zone.agri.dto.response.employee.EmployeeResponse;
 import com.zone.agri.entity.Branch;
 import com.zone.agri.entity.Role;
 import com.zone.agri.entity.User;
+import com.zone.agri.entity.enums.AuthProvider;
 import com.zone.agri.entity.enums.UserStatus;
 import com.zone.agri.exception.ConflictException;
 import com.zone.agri.exception.Forbidden;
@@ -12,13 +19,9 @@ import com.zone.agri.exception.NotFoundException;
 import com.zone.agri.repository.BranchRepository;
 import com.zone.agri.repository.RoleRepository;
 import com.zone.agri.repository.UserRepository;
+
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.data.domain.Page;
-import org.springframework.data.domain.Pageable;
-import org.springframework.security.crypto.password.PasswordEncoder;
-import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 @Service
 @RequiredArgsConstructor
@@ -62,6 +65,7 @@ public class EmployeeService {
                 .passwordHash(hashedPassword)
                 .avatarUrl(request.getAvatarUrl())
                 .status(parseStatus(request.getStatus()))
+                .provider(AuthProvider.LOCAL)
                 .branch(branch)
                 .role(role)
                 .build();
@@ -76,7 +80,8 @@ public class EmployeeService {
     }
 
     private UserStatus parseStatus(String status) {
-        if (status == null || status.isBlank()) return UserStatus.ACTIVE;
+        if (status == null || status.isBlank())
+            return UserStatus.ACTIVE;
         try {
             return "active".equalsIgnoreCase(status) ? UserStatus.ACTIVE : UserStatus.INACTIVE;
         } catch (Exception e) {
@@ -94,24 +99,25 @@ public class EmployeeService {
     }
 
     private void validateUniqueFields(Long id, String email, String phone) {
-        boolean emailExists = (id == null) 
-            ? userRepository.existsByEmail(email) 
-            : userRepository.existsByEmailAndIdNot(email, id);
-            
+        boolean emailExists = (id == null)
+                ? userRepository.existsByEmail(email)
+                : userRepository.existsByEmailAndIdNot(email, id);
+
         if (emailExists) {
             throw new ConflictException("Email này đã được sử dụng trong hệ thống");
         }
 
         boolean phoneExists = (id == null)
-            ? userRepository.existsByPhoneNumber(phone)
-            : userRepository.existsByPhoneNumberAndIdNot(phone, id);
+                ? userRepository.existsByPhoneNumber(phone)
+                : userRepository.existsByPhoneNumberAndIdNot(phone, id);
 
         if (phoneExists) {
             throw new ConflictException("Số điện thoại này đã được sử dụng trong hệ thống");
         }
     }
 
-    public Page<EmployeeResponse> getEmployees(String keyword, Long branchId, Long roleId, String status, Pageable pageable) {
+    public Page<EmployeeResponse> getEmployees(String keyword, Long branchId, Long roleId, String status,
+            Pageable pageable) {
         UserStatus userStatus = null;
         if (status != null && !status.isBlank() && !"all".equalsIgnoreCase(status)) {
             try {
