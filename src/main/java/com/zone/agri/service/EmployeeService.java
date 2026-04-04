@@ -7,6 +7,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.zone.agri.dto.request.employee.EmployeeCreateRequest;
+import com.zone.agri.dto.response.citizen.CitizenLookupResponse;
 import com.zone.agri.dto.response.employee.EmployeeResponse;
 import com.zone.agri.entity.Branch;
 import com.zone.agri.entity.Role;
@@ -190,11 +191,11 @@ public class EmployeeService {
                 .email(user.getEmail())
                 .phoneNumber(user.getPhoneNumber())
                 .citizenId(user.getCitizenId())
-                .address(user.getAddressDetail())
+                .address(null) // Address chưa được implement trong User entity
                 .avatarUrl(user.getAvatarUrl())
                 .status(user.getStatus())
                 .dateOfBirth(user.getDateOfBirth())
-                .startDate(user.getStartDate())
+                .startDate(null) // StartDate chưa được implement trong User entity
                 .createdAt(user.getCreatedAt())
                 .branch(user.getBranch() != null ? EmployeeResponse.BranchInfo.builder()
                         .id(user.getBranch().getId())
@@ -206,6 +207,18 @@ public class EmployeeService {
                         .displayName(user.getRole().getDisplayName())
                         .slug(user.getRole().getSlug())
                         .build() : null)
+                .build();
+    }
+
+    public CitizenLookupResponse lookupByCitizenId(String citizenId) {
+        User user = userRepository.findByCitizenId(citizenId)
+                .orElseThrow(() -> new NotFoundException("Không tìm thấy thông tin CCCD này trong hệ thống"));
+
+        return CitizenLookupResponse.builder()
+                .fullName(user.getFullName())
+                .dateOfBirth(user.getDateOfBirth())
+                .gender(user.getGender() != null ? user.getGender().name() : null)
+                .address(null) // Address chưa được implement trong User entity
                 .build();
     }
 }
