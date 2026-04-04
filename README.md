@@ -1,186 +1,176 @@
-# Agri Shrimp
+# 🦐 AgriShrimp Backend API
 
-Nền tảng API cho dự án **agri-shrimp** sử dụng **JWT authentication**, Spring Security, JPA và cấu hình đa môi trường.
+![Java 21](https://img.shields.io/badge/Java-21-007396?logo=openjdk&logoColor=white)
+![Spring Boot 3.5](https://img.shields.io/badge/Spring_Boot-3.5-6DB33F?logo=springboot&logoColor=white)
+![MySQL](https://img.shields.io/badge/MySQL-8-4479A1?logo=mysql&logoColor=white)
+![Redis](https://img.shields.io/badge/Redis-Cache-DC382D?logo=redis&logoColor=white)
+![Docker](https://img.shields.io/badge/Docker-Ready-2496ED?logo=docker&logoColor=white)
 
-## Tính năng chính
+AgriShrimp Backend is a Spring Boot API for a shrimp farming operations and agri-commerce platform. This repository powers the core backend for the storefront, admin dashboard, multi-branch inventory workflows, payment processing, shipping integration, and AI-enabled mini app features.
 
-- Xác thực và phân quyền: JWT + Spring Security
-- Quản lý người dùng tối thiểu (đăng ký/đăng nhập)
-- Cấu hình multi-profile (dev, staging)
-- CORS configuration
-- Exception handling tập trung
-- Logging interceptor
+## 📌 Project Snapshot
 
-## Yêu cầu hệ thống
+| Item | Details |
+| --- | --- |
+| Role | Central backend API for storefront, admin, and mini app |
+| Domain | Agri-commerce / shrimp farming operations |
+| Core stack | Java 21, Spring Boot 3.5, Spring Security, Spring Data JPA, MySQL, Redis |
+| External integrations | Cloudinary, PayOS, GHN, Google Login, Zalo Mini App, TrackAsia, OpenRouteService |
+| API docs | `/swagger-ui/index.html` |
+| Health check | `/actuator/health` |
+| Deployment | Docker Compose, GitHub Actions, GHCR, VPS, Nginx |
 
-- Java 24 (JDK)
-- Maven 3.8+ (hoặc sử dụng `./mvnw`)
-- MySql
-- Redis (token blacklist khi logout)
+## ✨ Technical Highlights
 
-## Cấu trúc thư mục chính
+- Built for more than CRUD: products, orders, inventory, stock transfers, handovers, vouchers, suppliers, debt tracking, and operational dashboards.
+- Supports a multi-branch business model with order splitting based on stock availability and branch proximity.
+- Implements authentication and authorization with JWT, refresh tokens, Google login, Zalo auth, and permission-based access control.
+- Integrates with real-world services for payments, shipping, media storage, geocoding, routing, and AI image search.
+- Includes production-minded engineering practices such as Swagger/OpenAPI, Actuator health endpoints, Dockerization, health check scripts, and automated deployment workflows.
 
+## 🧩 Core Modules
+
+- `Authentication & Authorization`: signup, login, refresh token, current-user endpoints, roles/permissions, custom security filters, and AOP-based permission checks.
+- `Product Catalog`: products, variants, categories, brands, attributes, image upload, and public catalog APIs.
+- `Order Management`: cart, order preparation, checkout, order confirmation, user/admin/branch order views, payment link creation, and payment webhook handling.
+- `Inventory & Warehouse`: stock receipts, export flows, stock checks, transfers, handovers, and branch-level inventory tracking.
+- `Branch & Logistics`: nearest branch lookup, address suggestions, real-distance calculation, shipping provider integration, and GHN data endpoints.
+- `AI Features`: image-based product search and shrimp disease diagnosis flows for the mini app.
+- `Finance & Dashboard`: business stats, top products, daily performance, pending orders, profit/loss reporting, and supplier debt visibility.
+
+## 🏗️ Architecture & Code Organization
+
+The codebase follows a clear REST API + service layer structure:
+
+```text
+src/main/java/com/zone/agri
+|-- controller/     # REST endpoints
+|-- service/        # Business logic
+|-- repository/     # Spring Data JPA repositories
+|-- entity/         # Domain model
+|-- dto/            # Request/response models
+|-- security/       # JWT, user details, filters
+|-- config/         # OpenAPI, security, Redis, JPA, app beans
+|-- exception/      # Global exception handling
+`-- utils/          # Utility helpers
+
+infra/
+|-- docker-compose.prod.yml
+|-- nginx/
+`-- scripts/
 ```
-.
-├─ pom.xml
-├─ src
-│  ├─ main
-│  │  ├─ java/com/zone/agri
-│  │  │  ├─ AgriShrimpApplication.java
-│  │  │  ├─ common/
-│  │  │  ├─ config/
-│  │  │  ├─ controller/
-│  │  │  ├─ dto/
-│  │  │  ├─ entity/
-│  │  │  ├─ exception/
-│  │  │  ├─ logging/
-│  │  │  ├─ repository/
-│  │  │  ├─ security/
-│  │  │  └─ service/
-│  │  └─ resources
-│  │     ├─ application.yml
-│  │     ├─ application-dev.yml
-│  │     └─ application-stg.yml
-│  └─ test/java/com/zone/agri/AgriShrimpApplicationTests.java
-└─ mvnw, mvnw.cmd
-```
 
-## Hướng dẫn nhanh (chạy được project)
+## 🧭 API Groups
 
-1. Tạo database PostgreSQL (ví dụ `agri_shrimp_db`).
-2. Thiết lập biến môi trường JWT và domain.
-3. Chỉnh `application-dev.yml` cho đúng user/password.
-4. Cài dependencies và chạy project.
+Swagger is grouped for easier review:
 
-Lệnh nhanh:
+- `Public APIs`: `/api/auth/**`, `/api/public/**`, `/api/external/**`
+- `Core System`: `/api/users/**`, `/api/roles/**`, `/api/branches/**`, `/api/files/**`
+- `Business Operations`: `/api/products/**`, `/api/categories/**`, `/api/suppliers/**`, `/api/customers/**`, `/api/attributes/**`
+- `Mini App`: `/api/miniapp/**`
+
+Full endpoint documentation is available at `http://localhost:8004/swagger-ui/index.html` after the application starts.
+
+## 🛠️ Tech Stack
+
+- Language: Java 21
+- Framework: Spring Boot 3.5.5
+- Security: Spring Security, JWT
+- Persistence: Spring Data JPA, Hibernate, MySQL
+- Cache / token support: Redis
+- API documentation: springdoc-openapi
+- Build tool: Maven Wrapper (`mvnw`, `mvnw.cmd`)
+- Media / storage: Cloudinary, with placeholders for AWS S3
+- Deployment: Docker, GitHub Container Registry, self-hosted VPS deployment
+
+## ▶️ Local Setup
+
+### Requirements
+
+- JDK 21
+- Docker + Docker Compose
+- Maven Wrapper already included in the repository
+
+### Option 1: Run the backend locally and use Docker for MySQL + Redis
+
+Start dependencies:
 
 ```bash
-./mvnw clean install
-./mvnw spring-boot:run -Dspring.profiles.active=dev
+docker compose up -d db redis
 ```
 
-## Hướng dẫn hoàn chỉnh cho người mới bắt đầu
-
-Mục tiêu: chạy được project, gọi thử API, và biết điểm bắt đầu khi phát triển tính năng mới.
-
-### 1) Clone project
+Run the application with the `dev` profile:
 
 ```bash
-git clone <repo-url>
-cd agri-shrimp-spring-webapp
-```
-
-### 2) Tạo database
-
-```sql
-CREATE DATABASE agri_shrimp_db;
-```
-
-### 3) Thiết lập biến môi trường
-
-Bạn cần ít nhất 2 biến sau:
-
-- `SECURITY_JWT_SECRET_KEY` (chuỗi bí mật cho JWT)
-- `DOMAIN` (tên miền hoặc `localhost`)
-
-MacOS/Linux:
-
-```bash
-export SECURITY_JWT_SECRET_KEY="your_jwt_secret"
-export DOMAIN="localhost"
+./mvnw spring-boot:run -Dspring-boot.run.profiles=dev
 ```
 
 Windows PowerShell:
 
 ```powershell
-$env:SECURITY_JWT_SECRET_KEY = "your_jwt_secret"
-$env:DOMAIN = "localhost"
+.\mvnw.cmd spring-boot:run "-Dspring-boot.run.profiles=dev"
 ```
 
-Windows CMD:
+Default local values from `application-dev.yml`:
 
-```cmd
-set SECURITY_JWT_SECRET_KEY=your_jwt_secret
-set DOMAIN=localhost
-```
+- API port: `8004`
+- MySQL: `localhost:3307`
+- Redis: `localhost:6379`
 
-### 4) Cấu hình database và redis
+After startup:
 
-Mở `src/main/resources/application-dev.yml` và cập nhật đúng thông tin của bạn:
+- Swagger UI: `http://localhost:8004/swagger-ui/index.html`
+- Health check: `http://localhost:8004/actuator/health`
 
-```yaml
-spring:
-  datasource:
-    driver-class-name: com.mysql.cj.jdbc.Driver
-    url: ${DBMS_CONNECTION:jdbc:mysql://localhost:3306/agri_shrimp_db?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true}
-    username: ${DBMS_USERNAME:root}
-    password: ${DBMS_PASSWORD:your_password_here}
+### Option 2: Run in a more production-like container setup
 
-  jpa:
-    show-sql: true
-    hibernate:
-      ddl-auto: update 
-    properties:
-      hibernate:
-        dialect: org.hibernate.dialect.MySQL8Dialect
-        format_sql: true
+- Use `.env.example` as the template for your `.env` or `.env.backend` file.
+- The repository `docker-compose.yml` includes `ai-visual-search`, which points to an external sibling repository at `../agrishrimp-ai-visual-search`, so that part is optional if you only need the core backend running.
 
-  data:
-    redis:
-      host: ${SPRING_DATA_REDIS_HOST:localhost}
-      port: 6379
-      timeout: 60000
-```
+## 🔐 Environment & Configuration
 
-### 5) Cài dependency và chạy project
+The project mainly uses two configuration profiles:
+
+- `src/main/resources/application-dev.yml`: local development defaults
+- `src/main/resources/application-prod.yml`: production profile driven by environment variables
+
+Important environment variables include:
+
+- `SPRING_DATASOURCE_URL`, `SPRING_DATASOURCE_USERNAME`, `SPRING_DATASOURCE_PASSWORD`
+- `SPRING_DATA_REDIS_HOST`, `SPRING_DATA_REDIS_PORT`
+- `SECURITY_JWT_SECRET_KEY`
+- `APP_CORS_ALLOWED_ORIGINS`, `APP_WEB_BASE_URL`, `APP_SERVER_URL`
+- `CLOUDINARY_*`
+- `PAYOS_*`
+- `GHN_*`
+- `TRACKASIA_*`, `ORS_API_KEY`
+
+Notes:
+
+- Do not commit real secrets to Git.
+- External integrations require their matching environment variables to be fully functional.
+
+## ✅ Testing & Operations
+
+- Representative unit tests already exist in `src/test/java`, for example `InventoryAllocationServiceTest` for stock-based order allocation logic.
+- Spring Actuator is enabled for health monitoring and deployment verification.
+- `infra/scripts/healthcheck.sh` checks the webapp, API, AI service, and container health.
+- `.github/workflows/deploy.yml` builds the image, pushes it to GHCR, and deploys it to a self-hosted server with a post-restart health check.
+
+## 💼 What This Repository Demonstrates
+
+- The ability to design backend systems for real business workflows with multiple modules and external dependencies.
+- Experience beyond a basic CRUD application, especially around inventory logic, order allocation, and multi-branch operations.
+- Production-ready thinking through API documentation, containerization, health checks, deployment automation, and environment separation.
+
+## 📎 Useful Commands
 
 ```bash
-./mvnw clean install
-./mvnw spring-boot:run -Dspring.profiles.active=dev
+./mvnw test
+./mvnw clean package
+./mvnw spring-boot:run -Dspring-boot.run.profiles=dev
 ```
 
-### 6) Gọi thử API
+---
 
-```bash
-curl -X POST http://localhost:8004/api/auth/signup \
-  -H "Content-Type: application/json" \
-  -d '{"email":"student@example.com","password":"123456"}'
-```
-
-### 7) Lỗi thường gặp
-
-- `Connection refused` to PostgreSQL: kiểm tra DB đã chạy chưa.
-- `Could not resolve placeholder SECURITY_JWT_SECRET_KEY`: chưa set biến môi trường.
-- `Redis connection failure`: kiểm tra Redis đã chạy chưa, port có đúng không.
-
-## Hướng dẫn bắt đầu triển khai tính năng mới (dành cho sinh viên)
-
-Thường bắt đầu từ các thư mục sau, theo thứ tự từ dữ liệu đến API:
-
-1. `src/main/java/com/zone/agri/entity/`
-   - Tạo hoặc cập nhật Entity.
-2. `src/main/java/com/zone/agri/repository/`
-   - Tạo Repository (JPA).
-3. `src/main/java/com/zone/agri/service/`
-   - Viết business logic.
-4. `src/main/java/com/zone/agri/dto/`
-   - Tạo DTO cho request/response.
-5. `src/main/java/com/zone/agri/controller/`
-   - Tạo API endpoint gọi xuống service.
-
-Thư mục hỗ trợ thường dùng:
-
-- `src/main/java/com/zone/agri/security/` khi cần phân quyền.
-- `src/main/java/com/zone/agri/config/` khi cần cấu hình bean, CORS, WebSocket.
-- `src/main/resources/` khi cần thêm cấu hình `application-*.yml`.
-- `src/test/java/com/zone/agri/` để viết test.
-
-## API auth cơ bản
-
-```
-POST /api/auth/signup
-POST /api/auth/login
-POST /api/auth/refresh
-POST /api/auth/logout
-GET  /api/auth/me
-```
+If you are reviewing this repository as a recruiter or hiring manager, the strongest signals are the multi-module business workflow design, the number of real service integrations, and the fact that the project is structured like a deployable production system rather than a classroom demo.
