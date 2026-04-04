@@ -7,6 +7,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.zone.agri.dto.request.employee.EmployeeCreateRequest;
+import com.zone.agri.dto.response.citizen.CitizenLookupResponse;
 import com.zone.agri.dto.response.employee.EmployeeResponse;
 import com.zone.agri.entity.Branch;
 import com.zone.agri.entity.Role;
@@ -62,6 +63,8 @@ public class EmployeeService {
                 .citizenId(request.getCitizenId())
                 .dateOfBirth(request.getDateOfBirth())
                 .gender(request.getGender())
+                .addressDetail(request.getAddressDetail())
+                .startDate(request.getStartDate())
                 .passwordHash(hashedPassword)
                 .avatarUrl(request.getAvatarUrl())
                 .status(parseStatus(request.getStatus()))
@@ -155,6 +158,8 @@ public class EmployeeService {
         existingEmployee.setCitizenId(request.getCitizenId());
         existingEmployee.setDateOfBirth(request.getDateOfBirth());
         existingEmployee.setGender(request.getGender());
+        existingEmployee.setAddressDetail(request.getAddressDetail());
+        existingEmployee.setStartDate(request.getStartDate());
         existingEmployee.setAvatarUrl(request.getAvatarUrl());
         existingEmployee.setStatus(parseStatus(request.getStatus()));
         existingEmployee.setBranch(branch);
@@ -175,7 +180,11 @@ public class EmployeeService {
         if (employee.getRole() != null && Boolean.TRUE.equals(employee.getRole().getIsSystem())) {
             throw new Forbidden("Không thể xóa nhân viên có vai trò hệ thống");
         }
-        employee.setStatus(UserStatus.INACTIVE);
+
+        // Toggle status: ACTIVE <-> INACTIVE
+        UserStatus currentStatus = employee.getStatus();
+        UserStatus newStatus = (currentStatus == UserStatus.ACTIVE) ? UserStatus.INACTIVE : UserStatus.ACTIVE;
+        employee.setStatus(newStatus);
         userRepository.save(employee);
     }
 
@@ -189,9 +198,12 @@ public class EmployeeService {
                 .employeeCode(employeeCode)
                 .email(user.getEmail())
                 .phoneNumber(user.getPhoneNumber())
+                .citizenId(user.getCitizenId())
+                .addressDetail(user.getAddressDetail())
                 .avatarUrl(user.getAvatarUrl())
                 .status(user.getStatus())
                 .dateOfBirth(user.getDateOfBirth())
+                .startDate(user.getStartDate())
                 .createdAt(user.getCreatedAt())
                 .branch(user.getBranch() != null ? EmployeeResponse.BranchInfo.builder()
                         .id(user.getBranch().getId())
@@ -203,6 +215,18 @@ public class EmployeeService {
                         .displayName(user.getRole().getDisplayName())
                         .slug(user.getRole().getSlug())
                         .build() : null)
+                .build();
+    }
+
+    public CitizenLookupResponse lookupByCitizenId(String citizenId) {
+        User user = userRepository.findByCitizenId(citizenId)
+                .orElseThrow(() -> new NotFoundException("Không tìm thấy thông tin CCCD này trong hệ thống"));
+
+        return CitizenLookupResponse.builder()
+                .fullName(user.getFullName())
+                .dateOfBirth(user.getDateOfBirth())
+                .gender(user.getGender() != null ? user.getGender().name() : null)
+                .address(user.getAddressDetail())
                 .build();
     }
 }
