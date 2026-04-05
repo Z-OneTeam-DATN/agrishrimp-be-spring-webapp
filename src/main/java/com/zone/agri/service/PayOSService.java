@@ -4,8 +4,11 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.zone.agri.dto.response.payment.PayOSApiResponse;
 import com.zone.agri.entity.Order;
+import com.zone.agri.entity.SubOrder;
+import com.zone.agri.entity.enums.OrderStatus;
 import com.zone.agri.entity.enums.PaymentStatus;
 import com.zone.agri.repository.OrderRepository;
+import com.zone.agri.repository.SubOrderRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -22,6 +25,7 @@ import javax.crypto.spec.SecretKeySpec;
 import java.nio.charset.StandardCharsets;
 import java.security.InvalidKeyException;
 import java.security.NoSuchAlgorithmException;
+import java.net.URLEncoder;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -36,6 +40,7 @@ public class PayOSService {
     private final PayOS payOS;
     private final RestTemplate restTemplate;
     private final OrderRepository orderRepository;
+    private final SubOrderRepository subOrderRepository;
     private final ObjectMapper objectMapper;
 
     @Value("${payos.client-id}")
@@ -67,15 +72,17 @@ public class PayOSService {
         int amount = order.getFinalAmount().intValue();
         String description = truncate(order.getCode(), 25); // PayOS giới hạn 25 ký tự
         long orderCode = parseOrderCode(order);
+        String resolvedReturnUrl = withOrderParams(returnUrl, order, "PAID");
+        String resolvedCancelUrl = withOrderParams(cancelUrl, order, "CANCELLED");
 
         log.info("Creating PayOS payment link for order {}: orderCode={}, amount={}", order.getCode(), orderCode, amount);
 
         // Tính chữ ký theo chuẩn PayOS
         String dataToSign = "amount=" + amount
-                + "&cancelUrl=" + cancelUrl
+                + "&cancelUrl=" + resolvedCancelUrl
                 + "&description=" + description
                 + "&orderCode=" + orderCode
-                + "&returnUrl=" + returnUrl;
+                + "&returnUrl=" + resolvedReturnUrl;
         String signature = hmacSHA256(dataToSign, checksumKey);
 
         // Build request body
@@ -88,8 +95,8 @@ public class PayOSService {
                 "quantity", 1,
                 "price", amount
         )));
-        body.put("returnUrl", returnUrl);
-        body.put("cancelUrl", cancelUrl);
+        body.put("returnUrl", resolvedReturnUrl);
+        body.put("cancelUrl", resolvedCancelUrl);
         body.put("signature", signature);
 
         HttpHeaders headers = new HttpHeaders();
@@ -162,8 +169,7 @@ public class PayOSService {
             if (orderOpt.isPresent()) {
                 Order order = orderOpt.get();
                 if (!PaymentStatus.PAID.equals(order.getPaymentStatus())) {
-                    order.setPaymentStatus(PaymentStatus.PAID);
-                    orderRepository.save(order);
+                    markOrderPaid(order);
                     log.info("Order {} marked as PAID via Webhook", order.getCode());
                 }
             }
@@ -192,5 +198,37 @@ public class PayOSService {
 
     private String truncate(String s, int maxLen) {
         return s != null && s.length() > maxLen ? s.substring(0, maxLen) : s;
+    }
+
+    @Transactional
+    public void markOrderPaid(Order order) {
+        order.setPaymentStatus(PaymentStatus.PAID);
+
+        if (order.getStatus() == OrderStatus.AWAITING_PAYMENT) {
+            order.setStatus(OrderStatus.CONFIRMED);
+        }
+
+        List<SubOrder> subOrders = subOrderRepository.findByOrderId(order.getId());
+        for (SubOrder subOrder : subOrders) {
+            if (subOrder.getStatus() == OrderStatus.AWAITING_PAYMENT) {
+                subOrder.setStatus(OrderStatus.CONFIRMED);
+            }
+        }
+
+        orderRepository.save(order);
+        subOrderRepository.saveAll(subOrders);
+    }
+
+    private String withOrderParams(String baseUrl, Order order, String status) {
+        String separator = baseUrl.contains("?") ? "&" : "?";
+        return baseUrl
+                + separator
+                + "orderId=" + order.getId()
+                + "&orderCode=" + urlEncode(order.getCode())
+                + "&status=" + status;
+    }
+
+    private String urlEncode(String value) {
+        return URLEncoder.encode(value, StandardCharsets.UTF_8);
     }
 }

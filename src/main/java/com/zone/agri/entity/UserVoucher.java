@@ -25,7 +25,6 @@ public class UserVoucher {
     @Column(name = "is_saved")
     Boolean isSaved;
 
-
     @Column(name = "created_at")
     LocalDateTime createdAt;
 
@@ -42,4 +41,14 @@ public class UserVoucher {
     @ToString.Exclude
     @EqualsAndHashCode.Exclude
     Voucher voucher;
+
+    // --- CONSTRUCTOR TÙY CHỈNH DÀNH CHO ORDER SERVICE ---
+    // Giúp hàm new UserVoucher(user, voucher, 0, false) hoạt động không lỗi
+    public UserVoucher(User user, Voucher voucher, Integer usageCount, Boolean isSaved) {
+        this.user = user;
+        this.voucher = voucher;
+        this.usageCount = usageCount;
+        this.isSaved = isSaved;
+        this.createdAt = LocalDateTime.now();
+    }
 }

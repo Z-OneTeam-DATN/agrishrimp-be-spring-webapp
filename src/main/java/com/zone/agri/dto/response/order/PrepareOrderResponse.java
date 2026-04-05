@@ -17,8 +17,10 @@ public class PrepareOrderResponse {
     private String prepareToken;
     /** true nếu toàn bộ giỏ hàng có thể thực hiện */
     private Boolean canFulfill;
+    private String voucherCode;
     private List<SubOrderDraftDto> subOrders;
     private BigDecimal totalSubtotal;
+    private BigDecimal discountAmount;
     private BigDecimal totalShippingFee;
     private BigDecimal totalAmount;
     private List<OutOfStockItemDto> outOfStockItems;

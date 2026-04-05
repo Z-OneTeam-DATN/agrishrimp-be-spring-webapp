@@ -27,11 +27,15 @@ public class Voucher {
     String code;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "discount_type", columnDefinition = "ENUM('PERCENT')")
+    @Column(name = "discount_type", columnDefinition = "ENUM('PERCENT', 'FIXED')")
     VoucherDiscountType discountType;
 
     @Column(name = "value", precision = 38, scale = 2)
     BigDecimal value;
+
+    // Thêm trường maxDiscount để hứng dữ liệu "Giảm tối đa (VNĐ)"
+    @Column(name = "max_discount", precision = 38, scale = 2)
+    BigDecimal maxDiscount;
 
     @Column(name = "max_usage_per_user")
     Integer maxUsagePerUser;
@@ -49,9 +53,8 @@ public class Voucher {
     Integer quantity;
 
     @Enumerated(EnumType.STRING)
-    @Column(columnDefinition = "ENUM('ACTIVE', 'INACTIVE')")
+    @Column(columnDefinition = "ENUM('ACTIVE', 'INACTIVE', 'EXPIRED')")
     VoucherStatus status;
-
 
     @OneToMany(mappedBy = "voucher", fetch = FetchType.LAZY)
     @ToString.Exclude

@@ -62,6 +62,20 @@ public class OrderController {
         return ResponseEntity.ok(orderService.getMyOrderDetail(userId, id));
     }
 
+    @Operation(summary = "Huy don hang cua toi")
+    @PostMapping("/orders/{id}/cancel")
+    public ResponseEntity<?> cancelMyOrder(@PathVariable Long id, @RequestBody(required = false) Map<String, Object> body) {
+        Long userId = getCurrentUserId();
+        String reasonCode = body != null && body.get("reasonCode") != null ? body.get("reasonCode").toString() : null;
+        String otherReasonText = body != null && body.get("otherReasonText") != null ? body.get("otherReasonText").toString() : null;
+        String cancelReason = reasonCode;
+        if (otherReasonText != null && !otherReasonText.isBlank()) {
+            cancelReason = (cancelReason != null ? cancelReason + ": " : "") + otherReasonText;
+        }
+        orderService.cancelMyOrder(userId, id, cancelReason);
+        return ResponseEntity.ok(Map.of("message", "Huy don hang thanh cong"));
+    }
+
     @Operation(
             summary = "Đặt hàng (Checkout — legacy)",
             description = "Tạo đơn hàng COD tại 1 chi nhánh có đủ hàng. "

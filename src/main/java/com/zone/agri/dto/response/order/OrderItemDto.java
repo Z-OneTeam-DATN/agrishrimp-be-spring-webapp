@@ -16,6 +16,8 @@ public class OrderItemDto {
     private String variantName;
     private String variantSku;
     private Integer quantity;
+    private Integer allocatedQuantity;
+    private Integer missingQuantity;
     private BigDecimal unitPrice;
     private BigDecimal subtotal;
 }

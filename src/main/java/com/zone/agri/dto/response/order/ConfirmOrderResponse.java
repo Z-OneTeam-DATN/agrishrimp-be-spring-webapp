@@ -17,8 +17,10 @@ public class ConfirmOrderResponse {
     private Long orderId;
     private String orderCode;
     private String status;
+    private String voucherCode;
     private List<SubOrderSummaryDto> subOrders;
     private BigDecimal totalAmount;
+    private BigDecimal discountAmount;
     private BigDecimal totalShippingFee;
     private String checkoutUrl; // non-null only for PAYOS orders
 }

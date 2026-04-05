@@ -19,6 +19,8 @@ public class PrepareOrderRequest {
     @NotNull(message = "Vui lòng chọn một địa chỉ từ sổ địa chỉ")
     private Long userAddressId;
 
+    private String voucherCode;
+
     @Valid
     private List<CartItemDto> cart;
 }

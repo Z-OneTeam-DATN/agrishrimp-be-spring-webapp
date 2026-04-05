@@ -1,5 +1,6 @@
 package com.zone.agri.dto.request.order;
 
+import com.zone.agri.dto.response.order.CartItemDto;
 import com.zone.agri.dto.response.order.OrderItemDto;
 import com.zone.agri.dto.response.order.OutOfStockItemDto;
 import com.zone.agri.dto.response.order.SubOrderDraftDto;
@@ -22,11 +23,14 @@ import java.util.List;
 public class PrepareOrderDraft {
     private String prepareToken;
     private Long userId;
+    private String voucherCode;
 
     // --- Thông tin bổ sung theo yêu cầu ---
     private Long branchId; // Chi nhánh chính hoặc chi nhánh duy nhất
     private List<OrderItemDto> finalItems; // Danh sách hàng hóa cuối cùng đã phân bổ
     // --------------------------------------
+
+    private List<CartItemDto> cartItems; // Snapshot gio hang goc de confirm tinh lai quote cuoi
 
     private String receiverName;
     private String receiverPhone;
@@ -40,6 +44,7 @@ public class PrepareOrderDraft {
     private List<SubOrderDraftDto> subOrders;
     private List<OutOfStockItemDto> outOfStockItems;
     private BigDecimal totalSubtotal;
+    private BigDecimal discountAmount;
     private BigDecimal totalShippingFee;
     private BigDecimal totalAmount;
 }

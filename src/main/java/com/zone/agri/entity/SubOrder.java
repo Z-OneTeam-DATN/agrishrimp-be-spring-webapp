@@ -24,7 +24,7 @@ public class SubOrder extends BaseEntity {
     Long id;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "status", length = 20)
+    @Column(name = "status", length = 40)
     OrderStatus status;
 
     @Column(name = "subtotal", precision = 38, scale = 2)

@@ -107,6 +107,8 @@ public class InventoryAllocationService {
                             .variantName(variantName)
                             .variantSku(variantSku)
                             .quantity(quantityToTake)
+                            .allocatedQuantity(quantityToTake)
+                            .missingQuantity(0)
                             .unitPrice(unitPrice)
                             .subtotal(unitPrice.multiply(BigDecimal.valueOf(quantityToTake)))
                             .build());

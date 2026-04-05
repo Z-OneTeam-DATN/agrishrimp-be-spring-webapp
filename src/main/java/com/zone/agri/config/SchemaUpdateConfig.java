@@ -29,8 +29,25 @@ public class SchemaUpdateConfig {
             );
 
             applyPatch(
+                "Patch orders.status ENUM thêm AWAITING_PAYMENT và READY_FOR_PICKUP",
+                "ALTER TABLE orders MODIFY COLUMN status ENUM('PENDING','AWAITING_PAYMENT','AWAITING_REPLENISHMENT','CONFIRMED','PROCESSING','READY_FOR_PICKUP','SHIPPING','COMPLETED','CANCELLED','RETURNED')"
+            );
+
+            applyPatch(
                 "Patch inventory_notes.type ENUM thêm CHECK",
                 "ALTER TABLE inventory_notes MODIFY COLUMN type ENUM('IMPORT','EXPORT','CHECK')"
+            );
+            applyPatch(
+                "Patch sub_orders.status length to 40",
+                "ALTER TABLE sub_orders MODIFY COLUMN status VARCHAR(40)"
+            );
+            applyPatch(
+                "Patch sub_order_items them allocated_quantity",
+                "ALTER TABLE sub_order_items ADD COLUMN allocated_quantity INT NULL"
+            );
+            applyPatch(
+                "Patch sub_order_items them missing_quantity",
+                "ALTER TABLE sub_order_items ADD COLUMN missing_quantity INT NULL"
             );
         };
     }

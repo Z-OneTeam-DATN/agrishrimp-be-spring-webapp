@@ -13,6 +13,8 @@ public class OrderItemResponse {
     private String sku;
     private String image;
     private Integer quantity;
+    private Integer allocatedQuantity;
+    private Integer missingQuantity;
     private BigDecimal price;
     private BigDecimal totalPrice;
     private boolean canReview; // Added

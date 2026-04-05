@@ -2,6 +2,7 @@ package com.zone.agri.dto.request.voucher;
 
 import com.zone.agri.entity.enums.VoucherDiscountType;
 import com.zone.agri.entity.enums.VoucherStatus;
+import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Positive;
@@ -24,16 +25,21 @@ public class VoucherRequest {
     @NotNull(message = "Loại giảm giá không được để trống")
     private VoucherDiscountType discountType;
 
+    // ĐÃ ĐỔI THÀNH value
     @NotNull(message = "Giá trị giảm giá không được để trống")
-    @Positive(message = "Giá trị giảm giá phải lớn hơn 0")
+    @Min(value = 0, message = "Giá trị giảm giá phải lớn hơn hoặc bằng 0")
     private BigDecimal value;
 
+    @Min(value = 0, message = "Giảm tối đa phải lớn hơn hoặc bằng 0")
+    private BigDecimal maxDiscount;
+
+    // ĐÃ ĐỔI THÀNH maxUsagePerUser
     @NotNull(message = "Số lần sử dụng tối đa mỗi người không được để trống")
     @Positive(message = "Số lần sử dụng tối đa phải lớn hơn 0")
     private Integer maxUsagePerUser;
 
     @NotNull(message = "Giá trị đơn hàng tối thiểu không được để trống")
-    @Positive(message = "Giá trị đơn hàng tối thiểu phải lớn hơn hoặc bằng 0")
+    @Min(value = 0, message = "Giá trị đơn hàng tối thiểu phải lớn hơn hoặc bằng 0")
     private BigDecimal minOrderValue;
 
     @NotNull(message = "Ngày bắt đầu không được để trống")

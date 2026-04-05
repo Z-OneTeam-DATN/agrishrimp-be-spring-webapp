@@ -24,6 +24,12 @@ public class SubOrderItem extends BaseEntity {
     @Column(name = "quantity", nullable = false)
     Integer quantity;
 
+    @Column(name = "allocated_quantity")
+    Integer allocatedQuantity;
+
+    @Column(name = "missing_quantity")
+    Integer missingQuantity;
+
     @Column(name = "unit_price", precision = 38, scale = 2, nullable = false)
     BigDecimal unitPrice;
 

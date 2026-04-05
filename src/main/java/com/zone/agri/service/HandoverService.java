@@ -53,7 +53,7 @@ public class HandoverService {
                 throw new BadRequestException("Đơn hàng #" + subOrder.getId() + " không thuộc chi nhánh của bạn");
             }
 
-            if (subOrder.getStatus() != OrderStatus.PROCESSING && subOrder.getStatus() != OrderStatus.PENDING) {
+            if (subOrder.getStatus() != OrderStatus.PROCESSING) {
                 throw new BadRequestException("Đơn hàng #" + subOrder.getId() + " chưa sẵn sàng để bàn giao");
             }
 

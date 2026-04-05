@@ -67,8 +67,15 @@ public class VoucherService {
     private void mapToEntity(Voucher entity, VoucherRequest request) {
         entity.setCode(request.getCode());
         entity.setDiscountType(request.getDiscountType());
+
+        // SỬA LẠI 2 DÒNG NÀY LÀ XONG
         entity.setValue(request.getValue());
         entity.setMaxUsagePerUser(request.getMaxUsagePerUser());
+
+        if (request.getMaxDiscount() != null) {
+            entity.setMaxDiscount(request.getMaxDiscount());
+        }
+
         entity.setMinOrderValue(request.getMinOrderValue());
         entity.setStartDate(request.getStartDate());
         entity.setEndDate(request.getEndDate());
@@ -88,6 +95,8 @@ public class VoucherService {
                 .endDate(entity.getEndDate())
                 .quantity(entity.getQuantity())
                 .status(entity.getStatus())
+                // Lưu ý: Nếu file VoucherResponse.java của bạn có thêm trường maxDiscount,
+                // bạn có thể thêm dòng .maxDiscount(entity.getMaxDiscount()) vào đây nhé!
                 .build();
     }
 
