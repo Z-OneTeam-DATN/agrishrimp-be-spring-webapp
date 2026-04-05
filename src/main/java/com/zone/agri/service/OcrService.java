@@ -133,7 +133,7 @@ public class OcrService {
     private OcrCccdResponse parseCccdText(String text) {
         try {
             if (text == null || text.isBlank()) {
-                return new OcrCccdResponse("", null, "", "", "");
+                return new OcrCccdResponse("", null, "", "", "", null);
             }
 
             log.info("Extracted text from CCCD: {}", text);
@@ -180,11 +180,12 @@ public class OcrService {
                 }
             }
 
-            return new OcrCccdResponse(fullName, dateOfBirth, gender, address, citizenId);
+            return new OcrCccdResponse(fullName, dateOfBirth != null ? dateOfBirth.toString() : null, gender, address,
+                    citizenId, null);
 
         } catch (Exception e) {
             log.error("Error parsing CCCD text", e);
-            return new OcrCccdResponse("", null, "", "", "");
+            return new OcrCccdResponse("", null, "", "", "", null);
         }
     }
 
