@@ -121,6 +121,8 @@ services:
       ORS_API_KEY: ${ORS_API_KEY}
       # Shipping (GHN)
       GHN_API_KEY: ${GHN_API_KEY}
+      # OCR/Google Vision
+      GOOGLE_VISION_API_KEY: ${GOOGLE_VISION_API_KEY}
       
 
 volumes:
