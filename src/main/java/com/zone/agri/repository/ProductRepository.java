@@ -67,6 +67,16 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
     Optional<Brand> findBrandByName(@Param("name") String name);
 
 
+    // --- MINI APP: lấy sản phẩm ACTIVE kèm ảnh + category để gợi ý cho AI prescription ---
+    // Phase BE-3: bổ sung LEFT JOIN FETCH p.category để rankCandidateProducts truy cập category.getName()
+    // an toàn sau khi transaction đóng (proxy đã initialized).
+    @Query("SELECT DISTINCT p FROM Product p " +
+           "LEFT JOIN FETCH p.productImages " +
+           "LEFT JOIN FETCH p.category " +
+           "WHERE p.status = :status " +
+           "ORDER BY p.name ASC")
+    List<Product> findActiveProductsForMiniApp(@Param("status") ProductStatus status);
+
     // Lấy danh sách sản phẩm đang kinh doanh và còn hàng tại chi nhánh ACTIVE
     @Query("SELECT p FROM Product p " +
             "JOIN p.category c " +
@@ -92,6 +102,36 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
             "HAVING SUM(i.quantity) > 0 " +
             "ORDER BY SUM(oi.quantity) DESC")
     List<Product> findTopBestSellers(Pageable pageable);
+
+    @Query("""
+            SELECT p.id, SUM(oi.quantity)
+            FROM OrderItem oi
+            JOIN oi.order o
+            JOIN oi.productVariant pv
+            JOIN pv.product p
+            WHERE p.id IN :productIds
+              AND o.status IN (
+                com.zone.agri.entity.enums.OrderStatus.COMPLETED,
+                com.zone.agri.entity.enums.OrderStatus.SHIPPING
+              )
+            GROUP BY p.id
+            """)
+    List<Object[]> sumLegacySoldQuantityByProductIds(@Param("productIds") List<Long> productIds);
+
+    @Query("""
+            SELECT p.id, SUM(si.quantity)
+            FROM SubOrderItem si
+            JOIN si.subOrder s
+            JOIN si.productVariant pv
+            JOIN pv.product p
+            WHERE p.id IN :productIds
+              AND s.status IN (
+                com.zone.agri.entity.enums.OrderStatus.COMPLETED,
+                com.zone.agri.entity.enums.OrderStatus.SHIPPING
+              )
+            GROUP BY p.id
+            """)
+    List<Object[]> sumSubOrderSoldQuantityByProductIds(@Param("productIds") List<Long> productIds);
 
     // Tìm theo Slug cho trang chi tiết
     Optional<Product> findBySlug(String slug);

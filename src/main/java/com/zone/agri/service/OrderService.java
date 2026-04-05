@@ -102,6 +102,7 @@ public class OrderService {
         } else {
             orders = orderRepository.findByUserIdOrderByCreatedAtDesc(userId);
         }
+        syncPayOSPaymentStatuses(orders);
         return orders.stream().map(this::mapToOrderResponse).collect(Collectors.toList());
     }
 
@@ -142,6 +143,7 @@ public class OrderService {
                     .collect(Collectors.toList());
         }
 
+        syncPayOSPaymentStatuses(orders);
         return orders.stream().map(this::mapToOrderResponse).collect(Collectors.toList());
     }
 
@@ -149,11 +151,13 @@ public class OrderService {
         Order order = orderRepository.findById(orderId)
                 .orElseThrow(() -> new NotFoundException("Không tìm thấy đơn hàng ID: " + orderId));
 
+
         if (PaymentMethod.PAYOS.equals(order.getPaymentMethod()) && PaymentStatus.UNPAID.equals(order.getPaymentStatus())) {
             if (payOSService.checkPaymentStatus(order)) {
                 payOSService.markOrderPaid(order);
             }
         }
+
 
         return mapToOrderResponse(order);
     }
@@ -266,24 +270,33 @@ public class OrderService {
                 ? subOrderRepository.findByBranchIdAndStatusOrderByCreatedAtDesc(branchId, status)
                 : subOrderRepository.findByBranchIdOrderByCreatedAtDesc(branchId);
 
-        Stream<SubOrder> stream = subOrders.stream();
+        List<SubOrder> filteredSubOrders = subOrders;
         if (search != null && !search.isBlank()) {
             String lc = search.toLowerCase();
-            stream = stream.filter(s -> {
+            filteredSubOrders = subOrders.stream().filter(s -> {
                 Order o = s.getOrder();
                 return (o.getCode() != null && o.getCode().toLowerCase().contains(lc))
                         || (o.getUser() != null && o.getUser().getFullName() != null
                         && o.getUser().getFullName().toLowerCase().contains(lc));
-            });
+            }).collect(Collectors.toList());
         }
 
-        return stream.map(this::mapSubOrderToBranchOrderResponse).collect(Collectors.toList());
+        syncPayOSPaymentStatuses(
+                filteredSubOrders.stream()
+                        .map(SubOrder::getOrder)
+                        .filter(Objects::nonNull)
+                        .distinct()
+                        .collect(Collectors.toList())
+        );
+
+        return filteredSubOrders.stream().map(this::mapSubOrderToBranchOrderResponse).collect(Collectors.toList());
     }
 
     @Transactional(readOnly = true)
     public BranchOrderResponse getBranchOrderDetail(Long branchId, Long orderId) {
         SubOrder subOrder = subOrderRepository.findByOrderIdAndBranchId(orderId, branchId)
                 .orElseThrow(() -> new NotFoundException("Không tìm thấy đơn hàng cho chi nhánh này"));
+        syncPayOSPaymentStatus(subOrder.getOrder());
         return mapSubOrderToBranchOrderResponse(subOrder);
     }
 
@@ -353,6 +366,27 @@ public class OrderService {
             case COMPLETED        -> 7;
             default               -> 8;
         };
+    }
+
+    private void syncPayOSPaymentStatuses(Collection<Order> orders) {
+        if (orders == null || orders.isEmpty()) {
+            return;
+        }
+
+        orders.forEach(this::syncPayOSPaymentStatus);
+    }
+
+    private void syncPayOSPaymentStatus(Order order) {
+        if (order == null
+                || !PaymentMethod.PAYOS.equals(order.getPaymentMethod())
+                || !PaymentStatus.UNPAID.equals(order.getPaymentStatus())) {
+            return;
+        }
+
+        if (payOSService.checkPaymentStatus(order)) {
+            order.setPaymentStatus(PaymentStatus.PAID);
+            orderRepository.save(order);
+        }
     }
 
     private BranchOrderResponse mapSubOrderToBranchOrderResponse(SubOrder subOrder) {

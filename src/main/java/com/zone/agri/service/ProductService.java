@@ -127,9 +127,8 @@ public class ProductService {
         log.info("Tạo sản phẩm thành công: id={}, name={}", savedProduct.getId(), savedProduct.getName());
 
         // Auto-index vào AI service (fire-and-forget, không block nếu AI service bị down)
-        if (!savedImages.isEmpty()) {
-            imageSearchService.indexProduct(savedProduct.getId(), savedImages.get(0).getImageUrl());
-        }
+        resolveIndexImageUrl(savedProduct)
+                .ifPresent(imageUrl -> imageSearchService.indexProduct(savedProduct.getId(), imageUrl));
 
         return convertToResponse(savedProduct);
     }
@@ -164,6 +163,9 @@ public class ProductService {
         String indexedImageUrl = productVectorRepository.findByProductId(id)
                 .map(pv -> pv.getImageUrl())
                 .orElse(null);
+        String requestedIndexImageUrl = null;
+        boolean mainImageChanged = false;
+        boolean variantImageChanged = false;
 
         if (product.getProductImages() != null) {
             product.getProductImages().removeIf(img -> !keepImages.contains(img.getImageUrl()));
@@ -176,6 +178,10 @@ public class ProductService {
                 if (file != null && !file.isEmpty()) {
                     CloudinaryService.UploadResult res = cloudinaryService.upload(file, "products/main");
                     product.getProductImages().add(ProductImage.builder().imageUrl(res.secureUrl()).product(product).build());
+                    mainImageChanged = true;
+                    if (requestedIndexImageUrl == null) {
+                        requestedIndexImageUrl = res.secureUrl();
+                    }
                 }
             }
         }
@@ -207,6 +213,7 @@ public class ProductService {
 
             // Kiểm tra xem biến thể này đã tồn tại trong DB chưa (Dựa vào SKU)
             ProductVariant variant = existingVariantsMap.get(vDto.getSku());
+            String previousVariantImageUrl = variant != null ? variant.getImageUrl() : null;
 
             if (variant != null) {
                 // NẾU ĐÃ TỒN TẠI -> Cập nhật thông tin đè lên, KHÔNG TẠO MỚI
@@ -246,6 +253,13 @@ public class ProductService {
                 variantRepository.save(variant);
             }
 
+            if (!mainImageChanged && finalImageUrl != null && !Objects.equals(previousVariantImageUrl, finalImageUrl)) {
+                variantImageChanged = true;
+                if (requestedIndexImageUrl == null) {
+                    requestedIndexImageUrl = finalImageUrl;
+                }
+            }
+
             updatedVariants.add(variant);
             // Gỡ biến thể này khỏi Map cũ (Những thằng nào còn sót lại trong Map nghĩa là đã bị FE xóa đi)
             existingVariantsMap.remove(vDto.getSku());
@@ -268,19 +282,18 @@ product.getVariants().addAll(updatedVariants);
 // Lưu sản phẩm
 Product updatedProduct = productRepository.save(product);
 
-// Re-index AI chỉ khi ảnh thực sự thay đổi (fire-and-forget)
-Set<String> newImageUrls = updatedProduct.getProductImages() != null
-        ? updatedProduct.getProductImages().stream()
-                .map(ProductImage::getImageUrl)
-                .collect(Collectors.toSet())
-        : Collections.emptySet();
+// Re-index AI khi ảnh chính hoặc ảnh biến thể thay đổi, hoặc khi ảnh đang index không còn tồn tại
+String resolvedIndexImageUrl = resolveIndexImageUrl(updatedProduct).orElse(null);
+Set<String> availableImageUrls = collectIndexImageUrls(updatedProduct);
+boolean indexedImageGone = indexedImageUrl != null && !availableImageUrls.contains(indexedImageUrl);
+String nextIndexImageUrl = requestedIndexImageUrl != null ? requestedIndexImageUrl : resolvedIndexImageUrl;
 
-boolean newFilesUploaded = productImages != null &&
-        productImages.stream().anyMatch(f -> f != null && !f.isEmpty());
-boolean indexedImageGone = indexedImageUrl != null && !newImageUrls.contains(indexedImageUrl);
-
-if ((newFilesUploaded || indexedImageGone) && !newImageUrls.isEmpty()) {
-    imageSearchService.indexProduct(updatedProduct.getId(), newImageUrls.iterator().next());
+if ((mainImageChanged || variantImageChanged) && nextIndexImageUrl != null) {
+    imageSearchService.indexProduct(updatedProduct.getId(), nextIndexImageUrl);
+} else if (indexedImageGone && resolvedIndexImageUrl != null) {
+    imageSearchService.indexProduct(updatedProduct.getId(), resolvedIndexImageUrl);
+} else if (indexedImageUrl != null && resolvedIndexImageUrl == null) {
+    imageSearchService.deleteIndex(updatedProduct.getId());
 }
 
 return convertToResponse(updatedProduct);
@@ -406,11 +419,10 @@ return convertToResponse(updatedProduct);
     public int indexAll() {
         List<Product> products = productRepository.findAllWithDetails();
         List<Map<String, Object>> payload = products.stream()
-                .filter(p -> p.getProductImages() != null && !p.getProductImages().isEmpty())
-                .map(p -> {
-                    String imageUrl = p.getProductImages().iterator().next().getImageUrl();
-                    return Map.<String, Object>of("productId", p.getId(), "imageUrl", imageUrl);
-                })
+                .map(p -> resolveIndexImageUrl(p)
+                        .map(imageUrl -> Map.<String, Object>of("productId", p.getId(), "imageUrl", imageUrl))
+                        .orElse(null))
+                .filter(Objects::nonNull)
                 .collect(Collectors.toList());
 
         if (payload.isEmpty()) return 0;
@@ -429,7 +441,92 @@ return convertToResponse(updatedProduct);
         return userRepository.findByEmail(auth.getName()).orElse(null);
     }
 
+    private Optional<String> resolveIndexImageUrl(Product product) {
+        if (product == null) {
+            return Optional.empty();
+        }
+
+        Optional<String> mainImageUrl = Optional.ofNullable(product.getProductImages())
+                .orElse(Collections.emptySet())
+                .stream()
+                .sorted(Comparator.comparing(ProductImage::getId, Comparator.nullsLast(Long::compareTo)))
+                .map(ProductImage::getImageUrl)
+                .filter(Objects::nonNull)
+                .filter(url -> !url.isBlank())
+                .findFirst();
+
+        if (mainImageUrl.isPresent()) {
+            return mainImageUrl;
+        }
+
+        return Optional.ofNullable(product.getVariants())
+                .orElse(Collections.emptySet())
+                .stream()
+                .sorted(Comparator.comparing(ProductVariant::getId, Comparator.nullsLast(Long::compareTo)))
+                .map(ProductVariant::getImageUrl)
+                .filter(Objects::nonNull)
+                .filter(url -> !url.isBlank())
+                .findFirst();
+    }
+
+    private Set<String> collectIndexImageUrls(Product product) {
+        if (product == null) {
+            return Collections.emptySet();
+        }
+
+        Set<String> imageUrls = new LinkedHashSet<>();
+
+        Optional.ofNullable(product.getProductImages())
+                .orElse(Collections.emptySet())
+                .stream()
+                .map(ProductImage::getImageUrl)
+                .filter(Objects::nonNull)
+                .filter(url -> !url.isBlank())
+                .forEach(imageUrls::add);
+
+        Optional.ofNullable(product.getVariants())
+                .orElse(Collections.emptySet())
+                .stream()
+                .map(ProductVariant::getImageUrl)
+                .filter(Objects::nonNull)
+                .filter(url -> !url.isBlank())
+                .forEach(imageUrls::add);
+
+        return imageUrls;
+    }
+
+    private Map<Long, Long> buildSoldCountMap(List<Long> productIds) {
+        if (productIds == null || productIds.isEmpty()) {
+            return Collections.emptyMap();
+        }
+
+        Map<Long, Long> soldCountMap = new LinkedHashMap<>();
+
+        productRepository.sumLegacySoldQuantityByProductIds(productIds)
+                .forEach(row -> soldCountMap.merge(
+                        ((Number) row[0]).longValue(),
+                        ((Number) row[1]).longValue(),
+                        Long::sum
+                ));
+
+        productRepository.sumSubOrderSoldQuantityByProductIds(productIds)
+                .forEach(row -> soldCountMap.merge(
+                        ((Number) row[0]).longValue(),
+                        ((Number) row[1]).longValue(),
+                        Long::sum
+                ));
+
+        return soldCountMap;
+    }
+
     public ProductResponse convertToResponse(Product product) {
+        if (product == null) {
+            return null;
+        }
+        return convertToResponse(product, buildSoldCountMap(List.of(product.getId())));
+    }
+
+    private ProductResponse convertToResponse(Product product, Map<Long, Long> soldCountMap) {
         User currentUser = getCurrentUser();
 
         // LẤY HỆ SỐ NHÂN TỪ SETTING SERVICE (Ví dụ: 30% -> 1.3)
@@ -471,12 +568,16 @@ return convertToResponse(updatedProduct);
                 .id(product.getId())
                 .name(product.getName())
                 .slug(product.getSlug())
+                .shortDesc(product.getShortDesc())
                 .description(product.getDescription())
                 .status(product.getStatus() != null ? product.getStatus().name() : null)
                 .origin(product.getOrigin())
                 .baseSku(product.getBaseSku())
                 .categoryName(product.getCategory() != null ? product.getCategory().getName() : null)
                 .brandName(product.getBrand() != null ? product.getBrand().getName() : null)
+                .soldCount(soldCountMap.getOrDefault(product.getId(), 0L))
+                .ratingAverage(product.getRatingAverage())
+                .reviewCount(product.getReviewCount())
                 .category(categoryDTO)
                 .brand(brandResponse)
                 .inventory(totalInventory)
@@ -492,7 +593,16 @@ return convertToResponse(updatedProduct);
 
     public ProductVariantResponse mapVariantToResponse(ProductVariant variant, User currentUser, BigDecimal multiplier) {
         // Tránh lỗi NullPointerException khi role null
-        boolean isAdmin = currentUser != null && currentUser.getRole() != null && "ADMIN".equals(currentUser.getRole().getSlug());
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        boolean hasExportPermission = auth != null && auth.getAuthorities().stream()
+                .anyMatch(a -> a.getAuthority().equals("EXPORT_CREATE") || a.getAuthority().equals("TRANSFER_CREATE"));
+
+        String roleSlug = (currentUser != null && currentUser.getRole() != null) ? currentUser.getRole().getSlug().toUpperCase() : "";
+        boolean isAdmin = "ADMIN".equals(roleSlug);
+        boolean isManager = "MANAGER".equals(roleSlug) || "BRANCH_MANAGER".equals(roleSlug);
+        
+        boolean canSeeImportPrice = isAdmin || isManager || hasExportPermission;
+
         Branch currentBranch = currentUser != null ? currentUser.getBranch() : null;
 
         List<Inventory> allInventories = inventoryRepository.findByProductVariantId(variant.getId());
@@ -501,7 +611,7 @@ return convertToResponse(updatedProduct);
                 .filter(inv -> inv.getQuantity() != null && inv.getQuantity() > 0)
                 // Chỉ lấy tồn kho từ chi nhánh ACTIVE (Admin xem được tất cả)
                 .filter(inv -> isAdmin || (inv.getBranch() != null && inv.getBranch().getStatus() == BranchStatus.ACTIVE))
-                // Public user thấy tất cả chi nhánh ACTIVE; Staff chỉ thấy chi nhánh của họ
+                // Public user thấy tất cả chi nhánh ACTIVE; Staff/Manager chỉ thấy chi nhánh của họ
                 .filter(inv -> currentUser == null || isAdmin || (currentBranch != null && inv.getBranch() != null && inv.getBranch().getId().equals(currentBranch.getId())))
                 .collect(Collectors.toList());
 
@@ -516,8 +626,9 @@ return convertToResponse(updatedProduct);
                     .branchName(inv.getBranch() != null ? inv.getBranch().getName() : "Kho tổng")
                     .batchNumber(inv.getBatchNumber() != null ? inv.getBatchNumber() : "Chưa xác định")
                     .quantity(inv.getQuantity())
-                    .importPrice(isAdmin ? importPrice : null) // Chỉ Admin mới thấy giá nhập
+                    .importPrice(canSeeImportPrice ? importPrice : null) // Admin/Manager/Exporter được thấy giá nhập
                     .sellingPrice(sellingPrice)
+                    .expiryDate(inv.getExpiryDate() != null ? inv.getExpiryDate().toLocalDate().toString() : null)
                     .build();
         }).collect(Collectors.toList());
 
@@ -669,16 +780,26 @@ return convertToResponse(updatedProduct);
     }
 
     public List<ProductResponse> getProductsForSale() {
-        return productRepository.findProductsForSale().stream()
-                .map(this::convertToResponse)
+        List<Product> products = productRepository.findProductsForSale();
+        Map<Long, Long> soldCountMap = buildSoldCountMap(
+                products.stream().map(Product::getId).toList()
+        );
+
+        return products.stream()
+                .map(product -> convertToResponse(product, soldCountMap))
                 .filter(p -> p.getInventory() != null && p.getInventory() > 0)
                 .collect(Collectors.toList());
     }
 
     public List<ProductResponse> getTopBestSellers(int limit) {
         Pageable pageable = PageRequest.of(0, limit * 2);
-        return productRepository.findTopBestSellers(pageable).stream()
-                .map(this::convertToResponse)
+        List<Product> products = productRepository.findTopBestSellers(pageable);
+        Map<Long, Long> soldCountMap = buildSoldCountMap(
+                products.stream().map(Product::getId).toList()
+        );
+
+        return products.stream()
+                .map(product -> convertToResponse(product, soldCountMap))
                 .filter(p -> p.getInventory() != null && p.getInventory() > 0)
                 .limit(limit)
                 .collect(Collectors.toList());
@@ -713,8 +834,11 @@ return convertToResponse(updatedProduct);
 
         if (productIds.isEmpty()) return Collections.emptyList();
 
-        return productRepository.findPublicByIds(productIds).stream()
-                .map(this::convertToResponse)
+        List<Product> products = productRepository.findPublicByIds(productIds);
+        Map<Long, Long> soldCountMap = buildSoldCountMap(productIds);
+
+        return products.stream()
+                .map(product -> convertToResponse(product, soldCountMap))
                 .filter(p -> p.getInventory() != null && p.getInventory() > 0)
                 .collect(Collectors.toList());
     }
@@ -733,8 +857,11 @@ return convertToResponse(updatedProduct);
 
         if (productIds.isEmpty()) return Collections.emptyList();
 
-        return productRepository.findPublicByIds(productIds).stream()
-                .map(this::convertToResponse)
+        List<Product> products = productRepository.findPublicByIds(productIds);
+        Map<Long, Long> soldCountMap = buildSoldCountMap(productIds);
+
+        return products.stream()
+                .map(product -> convertToResponse(product, soldCountMap))
                 .filter(p -> p.getInventory() != null && p.getInventory() > 0)
                 .collect(Collectors.toList());
     }
@@ -744,8 +871,9 @@ return convertToResponse(updatedProduct);
         Page<Long> productIdsPage = productRepository.findPublicProductIds(keyword, categoryId, brandId, pageable);
         List<Long> productIds = productIdsPage.getContent();
         if (productIds.isEmpty()) return Page.empty(pageable);
+        Map<Long, Long> soldCountMap = buildSoldCountMap(productIds);
         List<ProductResponse> productResponses = productRepository.findPublicByIds(productIds).stream()
-                .map(this::convertToResponse)
+                .map(product -> convertToResponse(product, soldCountMap))
                 .filter(p -> p.getInventory() != null && p.getInventory() > 0)
                 .collect(Collectors.toList());
         return new PageImpl<>(productResponses, pageable, productIdsPage.getTotalElements());

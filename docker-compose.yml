@@ -34,11 +34,11 @@ services:
   # ─────────────────────────────────────────────
   #  PYTHON AI — IMAGE SEARCH
   # ─────────────────────────────────────────────
-  image-search:
+  ai-visual-search:
     build:
       context: ../agrishrimp-ai-visual-search
       dockerfile: Dockerfile
-    container_name: agri-shrimp-ai
+    container_name: agri-shrimp-ai-visual-search
     restart: always
     depends_on:
       db:
@@ -68,15 +68,18 @@ services:
       dockerfile: Dockerfile
     container_name: agri-shrimp-app
     restart: always
+    env_file:
+      - .env
     depends_on:
       db:
         condition: service_healthy
       redis:
         condition: service_healthy
     ports:
-      - "${APP_PORT:-8001}:8080"
+      - "${APP_PORT:-8004}:8004"
     environment:
-      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-prod}
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-dev}
+      SERVER_PORT: ${SERVER_PORT:-8004}
       # Database connection for container network
       SPRING_DATASOURCE_URL: jdbc:mysql://db:3306/${MYSQL_DATABASE:-agri_shrimp_db}?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
       SPRING_DATASOURCE_USERNAME: root
@@ -87,18 +90,22 @@ services:
       SECURITY_JWT_SECRET_KEY: ${JWT_SECRET}
       SECURITY_JWT_ISSUER: ${JWT_ISSUER}
       APP_TURNSTILE_SECRET_KEY: ${APP_TURNSTILE_SECRET_KEY:-0x4AAAAAACWEfgMhY3lG-CqER4Ayl1OtWOY}
+      ZALO_APP_SECRET: ${ZALO_APP_SECRET}
+      APP_GOOGLE_CLIENT_ID: ${APP_GOOGLE_CLIENT_ID}
       CLOUDINARY_CLOUD_NAME: ${CLOUDINARY_CLOUD_NAME:-}
       CLOUDINARY_API_KEY: ${CLOUDINARY_API_KEY:-}
       CLOUDINARY_API_SECRET: ${CLOUDINARY_API_SECRET:-}
       PAYOS_CLIENT_ID: ${PAYOS_CLIENT_ID:-}
       PAYOS_API_KEY: ${PAYOS_API_KEY:-}
       PAYOS_CHECKSUM_KEY: ${PAYOS_CHECKSUM_KEY:-}
-      PAYOS_RETURN_URL: ${PAYOS_RETURN_URL:-https://agrishrimp.io.vn/order-success}
-      PAYOS_CANCEL_URL: ${PAYOS_CANCEL_URL:-https://agrishrimp.io.vn/order-cancel}
+      PAYOS_RETURN_URL: ${PAYOS_RETURN_URL:-http://localhost:3004/order-success}
+      PAYOS_CANCEL_URL: ${PAYOS_CANCEL_URL:-http://localhost:3004/order-cancel}
       SPRING_MAIL_USERNAME: ${MAIL_USERNAME}
       SPRING_MAIL_PASSWORD: ${MAIL_PASSWORD}
       # CORS & Cookie
-      APP_CORS_ALLOWED_ORIGINS: ${APP_CORS_ALLOWED_ORIGINS:-https://agrishrimp.io.vn}
+      APP_CORS_ALLOWED_ORIGINS: ${APP_CORS_ALLOWED_ORIGINS:-http://localhost:3004}
+      APP_WEB_BASE_URL: ${APP_WEB_BASE_URL:-http://localhost:3004}
+      APP_SERVER_URL: ${APP_SERVER_URL:-http://localhost:8004}
       APP_COOKIE_SECURE: ${APP_COOKIE_SECURE:-true}
       # Hibernate (validate = chỉ kiểm tra schema, không tự ALTER; update = tự ALTER khi có thay đổi entity)
       SPRING_JPA_HIBERNATE_DDL_AUTO: ${HIBERNATE_DDL_AUTO:-update}
@@ -107,7 +114,14 @@ services:
       AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
       AWS_REGION: ${AWS_REGION:-ap-southeast-1}
       # Python AI Service
-      IMAGE_SEARCH_URL: http://image-search:5001
+      IMAGE_SEARCH_URL: http://ai-visual-search:5001
+      # Geocoding / Routing
+      TRACKASIA_API_KEY: ${TRACKASIA_API_KEY}
+      TRACKASIA_AUTOCOMPLETE_URL: ${TRACKASIA_AUTOCOMPLETE_URL:-https://api.trackasia.vn/api/geocode/autocomplete}
+      ORS_API_KEY: ${ORS_API_KEY}
+      # Shipping (GHN)
+      GHN_API_KEY: ${GHN_API_KEY}
+      
 
 volumes:
   mysql_data:

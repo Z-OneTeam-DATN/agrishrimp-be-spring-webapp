@@ -11,12 +11,16 @@ public class ProductResponse {
     private Long id;
     private String name;
     private String slug;
+    private String shortDesc;
     private String description;
     private String status;
     private String origin;
     private String baseSku;
     private String categoryName;
     private String brandName;
+    private Long soldCount;
+    private Float ratingAverage;
+    private Integer reviewCount;
     private CategoryDTO category;
     private BrandResponse brand;
 

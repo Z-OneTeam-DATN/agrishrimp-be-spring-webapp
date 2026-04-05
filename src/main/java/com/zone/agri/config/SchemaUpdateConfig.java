@@ -37,6 +37,7 @@ public class SchemaUpdateConfig {
                 "Patch inventory_notes.type ENUM thêm CHECK",
                 "ALTER TABLE inventory_notes MODIFY COLUMN type ENUM('IMPORT','EXPORT','CHECK')"
             );
+
             applyPatch(
                 "Patch sub_orders.status length to 40",
                 "ALTER TABLE sub_orders MODIFY COLUMN status VARCHAR(40)"

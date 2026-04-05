@@ -59,12 +59,13 @@ public class PublicProductService {
         List<Product> products = productRepository.findPublicByIds(ids);
 
         Map<Long, Long> stockMap = buildStockMap(ids);
+        Map<Long, Long> soldCountMap = buildSoldCountMap(ids);
 
         Map<Long, Product> productById = products.stream()
                 .collect(Collectors.toMap(Product::getId, p -> p));
 
         List<PublicProductResponse> responses = ids.stream()
-                .map(id -> toPublicResponse(productById.get(id), stockMap))
+                .map(id -> toPublicResponse(productById.get(id), stockMap, soldCountMap))
                 .filter(Objects::nonNull)
                 .collect(Collectors.toList());
 
@@ -79,7 +80,11 @@ public class PublicProductService {
         Product product = productRepository.findById(id)
                 .orElseThrow(() -> new NotFoundException("Sản phẩm không tồn tại."));
         assertPublicVisible(product);
-        return toPublicResponse(product, buildStockMap(List.of(product.getId())));
+        return toPublicResponse(
+                product,
+                buildStockMap(List.of(product.getId())),
+                buildSoldCountMap(List.of(product.getId()))
+        );
     }
 
     // =========================================================================
@@ -90,7 +95,11 @@ public class PublicProductService {
         Product product = productRepository.findBySlug(slug)
                 .orElseThrow(() -> new NotFoundException("Sản phẩm không tồn tại."));
         assertPublicVisible(product);
-        return toPublicResponse(product, buildStockMap(List.of(product.getId())));
+        return toPublicResponse(
+                product,
+                buildStockMap(List.of(product.getId())),
+                buildSoldCountMap(List.of(product.getId()))
+        );
     }
 
     // =========================================================================
@@ -117,7 +126,35 @@ public class PublicProductService {
                 ));
     }
 
-    private PublicProductResponse toPublicResponse(Product product, Map<Long, Long> stockMap) {
+    private Map<Long, Long> buildSoldCountMap(List<Long> productIds) {
+        if (productIds == null || productIds.isEmpty()) {
+            return Collections.emptyMap();
+        }
+
+        Map<Long, Long> soldCountMap = new LinkedHashMap<>();
+
+        productRepository.sumLegacySoldQuantityByProductIds(productIds)
+                .forEach(row -> soldCountMap.merge(
+                        ((Number) row[0]).longValue(),
+                        ((Number) row[1]).longValue(),
+                        Long::sum
+                ));
+
+        productRepository.sumSubOrderSoldQuantityByProductIds(productIds)
+                .forEach(row -> soldCountMap.merge(
+                        ((Number) row[0]).longValue(),
+                        ((Number) row[1]).longValue(),
+                        Long::sum
+                ));
+
+        return soldCountMap;
+    }
+
+    private PublicProductResponse toPublicResponse(
+            Product product,
+            Map<Long, Long> stockMap,
+            Map<Long, Long> soldCountMap
+    ) {
         if (product == null) return null;
 
         boolean isOutOfStock = stockMap.getOrDefault(product.getId(), 0L) <= 0;
@@ -151,6 +188,9 @@ public class PublicProductService {
                 .description(product.getDescription())
                 .origin(product.getOrigin())
                 .baseSku(product.getBaseSku())
+                .soldCount(soldCountMap.getOrDefault(product.getId(), 0L))
+                .ratingAverage(product.getRatingAverage())
+                .reviewCount(product.getReviewCount())
                 .category(categoryInfo)
                 .brandName(product.getBrand() != null ? product.getBrand().getName() : null)
                 .imageUrls(imageUrls)

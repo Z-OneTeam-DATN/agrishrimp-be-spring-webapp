@@ -48,6 +48,12 @@ public class User extends BaseEntity {
     @Column(name = "avatar_url")
     private String avatarUrl;
 
+    @Column(name = "address_detail", columnDefinition = "TEXT")
+    private String addressDetail;
+
+    @Column(name = "start_date")
+    private java.time.LocalDate startDate;
+
     @Enumerated(EnumType.ORDINAL)
     @Column(columnDefinition = "TINYINT")
     private Gender gender;
@@ -78,6 +84,9 @@ public class User extends BaseEntity {
     @EqualsAndHashCode.Exclude
     @JsonIgnore
     private Role role;
+
+    @Column(name = "zalo_id", unique = true)
+    private String zaloId;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "auth_provider")

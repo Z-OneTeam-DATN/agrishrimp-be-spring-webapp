@@ -26,7 +26,7 @@ import java.util.Map;
 @Slf4j
 public class ImageSearchService {
 
-    @Value("${image-search.base-url:http://localhost:5001}")
+    @Value("${image-search.base-url:http://ai-visual-search:5001}")
     private String baseUrl;
 
     private final RestTemplate restTemplate;

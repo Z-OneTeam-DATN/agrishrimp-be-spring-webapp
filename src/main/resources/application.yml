@@ -2,8 +2,7 @@ spring:
   application:
     name: agri-shrimp
   profiles:
-    active:
-      dev
+    active: ${SPRING_PROFILES_ACTIVE:prod}
 
 management:
   endpoints:
@@ -21,3 +20,9 @@ management:
       enabled: true
     readinessState:
       enabled: true
+  
+# OCR Configuration  
+ocr:  
+  api:  
+    url: ${OCR_API_URL:}  
+    key: ${OCR_API_KEY:} 

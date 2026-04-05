@@ -1,6 +1,9 @@
 package com.zone.agri.service;
 
+import com.zone.agri.dto.request.auth.ZaloAuthRequest;
 import com.zone.agri.dto.response.auth.AuthResponse;
+import com.zone.agri.dto.response.auth.ZaloAuthResponse;
+import org.springframework.dao.DataIntegrityViolationException;
 import com.zone.agri.dto.request.auth.GoogleLoginRequest;
 import com.zone.agri.dto.request.auth.LoginRequest;
 import com.zone.agri.dto.request.auth.SignupRequest;
@@ -19,6 +22,7 @@ import com.zone.agri.utils.JwtUtils;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.*;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -43,7 +47,13 @@ public class AuthService {
     private final JwtUtils jwtUtils;
     private final CustomUserDetailsService userDetailsService;
 
-    private final RestTemplate restTemplate = new RestTemplate();
+    @Value("${zalo.app-secret}")
+    private String zaloAppSecret;
+
+    private final RestTemplate restTemplate;
+
+    private static final String ZALO_VERIFY_URL = "https://graph.zalo.me/v2.0/me?fields=id";
+    private static final String ZALO_PHONE_URL   = "https://graph.zalo.me/v2.0/me/info";
 
     private static final Pattern EMAIL_PATTERN =
             Pattern.compile("^[\\w-\\.]+@([\\w-]+\\.)+[\\w-]{2,4}$");
@@ -257,5 +267,228 @@ public class AuthService {
         } catch (Exception e) {
             return null;
         }
+    }
+
+    // =========================================================
+    // ĐĂNG NHẬP ZALO MINI APP
+    // =========================================================
+
+    public ZaloAuthResponse loginWithZaloUserInfo(ZaloAuthRequest request) {
+
+        // 1. Verify + lấy phone TRƯỚC khi vào transaction (các bước này gọi Zalo API, không cần TX)
+        verifyZaloUserId(request.getZaloAccessToken(), request.getUserId());
+        String normalizedPhone = normalizePhoneNumber(
+                getPhoneFromZalo(request.getZaloAccessToken(), request.getPhoneToken()));
+
+        try {
+            return doZaloLogin(request, normalizedPhone);
+        } catch (DataIntegrityViolationException e) {
+            // Race condition: concurrent request đã tạo user cùng lúc — retry lookup
+            log.warn("Race condition trên Zalo login zaloId={}, retrying", request.getUserId());
+            return doZaloLogin(request, normalizedPhone);
+        }
+    }
+
+    @Transactional
+    protected ZaloAuthResponse doZaloLogin(ZaloAuthRequest request, String normalizedPhone) {
+
+        // 2. Tìm hoặc tạo user
+        User user = userRepository.findByZaloId(request.getUserId())
+                .orElseGet(() -> userRepository.findByPhoneNumber(normalizedPhone).orElse(null));
+
+        if (user == null) {
+            // Tạo user mới
+            Role defaultRole = roleRepository.findBySlug(ROLE_USER)
+                    .orElseThrow(() -> new BadRequestException("Cấu hình hệ thống lỗi: Role USER chưa được tạo"));
+
+            String displayName = (request.getName() != null && !request.getName().isBlank())
+                    ? request.getName().trim() : "Zalo User";
+            String avatarUrl = (request.getAvatar() != null && !request.getAvatar().isBlank())
+                    ? request.getAvatar() : generateSmartAvatar(displayName);
+
+            user = User.builder()
+                    .fullName(displayName)
+                    .phoneNumber(normalizedPhone)
+                    .avatarUrl(avatarUrl)
+                    .zaloId(request.getUserId())
+                    .provider(AuthProvider.ZALO)
+                    .role(defaultRole)
+                    .status(UserStatus.ACTIVE)
+                    .passwordHash(passwordEncoder.encode(UUID.randomUUID().toString()))
+                    .build();
+
+            userRepository.save(user);
+            log.info("Tạo tài khoản Zalo mới: zaloId={}, phone={}", request.getUserId(), normalizedPhone);
+        } else {
+            // Kiểm tra trạng thái tài khoản
+            checkUserStatus(user);
+
+            // FIX ACCOUNT TAKEOVER: nếu phone này đã linked với zaloId KHÁC → reject
+            if (user.getZaloId() != null && !user.getZaloId().equals(request.getUserId())) {
+                log.warn("Zalo ID conflict: phone={}, dbZaloId={}, requestZaloId={}",
+                        normalizedPhone, user.getZaloId(), request.getUserId());
+                throw new BadRequestException(
+                        "Số điện thoại này đã liên kết với một tài khoản Zalo khác. Vui lòng liên hệ hỗ trợ.");
+            }
+
+            // Liên kết / cập nhật thông tin
+            boolean changed = false;
+
+            if (user.getZaloId() == null) {
+                user.setZaloId(request.getUserId());
+                changed = true;
+            }
+            if (request.getName() != null && !request.getName().isBlank()
+                    && !request.getName().trim().equals(user.getFullName())) {
+                user.setFullName(request.getName().trim());
+                changed = true;
+            }
+            if (request.getAvatar() != null && !request.getAvatar().isBlank()
+                    && !request.getAvatar().equals(user.getAvatarUrl())) {
+                user.setAvatarUrl(request.getAvatar());
+                changed = true;
+            }
+            if (!normalizedPhone.equals(user.getPhoneNumber())) {
+                user.setPhoneNumber(normalizedPhone);
+                changed = true;
+            }
+            if (changed) {
+                userRepository.save(user);
+            }
+            log.info("Đăng nhập Zalo thành công: userId={}, zaloId={}", user.getId(), request.getUserId());
+        }
+
+        // 3. Generate JWT nội bộ — subject = phoneNumber
+        CustomUserDetail userDetails = (CustomUserDetail) userDetailsService.loadUserByUsername(normalizedPhone);
+        String accessToken = jwtUtils.generateAccessTokenFromZalo(userDetails, request.getUserId());
+
+        return ZaloAuthResponse.builder()
+                .accessToken(accessToken)
+                .userId(user.getId())
+                .fullName(user.getFullName())
+                .avatar(user.getAvatarUrl())
+                .phone(user.getPhoneNumber())
+                .hasPaymentPassword(false)
+                .build();
+    }
+
+    // =========================================================
+    // HELPER: Xác thực userId từ Zalo access token
+    // =========================================================
+    private void verifyZaloUserId(String zaloAccessToken, String expectedUserId) {
+        HttpHeaders headers = new HttpHeaders();
+        headers.set("access_token", zaloAccessToken);
+        HttpEntity<Void> entity = new HttpEntity<>(headers);
+
+        Map<?, ?> body;
+        try {
+            log.info("Verifying Zalo Access Token for userId: {}", expectedUserId);
+            ResponseEntity<Map> response = restTemplate.exchange(
+                    ZALO_VERIFY_URL, HttpMethod.GET, entity, Map.class
+            );
+            body = response.getBody();
+            log.info("Zalo Verify Token Response: {}", body);
+        } catch (Exception e) {
+            log.error("Lỗi thực thi khi verify Zalo token: {}", e.getMessage());
+            throw new BadRequestException("Lỗi kết nối khi xác thực Zalo token: " + e.getMessage());
+        }
+
+        if (body == null) {
+            throw new BadRequestException("Zalo không trả về dữ liệu khi xác thực token");
+        }
+
+        // Kiểm tra lỗi từ Zalo
+        if (body.containsKey("error")) {
+            Object errObj = body.get("error");
+            int errorCode = (errObj instanceof Integer) ? (Integer) errObj : Integer.parseInt(String.valueOf(errObj));
+            if (errorCode != 0) {
+                String errorMsg = String.valueOf(body.get("message"));
+                log.error("Zalo Verify Token Error: code={}, message={}", errorCode, errorMsg);
+                throw new BadRequestException("Zalo Verify Token Error (" + errorCode + "): " + errorMsg);
+            }
+        }
+
+        if (body.get("id") == null) {
+            log.warn("Zalo verify token success but 'id' field is missing: {}", body);
+            throw new BadRequestException("Không lấy được thông tin user ID từ Zalo");
+        }
+
+        String returnedId = String.valueOf(body.get("id"));
+        if (!expectedUserId.equals(returnedId)) {
+            log.warn("Zalo userId không khớp: expected={}, returned={}", expectedUserId, returnedId);
+            throw new BadRequestException("User ID cung cấp không khớp với Access Token từ Zalo");
+        }
+    }
+
+    // =========================================================
+    // HELPER: Lấy số điện thoại từ Zalo API
+    // =========================================================
+    private String getPhoneFromZalo(String zaloAccessToken, String phoneToken) {
+        HttpHeaders headers = new HttpHeaders();
+        headers.set("access_token", zaloAccessToken);
+        headers.set("code", phoneToken);
+        headers.set("secret_key", zaloAppSecret);
+        HttpEntity<Void> entity = new HttpEntity<>(headers);
+
+        Map<?, ?> body;
+        try {
+            log.info("Calling Zalo Phone API with access_token and code/phoneToken");
+            ResponseEntity<Map> response = restTemplate.exchange(
+                    ZALO_PHONE_URL, HttpMethod.GET, entity, Map.class
+            );
+            body = response.getBody();
+            log.info("Zalo Phone API Raw Response: {}", body);
+        } catch (Exception e) {
+            log.error("Lỗi thực thi khi gọi Zalo API: {}", e.getMessage());
+            throw new BadRequestException("Lỗi kết nối hoặc xử lý Zalo API: " + e.getMessage());
+        }
+
+        if (body == null) {
+            throw new BadRequestException("Zalo trả về response rỗng");
+        }
+
+        // Kiểm tra lỗi nghiệp vụ từ Zalo (error != 0)
+        if (body.containsKey("error")) {
+            Object errObj = body.get("error");
+            int errorCode = (errObj instanceof Integer) ? (Integer) errObj : Integer.parseInt(String.valueOf(errObj));
+            if (errorCode != 0) {
+                String errorMsg = String.valueOf(body.get("message"));
+                log.error("Zalo API Error: code={}, message={}", errorCode, errorMsg);
+                throw new BadRequestException("Zalo API Error (" + errorCode + "): " + errorMsg);
+            }
+        }
+
+        if (body.get("data") == null) {
+            log.warn("Zalo response success but 'data' field is missing: {}", body);
+            throw new BadRequestException("Zalo không trả về thông tin số điện thoại (data is null)");
+        }
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> data = (Map<String, Object>) body.get("data");
+        Object numberObj = data.get("number");
+
+        if (numberObj == null || String.valueOf(numberObj).isBlank()) {
+            log.warn("Zalo 'data' found but 'number' is empty: {}", data);
+            throw new BadRequestException("Số điện thoại từ Zalo bị rỗng hoặc không hợp lệ");
+        }
+
+        return String.valueOf(numberObj);
+    }
+
+    // =========================================================
+    // HELPER: Chuẩn hoá số điện thoại Zalo (+84 → 0)
+    // =========================================================
+    private String normalizePhoneNumber(String phone) {
+        if (phone == null) return null;
+        String cleaned = phone.trim().replaceAll("\\s+", "");
+        if (cleaned.startsWith("+84")) {
+            cleaned = "0" + cleaned.substring(3);
+        } else if (cleaned.startsWith("84") && cleaned.length() == 11) {
+            cleaned = "0" + cleaned.substring(2);
+        }
+        if (!cleaned.matches("^0\\d{9}$")) {
+            throw new BadRequestException("Số điện thoại không đúng định dạng Việt Nam: " + phone);
+        }
+        return cleaned;
     }
 }

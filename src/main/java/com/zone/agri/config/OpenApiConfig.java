@@ -22,20 +22,18 @@ import java.util.List;
                 title = "AgriShrimp Enterprise API",
                 version = "1.0.0",
                 description = "Hệ thống quản lý chuỗi cung ứng và vận hành nuôi tôm công nghệ cao.",
-                contact = @Contact(name = "Zone Agri Support", email = "support@zone-agri.com", url = "https://zone-agri.com"),
-                license = @License(name = "Enterprise License", url = "https://zone-agri.com/license")
+                contact = @Contact(name = "AgriShrimp Support", url = "https://agrishrimp.io.vn"),
+                license = @License(name = "Enterprise License", url = "https://agrishrimp.io.vn")
         ),
         security = {@SecurityRequirement(name = "bearerAuth")}
 )
 public class OpenApiConfig {
 
     @Bean
-    public OpenAPI customOpenAPI(@Value("${app.server.url:http://localhost:8080}") String serverUrl) {
+    public OpenAPI customOpenAPI(@Value("${app.server.url:https://api.agrishrimp.io.vn}") String serverUrl) {
         return new OpenAPI()
                 .servers(List.of(
-                        new Server().url(serverUrl).description("Default Server"),
-                        new Server().url("https://api.dev.zone-agri.com").description("Development Server"),
-                        new Server().url("https://api.stg.zone-agri.com").description("Staging Server")
+                        new Server().url(serverUrl).description("Production API")
                 ))
                 .components(new Components()
                         .addSecuritySchemes("bearerAuth",

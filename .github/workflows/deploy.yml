@@ -1,0 +1,127 @@
+name: Deploy Backend (agrishrimp-be-spring-webapp)
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-backend
+  cancel-in-progress: false
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: z-oneteam-datn/agrishrimp-be-spring-webapp
+  APP_PORT: 8004
+  JAVA_VERSION: '21'
+
+jobs:
+  # ─────────────────────────────────────────────
+  # JOB 1: Compile + Test (GitHub-hosted cloud)
+  # ─────────────────────────────────────────────
+  test:
+    name: Maven Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: 'temurin'
+          cache: maven
+
+      - name: Compile
+        run: mvn clean verify -DskipTests --batch-mode --no-transfer-progress
+
+  # ─────────────────────────────────────────────
+  # JOB 2: Build + Push image (GitHub-hosted cloud)
+  # ─────────────────────────────────────────────
+  build:
+    name: Build & Push Image
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GHCR_WRITE_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha,prefix=sha-,format=short
+
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ─────────────────────────────────────────────
+  # JOB 3: Deploy (self-hosted runner trên máy)
+  # Không cần SSH — runner chạy trực tiếp trên server
+  # ─────────────────────────────────────────────
+  deploy:
+    name: Deploy on Server
+    runs-on: [self-hosted, linux, agrishrimp]
+    needs: build
+    environment: production
+    steps:
+      - name: Pull & restart api
+        env:
+          GHCR_TOKEN: ${{ secrets.GHCR_WRITE_TOKEN }}
+          ACTOR: ${{ github.actor }}
+          REGISTRY: ${{ env.REGISTRY }}
+          IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+        run: |
+          set -e
+          cd /home/bnhien40/agrishrimp
+
+          CURRENT_IMAGE=$(docker inspect --format='{{index .RepoDigests 0}}' agrishrimp-api 2>/dev/null || echo "none")
+
+          echo "$GHCR_TOKEN" | docker login ghcr.io -u "$ACTOR" --password-stdin
+
+          docker pull "$IMAGE:latest"
+
+          docker compose -f docker-compose.prod.yml up -d --no-deps --pull never api
+
+          echo "Waiting for Spring Boot..."
+          sleep 20
+
+          RETRIES=6
+          for i in $(seq 1 $RETRIES); do
+            STATUS=$(curl -sf http://127.0.0.1:${{ env.APP_PORT }}/actuator/health \
+              | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('status','DOWN'))" \
+              2>/dev/null || echo "DOWN")
+
+            if [ "$STATUS" = "UP" ]; then
+              echo "✅ Health check passed"
+              exit 0
+            fi
+            echo "⏳ $i/$RETRIES — $STATUS. Retry in 10s..."
+            sleep 10
+          done
+
+          echo "❌ Health check failed. Rolling back..."
+          if [ "$CURRENT_IMAGE" != "none" ]; then
+            docker tag "$CURRENT_IMAGE" "$IMAGE:latest" 2>/dev/null || true
+            docker compose -f docker-compose.prod.yml up -d --no-deps --pull never api
+            echo "⏮️  Rolled back"
+          fi
+          exit 1
