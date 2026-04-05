@@ -153,3 +153,9 @@ payos:
   checksum-key: ce77815efbadca0bb92a5fece880b3eea4786e236a5d84b4c718cff33d5ff3e3
   return-url: "${PAYOS_RETURN_URL:http://localhost:3004/order-success}"
   cancel-url: "${PAYOS_CANCEL_URL:http://localhost:3004/order-cancel}"
+
+# 16. CẤU HÌNH OCR (GOOGLE VISION)
+ocr:
+  api:
+    url: "https://vision.googleapis.com/v1/images:annotate"
+    key: ${GOOGLE_VISION_API_KEY:}

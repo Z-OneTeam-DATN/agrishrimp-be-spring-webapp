@@ -145,3 +145,9 @@ logging:
   level:
     root: INFO
     com.zone.agri: INFO
+
+# 16. CẤU HÌNH OCR (GOOGLE VISION)
+ocr:
+  api:
+    url: "https://vision.googleapis.com/v1/images:annotate"
+    key: ${GOOGLE_VISION_API_KEY:}
