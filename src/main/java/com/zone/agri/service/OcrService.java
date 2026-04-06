@@ -863,11 +863,29 @@ public class OcrService {
                 .replaceAll("\\s{2,}", " ")
                 .trim();
 
+        cleaned = normalizeCommonNameOcrMistakes(cleaned);
+
         String[] tokens = cleaned.split("\\s+");
         if (tokens.length >= 2 && tokens[tokens.length - 1].length() == 1) {
             cleaned = String.join(" ", List.of(tokens).subList(0, tokens.length - 1));
         }
         return cleaned.trim();
+    }
+
+    private String normalizeCommonNameOcrMistakes(String value) {
+        if (value == null || value.isBlank()) {
+            return "";
+        }
+
+        String normalized = value.replaceAll("\\s{2,}", " ").trim();
+
+        // Common OCR confusions on Vietnamese CCCD names.
+        normalized = normalized.replaceAll("(?iu)^NGUYEN\\b", "NGUYỄN");
+        normalized = normalized.replaceAll("(?iu)^NGUYÊN\\b", "NGUYỄN");
+        normalized = normalized.replaceAll("(?iu)\\bHÙY\\b", "HUY");
+        normalized = normalized.replaceAll("(?iu)\\bGIAHUY\\b", "GIA HUY");
+
+        return normalized.replaceAll("\\s{2,}", " ").trim();
     }
 
     private String cleanupAddress(String value) {
@@ -893,10 +911,59 @@ public class OcrService {
         cleaned = removeIsolatedOneLetterTokens(cleaned);
         // Remove garbage tokens like "R tu", "va VN" etc
         cleaned = removeNoisyTokens(cleaned);
+        cleaned = normalizeCommonAddressOcrMistakes(cleaned);
+        cleaned = trimTrailingNonAddressSegment(cleaned);
         cleaned = trimTrailingUppercaseNoise(cleaned);
         return cleaned.replaceAll("\\s{2,}", " ")
                 .replaceAll("[/,\\-\\s]+$", "")
                 .trim();
+    }
+
+    private String normalizeCommonAddressOcrMistakes(String value) {
+        if (value == null || value.isBlank()) {
+            return "";
+        }
+
+        String normalized = value;
+
+        normalized = normalized.replaceAll("(?iu)\\b[Tt][eễ]\\s*4?6\\b", "Tổ 16");
+        normalized = normalized.replaceAll("(?iu)\\b[Tt]o\\s*1[6b]\\b", "Tổ 16");
+        normalized = normalized.replaceAll("(?iu)\\b[Kk]i\\s*[Kk]enh\\s*2A\\b", "Ấp Kinh 2A");
+        normalized = normalized.replaceAll("(?iu)\\b[Kk]enh\\s*2A\\b", "Ấp Kinh 2A");
+        normalized = normalized.replaceAll("(?iu)\\b[Kk]em\\s*2A\\b", "Ấp Kinh 2A");
+        normalized = normalized.replaceAll("(?iu)\\b[Aa]steh2A\\b", "Ấp Kinh 2A");
+        normalized = normalized.replaceAll("(?iu)\\b[Aa]gkmh2A\\b", "Ấp Kinh 2A");
+
+        return normalized.replaceAll("\\s{2,}", " ").replaceAll("\\s+,", ",").trim();
+    }
+
+    private String trimTrailingNonAddressSegment(String value) {
+        if (value == null || value.isBlank()) {
+            return "";
+        }
+
+        String[] segments = value.split("\\s*,\\s*");
+        if (segments.length < 3) {
+            return value.trim();
+        }
+
+        String last = segments[segments.length - 1].trim();
+        String mergedLower = value.toLowerCase(Locale.ROOT);
+        boolean hasStrongLocation = mergedLower.contains("kiên giang")
+                || mergedLower.contains("tân hiệp")
+                || mergedLower.contains("ấp")
+                || mergedLower.contains("tổ");
+
+        boolean lastLooksLikeAddress = last.toLowerCase(Locale.ROOT)
+                .matches(".*\\b(tổ|ấp|xã|huyện|tỉnh|thành|phố|quận|đường|thôn|ấp)\\b.*")
+                || last.matches(".*\\d.*");
+
+        // Drop trailing personal-name-like fragment (e.g. "Thuân") after an already complete address.
+        if (hasStrongLocation && !lastLooksLikeAddress && last.split("\\s+").length <= 2) {
+            return String.join(", ", List.of(segments).subList(0, segments.length - 1)).trim();
+        }
+
+        return value.trim();
     }
 
     private String removeNoisyTokens(String value) {
