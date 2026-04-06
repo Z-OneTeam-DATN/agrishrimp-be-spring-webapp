@@ -1,7 +1,6 @@
 package com.zone.agri.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
-
 import org.junit.jupiter.api.Test;
 
 class OcrServiceTest {
@@ -48,5 +47,24 @@ class OcrServiceTest {
         assertThat(result.getFullName()).isEqualTo("TRAN VAN BINH");
         assertThat(result.getDateOfBirth()).isEqualTo("2000-01-01");
         assertThat(result.getGender()).isEqualTo("MALE");
+    }
+
+    @Test
+    void parseExtractedText_shouldIgnoreLabelLikeNameAndTrimAddressNoise() {
+        String text = """
+                CAN CUOC CONG DAN
+                SO: 091206016882
+                FULL NAME
+                NGUYEN HOANG GIA HUY
+                NGAY SINH: 20/06/2006
+                GIOI TINH: NAM
+                NOI THUONG TRU: Tan Hiep A, Tan n Hiep, Kien Giang T E
+                """;
+
+        var result = ocrService.parseExtractedText(text);
+
+        assertThat(result.getCitizenId()).isEqualTo("091206016882");
+        assertThat(result.getFullName()).isEqualTo("NGUYEN HOANG GIA HUY");
+        assertThat(result.getAddress()).isEqualTo("Tan Hiep A, Tan Hiep, Kien Giang");
     }
 }

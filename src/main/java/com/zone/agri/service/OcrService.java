@@ -456,13 +456,17 @@ public class OcrService {
             }
 
             String inlineCandidate = cleanupName(removeLabelValue(line.original(), NAME_LABELS));
-            if (!inlineCandidate.isBlank() && !containsAny(normalizeForLookup(inlineCandidate), NAME_LABELS)) {
-                return inlineCandidate;
+            if (!inlineCandidate.isBlank()) {
+                String normalizedCandidate = normalizeForLookup(inlineCandidate);
+                if (!containsAny(normalizedCandidate, NAME_LABELS) && !isLabelLikeNameCandidate(normalizedCandidate)) {
+                    return inlineCandidate;
+                }
             }
 
             for (int next = i + 1; next < Math.min(lines.size(), i + 4); next++) {
                 String candidate = cleanupName(lines.get(next).original());
-                if (isLikelyName(candidate, lines.get(next).normalized())) {
+                String normalizedCandidate = normalizeForLookup(candidate);
+                if (isLikelyName(candidate, normalizedCandidate)) {
                     return candidate;
                 }
             }
@@ -471,6 +475,7 @@ public class OcrService {
         return lines.stream()
                 .map(line -> cleanupName(line.original()))
                 .filter(candidate -> isLikelyName(candidate, normalizeForLookup(candidate)))
+                .filter(candidate -> !isLabelLikeNameCandidate(normalizeForLookup(candidate)))
                 .findFirst()
                 .orElse("");
     }
@@ -495,6 +500,7 @@ public class OcrService {
                 }
             }
         }
+
         return "";
     }
 
@@ -638,10 +644,52 @@ public class OcrService {
     }
 
     private String cleanupAddress(String value) {
-        return value == null ? "" : value.replaceAll("[^\\p{L}\\p{N}\\s,./-]", " ")
+        if (value == null) {
+            return "";
+        }
+
+        String cleaned = value.replaceAll("[^\\p{L}\\p{N}\\s,./-]", " ")
                 .replaceAll("\\s{2,}", " ")
                 .replaceAll("\\s+,", ",")
                 .trim();
+
+        cleaned = removeIsolatedOneLetterTokens(cleaned);
+        cleaned = trimTrailingUppercaseNoise(cleaned);
+        return cleaned.replaceAll("\\s{2,}", " ").trim();
+    }
+
+    private String removeIsolatedOneLetterTokens(String value) {
+        String[] tokens = value.split("\\s+");
+        List<String> kept = new ArrayList<>();
+        for (String token : tokens) {
+            String normalized = token.replaceAll("[,./-]", "");
+            if (normalized.length() == 1 && Character.isLetter(normalized.charAt(0))
+                    && !Character.isUpperCase(normalized.charAt(0))) {
+                continue;
+            }
+            kept.add(token);
+        }
+        return String.join(" ", kept);
+    }
+
+    private String trimTrailingUppercaseNoise(String value) {
+        String result = value.trim();
+        while (result.matches(".*\\s\\p{Lu}{1,2}$")) {
+            result = result.replaceFirst("\\s\\p{Lu}{1,2}$", "").trim();
+        }
+        return result;
+    }
+
+    private boolean isLabelLikeNameCandidate(String normalizedCandidate) {
+        if (normalizedCandidate == null || normalizedCandidate.isBlank()) {
+            return true;
+        }
+
+        return normalizedCandidate.contains("FULL NAME")
+                || normalizedCandidate.contains("NAME")
+                || normalizedCandidate.equals("HO VA TEN")
+                || normalizedCandidate.equals("HO TEN")
+                || normalizedCandidate.equals("TEN");
     }
 
     private boolean containsAny(String value, Set<String> tokens) {
