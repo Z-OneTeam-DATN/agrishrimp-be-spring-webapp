@@ -1,252 +1,684 @@
 package com.zone.agri.service;
 
+import java.awt.Graphics2D;
+import java.awt.RenderingHints;
+import java.awt.color.ColorSpace;
+import java.awt.image.BufferedImage;
+import java.awt.image.ColorConvertOp;
+import java.io.ByteArrayInputStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.text.Normalizer;
+import java.time.DateTimeException;
 import java.time.LocalDate;
-import java.time.format.DateTimeFormatter;
-import java.util.Base64;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Map;
-import java.util.Objects;
+import java.util.Locale;
+import java.util.Optional;
+import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
+import javax.imageio.ImageIO;
 
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.core.io.ByteArrayResource;
-import org.springframework.http.HttpEntity;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.HttpMethod;
-import org.springframework.http.HttpStatus;
-import org.springframework.http.MediaType;
-import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
-import org.springframework.util.LinkedMultiValueMap;
-import org.springframework.util.MultiValueMap;
-import org.springframework.web.client.RestTemplate;
 import org.springframework.web.multipart.MultipartFile;
 
 import com.zone.agri.dto.response.employee.OcrCccdResponse;
+import com.zone.agri.exception.BadRequestException;
 
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import net.sourceforge.tess4j.ITessAPI;
+import net.sourceforge.tess4j.Tesseract;
+import net.sourceforge.tess4j.TesseractException;
 
-/**
- * Service for OCR processing of CCCD images
- */
 @Service
-@RequiredArgsConstructor
 @Slf4j
 public class OcrService {
 
-    private final RestTemplate restTemplate;
+    private static final Pattern DATE_PATTERN = Pattern.compile("(?<!\\d)(\\d{1,2}[\\s./-]\\d{1,2}[\\s./-]\\d{4})(?!\\d)");
+    private static final Pattern TWELVE_DIGIT_PATTERN = Pattern.compile("(?<!\\d)(\\d{12})(?!\\d)");
+    private static final Set<String> NAME_LABELS = Set.of("HO VA TEN", "HO TEN", "FULL NAME");
+    private static final Set<String> DOB_LABELS = Set.of("NGAY THANG NAM SINH", "NGAY SINH", "SINH NGAY");
+    private static final Set<String> GENDER_LABELS = Set.of("GIOI TINH", "SEX");
+    private static final Set<String> ADDRESS_LABELS = Set.of("NOI THUONG TRU", "QUE QUAN", "DIA CHI");
+    private static final Set<String> STOP_LABELS = Set.of(
+            "CAN CUOC", "CONG HOA", "QUOC TICH", "SO", "GIOI TINH", "NGAY SINH",
+            "NGAY THANG NAM SINH", "QUE QUAN", "NOI THUONG TRU", "CO GIA TRI", "DEN", "SIGNATURE");
 
-    @Value("${ocr.api.url:}")
-    private String ocrApiUrl;
+    static {
+        ImageIO.setUseCache(false);
+    }
 
-    @Value("${ocr.api.key:}")
-    private String ocrApiKey;
+    @Value("${ocr.tesseract.language:vie}")
+    private String ocrLanguage = "vie";
 
-    /**
-     * Extract information from CCCD image using Google Vision API
-     */
+    @Value("${ocr.tesseract.data-path:}")
+    private String configuredTessdataPath = "";
+
+    @Value("${ocr.max-file-size-bytes:5242880}")
+    private long maxFileSizeBytes = 5L * 1024 * 1024;
+
+    @Value("${ocr.max-image-width:1800}")
+    private int maxImageWidth = 1800;
+
+    private volatile String resolvedTessdataPath;
+
     public OcrCccdResponse extractCccdInfo(MultipartFile image) {
-        if (ocrApiUrl == null || ocrApiUrl.isBlank()) {
-            throw new IllegalStateException(
-                    "OCR API URL chưa được cấu hình. Vui lòng thiết lập GOOGLE_VISION_API_KEY.");
-        }
+        validateUpload(image);
 
-        if (ocrApiKey == null || ocrApiKey.isBlank()) {
-            throw new IllegalStateException(
-                    "Google Vision API Key chưa được cấu hình. Vui lòng thiết lập GOOGLE_VISION_API_KEY.");
-        }
+        BufferedImage original = readImage(image);
+        List<BufferedImage> variants = buildVariants(original);
+        List<OcrAttempt> attempts = new ArrayList<>();
 
-        try {
-            log.info("Starting OCR processing for CCCD image using Google Vision API");
-
-            // Convert image to base64
-            byte[] imageBytes = image.getBytes();
-            String base64Image = Base64.getEncoder().encodeToString(imageBytes);
-
-            // Build Google Vision API request
-            Map<String, Object> requestBody = buildGoogleVisionRequest(base64Image);
-
-            HttpHeaders headers = new HttpHeaders();
-            headers.setContentType(MediaType.APPLICATION_JSON);
-
-            HttpEntity<Map<String, Object>> requestEntity = new HttpEntity<>(requestBody, headers);
-
-            // Call Google Vision API
-            String apiUrlWithKey = ocrApiUrl + "?key=" + ocrApiKey;
-            ResponseEntity<Map> response = restTemplate.exchange(
-                    apiUrlWithKey,
-                    HttpMethod.POST,
-                    requestEntity,
-                    Map.class);
-
-            if (response.getStatusCode() == HttpStatus.OK && response.getBody() != null) {
-                String extractedText = extractTextFromGoogleVisionResponse(response.getBody());
-                return parseCccdText(extractedText);
+        for (int i = 0; i < variants.size(); i++) {
+            String extractedText = performOcr(variants.get(i));
+            if (extractedText == null || extractedText.isBlank()) {
+                continue;
             }
 
-            throw new RuntimeException("Google Vision API returned error: " + response.getStatusCode());
+            OcrCccdResponse parsed = parseExtractedText(extractedText);
+            attempts.add(new OcrAttempt(extractedText, parsed, i));
+        }
 
-        } catch (Exception e) {
-            log.error("Error processing OCR for CCCD image", e);
-            throw new RuntimeException("Không thể xử lý ảnh CCCD: " + e.getMessage(), e);
+        if (attempts.isEmpty()) {
+            throw new BadRequestException("Không trích xuất được văn bản từ ảnh CCCD. Vui lòng dùng ảnh rõ hơn.");
+        }
+
+        OcrAttempt bestAttempt = attempts.stream()
+                .max(Comparator.comparingDouble((OcrAttempt attempt) -> attempt.response().getConfidence() != null
+                        ? attempt.response().getConfidence()
+                        : 0D).thenComparingInt(attempt -> attempt.rawText().length()))
+                .orElseThrow();
+
+        OcrCccdResponse result = bestAttempt.response();
+        if (isBlank(result.getCitizenId()) && isBlank(result.getFullName()) && isBlank(result.getDateOfBirth())) {
+            throw new BadRequestException(
+                    "Không nhận diện được số CCCD, họ tên hoặc ngày sinh. Vui lòng chụp rõ mặt trước CCCD, đủ sáng và không bị lóa.");
+        }
+
+        log.info("OCR CCCD thành công với biến thể ảnh {}, confidence={}", bestAttempt.variantIndex(),
+                result.getConfidence());
+        return result;
+    }
+
+    OcrCccdResponse parseExtractedText(String text) {
+        if (text == null || text.isBlank()) {
+            return emptyResponse(0D);
+        }
+
+        String normalizedText = normalizeRawText(text);
+        List<TextLine> lines = buildLines(normalizedText);
+
+        String citizenId = extractCitizenId(lines, normalizedText);
+        LocalDate dateOfBirth = extractDateOfBirth(lines, normalizedText);
+        String fullName = extractFullName(lines);
+        String gender = extractGender(lines);
+        String address = extractAddress(lines);
+        double confidence = estimateConfidence(citizenId, fullName, dateOfBirth, gender, address);
+
+        return OcrCccdResponse.builder()
+                .fullName(defaultString(fullName))
+                .dateOfBirth(dateOfBirth != null ? dateOfBirth.toString() : null)
+                .gender(defaultString(gender))
+                .address(defaultString(address))
+                .citizenId(defaultString(citizenId))
+                .confidence(confidence)
+                .build();
+    }
+
+    private void validateUpload(MultipartFile image) {
+        if (image == null || image.isEmpty()) {
+            throw new BadRequestException("Vui lòng chọn ảnh CCCD để tải lên.");
+        }
+
+        String contentType = image.getContentType();
+        if (contentType == null || !contentType.startsWith("image/")) {
+            throw new BadRequestException("File tải lên phải là ảnh hợp lệ.");
+        }
+
+        if (image.getSize() > maxFileSizeBytes) {
+            throw new BadRequestException("Ảnh CCCD vượt quá giới hạn 5MB.");
         }
     }
 
-    /**
-     * Build Google Vision API request body
-     */
-    private Map<String, Object> buildGoogleVisionRequest(String base64Image) {
-        Map<String, Object> image = Map.of("content", base64Image);
-        Map<String, Object> feature = Map.of("type", "TEXT_DETECTION");
-        List<Map<String, Object>> features = List.of(feature);
-        Map<String, Object> request = Map.of("image", image, "features", features);
-        return Map.of("requests", List.of(request));
-    }
-
-    /**
-     * Extract text from Google Vision API response
-     */
-    private String extractTextFromGoogleVisionResponse(Map<String, Object> response) {
+    private BufferedImage readImage(MultipartFile image) {
         try {
-            List<Map<String, Object>> responses = asList(response.get("responses"));
-            if (responses.isEmpty()) {
-                return "";
+            BufferedImage bufferedImage = ImageIO.read(new ByteArrayInputStream(image.getBytes()));
+            if (bufferedImage == null) {
+                throw new BadRequestException("Không đọc được ảnh CCCD. Vui lòng kiểm tra lại file tải lên.");
             }
-
-            Map<String, Object> firstResponse = responses.get(0);
-            List<Map<String, Object>> textAnnotations = asList(firstResponse.get("textAnnotations"));
-
-            if (textAnnotations.isEmpty()) {
-                return "";
-            }
-
-            return (String) textAnnotations.get(0).get("description");
-        } catch (Exception e) {
-            log.warn("Failed to extract text from Google Vision response", e);
-            return "";
+            return bufferedImage;
+        } catch (BadRequestException ex) {
+            throw ex;
+        } catch (Exception ex) {
+            log.warn("Không thể đọc ảnh CCCD: {}", ex.getMessage());
+            throw new BadRequestException("Ảnh CCCD không hợp lệ hoặc đã bị hỏng.");
         }
     }
 
-    /**
-     * Parse CCCD information from extracted text using regex
-     */
-    private OcrCccdResponse parseCccdText(String text) {
+    private List<BufferedImage> buildVariants(BufferedImage source) {
+        BufferedImage resized = resizeForOcr(source);
+        BufferedImage grayscale = toGrayscale(resized);
+        BufferedImage enhanced = adjustContrast(grayscale, 1.18f, -12f);
+        BufferedImage blurred = applyBoxBlur(enhanced);
+        BufferedImage thresholded = applyOtsuThreshold(blurred);
+        return List.of(grayscale, enhanced, thresholded);
+    }
+
+    private BufferedImage resizeForOcr(BufferedImage source) {
+        int width = source.getWidth();
+        int height = source.getHeight();
+
+        int targetWidth = width;
+        if (width < 1400) {
+            targetWidth = Math.min(maxImageWidth, 1400);
+        } else if (width > maxImageWidth) {
+            targetWidth = maxImageWidth;
+        }
+
+        if (targetWidth == width) {
+            return source;
+        }
+
+        int targetHeight = Math.max(1, (int) Math.round((double) height * targetWidth / width));
+        BufferedImage resized = new BufferedImage(targetWidth, targetHeight, BufferedImage.TYPE_INT_RGB);
+        Graphics2D graphics = resized.createGraphics();
         try {
-            if (text == null || text.isBlank()) {
-                return OcrCccdResponse.builder()
-                        .fullName("")
-                        .dateOfBirth(null)
-                        .gender("")
-                        .address("")
-                        .citizenId("")
-                        .confidence(null)
-                        .build();
+            graphics.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BICUBIC);
+            graphics.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
+            graphics.drawImage(source, 0, 0, targetWidth, targetHeight, null);
+        } finally {
+            graphics.dispose();
+        }
+        return resized;
+    }
+
+    private BufferedImage toGrayscale(BufferedImage source) {
+        BufferedImage grayscale = new BufferedImage(source.getWidth(), source.getHeight(), BufferedImage.TYPE_BYTE_GRAY);
+        new ColorConvertOp(ColorSpace.getInstance(ColorSpace.CS_GRAY), null).filter(source, grayscale);
+        return grayscale;
+    }
+
+    private BufferedImage adjustContrast(BufferedImage source, float scale, float offset) {
+        BufferedImage adjusted = new BufferedImage(source.getWidth(), source.getHeight(), BufferedImage.TYPE_BYTE_GRAY);
+        for (int y = 0; y < source.getHeight(); y++) {
+            for (int x = 0; x < source.getWidth(); x++) {
+                int gray = source.getRaster().getSample(x, y, 0);
+                int value = Math.round(gray * scale + offset);
+                adjusted.getRaster().setSample(x, y, 0, clamp(value));
             }
+        }
+        return adjusted;
+    }
 
-            log.info("Extracted text from CCCD: {}", text);
-
-            // Extract CCCD number (12 digits)
-            String citizenId = extractByRegex(text, "\\b\\d{12}\\b");
-
-            // Extract full name (Vietnamese names after "Họ và tên" or similar)
-            String fullName = extractByRegex(text, "(?i)(?:họ\\s+và\\s+tên|full\\s+name)[:\\s]*([A-ZÀ-Ỹ\\s]+)", 1);
-
-            // Extract date of birth
-            String dateOfBirthStr = extractByRegex(text, "(\\d{1,2}[/-]\\d{1,2}[/-]\\d{4})");
-
-            // Extract gender
-            String gender = "";
-            if (text.toLowerCase().contains("nam")) {
-                gender = "Nam";
-            } else if (text.toLowerCase().contains("nữ") || text.toLowerCase().contains("nu")) {
-                gender = "Nữ";
-            }
-
-            // Extract address (after "Địa chỉ" or similar)
-            String address = extractByRegex(text, "(?i)(?:địa\\s+chỉ|address)[:\\s]*([^\\n]+)", 1);
-
-            // Parse date
-            LocalDate dateOfBirth = null;
-            if (dateOfBirthStr != null) {
-                DateTimeFormatter[] formatters = {
-                        DateTimeFormatter.ofPattern("dd/MM/yyyy"),
-                        DateTimeFormatter.ofPattern("d/M/yyyy"),
-                        DateTimeFormatter.ofPattern("dd-MM-yyyy"),
-                        DateTimeFormatter.ofPattern("d-M-yyyy")
-                };
-
-                for (DateTimeFormatter formatter : formatters) {
-                    try {
-                        dateOfBirth = LocalDate.parse(dateOfBirthStr, formatter);
-                        break;
-                    } catch (Exception ignored) {
+    private BufferedImage applyBoxBlur(BufferedImage source) {
+        BufferedImage blurred = new BufferedImage(source.getWidth(), source.getHeight(), BufferedImage.TYPE_BYTE_GRAY);
+        for (int y = 0; y < source.getHeight(); y++) {
+            for (int x = 0; x < source.getWidth(); x++) {
+                int sum = 0;
+                int count = 0;
+                for (int dy = -1; dy <= 1; dy++) {
+                    int py = y + dy;
+                    if (py < 0 || py >= source.getHeight()) {
+                        continue;
+                    }
+                    for (int dx = -1; dx <= 1; dx++) {
+                        int px = x + dx;
+                        if (px < 0 || px >= source.getWidth()) {
+                            continue;
+                        }
+                        sum += source.getRaster().getSample(px, py, 0);
+                        count++;
                     }
                 }
-                if (dateOfBirth == null) {
-                    log.warn("Could not parse date of birth: {}", dateOfBirthStr);
-                }
+                blurred.getRaster().setSample(x, y, 0, sum / Math.max(count, 1));
+            }
+        }
+        return blurred;
+    }
+
+    private BufferedImage applyOtsuThreshold(BufferedImage source) {
+        int[] histogram = new int[256];
+        int totalPixels = source.getWidth() * source.getHeight();
+
+        for (int y = 0; y < source.getHeight(); y++) {
+            for (int x = 0; x < source.getWidth(); x++) {
+                histogram[source.getRaster().getSample(x, y, 0)]++;
+            }
+        }
+
+        long sum = 0;
+        for (int i = 0; i < histogram.length; i++) {
+            sum += (long) i * histogram[i];
+        }
+
+        long backgroundWeight = 0;
+        long backgroundSum = 0;
+        double maxVariance = -1;
+        int threshold = 0;
+
+        for (int i = 0; i < histogram.length; i++) {
+            backgroundWeight += histogram[i];
+            if (backgroundWeight == 0) {
+                continue;
             }
 
-            return OcrCccdResponse.builder()
-                    .fullName(fullName)
-                    .dateOfBirth(dateOfBirth != null ? dateOfBirth.toString() : null)
-                    .gender(gender)
-                    .address(address)
-                    .citizenId(citizenId)
-                    .confidence(null)
-                    .build();
+            long foregroundWeight = totalPixels - backgroundWeight;
+            if (foregroundWeight == 0) {
+                break;
+            }
 
-        } catch (Exception e) {
-            log.error("Error parsing CCCD text", e);
-            return OcrCccdResponse.builder()
-                    .fullName("")
-                    .dateOfBirth(null)
-                    .gender("")
-                    .address("")
-                    .citizenId("")
-                    .confidence(null)
-                    .build();
+            backgroundSum += (long) i * histogram[i];
+            double backgroundMean = (double) backgroundSum / backgroundWeight;
+            double foregroundMean = (double) (sum - backgroundSum) / foregroundWeight;
+            double variance = backgroundWeight * (double) foregroundWeight
+                    * Math.pow(backgroundMean - foregroundMean, 2);
+
+            if (variance > maxVariance) {
+                maxVariance = variance;
+                threshold = i;
+            }
+        }
+
+        BufferedImage binary = new BufferedImage(source.getWidth(), source.getHeight(), BufferedImage.TYPE_BYTE_BINARY);
+        for (int y = 0; y < source.getHeight(); y++) {
+            for (int x = 0; x < source.getWidth(); x++) {
+                int gray = source.getRaster().getSample(x, y, 0);
+                binary.getRaster().setSample(x, y, 0, gray >= threshold ? 1 : 0);
+            }
+        }
+        return binary;
+    }
+
+    private String performOcr(BufferedImage image) {
+        try {
+            Tesseract tesseract = new Tesseract();
+            resolveTessdataPath().ifPresent(tesseract::setDatapath);
+            tesseract.setLanguage(ocrLanguage);
+            tesseract.setPageSegMode(6);
+            tesseract.setOcrEngineMode(ITessAPI.TessOcrEngineMode.OEM_LSTM_ONLY);
+            tesseract.setTessVariable("user_defined_dpi", "300");
+            tesseract.setTessVariable("preserve_interword_spaces", "1");
+            return tesseract.doOCR(image);
+        } catch (TesseractException ex) {
+            String message = ex.getMessage() != null ? ex.getMessage() : "";
+            if (message.contains("traineddata") || message.contains("Error opening data file")) {
+                throw new IllegalStateException(
+                        "Thiếu bộ ngôn ngữ tiếng Việt cho Tesseract. Hãy cài gói tesseract-ocr-vie hoặc cấu hình OCR_TESSERACT_DATA_PATH.",
+                        ex);
+            }
+            log.error("OCR CCCD thất bại", ex);
+            throw new BadRequestException("Không thể xử lý ảnh CCCD bằng OCR. Vui lòng thử lại với ảnh rõ hơn.");
         }
     }
 
-    /**
-     * Extract field value using regex pattern
-     */
-    private String extractByRegex(String text, String pattern) {
-        return extractByRegex(text, pattern, 0);
+    private Optional<String> resolveTessdataPath() {
+        if (resolvedTessdataPath != null) {
+            return Optional.of(resolvedTessdataPath);
+        }
+
+        List<String> candidates = new ArrayList<>();
+        if (!isBlank(configuredTessdataPath)) {
+            candidates.add(configuredTessdataPath);
+        }
+
+        String envPath = System.getenv("TESSDATA_PREFIX");
+        if (!isBlank(envPath)) {
+            candidates.add(envPath);
+        }
+
+        candidates.add("/usr/share/tesseract-ocr/5");
+        candidates.add("/usr/share/tesseract-ocr/4.00");
+        candidates.add("/usr/share");
+        candidates.add("/usr/local/share");
+        candidates.add("/opt/homebrew/share");
+
+        for (String candidate : new LinkedHashSet<>(candidates)) {
+            Path resolved = normalizeTessdataPath(candidate);
+            if (resolved != null) {
+                resolvedTessdataPath = resolved.toString();
+                log.info("Sử dụng tessdata path: {}", resolvedTessdataPath);
+                return Optional.of(resolvedTessdataPath);
+            }
+        }
+
+        log.warn("Không tìm thấy tessdata path khả dụng cho ngôn ngữ {}", ocrLanguage);
+        return Optional.empty();
     }
 
-    /**
-     * Extract field value using regex pattern with group index
-     */
-    private String extractByRegex(String text, String pattern, int groupIndex) {
+    private Path normalizeTessdataPath(String candidate) {
         try {
-            java.util.regex.Pattern p = java.util.regex.Pattern.compile(pattern,
-                    java.util.regex.Pattern.CASE_INSENSITIVE);
-            java.util.regex.Matcher m = p.matcher(text);
-            if (m.find() && m.groupCount() >= groupIndex) {
-                String result = m.group(groupIndex).trim();
-                return result.isEmpty() ? null : result;
+            Path path = Path.of(candidate);
+            if (!Files.exists(path)) {
+                return null;
             }
-        } catch (Exception e) {
-            log.warn("Regex extraction failed for pattern: {}", pattern, e);
+
+            Path trainedData = path.resolve("tessdata").resolve(ocrLanguage + ".traineddata");
+            if (Files.exists(trainedData)) {
+                return path;
+            }
+
+            Path directTrainedData = path.resolve(ocrLanguage + ".traineddata");
+            if (Files.exists(directTrainedData)) {
+                return path.getParent();
+            }
+            return null;
+        } catch (Exception ex) {
+            return null;
+        }
+    }
+
+    private String extractCitizenId(List<TextLine> lines, String fullText) {
+        List<String> priorityCandidates = new ArrayList<>();
+        for (TextLine line : lines) {
+            if (line.normalized().contains("SO")) {
+                priorityCandidates.add(line.original());
+            }
+        }
+        priorityCandidates.add(fullText);
+
+        for (String candidate : priorityCandidates) {
+            String normalizedDigits = normalizeDigitLikeText(candidate);
+            Matcher matcher = TWELVE_DIGIT_PATTERN.matcher(normalizedDigits);
+            if (matcher.find()) {
+                return matcher.group(1);
+            }
+        }
+        return "";
+    }
+
+    private LocalDate extractDateOfBirth(List<TextLine> lines, String fullText) {
+        for (int i = 0; i < lines.size(); i++) {
+            TextLine line = lines.get(i);
+            if (!containsAny(line.normalized(), DOB_LABELS)) {
+                continue;
+            }
+
+            String candidate = line.original();
+            if (i + 1 < lines.size()) {
+                candidate = candidate + " " + lines.get(i + 1).original();
+            }
+
+            LocalDate parsed = extractDateFromText(candidate);
+            if (parsed != null) {
+                return parsed;
+            }
+        }
+
+        return extractDateFromText(fullText);
+    }
+
+    private LocalDate extractDateFromText(String input) {
+        String normalizedDigits = normalizeDigitLikeText(input);
+        Matcher matcher = DATE_PATTERN.matcher(normalizedDigits);
+        while (matcher.find()) {
+            String[] parts = matcher.group(1).replace('.', '/').replace('-', '/').replace(" ", "").split("/");
+            if (parts.length != 3) {
+                continue;
+            }
+
+            try {
+                int day = Integer.parseInt(parts[0]);
+                int month = Integer.parseInt(parts[1]);
+                int year = Integer.parseInt(parts[2]);
+                return LocalDate.of(year, month, day);
+            } catch (NumberFormatException | DateTimeException ignored) {
+            }
         }
         return null;
     }
 
-    /**
-     * Safe cast to List
-     */
-    @SuppressWarnings("unchecked")
-    private List<Map<String, Object>> asList(Object obj) {
-        return obj instanceof List ? (List<Map<String, Object>>) obj : List.of();
+    private String extractFullName(List<TextLine> lines) {
+        for (int i = 0; i < lines.size(); i++) {
+            TextLine line = lines.get(i);
+            if (!containsAny(line.normalized(), NAME_LABELS)) {
+                continue;
+            }
+
+            String inlineCandidate = cleanupName(removeLabelValue(line.original(), NAME_LABELS));
+            if (!inlineCandidate.isBlank() && !containsAny(normalizeForLookup(inlineCandidate), NAME_LABELS)) {
+                return inlineCandidate;
+            }
+
+            for (int next = i + 1; next < Math.min(lines.size(), i + 3); next++) {
+                String candidate = cleanupName(lines.get(next).original());
+                if (isLikelyName(candidate, lines.get(next).normalized())) {
+                    return candidate;
+                }
+            }
+        }
+
+        return lines.stream()
+                .map(line -> cleanupName(line.original()))
+                .filter(candidate -> isLikelyName(candidate, normalizeForLookup(candidate)))
+                .findFirst()
+                .orElse("");
     }
 
-    /**
-     * Safe cast to Map
-     */
-    @SuppressWarnings("unchecked")
-    private Map<String, Object> asMap(Object obj) {
-        return obj instanceof Map ? (Map<String, Object>) obj : Map.of();
+    private String extractGender(List<TextLine> lines) {
+        for (int i = 0; i < lines.size(); i++) {
+            TextLine line = lines.get(i);
+            if (!containsAny(line.normalized(), GENDER_LABELS)) {
+                continue;
+            }
+
+            String candidate = normalizeForLookup(removeLabelValue(line.original(), GENDER_LABELS));
+            String mapped = mapGender(candidate);
+            if (!mapped.isBlank()) {
+                return mapped;
+            }
+
+            if (i + 1 < lines.size()) {
+                mapped = mapGender(lines.get(i + 1).normalized());
+                if (!mapped.isBlank()) {
+                    return mapped;
+                }
+            }
+        }
+        return "";
+    }
+
+    private String extractAddress(List<TextLine> lines) {
+        for (int i = 0; i < lines.size(); i++) {
+            TextLine line = lines.get(i);
+            if (!containsAny(line.normalized(), ADDRESS_LABELS)) {
+                continue;
+            }
+
+            List<String> parts = new ArrayList<>();
+            String inline = cleanupAddress(removeLabelValue(line.original(), ADDRESS_LABELS));
+            if (!inline.isBlank()) {
+                parts.add(inline);
+            }
+
+            for (int next = i + 1; next < Math.min(lines.size(), i + 3); next++) {
+                TextLine nextLine = lines.get(next);
+                if (containsAny(nextLine.normalized(), STOP_LABELS)) {
+                    break;
+                }
+                String part = cleanupAddress(nextLine.original());
+                if (!part.isBlank()) {
+                    parts.add(part);
+                }
+            }
+
+            if (!parts.isEmpty()) {
+                return String.join(", ", parts);
+            }
+        }
+        return "";
+    }
+
+    private String mapGender(String normalizedValue) {
+        if (normalizedValue == null || normalizedValue.isBlank()) {
+            return "";
+        }
+        if (normalizedValue.contains("NU")) {
+            return "FEMALE";
+        }
+        if (normalizedValue.contains("NAM")) {
+            return "MALE";
+        }
+        return "";
+    }
+
+    private boolean isLikelyName(String candidate, String normalizedCandidate) {
+        if (candidate == null || candidate.isBlank()) {
+            return false;
+        }
+
+        if (candidate.chars().anyMatch(Character::isDigit)) {
+            return false;
+        }
+
+        if (containsAny(normalizedCandidate, STOP_LABELS)) {
+            return false;
+        }
+
+        String[] parts = candidate.trim().split("\\s+");
+        return parts.length >= 2 && candidate.length() >= 6;
+    }
+
+    private String normalizeRawText(String text) {
+        return text.replace("\r\n", "\n")
+                .replace('\r', '\n')
+                .replaceAll("[\\t\\f]+", " ")
+                .replaceAll(" {2,}", " ")
+                .trim();
+    }
+
+    private List<TextLine> buildLines(String text) {
+        return text.lines()
+                .map(String::trim)
+                .filter(line -> !line.isBlank())
+                .map(line -> new TextLine(line, normalizeForLookup(line)))
+                .toList();
+    }
+
+    private String normalizeForLookup(String value) {
+        String noDiacritics = Normalizer.normalize(value, Normalizer.Form.NFD)
+                .replaceAll("\\p{M}+", "");
+        return noDiacritics.toUpperCase(Locale.ROOT)
+                .replace('Đ', 'D')
+                .replaceAll("[^A-Z0-9:/\\-\\s]", " ")
+                .replaceAll("\\s+", " ")
+                .trim();
+    }
+
+    private String normalizeDigitLikeText(String input) {
+        StringBuilder builder = new StringBuilder(input.length());
+        for (char ch : input.toCharArray()) {
+            switch (Character.toUpperCase(ch)) {
+                case 'O', 'D', 'Q' -> builder.append('0');
+                case 'I', 'L', '|', '!' -> builder.append('1');
+                case 'Z' -> builder.append('2');
+                case 'S' -> builder.append('5');
+                case 'G' -> builder.append('6');
+                case 'B' -> builder.append('8');
+                default -> builder.append(ch);
+            }
+        }
+        return builder.toString();
+    }
+
+    private String removeLabelValue(String raw, Set<String> labels) {
+        String normalized = normalizeForLookup(raw);
+        boolean containsLabel = labels.stream().anyMatch(normalized::contains);
+        if (!containsLabel) {
+            return raw.trim();
+        }
+
+        int separatorIndex = -1;
+        for (char separator : new char[] { ':', '-', '.' }) {
+            int currentIndex = raw.indexOf(separator);
+            if (currentIndex >= 0 && (separatorIndex < 0 || currentIndex < separatorIndex)) {
+                separatorIndex = currentIndex;
+            }
+        }
+
+        if (separatorIndex >= 0 && separatorIndex + 1 < raw.length()) {
+            return raw.substring(separatorIndex + 1).trim();
+        }
+
+        String[] rawWords = raw.trim().split("\\s+");
+        for (String label : labels) {
+            String[] labelWords = label.split("\\s+");
+            if (normalized.startsWith(label) && rawWords.length > labelWords.length) {
+                return String.join(" ", List.of(rawWords).subList(labelWords.length, rawWords.length)).trim();
+            }
+        }
+
+        return raw.trim();
+    }
+
+    private String cleanupName(String value) {
+        return value == null ? "" : value.replaceAll("[^\\p{L}\\s-]", " ")
+                .replaceAll("\\s{2,}", " ")
+                .trim();
+    }
+
+    private String cleanupAddress(String value) {
+        return value == null ? "" : value.replaceAll("[^\\p{L}\\p{N}\\s,./-]", " ")
+                .replaceAll("\\s{2,}", " ")
+                .replaceAll("\\s+,", ",")
+                .trim();
+    }
+
+    private boolean containsAny(String value, Set<String> tokens) {
+        return tokens.stream().anyMatch(value::contains);
+    }
+
+    private double estimateConfidence(String citizenId, String fullName, LocalDate dateOfBirth, String gender,
+            String address) {
+        double score = 0;
+        if (!isBlank(citizenId)) {
+            score += 0.4;
+        }
+        if (!isBlank(fullName)) {
+            score += 0.3;
+        }
+        if (dateOfBirth != null) {
+            score += 0.2;
+        }
+        if (!isBlank(gender)) {
+            score += 0.05;
+        }
+        if (!isBlank(address)) {
+            score += 0.05;
+        }
+        return Math.min(score, 1D);
+    }
+
+    private OcrCccdResponse emptyResponse(double confidence) {
+        return OcrCccdResponse.builder()
+                .fullName("")
+                .dateOfBirth(null)
+                .gender("")
+                .address("")
+                .citizenId("")
+                .confidence(confidence)
+                .build();
+    }
+
+    private int clamp(int value) {
+        return Math.max(0, Math.min(255, value));
+    }
+
+    private String defaultString(String value) {
+        return value == null ? "" : value;
+    }
+
+    private boolean isBlank(String value) {
+        return value == null || value.isBlank();
+    }
+
+    private record TextLine(String original, String normalized) {
+    }
+
+    private record OcrAttempt(String rawText, OcrCccdResponse response, int variantIndex) {
     }
 }

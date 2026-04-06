@@ -156,6 +156,8 @@ payos:
 
 # 16. CẤU HÌNH OCR (GOOGLE VISION)
 ocr:
-  api:
-    url: "https://vision.googleapis.com/v1/images:annotate"
-    key: ${GOOGLE_VISION_API_KEY:}
+  tesseract:
+    language: ${OCR_TESSERACT_LANGUAGE:vie}
+    data-path: ${OCR_TESSERACT_DATA_PATH:}
+  max-file-size-bytes: ${OCR_MAX_FILE_SIZE_BYTES:5242880}
+  max-image-width: ${OCR_MAX_IMAGE_WIDTH:1800}

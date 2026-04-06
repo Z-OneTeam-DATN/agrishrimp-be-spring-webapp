@@ -21,8 +21,10 @@ management:
     readinessState:
       enabled: true
   
-# OCR Configuration  
-ocr:  
-  api:  
-    url: https://vision.googleapis.com/v1/images:annotate  
-    key: ${GOOGLE_VISION_API_KEY:} 
+# OCR Configuration
+ocr:
+  tesseract:
+    language: ${OCR_TESSERACT_LANGUAGE:vie}
+    data-path: ${OCR_TESSERACT_DATA_PATH:}
+  max-file-size-bytes: ${OCR_MAX_FILE_SIZE_BYTES:5242880}
+  max-image-width: ${OCR_MAX_IMAGE_WIDTH:1800}

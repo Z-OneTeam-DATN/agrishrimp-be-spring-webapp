@@ -1,5 +1,5 @@
 # --- Stage 1: Build Stage ---
-FROM maven:3.9.9-eclipse-temurin-21-alpine AS build
+FROM maven:3.9.9-eclipse-temurin-21 AS build
 WORKDIR /app
 
 # Cache dependencies
@@ -11,15 +11,21 @@ COPY src ./src
 RUN mvn clean package -DskipTests
 
 # --- Stage 2: Run Stage ---
-FROM eclipse-temurin:21-jre-alpine
+FROM eclipse-temurin:21-jre-jammy
 WORKDIR /app
 
-# Create a non-root user for security
-RUN addgroup -S spring && adduser -S spring -G spring
-USER spring:spring
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-vie \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV TESSDATA_PREFIX=/usr/share/tesseract-ocr/5
 
 # Copy the built JAR
 COPY --from=build /app/target/*.jar app.jar
+
+# Create a non-root user for security
+RUN groupadd --system spring && useradd --system --gid spring spring
+USER spring:spring
 
 # JVM Optimization flags
 # -XX:+UseContainerSupport: Ensures JVM respects container memory limits

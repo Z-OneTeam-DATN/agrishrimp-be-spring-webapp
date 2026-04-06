@@ -18,9 +18,9 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.zone.agri.dto.request.employee.EmployeeCreateRequest;
-import com.zone.agri.dto.request.employee.OcrCccdRequest;
 import com.zone.agri.dto.response.employee.EmployeeResponse;
 import com.zone.agri.dto.response.employee.OcrCccdResponse;
+import com.zone.agri.exception.BadRequestException;
 import com.zone.agri.security.annotation.RequirePermission;
 import com.zone.agri.service.EmployeeService;
 import com.zone.agri.service.OcrService;
@@ -177,6 +177,8 @@ public class EmployeeController {
          * Endpoint: POST /api/employees/ocr-cccd
          */
         @PostMapping(value = "/ocr-cccd", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+        @SecurityRequirement(name = "bearerAuth")
+        @RequirePermission("STAFF_CREATE")
         @Operation(summary = "OCR trích xuất thông tin từ ảnh CCCD", description = "Upload ảnh mặt trước CCCD để tự động trích xuất thông tin (họ tên, ngày sinh, giới tính, địa chỉ)", responses = {
                         @ApiResponse(responseCode = "200", description = "OCR thành công", content = @Content(schema = @Schema(implementation = OcrCccdResponse.class))),
                         @ApiResponse(responseCode = "400", description = "Ảnh không hợp lệ"),
@@ -185,15 +187,13 @@ public class EmployeeController {
         public ResponseEntity<OcrCccdResponse> extractCccdFromImage(
                         @Parameter(description = "Ảnh mặt trước CCCD (PNG, JPG, JPEG)") @RequestParam("image") MultipartFile image) {
 
-                // Validate image
                 if (image.isEmpty()) {
-                        return ResponseEntity.badRequest().build();
+                        throw new BadRequestException("Vui lòng chọn ảnh CCCD để tải lên.");
                 }
 
-                // Check file type
                 String contentType = image.getContentType();
                 if (contentType == null || !contentType.startsWith("image/")) {
-                        return ResponseEntity.badRequest().build();
+                        throw new BadRequestException("File tải lên phải là ảnh hợp lệ (PNG, JPG, JPEG, WEBP).");
                 }
 
                 log.info("Processing OCR for CCCD image: {}", image.getOriginalFilename());
