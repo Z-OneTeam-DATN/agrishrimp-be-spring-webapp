@@ -117,6 +117,8 @@ public class OcrService {
             return emptyResponse(0D);
         }
 
+        log.info("=== RAW OCR TEXT ===\n{}", text);
+        
         String normalizedText = normalizeRawText(text);
         List<TextLine> lines = buildLines(normalizedText);
 
@@ -125,6 +127,14 @@ public class OcrService {
         String fullName = extractFullName(lines);
         String gender = extractGender(lines);
         String address = extractAddress(lines);
+        
+        log.info("=== EXTRACTED FIELDS ===");
+        log.info("Citizen ID: {}", citizenId);
+        log.info("Full Name: {}", fullName);
+        log.info("DOB: {}", dateOfBirth);
+        log.info("Gender: {}", gender);
+        log.info("Address: {}", address);
+        
         double confidence = estimateConfidence(citizenId, fullName, dateOfBirth, gender, address);
 
         return OcrCccdResponse.builder()
@@ -607,9 +617,12 @@ public class OcrService {
             if (!containsAny(line.normalized(), ADDRESS_LABELS)) {
                 continue;
             }
+            
+            log.info("Found address label line: {} (normalized: {})", line.original(), line.normalized());
 
             List<String> parts = new ArrayList<>();
             String inline = cleanupAddress(removeLabelValue(line.original(), ADDRESS_LABELS));
+            log.info("  After label removal + cleanup: {}", inline);
             if (!inline.isBlank()) {
                 parts.add(inline);
             }
@@ -620,6 +633,7 @@ public class OcrService {
                     break;
                 }
                 String part = cleanupAddress(nextLine.original());
+                log.info("  Address continuation: {}", part);
                 if (!part.isBlank()) {
                     parts.add(part);
                 }
@@ -628,12 +642,14 @@ public class OcrService {
             if (!parts.isEmpty()) {
                 String candidate = cleanupAddress(String.join(", ", parts));
                 int candidateScore = scoreAddressCandidateByLabel(line.normalized(), candidate);
+                log.info("  Candidate: {} (score: {})", candidate, candidateScore);
                 if (candidateScore > bestScore) {
                     bestScore = candidateScore;
                     bestAddress = candidate;
                 }
             }
         }
+        log.info("Best address selected: {} (score: {})", bestAddress, bestScore);
         return bestAddress;
     }
 
