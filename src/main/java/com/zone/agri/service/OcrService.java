@@ -599,6 +599,9 @@ public class OcrService {
     }
 
     private String extractAddress(List<TextLine> lines) {
+        String bestAddress = "";
+        int bestScore = -1;
+
         for (int i = 0; i < lines.size(); i++) {
             TextLine line = lines.get(i);
             if (!containsAny(line.normalized(), ADDRESS_LABELS)) {
@@ -623,10 +626,29 @@ public class OcrService {
             }
 
             if (!parts.isEmpty()) {
-                return String.join(", ", parts);
+                String candidate = cleanupAddress(String.join(", ", parts));
+                int candidateScore = scoreAddressCandidateByLabel(line.normalized(), candidate);
+                if (candidateScore > bestScore) {
+                    bestScore = candidateScore;
+                    bestAddress = candidate;
+                }
             }
         }
-        return "";
+        return bestAddress;
+    }
+
+    private int scoreAddressCandidateByLabel(String normalizedLabelLine, String value) {
+        int score = scoreAddressCandidate(value);
+
+        if (normalizedLabelLine.contains("NOI THUONG TRU")
+                || normalizedLabelLine.contains("NOI O")
+                || normalizedLabelLine.contains("HKTT")) {
+            score += 80;
+        } else if (normalizedLabelLine.contains("QUE QUAN")) {
+            score += 20;
+        }
+
+        return score;
     }
 
     private String mapGender(String normalizedValue) {
@@ -753,14 +775,18 @@ public class OcrService {
         }
 
         String cleaned = value.replaceAll("[^\\p{L}\\p{N}\\s,./-]", " ")
+                .replaceAll("(?iu)\\bPLACE\\s+OF\\s+(ORIGIN|RESIDENCE)\\b", " ")
                 .replaceAll("\\s{2,}", " ")
                 .replaceAll("\\s+,", ",")
+                .replaceAll("^[/,\\-\\s]+", "")
                 .trim();
 
         cleaned = collapseRepeatedAdjacentPhrase(cleaned);
         cleaned = removeIsolatedOneLetterTokens(cleaned);
         cleaned = trimTrailingUppercaseNoise(cleaned);
-        return cleaned.replaceAll("\\s{2,}", " ").trim();
+        return cleaned.replaceAll("\\s{2,}", " ")
+                .replaceAll("[/,\\-\\s]+$", "")
+                .trim();
     }
 
     private String collapseRepeatedAdjacentPhrase(String value) {
