@@ -41,13 +41,14 @@ public class OcrService {
 
     private static final Pattern DATE_PATTERN = Pattern.compile("(?<!\\d)(\\d{1,2}[\\s./-]\\d{1,2}[\\s./-]\\d{4})(?!\\d)");
     private static final Pattern TWELVE_DIGIT_PATTERN = Pattern.compile("(?<!\\d)(\\d{12})(?!\\d)");
-    private static final Set<String> NAME_LABELS = Set.of("HO VA TEN", "HO TEN", "FULL NAME");
-    private static final Set<String> DOB_LABELS = Set.of("NGAY THANG NAM SINH", "NGAY SINH", "SINH NGAY");
-    private static final Set<String> GENDER_LABELS = Set.of("GIOI TINH", "SEX");
-    private static final Set<String> ADDRESS_LABELS = Set.of("NOI THUONG TRU", "QUE QUAN", "DIA CHI");
+        private static final Set<String> NAME_LABELS = Set.of("HO VA TEN", "HO TEN", "FULL NAME", "TEN");
+        private static final Set<String> DOB_LABELS = Set.of("NGAY THANG NAM SINH", "NGAY SINH", "SINH NGAY", "DOB", "DATE OF BIRTH");
+        private static final Set<String> GENDER_LABELS = Set.of("GIOI TINH", "SEX", "NAM", "NU");
+        private static final Set<String> ADDRESS_LABELS = Set.of("NOI THUONG TRU", "QUE QUAN", "DIA CHI", "NOI O", "NOI O HIEN TAI", "HKTT", "NOI DANG KY HKTT");
     private static final Set<String> STOP_LABELS = Set.of(
             "CAN CUOC", "CONG HOA", "QUOC TICH", "SO", "GIOI TINH", "NGAY SINH",
-            "NGAY THANG NAM SINH", "QUE QUAN", "NOI THUONG TRU", "CO GIA TRI", "DEN", "SIGNATURE");
+            "NGAY THANG NAM SINH", "QUE QUAN", "NOI THUONG TRU", "CO GIA TRI", "DEN", "SIGNATURE",
+            "NGAY CAP", "NOI CAP", "DAN TOC", "TON GIAO");
 
     static {
         ImageIO.setUseCache(false);
@@ -72,16 +73,19 @@ public class OcrService {
 
         BufferedImage original = readImage(image);
         List<BufferedImage> variants = buildVariants(original);
+        int[] pageSegModes = { 6, 11, 4 };
         List<OcrAttempt> attempts = new ArrayList<>();
 
         for (int i = 0; i < variants.size(); i++) {
-            String extractedText = performOcr(variants.get(i));
-            if (extractedText == null || extractedText.isBlank()) {
-                continue;
-            }
+            for (int pageSegMode : pageSegModes) {
+                String extractedText = performOcr(variants.get(i), pageSegMode);
+                if (extractedText == null || extractedText.isBlank()) {
+                    continue;
+                }
 
-            OcrCccdResponse parsed = parseExtractedText(extractedText);
-            attempts.add(new OcrAttempt(extractedText, parsed, i));
+                OcrCccdResponse parsed = parseExtractedText(extractedText);
+                attempts.add(new OcrAttempt(extractedText, parsed, i * 10 + pageSegMode));
+            }
         }
 
         if (attempts.isEmpty()) {
@@ -294,12 +298,12 @@ public class OcrService {
         return binary;
     }
 
-    private String performOcr(BufferedImage image) {
+    private String performOcr(BufferedImage image, int pageSegMode) {
         try {
             Tesseract tesseract = new Tesseract();
             resolveTessdataPath().ifPresent(tesseract::setDatapath);
             tesseract.setLanguage(ocrLanguage);
-            tesseract.setPageSegMode(6);
+            tesseract.setPageSegMode(pageSegMode);
             tesseract.setOcrEngineMode(ITessAPI.TessOcrEngineMode.OEM_LSTM_ONLY);
             tesseract.setTessVariable("user_defined_dpi", "300");
             tesseract.setTessVariable("preserve_interword_spaces", "1");
@@ -444,7 +448,7 @@ public class OcrService {
                 return inlineCandidate;
             }
 
-            for (int next = i + 1; next < Math.min(lines.size(), i + 3); next++) {
+            for (int next = i + 1; next < Math.min(lines.size(), i + 4); next++) {
                 String candidate = cleanupName(lines.get(next).original());
                 if (isLikelyName(candidate, lines.get(next).normalized())) {
                     return candidate;
@@ -495,7 +499,7 @@ public class OcrService {
                 parts.add(inline);
             }
 
-            for (int next = i + 1; next < Math.min(lines.size(), i + 3); next++) {
+            for (int next = i + 1; next < Math.min(lines.size(), i + 5); next++) {
                 TextLine nextLine = lines.get(next);
                 if (containsAny(nextLine.normalized(), STOP_LABELS)) {
                     break;

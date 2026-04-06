@@ -97,7 +97,7 @@ public class EmployeeService {
             emailService.sendAccountInfo(user.getEmail(), user.getFullName(), password);
             log.info("Đã gửi email cấp tài khoản cho: {}", user.getEmail());
         } catch (Exception e) {
-            log.error("Lỗi khi gửi email cho {}: {}", user.getEmail(), e.getMessage());
+            log.error("Lỗi khi gửi email cho {}", user.getEmail(), e);
         }
     }
 
