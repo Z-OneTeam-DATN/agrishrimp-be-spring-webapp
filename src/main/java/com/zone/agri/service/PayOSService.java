@@ -204,15 +204,19 @@ public class PayOSService {
     public void markOrderPaid(Order order) {
         order.setPaymentStatus(PaymentStatus.PAID);
 
-        if (order.getStatus() == OrderStatus.AWAITING_PAYMENT) {
-            order.setStatus(OrderStatus.CONFIRMED);
-        }
-
         List<SubOrder> subOrders = subOrderRepository.findByOrderId(order.getId());
+        boolean hasAnyMissingItems = false;
         for (SubOrder subOrder : subOrders) {
             if (subOrder.getStatus() == OrderStatus.AWAITING_PAYMENT) {
-                subOrder.setStatus(OrderStatus.CONFIRMED);
+                boolean hasMissingItems = subOrder.getItems() != null
+                        && subOrder.getItems().stream().anyMatch(item -> (item.getMissingQuantity() != null ? item.getMissingQuantity() : 0) > 0);
+                subOrder.setStatus(hasMissingItems ? OrderStatus.AWAITING_REPLENISHMENT : OrderStatus.READY_FOR_PICKUP);
+                hasAnyMissingItems = hasAnyMissingItems || hasMissingItems;
             }
+        }
+
+        if (order.getStatus() == OrderStatus.AWAITING_PAYMENT) {
+            order.setStatus(hasAnyMissingItems ? OrderStatus.AWAITING_REPLENISHMENT : OrderStatus.READY_FOR_PICKUP);
         }
 
         orderRepository.save(order);

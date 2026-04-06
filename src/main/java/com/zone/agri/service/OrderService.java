@@ -173,8 +173,8 @@ public class OrderService {
         if (order.getStatus() == OrderStatus.CANCELLED || order.getStatus() == OrderStatus.COMPLETED || order.getStatus() == OrderStatus.RETURNED) {
             throw new BadRequestException("Don hang da dong, khong the huy");
         }
-        if (order.getStatus() == OrderStatus.SHIPPING || order.getStatus() == OrderStatus.READY_FOR_PICKUP) {
-            throw new BadRequestException("Don hang dang giao hoac cho lay hang, khong the huy");
+        if (order.getStatus() == OrderStatus.SHIPPING) {
+            throw new BadRequestException("Don hang dang giao, khong the huy");
         }
 
         releaseAllocatedInventoryForOrder(order);
@@ -224,21 +224,63 @@ public class OrderService {
 
     private void validateStatusTransition(OrderStatus current, OrderStatus next) {
         if (next == OrderStatus.CANCELLED) return;
+        if (current == OrderStatus.PENDING) {
+            if (next != OrderStatus.READY_FOR_PICKUP) {
+                throw new BadRequestException("Don hang cho xac nhan chi co the chuyen sang 'Cho lay hang'.");
+            }
+            return;
+        }
+        if (current == OrderStatus.AWAITING_PAYMENT) {
+            if (next != OrderStatus.PENDING) {
+                throw new BadRequestException("Don hang cho thanh toan chi co the chuyen sang 'Cho xac nhan' sau khi thanh toan xong.");
+            }
+            return;
+        }
+        if (current == OrderStatus.AWAITING_REPLENISHMENT) {
+            if (next != OrderStatus.READY_FOR_PICKUP) {
+                throw new BadRequestException("Don hang thieu hang chi co the chuyen sang 'Cho lay hang' sau khi nhap du.");
+            }
+            return;
+        }
+        if (current == OrderStatus.CONFIRMED) {
+            if (next != OrderStatus.READY_FOR_PICKUP) {
+                throw new BadRequestException("Don hang o trang thai cu 'Da xac nhan' chi co the chuyen sang 'Cho lay hang'.");
+            }
+            return;
+        }
+        if (current == OrderStatus.PROCESSING) {
+            if (next != OrderStatus.READY_FOR_PICKUP && next != OrderStatus.SHIPPING) {
+                throw new BadRequestException("Don hang o trang thai cu 'Dang xu ly' chi co the chuyen sang 'Cho lay hang' hoac 'Cho giao hang'.");
+            }
+            return;
+        }
+        if (current == OrderStatus.READY_FOR_PICKUP) {
+            if (next != OrderStatus.SHIPPING) {
+                throw new BadRequestException("Don hang cho lay hang chi co the chuyen sang 'Cho giao hang'.");
+            }
+            return;
+        }
+        if (current == OrderStatus.SHIPPING) {
+            if (next != OrderStatus.COMPLETED && next != OrderStatus.RETURNED) {
+                throw new BadRequestException("Don hang cho giao hang chi co the chuyen sang 'Da giao' hoac 'Tra hang'.");
+            }
+            return;
+        }
         switch (current) {
             case PENDING:
-                if (next != OrderStatus.CONFIRMED && next != OrderStatus.AWAITING_PAYMENT)
+                if (next != OrderStatus.READY_FOR_PICKUP)
                     throw new BadRequestException("Đơn hàng mới cần được 'Xác nhận' hoặc 'Chờ thanh toán'.");
                 break;
             case AWAITING_PAYMENT:
-                if (next != OrderStatus.CONFIRMED)
+                if (next != OrderStatus.PENDING)
                     throw new BadRequestException("Đơn hàng chờ thanh toán cần được 'Xác nhận' sau khi thanh toán xong.");
                 break;
             case AWAITING_REPLENISHMENT:
-                if (next != OrderStatus.CONFIRMED)
+                if (next != OrderStatus.READY_FOR_PICKUP)
                     throw new BadRequestException("ÄÆ¡n hĂ ng thiáº¿u hĂ ng cáº§n Ä‘Æ°á»£c xĂ¡c nháº­n láº¡i sau khi Ä‘Ă£ bá»• sung.");
                 break;
             case CONFIRMED:
-                if (next != OrderStatus.PROCESSING)
+                if (next != OrderStatus.READY_FOR_PICKUP)
                     throw new BadRequestException("Đơn hàng đã xác nhận phải chuyển sang 'Đang đóng gói'.");
                 break;
             case PROCESSING:
@@ -355,6 +397,9 @@ public class OrderService {
     }
 
     private int statusWeight(OrderStatus s) {
+        if (s == OrderStatus.AWAITING_PAYMENT) return 0;
+        if (s == OrderStatus.AWAITING_REPLENISHMENT) return 1;
+        if (s == OrderStatus.PENDING) return 2;
         return switch (s) {
             case PENDING          -> 0;
             case AWAITING_PAYMENT -> 1;
@@ -384,8 +429,8 @@ public class OrderService {
         }
 
         if (payOSService.checkPaymentStatus(order)) {
-            order.setPaymentStatus(PaymentStatus.PAID);
-            orderRepository.save(order);
+            payOSService.markOrderPaid(order);
+            return;
         }
     }
 
@@ -735,9 +780,9 @@ public class OrderService {
         boolean hasMissingItems = liveQuote.subOrders().stream()
                 .flatMap(subOrder -> subOrder.getItems().stream())
                 .anyMatch(item -> Objects.requireNonNullElse(item.getMissingQuantity(), 0) > 0);
-        OrderStatus initialStatus = hasMissingItems
-                ? OrderStatus.AWAITING_REPLENISHMENT
-                : (PaymentMethod.PAYOS.equals(paymentMethod) ? OrderStatus.AWAITING_PAYMENT : OrderStatus.CONFIRMED);
+        OrderStatus initialStatus = PaymentMethod.PAYOS.equals(paymentMethod)
+                ? OrderStatus.AWAITING_PAYMENT
+                : (hasMissingItems ? OrderStatus.AWAITING_REPLENISHMENT : OrderStatus.READY_FOR_PICKUP);
 
         Order order = Order.builder().code("ORD" + System.currentTimeMillis()).user(user).status(initialStatus)
                 .paymentMethod(paymentMethod).paymentStatus(PaymentStatus.UNPAID).createdAt(LocalDateTime.now())
@@ -754,9 +799,9 @@ public class OrderService {
             Branch branch = branchRepository.findById(subDraft.getBranchId()).orElseThrow(() -> new NotFoundException("Branch không tồn tại"));
             boolean subOrderHasMissingItems = subDraft.getItems().stream()
                     .anyMatch(item -> Objects.requireNonNullElse(item.getMissingQuantity(), 0) > 0);
-            OrderStatus subOrderStatus = subOrderHasMissingItems
-                    ? OrderStatus.AWAITING_REPLENISHMENT
-                    : (PaymentMethod.PAYOS.equals(paymentMethod) ? OrderStatus.AWAITING_PAYMENT : OrderStatus.CONFIRMED);
+            OrderStatus subOrderStatus = PaymentMethod.PAYOS.equals(paymentMethod)
+                    ? OrderStatus.AWAITING_PAYMENT
+                    : (subOrderHasMissingItems ? OrderStatus.AWAITING_REPLENISHMENT : OrderStatus.READY_FOR_PICKUP);
             SubOrder subOrder = SubOrder.builder().order(savedOrder).branch(branch).status(subOrderStatus)
                     .subtotal(subDraft.getSubtotal()).shippingFee(subDraft.getShippingFee())
                     .estimatedDays(subDraft.getEstimatedDays()).carrier(subDraft.getCarrier()).build();
@@ -1322,7 +1367,7 @@ public class OrderService {
         PaymentMethod paymentMethod = req.getPaymentMethod() != null ? req.getPaymentMethod() : PaymentMethod.COD;
         OrderStatus legacyInitialStatus = PaymentMethod.PAYOS.equals(paymentMethod)
                 ? OrderStatus.AWAITING_PAYMENT
-                : OrderStatus.CONFIRMED;
+                : OrderStatus.READY_FOR_PICKUP;
 
         Order order = Order.builder()
                 .code("ORD" + System.currentTimeMillis())
