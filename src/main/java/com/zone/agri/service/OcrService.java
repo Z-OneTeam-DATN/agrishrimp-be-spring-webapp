@@ -791,7 +791,14 @@ public class OcrService {
         }
 
         String cleaned = value.replaceAll("[^\\p{L}\\p{N}\\s,./-]", " ")
-                .replaceAll("(?iu)\\bPLACE\\s+OF\\s+(ORIGIN|RESIDENCE)\\b", " ")
+                // Remove all "Place of X" variants (with typos): resideree, residenos, resiklence, oigin, etc
+                .replaceAll("(?iu)\\b[Rr](?:e?/)?.*?place\\s+of\\s+\\w+\\b", " ")
+                // Remove Vietnamese + English mixed patterns
+                .replaceAll("(?iu)place\\s+of\\s+resid", " ")
+                // Remove lonely "Place of" prefixes
+                .replaceAll("(?iu)place\\s+of", " ")
+                // Remove patterns like "Nơi thường trú / Place..." where we only want Vietnamese part
+                .replaceAll("(?iu)/\\s*[Pp](?:lace|face).*?\\b", " ")
                 .replaceAll("\\s{2,}", " ")
                 .replaceAll("\\s+,", ",")
                 .replaceAll("^[/,\\-\\s]+", "")
@@ -814,8 +821,8 @@ public class OcrService {
         List<String> kept = new ArrayList<>();
         for (String token : tokens) {
             String normalized = token.replaceAll("[,./-]", "");
-            if (normalized.length() == 1 && Character.isLetter(normalized.charAt(0))
-                    && !Character.isUpperCase(normalized.charAt(0))) {
+            // Remove ANY single letter (both lowercase and uppercase)
+            if (normalized.length() == 1 && Character.isLetter(normalized.charAt(0))) {
                 continue;
             }
             kept.add(token);
