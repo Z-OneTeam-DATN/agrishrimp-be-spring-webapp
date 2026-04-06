@@ -12,7 +12,8 @@ import org.springframework.test.context.TestPropertySource;
     "security.jwt.issuer=test-issuer",
     "security.jwt.expiry-time-in-seconds=86400",
     "security.jwt.refreshable-duration=86400",
-    "mnl.tmp-dir=mnt/"
+    "mnl.tmp-dir=mnt/",
+    "spring.jpa.hibernate.ddl-auto=create-drop"
 })
 class AgriShrimpApplicationTests {
 

@@ -27,6 +27,9 @@ class InventoryAllocationServiceTest {
     @Mock
     private InventoryRepository inventoryRepository;
 
+    @Mock
+    private SettingService settingService;
+
     @InjectMocks
     private InventoryAllocationService allocationService;
 
@@ -36,6 +39,9 @@ class InventoryAllocationServiceTest {
 
     @BeforeEach
     void setUp() {
+        org.mockito.Mockito.when(settingService.getProfitMultiplier())
+                .thenReturn(new BigDecimal("1.3"));
+
         branch1 = Branch.builder().build();
         setId(branch1, 1L, "id");
         branch1.setName("Chi Nhánh Cần Thơ");
