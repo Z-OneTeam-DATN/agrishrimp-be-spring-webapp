@@ -234,8 +234,35 @@ public class OcrService {
             return 0;
         }
 
+        int score = Math.min(40, value.length());
         int commaBonus = (int) value.chars().filter(ch -> ch == ',').count() * 5;
-        return Math.min(40, value.length()) + commaBonus;
+        score += commaBonus;
+        
+        // Penalize addresses with clear noise patterns
+        score -= detectNoisePatterns(value);
+        
+        return Math.max(0, score);
+    }
+    
+    private int detectNoisePatterns(String value) {
+        int penalty = 0;
+        
+        // Double commas = formatting corruption
+        if (value.contains(",,")) {
+            penalty += 30;
+        }
+        
+        // Single letters followed by other text (like "R tư", "Z7") = corruption  
+        if (value.matches(".*\\b[A-Z]\\s+[A-Za-z0-9]{1,3}\\b.*")) {
+            penalty += 20;
+        }
+        
+        // Contains English noise words that shouldn't be in Vietnamese addresses
+        if (value.matches("(?i).*\\b(va\\s+vn|is|or|by|of)\\b.*")) {
+            penalty += 25;
+        }
+        
+        return penalty;
     }
 
     private void validateUpload(MultipartFile image) {
@@ -857,7 +884,8 @@ public class OcrService {
         String[] tokens = value.split("\\s+");
         List<String> kept = new ArrayList<>();
         
-        for (String token : tokens) {
+        for (int i = 0; i < tokens.length; i++) {
+            String token = tokens[i];
             String normalized = token.replaceAll("[,./-]", "");
             
             // Remove pure English noise: "va", "VN", "R", "tu", "by", "of", "or", etc
@@ -865,14 +893,33 @@ public class OcrService {
                 continue;
             }
             
-            // Single letters followed by single letters/numbers are noise: "R tu", "Z7", etc
-            if (normalized.length() <= 2 && normalized.matches("[A-Za-z0-9]+")) {
+            // Single letters followed by short text are likely OCR corruption (R tư, Z 7, etc)
+            if (normalized.length() == 1 && Character.isLetter(normalized.charAt(0))) {
+                // If next token is very short and non-standard, skip both
+                if (i + 1 < tokens.length) {
+                    String nextNorm = tokens[i + 1].replaceAll("[,./-]", "");
+                    if (nextNorm.length() <= 3 && (nextNorm.matches("[A-Za-z0-9]+") || nextNorm.length() == 2)) {
+                        // Skip this single letter AND mark to skip next token
+                        i++; // Will be skipped
+                        continue;
+                    }
+                }
                 continue;
             }
             
             // Skip if it's just punctuation
             if (normalized.isBlank()) {
                 continue;
+            }
+            
+            // Remove ultra-short tokens (1-2 chars) that don't look like location abbreviations
+            // Valid abbreviations: Tổ, Ấp, etc. But random chars like "tư", "ki", etc. get removed
+            if (normalized.length() <= 2 && Character.isLowerCase(normalized.charAt(0))) {
+                // Lowercase 2-char tokens like "tư", "ki", "xá" appearing alone are likely corruption
+                // Unless they appear in specific contexts (Skip for now as they're likely noise)
+                if (!containsAny(value.toLowerCase(), Set.of("tổ", "ấp", "xã"))) {
+                    continue;
+                }
             }
             
             kept.add(token);
