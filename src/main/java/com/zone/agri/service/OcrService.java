@@ -300,8 +300,11 @@ public class OcrService {
 
     private String performOcr(BufferedImage image, int pageSegMode) {
         try {
+            String tessdataPath = resolveTessdataPath().orElseThrow(() -> new IllegalStateException(
+                "Thiếu bộ ngôn ngữ tiếng Việt cho Tesseract. Hãy cài gói tesseract-ocr-vie hoặc cấu hình OCR_TESSERACT_DATA_PATH."));
+
             Tesseract tesseract = new Tesseract();
-            resolveTessdataPath().ifPresent(tesseract::setDatapath);
+            tesseract.setDatapath(tessdataPath);
             tesseract.setLanguage(ocrLanguage);
             tesseract.setPageSegMode(pageSegMode);
             tesseract.setOcrEngineMode(ITessAPI.TessOcrEngineMode.OEM_LSTM_ONLY);
@@ -361,19 +364,28 @@ public class OcrService {
                 return null;
             }
 
-            Path trainedData = path.resolve("tessdata").resolve(ocrLanguage + ".traineddata");
-            if (Files.exists(trainedData)) {
+            if (isValidTessdataDirectory(path)) {
                 return path;
+            }
+
+            Path tessdataDir = path.resolve("tessdata");
+            if (isValidTessdataDirectory(tessdataDir)) {
+                return tessdataDir;
             }
 
             Path directTrainedData = path.resolve(ocrLanguage + ".traineddata");
             if (Files.exists(directTrainedData)) {
-                return path.getParent();
+                return path;
             }
+
             return null;
         } catch (Exception ex) {
             return null;
         }
+    }
+
+    private boolean isValidTessdataDirectory(Path directory) {
+        return Files.exists(directory.resolve(ocrLanguage + ".traineddata"));
     }
 
     private String extractCitizenId(List<TextLine> lines, String fullText) {
