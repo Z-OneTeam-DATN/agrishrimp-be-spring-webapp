@@ -647,6 +647,7 @@ public class OcrService {
             
             log.info("Found address label line: {} (normalized: {})", line.original(), line.normalized());
 
+            // Only take first 2 continuation lines, not all 5 - this avoids over-concatenation of garbage
             List<String> parts = new ArrayList<>();
             String inline = cleanupAddress(removeLabelValue(line.original(), ADDRESS_LABELS));
             log.info("  After label removal + cleanup: {}", inline);
@@ -654,7 +655,8 @@ public class OcrService {
                 parts.add(inline);
             }
 
-            for (int next = i + 1; next < Math.min(lines.size(), i + 5); next++) {
+            int continuationCount = 0;
+            for (int next = i + 1; next < lines.size() && continuationCount < 2; next++) {
                 TextLine nextLine = lines.get(next);
                 if (containsAny(nextLine.normalized(), STOP_LABELS)) {
                     break;
@@ -668,11 +670,17 @@ public class OcrService {
                 log.info("  Address continuation: {}", cleaned);
                 if (!cleaned.isBlank()) {
                     parts.add(cleaned);
+                    continuationCount++;
                 }
             }
 
             if (!parts.isEmpty()) {
                 String candidate = cleanupAddress(String.join(", ", parts));
+                // Validate address contains expected Vietnamese patterns
+                if (!isValidVietnameseAddress(candidate)) {
+                    log.info("  Candidate rejected - invalid Vietnamese address: {}", candidate);
+                    continue;
+                }
                 int candidateScore = scoreAddressCandidateByLabel(line.normalized(), candidate);
                 log.info("  Candidate: {} (score: {})", candidate, candidateScore);
                 if (candidateScore > bestScore) {
@@ -683,6 +691,20 @@ public class OcrService {
         }
         log.info("Best address selected: {} (score: {})", bestAddress, bestScore);
         return bestAddress;
+    }
+    
+    private boolean isValidVietnameseAddress(String address) {
+        if (address == null || address.length() < 5) {
+            return false;
+        }
+        
+        String lower = address.toLowerCase();
+        // Must contain at least location keywords like tổ, ấp, xã, huyện, tỉnh, thành phố
+        // Or contain actual province names like kiên giang, tân hiệp, etc
+        boolean hasLocationKeyword = lower.matches(".*\\b(tổ|ấp|xã|huyện|tỉnh|thành|phố|quận|hẻm)\\b.*");
+        boolean hasProvinceOrDistrict = lower.matches(".*\\b(kiên giang|tân hiệp|an giang|bạc liêu|cà mau|long an)\\b.*");
+        
+        return hasLocationKeyword || hasProvinceOrDistrict;
     }
 
     private int scoreAddressCandidateByLabel(String normalizedLabelLine, String value) {
