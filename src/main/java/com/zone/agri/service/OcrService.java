@@ -632,10 +632,15 @@ public class OcrService {
                 if (containsAny(nextLine.normalized(), STOP_LABELS)) {
                     break;
                 }
-                String part = cleanupAddress(nextLine.original());
-                log.info("  Address continuation: {}", part);
-                if (!part.isBlank()) {
-                    parts.add(part);
+                String cleaned = cleanupAddress(nextLine.original());
+                // Filter out garbage lines: single letters, noisy English words, formatting noise
+                if (isGarbageLine(cleaned)) {
+                    log.info("  Skipping garbage line: {}", cleaned);
+                    continue;
+                }
+                log.info("  Address continuation: {}", cleaned);
+                if (!cleaned.isBlank()) {
+                    parts.add(cleaned);
                 }
             }
 
@@ -665,6 +670,37 @@ public class OcrService {
         }
 
         return score;
+    }
+
+    private boolean isGarbageLine(String line) {
+        if (line == null || line.isBlank()) {
+            return true;
+        }
+        
+        // Single letter or very short noise
+        String[] tokens = line.trim().split("\\s+");
+        if (tokens.length == 1) {
+            String token = tokens[0].replaceAll("[,./-]", "");
+            // Single letters, numbers only, or things like "va VN", "Z7", "4"
+            if (token.length() <= 2) {
+                return true;
+            }
+        }
+        
+        // Pure English words that aren't location related (va, is, etc.)
+        String normalized = line.replaceAll("[^a-zA-Z\\s]", "").trim().toUpperCase();
+        if (normalized.matches("^(VA|VN|IS|IT|OR|AND|THE)\\s*$") || 
+            normalized.matches("^[A-Z]{1,3}$")) {
+            return true;
+        }
+        
+        // Too short to be an address (less than 3 chars of actual Vietnamese)
+        String vietnamese = line.replaceAll("[^\\p{L}\\p{N}]", "");
+        if (vietnamese.length() < 3) {
+            return true;
+        }
+        
+        return false;
     }
 
     private String mapGender(String normalizedValue) {
@@ -806,10 +842,43 @@ public class OcrService {
 
         cleaned = collapseRepeatedAdjacentPhrase(cleaned);
         cleaned = removeIsolatedOneLetterTokens(cleaned);
+        // Remove garbage tokens like "R tu", "va VN" etc
+        cleaned = removeNoisyTokens(cleaned);
         cleaned = trimTrailingUppercaseNoise(cleaned);
         return cleaned.replaceAll("\\s{2,}", " ")
                 .replaceAll("[/,\\-\\s]+$", "")
                 .trim();
+    }
+
+    private String removeNoisyTokens(String value) {
+        if (value == null || value.isBlank()) {
+            return "";
+        }
+        String[] tokens = value.split("\\s+");
+        List<String> kept = new ArrayList<>();
+        
+        for (String token : tokens) {
+            String normalized = token.replaceAll("[,./-]", "");
+            
+            // Remove pure English noise: "va", "VN", "R", "tu", "by", "of", "or", etc
+            if (normalized.matches("(?i)^(va|vn|is|it|or|and|the|by|of|in|to|at|for|on|a|an)$")) {
+                continue;
+            }
+            
+            // Single letters followed by single letters/numbers are noise: "R tu", "Z7", etc
+            if (normalized.length() <= 2 && normalized.matches("[A-Za-z0-9]+")) {
+                continue;
+            }
+            
+            // Skip if it's just punctuation
+            if (normalized.isBlank()) {
+                continue;
+            }
+            
+            kept.add(token);
+        }
+        
+        return String.join(" ", kept);
     }
 
     private String collapseRepeatedAdjacentPhrase(String value) {
