@@ -12,6 +12,8 @@ import java.text.Normalizer;
 import java.time.DateTimeException;
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Comparator;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -92,13 +94,14 @@ public class OcrService {
             throw new BadRequestException("Không trích xuất được văn bản từ ảnh CCCD. Vui lòng dùng ảnh rõ hơn.");
         }
 
+        OcrCccdResponse mergedResult = mergeAttempts(attempts);
         OcrAttempt bestAttempt = attempts.stream()
                 .max(Comparator.comparingDouble((OcrAttempt attempt) -> attempt.response().getConfidence() != null
                         ? attempt.response().getConfidence()
                         : 0D).thenComparingInt(attempt -> attempt.rawText().length()))
                 .orElseThrow();
 
-        OcrCccdResponse result = bestAttempt.response();
+        OcrCccdResponse result = mergedResult;
         if (isBlank(result.getCitizenId()) && isBlank(result.getFullName()) && isBlank(result.getDateOfBirth())) {
             throw new BadRequestException(
                     "Không nhận diện được số CCCD, họ tên hoặc ngày sinh. Vui lòng chụp rõ mặt trước CCCD, đủ sáng và không bị lóa.");
@@ -132,6 +135,97 @@ public class OcrService {
                 .citizenId(defaultString(citizenId))
                 .confidence(confidence)
                 .build();
+    }
+
+    private OcrCccdResponse mergeAttempts(List<OcrAttempt> attempts) {
+        String citizenId = pickBestValue(attempts, attempt -> attempt.response().getCitizenId(), this::scoreCitizenIdCandidate);
+        String fullName = pickBestValue(attempts, attempt -> cleanupName(attempt.response().getFullName()),
+                this::scoreNameCandidate);
+        String dateOfBirth = pickBestValue(attempts, attempt -> attempt.response().getDateOfBirth(),
+                this::scoreDateCandidate);
+        String gender = pickBestValue(attempts, attempt -> attempt.response().getGender(), this::scoreGenderCandidate);
+        String address = pickBestValue(attempts, attempt -> cleanupAddress(attempt.response().getAddress()),
+                this::scoreAddressCandidate);
+
+        double confidence = estimateConfidence(citizenId, fullName,
+                !isBlank(dateOfBirth) ? LocalDate.parse(dateOfBirth) : null,
+                gender, address);
+
+        return OcrCccdResponse.builder()
+                .fullName(defaultString(fullName))
+                .dateOfBirth(isBlank(dateOfBirth) ? null : dateOfBirth)
+                .gender(defaultString(gender))
+                .address(defaultString(address))
+                .citizenId(defaultString(citizenId))
+                .confidence(confidence)
+                .build();
+    }
+
+    private String pickBestValue(List<OcrAttempt> attempts, java.util.function.Function<OcrAttempt, String> extractor,
+            java.util.function.ToIntFunction<String> qualityScorer) {
+        Map<String, CandidateStat> stats = new HashMap<>();
+
+        for (OcrAttempt attempt : attempts) {
+            String rawValue = extractor.apply(attempt);
+            if (isBlank(rawValue)) {
+                continue;
+            }
+
+            String value = rawValue.trim();
+            CandidateStat stat = stats.computeIfAbsent(value, ignored -> new CandidateStat());
+            stat.count++;
+            stat.bestQuality = Math.max(stat.bestQuality, qualityScorer.applyAsInt(value));
+        }
+
+        return stats.entrySet().stream()
+                .max(Comparator
+                        .comparingInt((Map.Entry<String, CandidateStat> entry) -> entry.getValue().count)
+                        .thenComparingInt(entry -> entry.getValue().bestQuality)
+                        .thenComparingInt(entry -> entry.getKey().length()))
+                .map(Map.Entry::getKey)
+                .orElse("");
+    }
+
+    private int scoreCitizenIdCandidate(String value) {
+        int score = 0;
+        if (value.matches("^\\d{12}$")) {
+            score += 100;
+        }
+        if (value.startsWith("0")) {
+            score += 5;
+        }
+        return score;
+    }
+
+    private int scoreNameCandidate(String value) {
+        String cleaned = cleanupName(value);
+        if (cleaned.isBlank()) {
+            return 0;
+        }
+
+        int words = cleaned.split("\\s+").length;
+        int score = Math.min(40, words * 10);
+        if (!cleaned.chars().anyMatch(Character::isLowerCase)) {
+            score += 10;
+        }
+        return score;
+    }
+
+    private int scoreDateCandidate(String value) {
+        return value.matches("^\\d{4}-\\d{2}-\\d{2}$") ? 40 : 0;
+    }
+
+    private int scoreGenderCandidate(String value) {
+        return "MALE".equals(value) || "FEMALE".equals(value) ? 30 : 0;
+    }
+
+    private int scoreAddressCandidate(String value) {
+        if (isBlank(value)) {
+            return 0;
+        }
+
+        int commaBonus = (int) value.chars().filter(ch -> ch == ',').count() * 5;
+        return Math.min(40, value.length()) + commaBonus;
     }
 
     private void validateUpload(MultipartFile image) {
@@ -638,9 +732,19 @@ public class OcrService {
     }
 
     private String cleanupName(String value) {
-        return value == null ? "" : value.replaceAll("[^\\p{L}\\s-]", " ")
+        if (value == null) {
+            return "";
+        }
+
+        String cleaned = value.replaceAll("[^\\p{L}\\s-]", " ")
                 .replaceAll("\\s{2,}", " ")
                 .trim();
+
+        String[] tokens = cleaned.split("\\s+");
+        if (tokens.length >= 2 && tokens[tokens.length - 1].length() == 1) {
+            cleaned = String.join(" ", List.of(tokens).subList(0, tokens.length - 1));
+        }
+        return cleaned.trim();
     }
 
     private String cleanupAddress(String value) {
@@ -653,9 +757,14 @@ public class OcrService {
                 .replaceAll("\\s+,", ",")
                 .trim();
 
+        cleaned = collapseRepeatedAdjacentPhrase(cleaned);
         cleaned = removeIsolatedOneLetterTokens(cleaned);
         cleaned = trimTrailingUppercaseNoise(cleaned);
         return cleaned.replaceAll("\\s{2,}", " ").trim();
+    }
+
+    private String collapseRepeatedAdjacentPhrase(String value) {
+        return value.replaceAll("(?iu)\\b([\\p{L}]+\\s+[\\p{L}]+)\\s+\\1\\b", "$1");
     }
 
     private String removeIsolatedOneLetterTokens(String value) {
@@ -744,5 +853,10 @@ public class OcrService {
     }
 
     private record OcrAttempt(String rawText, OcrCccdResponse response, int variantIndex) {
+    }
+
+    private static class CandidateStat {
+        private int count;
+        private int bestQuality;
     }
 }

@@ -67,4 +67,19 @@ class OcrServiceTest {
         assertThat(result.getFullName()).isEqualTo("NGUYEN HOANG GIA HUY");
         assertThat(result.getAddress()).isEqualTo("Tan Hiep A, Tan Hiep, Kien Giang");
     }
+
+    @Test
+    void parseExtractedText_shouldTrimSingleCharacterNoiseAtEndOfName() {
+        String text = """
+                CAN CUOC CONG DAN
+                SO: 091206016882
+                HO VA TEN: NGUYEN HOANG GIA HUY e
+                NGAY SINH: 20/06/2006
+                GIOI TINH: NAM
+                """;
+
+        var result = ocrService.parseExtractedText(text);
+
+        assertThat(result.getFullName()).isEqualTo("NGUYEN HOANG GIA HUY");
+    }
 }
