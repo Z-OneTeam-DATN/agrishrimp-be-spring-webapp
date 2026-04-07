@@ -11,15 +11,15 @@ spring:
 
   # 1. CẤU HÌNH DATABASE (MYSQL)
   datasource:
-    url: jdbc:mysql://localhost:3307/agri_shrimp_db?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
-    username: root
-    password: 123456zoneteam
+    url: ${SPRING_DATASOURCE_URL:jdbc:mysql://localhost:3307/agri_shrimp_db?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true}
+    username: ${SPRING_DATASOURCE_USERNAME:root}
+    password: ${SPRING_DATASOURCE_PASSWORD:}
     driver-class-name: com.mysql.cj.jdbc.Driver
 
   # 2. CẤU HÌNH JPA
   jpa:
     hibernate:
-      ddl-auto: update
+      ddl-auto: ${SPRING_JPA_HIBERNATE_DDL_AUTO:update}
     show-sql: true
     properties:
       hibernate:
@@ -29,8 +29,9 @@ spring:
   # 3. CẤU HÌNH REDIS
   data:
     redis:
-      host: localhost
-      port: 6379
+      host: ${SPRING_DATA_REDIS_HOST:localhost}
+      port: ${SPRING_DATA_REDIS_PORT:6379}
+      password: ${SPRING_DATA_REDIS_PASSWORD:}
 
   # 4. CẤU HÌNH MAIN
   main:
@@ -43,10 +44,10 @@ spring:
 
   # 8. CẤU HÌNH MAIL SERVER
   mail:
-    host: smtp.gmail.com
-    port: 587
-    username: nguyenvanbinhkg1586@gmail.com
-    password: xrkbakmtostrtqia
+    host: ${SPRING_MAIL_HOST:smtp.gmail.com}
+    port: ${SPRING_MAIL_PORT:587}
+    username: ${SPRING_MAIL_USERNAME:}
+    password: ${SPRING_MAIL_PASSWORD:}
     properties:
       mail:
         smtp:
@@ -60,23 +61,23 @@ spring:
 # 5. CẤU HÌNH JWT
 security:
   jwt:
-    secret-key: 404E635266556A586E3272357538782F413F4428472B4B6250645367566B5970
-    issuer: agri-shrimp
-    expiry-time-in-seconds: 3600 # 1 giờ
-    refreshable-duration: 604800 # 7 ngày
+    secret-key: ${SECURITY_JWT_SECRET_KEY:dev-only-change-me}
+    issuer: ${SECURITY_JWT_ISSUER:agri-shrimp}
+    expiry-time-in-seconds: ${SECURITY_JWT_EXPIRY_SECONDS:3600} # 1 giờ
+    refreshable-duration: ${SECURITY_JWT_REFRESHABLE_DURATION_SECONDS:604800} # 7 ngày
 
 # 6. CẤU HÌNH APP (CORS)
 app:
   cors:
     allowed-origins: "${APP_CORS_ALLOWED_ORIGINS:http://localhost:3004,http://localhost:8004,https://*.mini.123c.vn,https://mini.123c.vn,https://*.ngrok-free.dev,https://*.ngrok-free.app,https://h5.zdn.vn,https://*.zdn.vn}"
   turnstile:
-    secret-key: "0x4AAAAAACWEfgMhY3lG-CqER4Ayl1OtWOY"
+    secret-key: "${APP_TURNSTILE_SECRET_KEY:}"
     url: "https://challenges.cloudflare.com/turnstile/v0/siteverify"
   google:
-    client-id: "716238456770-avu71bkjh5nngpq1j5gs7euull9kn663.apps.googleusercontent.com"
+    client-id: "${APP_GOOGLE_CLIENT_ID:}"
   cookie:
-    secure: false     # true khi deploy HTTPS
-    same-site: Lax
+    secure: ${APP_COOKIE_SECURE:false}     # true khi deploy HTTPS
+    same-site: ${APP_COOKIE_SAME_SITE:Lax}
   web-base-url: "${APP_WEB_BASE_URL:http://localhost:3004}"
   server:
     url: "${APP_SERVER_URL:http://localhost:8004}"
@@ -89,68 +90,68 @@ ai:
 
 # ZALO MINI APP
 zalo:
-  app-secret: "6jRfMVR5fDXCUIL9OJ68"
+  app-secret: "${ZALO_APP_SECRET:}"
 
 # 7. CẤU HÌNH AWS
 cloud:
   aws:
-    accessKey: ""
-    secretKey: ""
-    region: ap-southeast-1
+    accessKey: "${AWS_ACCESS_KEY_ID:}"
+    secretKey: "${AWS_SECRET_ACCESS_KEY:}"
+    region: ${AWS_REGION:ap-southeast-1}
   s3:
-    bucket-name: agri-shrimp-storage
-    upload-dir: webapp
-    region: ap-southeast-1
+    bucket-name: ${AWS_S3_BUCKET_NAME:agri-shrimp-storage}
+    upload-dir: ${AWS_S3_UPLOAD_DIR:webapp}
+    region: ${AWS_REGION:ap-southeast-1}
 
 # 9. CẤU HÌNH CLOUDINARY
 cloudinary:
-  cloud-name: demevvyp4
-  api-key: 176599529831455
-  api-secret: PqDexQ59PWJ8pOWeqN_BjimFYuY
-  folder: agrishrimp/products
+  cloud-name: ${CLOUDINARY_CLOUD_NAME:}
+  api-key: ${CLOUDINARY_API_KEY:}
+  api-secret: ${CLOUDINARY_API_SECRET:}
+  folder: ${CLOUDINARY_FOLDER:agrishrimp/products}
 
 # 10. GEOCODING (TrackAsia hoặc Nominatim)
 geocoding:
-  provider: trackasia          # trackasia | nominatim
+  provider: ${GEOCODING_PROVIDER:trackasia}          # trackasia | nominatim
   trackasia:
-    api-key: 63a1ec0fafba9b6c88391772034153b56c
+    api-key: ${TRACKASIA_API_KEY:}
     url: https://api.trackasia.vn/api/geocode/search
-    autocomplete-url: https://api.trackasia.vn/api/geocode/autocomplete
+    autocomplete-url: ${TRACKASIA_AUTOCOMPLETE_URL:https://api.trackasia.vn/api/geocode/autocomplete}
   nominatim:
     url: https://nominatim.openstreetmap.org/search
 
 # 11. DISTANCE MATRIX / ROUTING (OpenRouteService)
 routing:
-  provider: ors                # ors | trackasia
+  provider: ${ROUTING_PROVIDER:ors}                # ors | trackasia
   ors:
-    api-key: "eyJvcmciOiI1YjNjZTM1OTc4NTExMTAwMDFjZjYyNDgiLCJpZCI6IjQ0OGZjMDBmNjdjZjQwNTliMzcxNjYwMDgwNjU5ODk0IiwiaCI6Im11cm11cjY0In0="
+    api-key: "${ORS_API_KEY:}"
     url: https://api.openrouteservice.org/v2/matrix/driving-car
   trackasia:
-    api-key: 63a1ec0fafba9b6c88391772034153b56c
+    api-key: ${TRACKASIA_ROUTING_KEY:}
 
 # 12. SHIPPING (GHN)
 shipping:
-  provider: ghn                # ghn | ghtk
+  provider: ${SHIPPING_PROVIDER:ghn}                # ghn | ghtk
   ghn:
-    token: 0c84d3ad-125f-11f1-8935-9e298af4d523
-    shop-id: 6287754
+    token: ${GHN_API_KEY:}
+    shop-id: ${GHN_SHOP_ID:}
     url: https://online-gateway.ghn.vn/shiip/public-api/v2
 
 # 13. LOCATION / SEARCH CONFIG
 location:
-  default-radius-km: 15
-  max-candidates: 5
-  ip-geo-url: http://ip-api.com/json
+  default-radius-km: ${LOCATION_DEFAULT_RADIUS_KM:15}
+  max-candidates: ${LOCATION_MAX_CANDIDATES:5}
+  ip-geo-url: ${LOCATION_IP_GEO_URL:http://ip-api.com/json}
 
 # 15. IMAGE SEARCH AI SERVICE (Python)
 image-search:
-  base-url: http://localhost:5001
+  base-url: ${IMAGE_SEARCH_URL:http://localhost:5001}
 
 # 14. PAYOS PAYMENT GATEWAY
 payos:
-  client-id: 0c87dabd-9af7-4add-879a-19b43b8f1dbb
-  api-key: a4f8c063-f4bc-47a7-95fe-c55dada097a2
-  checksum-key: ce77815efbadca0bb92a5fece880b3eea4786e236a5d84b4c718cff33d5ff3e3
+  client-id: ${PAYOS_CLIENT_ID:}
+  api-key: ${PAYOS_API_KEY:}
+  checksum-key: ${PAYOS_CHECKSUM_KEY:}
   return-url: "${PAYOS_RETURN_URL:http://localhost:3004/order-success}"
   cancel-url: "${PAYOS_CANCEL_URL:http://localhost:3004/order-cancel}"
 
