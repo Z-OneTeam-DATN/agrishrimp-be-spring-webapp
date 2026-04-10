@@ -82,14 +82,14 @@ public class OrderService {
             BigDecimal totalSubtotal,
             BigDecimal discountAmount,
             BigDecimal totalShippingFee,
-            BigDecimal totalAmount
-    ) {}
+            BigDecimal totalAmount) {
+    }
 
     private record VoucherValidation(
             Voucher voucher,
             UserVoucher userVoucher,
-            BigDecimal discountAmount
-    ) {}
+            BigDecimal discountAmount) {
+    }
 
     // ══════════════════════════════════════════════════════════════════════
     // QUẢN LÝ ĐƠN HÀNG CHO USER
@@ -122,7 +122,8 @@ public class OrderService {
             throw new BadRequestException("Bạn không có quyền xem đơn hàng này!");
         }
 
-        if (PaymentMethod.PAYOS.equals(order.getPaymentMethod()) && PaymentStatus.UNPAID.equals(order.getPaymentStatus())) {
+        if (PaymentMethod.PAYOS.equals(order.getPaymentMethod())
+                && PaymentStatus.UNPAID.equals(order.getPaymentStatus())) {
             if (payOSService.checkPaymentStatus(order)) {
                 payOSService.markOrderPaid(order);
             }
@@ -147,7 +148,8 @@ public class OrderService {
             String searchLower = search.toLowerCase();
             orders = orders.stream()
                     .filter(o -> (o.getCode() != null && o.getCode().toLowerCase().contains(searchLower)) ||
-                            (o.getUser() != null && o.getUser().getFullName() != null && o.getUser().getFullName().toLowerCase().contains(searchLower)))
+                            (o.getUser() != null && o.getUser().getFullName() != null
+                                    && o.getUser().getFullName().toLowerCase().contains(searchLower)))
                     .collect(Collectors.toList());
         }
 
@@ -159,13 +161,12 @@ public class OrderService {
         Order order = orderRepository.findById(orderId)
                 .orElseThrow(() -> new NotFoundException("Không tìm thấy đơn hàng ID: " + orderId));
 
-
-        if (PaymentMethod.PAYOS.equals(order.getPaymentMethod()) && PaymentStatus.UNPAID.equals(order.getPaymentStatus())) {
+        if (PaymentMethod.PAYOS.equals(order.getPaymentMethod())
+                && PaymentStatus.UNPAID.equals(order.getPaymentStatus())) {
             if (payOSService.checkPaymentStatus(order)) {
                 payOSService.markOrderPaid(order);
             }
         }
-
 
         return mapToOrderResponse(order, false);
     }
@@ -178,7 +179,8 @@ public class OrderService {
         if (!order.getUser().getId().equals(userId)) {
             throw new BadRequestException("Ban khong co quyen huy don hang nay");
         }
-        if (order.getStatus() == OrderStatus.CANCELLED || order.getStatus() == OrderStatus.COMPLETED || order.getStatus() == OrderStatus.RETURNED) {
+        if (order.getStatus() == OrderStatus.CANCELLED || order.getStatus() == OrderStatus.COMPLETED
+                || order.getStatus() == OrderStatus.RETURNED) {
             throw new BadRequestException("Don hang da dong, khong the huy");
         }
         if (order.getStatus() == OrderStatus.SHIPPING) {
@@ -233,13 +235,15 @@ public class OrderService {
         order.setStatus(newStatus);
         orderRepository.save(order);
 
-        if (newStatus == OrderStatus.COMPLETED || newStatus == OrderStatus.CANCELLED || newStatus == OrderStatus.RETURNED) {
+        if (newStatus == OrderStatus.COMPLETED || newStatus == OrderStatus.CANCELLED
+                || newStatus == OrderStatus.RETURNED) {
             customerService.evaluateAndHandleCustomerReputation(order.getUser().getId());
         }
     }
 
     private void validateStatusTransition(OrderStatus current, OrderStatus next) {
-        if (next == OrderStatus.CANCELLED) return;
+        if (next == OrderStatus.CANCELLED)
+            return;
         if (current == OrderStatus.PENDING) {
             if (next != OrderStatus.CONFIRMED && next != OrderStatus.PROCESSING) {
                 throw new BadRequestException("Don hang cho xac nhan chi co the chuyen sang 'Da duyet' hoac 'Dang xu ly'.");
@@ -266,7 +270,8 @@ public class OrderService {
         }
         if (current == OrderStatus.PROCESSING) {
             if (next != OrderStatus.READY_FOR_PICKUP && next != OrderStatus.SHIPPING) {
-                throw new BadRequestException("Don hang o trang thai cu 'Dang xu ly' chi co the chuyen sang 'Cho lay hang' hoac 'Cho giao hang'.");
+                throw new BadRequestException(
+                        "Don hang o trang thai cu 'Dang xu ly' chi co the chuyen sang 'Cho lay hang' hoac 'Cho giao hang'.");
             }
             return;
         }
@@ -278,7 +283,8 @@ public class OrderService {
         }
         if (current == OrderStatus.SHIPPING) {
             if (next != OrderStatus.COMPLETED && next != OrderStatus.RETURNED) {
-                throw new BadRequestException("Don hang cho giao hang chi co the chuyen sang 'Da giao' hoac 'Tra hang'.");
+                throw new BadRequestException(
+                        "Don hang cho giao hang chi co the chuyen sang 'Da giao' hoac 'Tra hang'.");
             }
             return;
         }
@@ -305,7 +311,7 @@ public class OrderService {
                 Order o = s.getOrder();
                 return (o.getCode() != null && o.getCode().toLowerCase().contains(lc))
                         || (o.getUser() != null && o.getUser().getFullName() != null
-                        && o.getUser().getFullName().toLowerCase().contains(lc));
+                                && o.getUser().getFullName().toLowerCase().contains(lc));
             }).collect(Collectors.toList());
         }
 
@@ -314,8 +320,7 @@ public class OrderService {
                         .map(SubOrder::getOrder)
                         .filter(Objects::nonNull)
                         .distinct()
-                        .collect(Collectors.toList())
-        );
+                        .collect(Collectors.toList()));
 
         return filteredSubOrders.stream().map(this::mapSubOrderToBranchOrderResponse).collect(Collectors.toList());
     }
@@ -369,7 +374,8 @@ public class OrderService {
                 .orElseThrow(() -> new NotFoundException("Không tìm thấy đơn hàng tổng"));
 
         List<SubOrder> allSubs = subOrderRepository.findByOrderId(orderId);
-        if (allSubs.isEmpty()) return;
+        if (allSubs.isEmpty())
+            return;
 
         List<SubOrder> activeSubs = allSubs.stream()
                 .filter(s -> s.getStatus() != OrderStatus.CANCELLED && s.getStatus() != OrderStatus.RETURNED)
@@ -399,25 +405,29 @@ public class OrderService {
         order.setStatus(newMasterStatus);
         orderRepository.saveAndFlush(order);
 
-        if (newMasterStatus == OrderStatus.COMPLETED || newMasterStatus == OrderStatus.CANCELLED || newMasterStatus == OrderStatus.RETURNED) {
+        if (newMasterStatus == OrderStatus.COMPLETED || newMasterStatus == OrderStatus.CANCELLED
+                || newMasterStatus == OrderStatus.RETURNED) {
             customerService.evaluateAndHandleCustomerReputation(order.getUser().getId());
         }
     }
 
     private int statusWeight(OrderStatus s) {
-        if (s == OrderStatus.AWAITING_PAYMENT) return 0;
-        if (s == OrderStatus.AWAITING_REPLENISHMENT) return 1;
-        if (s == OrderStatus.PENDING) return 2;
+        if (s == OrderStatus.AWAITING_PAYMENT)
+            return 0;
+        if (s == OrderStatus.AWAITING_REPLENISHMENT)
+            return 1;
+        if (s == OrderStatus.PENDING)
+            return 2;
         return switch (s) {
-            case PENDING          -> 0;
+            case PENDING -> 0;
             case AWAITING_PAYMENT -> 1;
             case AWAITING_REPLENISHMENT -> 2;
-            case CONFIRMED        -> 3;
-            case PROCESSING       -> 4;
+            case CONFIRMED -> 3;
+            case PROCESSING -> 4;
             case READY_FOR_PICKUP -> 5;
-            case SHIPPING         -> 6;
-            case COMPLETED        -> 7;
-            default               -> 8;
+            case SHIPPING -> 6;
+            case COMPLETED -> 7;
+            default -> 8;
         };
     }
 
@@ -454,7 +464,8 @@ public class OrderService {
                 .orderCode(order.getCode())
                 .customerName(order.getUser() != null ? order.getUser().getFullName() : "")
                 .customerPhone(order.getUser() != null ? order.getUser().getPhoneNumber() : "")
-                .shippingAddress(order.getShippingAddress() != null ? order.getShippingAddress() : order.getDeliveryAddress())
+                .shippingAddress(
+                        order.getShippingAddress() != null ? order.getShippingAddress() : order.getDeliveryAddress())
                 .createdAt(order.getCreatedAt())
                 .paymentMethod(order.getPaymentMethod() != null ? order.getPaymentMethod().name() : "")
                 .paymentStatus(order.getPaymentStatus() != null ? order.getPaymentStatus().name() : "")
@@ -483,8 +494,7 @@ public class OrderService {
 
         if (order.getOrderItems() != null && !order.getOrderItems().isEmpty()) {
             itemResponses = order.getOrderItems().stream().map(this::mapItemToResponse).collect(Collectors.toList());
-        }
-        else if (order.getSubOrders() != null && !order.getSubOrders().isEmpty()) {
+        } else if (order.getSubOrders() != null && !order.getSubOrders().isEmpty()) {
             itemResponses = order.getSubOrders().stream()
                     .filter(sub -> sub.getItems() != null)
                     .flatMap(sub -> sub.getItems().stream())
@@ -497,8 +507,8 @@ public class OrderService {
         String branchAddress = null;
 
         if (order.getBranch() != null) {
-            branchName   = order.getBranch().getName();
-            branchPhone  = order.getBranch().getPhone();
+            branchName = order.getBranch().getName();
+            branchPhone = order.getBranch().getPhone();
             branchAddress = order.getBranch().getAddressDetail();
         } else if (order.getSubOrders() != null && order.getSubOrders().size() == 1) {
             Branch singleBranch = order.getSubOrders().get(0).getBranch();
@@ -573,7 +583,8 @@ public class OrderService {
             if (item.getProductVariant().getProduct() != null) {
                 productId = item.getProductVariant().getProduct().getId();
                 pName = item.getProductVariant().getProduct().getName();
-                if (item.getProductVariant().getProduct().getProductImages() != null && !item.getProductVariant().getProduct().getProductImages().isEmpty()) {
+                if (item.getProductVariant().getProduct().getProductImages() != null
+                        && !item.getProductVariant().getProduct().getProductImages().isEmpty()) {
                     pImg = item.getProductVariant().getProduct().getProductImages().iterator().next().getImageUrl();
                 }
             }
@@ -582,7 +593,8 @@ public class OrderService {
         boolean canReview = false;
         if (item.getOrder() != null && item.getOrder().getStatus() == OrderStatus.COMPLETED && productId != null) {
             Long userId = item.getOrder().getUser().getId();
-            canReview = !reviewRepository.existsByOrderIdAndProductIdAndUserId(item.getOrder().getId(), productId, userId);
+            canReview = !reviewRepository.existsByOrderIdAndProductIdAndUserId(item.getOrder().getId(), productId,
+                    userId);
         }
 
         return OrderItemResponse.builder()
@@ -595,7 +607,8 @@ public class OrderService {
                 .allocatedQuantity(item.getQuantity())
                 .missingQuantity(0)
                 .price(item.getPrice() != null ? item.getPrice() : BigDecimal.ZERO)
-                .totalPrice(item.getPrice() != null ? item.getPrice().multiply(new BigDecimal(item.getQuantity())) : BigDecimal.ZERO)
+                .totalPrice(item.getPrice() != null ? item.getPrice().multiply(new BigDecimal(item.getQuantity()))
+                        : BigDecimal.ZERO)
                 .canReview(canReview)
                 .build();
     }
@@ -611,16 +624,19 @@ public class OrderService {
             if (item.getProductVariant().getProduct() != null) {
                 productId = item.getProductVariant().getProduct().getId();
                 pName = item.getProductVariant().getProduct().getName();
-                if (item.getProductVariant().getProduct().getProductImages() != null && !item.getProductVariant().getProduct().getProductImages().isEmpty()) {
+                if (item.getProductVariant().getProduct().getProductImages() != null
+                        && !item.getProductVariant().getProduct().getProductImages().isEmpty()) {
                     pImg = item.getProductVariant().getProduct().getProductImages().iterator().next().getImageUrl();
                 }
             }
         }
 
         boolean canReview = false;
-        if (item.getSubOrder() != null && item.getSubOrder().getStatus() == OrderStatus.COMPLETED && productId != null) {
+        if (item.getSubOrder() != null && item.getSubOrder().getStatus() == OrderStatus.COMPLETED
+                && productId != null) {
             Long userId = item.getSubOrder().getOrder().getUser().getId();
-            canReview = !reviewRepository.existsByOrderIdAndProductIdAndUserId(item.getSubOrder().getOrder().getId(), productId, userId);
+            canReview = !reviewRepository.existsByOrderIdAndProductIdAndUserId(item.getSubOrder().getOrder().getId(),
+                    productId, userId);
         }
 
         return OrderItemResponse.builder()
@@ -630,10 +646,13 @@ public class OrderService {
                 .sku(pSku)
                 .image(pImg)
                 .quantity(item.getQuantity())
-                .allocatedQuantity(item.getAllocatedQuantity() != null ? item.getAllocatedQuantity() : item.getQuantity())
+                .allocatedQuantity(
+                        item.getAllocatedQuantity() != null ? item.getAllocatedQuantity() : item.getQuantity())
                 .missingQuantity(item.getMissingQuantity() != null ? item.getMissingQuantity() : 0)
                 .price(item.getUnitPrice() != null ? item.getUnitPrice() : BigDecimal.ZERO)
-                .totalPrice(item.getUnitPrice() != null ? item.getUnitPrice().multiply(new BigDecimal(item.getQuantity())) : BigDecimal.ZERO)
+                .totalPrice(
+                        item.getUnitPrice() != null ? item.getUnitPrice().multiply(new BigDecimal(item.getQuantity()))
+                                : BigDecimal.ZERO)
                 .canReview(canReview)
                 .build();
     }
@@ -689,24 +708,32 @@ public class OrderService {
         List<ProductVariant> variants = variantRepository.findAllById(variantIds);
         if (variants.size() != variantIds.size()) throw new NotFoundException("Một hoặc nhiều sản phẩm không tồn tại");
 
-        Map<Long, ProductVariant> variantMap = variants.stream().collect(Collectors.toMap(ProductVariant::getId, Function.identity()));
+        Map<Long, ProductVariant> variantMap = variants.stream()
+                .collect(Collectors.toMap(ProductVariant::getId, Function.identity()));
 
         List<BranchWithRealDistance> nearestBranches = branchSearchService.findNearestBranches(userLat, userLng);
         if (nearestBranches.isEmpty()) throw new NotFoundException("Không có chi nhánh hoạt động");
 
         List<Long> branchIds = nearestBranches.stream().map(bwr -> bwr.branch().getId()).toList();
 
-        Map<Long, Map<Long, List<Inventory>>> inventoryMatrix = allocationService.buildInventoryMatrix(branchIds, variantIds);
-        AllocationResult allocation = allocationService.allocate(finalCart, variantMap, nearestBranches, inventoryMatrix);
+        Map<Long, Map<Long, List<Inventory>>> inventoryMatrix = allocationService.buildInventoryMatrix(branchIds,
+                variantIds);
+        AllocationResult allocation = allocationService.allocate(finalCart, variantMap, nearestBranches,
+                inventoryMatrix);
 
         DeliveryInfo deliveryInfo = DeliveryInfo.builder()
                 .toDistrictId(deliveryDistrictId).toWardCode(deliveryWardCode)
                 .deliveryAddress(deliveryAddress).userLat(userLat).userLng(userLng).build();
 
-        List<SubOrderDraftDto> enrichedSubOrders = shippingService.enrichWithShippingFees(allocation.subOrders(), deliveryInfo, variantMap);
+        List<SubOrderDraftDto> enrichedSubOrders = shippingService.enrichWithShippingFees(allocation.subOrders(),
+                deliveryInfo, variantMap);
 
-        BigDecimal totalSubtotal = enrichedSubOrders.stream().map(s -> s.getSubtotal() != null ? s.getSubtotal() : BigDecimal.ZERO).reduce(BigDecimal.ZERO, BigDecimal::add);
-        BigDecimal totalShippingFee = enrichedSubOrders.stream().map(s -> s.getShippingFee() != null ? s.getShippingFee() : BigDecimal.ZERO).reduce(BigDecimal.ZERO, BigDecimal::add);
+        BigDecimal totalSubtotal = enrichedSubOrders.stream()
+                .map(s -> s.getSubtotal() != null ? s.getSubtotal() : BigDecimal.ZERO)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        BigDecimal totalShippingFee = enrichedSubOrders.stream()
+                .map(s -> s.getShippingFee() != null ? s.getShippingFee() : BigDecimal.ZERO)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
         BigDecimal discountAmount = BigDecimal.ZERO;
         if (voucherCode != null) {
             User previewUser = userRepository.findById(userId)
@@ -720,22 +747,27 @@ public class OrderService {
         }
 
         String token = UUID.randomUUID().toString();
-        List<OrderItemDto> allFinalItems = enrichedSubOrders.stream().flatMap(s -> s.getItems().stream()).collect(Collectors.toList());
+        List<OrderItemDto> allFinalItems = enrichedSubOrders.stream().flatMap(s -> s.getItems().stream())
+                .collect(Collectors.toList());
         Long mainBranchId = enrichedSubOrders.size() == 1 ? enrichedSubOrders.get(0).getBranchId() : null;
 
         PrepareOrderDraft draft = PrepareOrderDraft.builder()
-                .prepareToken(token).userId(userId).voucherCode(voucherCode).branchId(mainBranchId).finalItems(allFinalItems).cartItems(finalCart)
+                .prepareToken(token).userId(userId).voucherCode(voucherCode).branchId(mainBranchId)
+                .finalItems(allFinalItems).cartItems(finalCart)
                 .receiverName(receiverName).receiverPhone(receiverPhone)
                 .userLat(userLat).userLng(userLng).deliveryAddress(deliveryAddress)
                 .deliveryDistrictId(deliveryDistrictId).deliveryProvinceId(deliveryProvinceId)
                 .deliveryWardCode(deliveryWardCode).subOrders(enrichedSubOrders)
-                .outOfStockItems(allocation.outOfStockItems()).totalSubtotal(totalSubtotal).discountAmount(discountAmount)
+                .outOfStockItems(allocation.outOfStockItems()).totalSubtotal(totalSubtotal)
+                .discountAmount(discountAmount)
                 .totalShippingFee(totalShippingFee).totalAmount(totalAmount).build();
 
         saveDraftToRedis(token, draft);
 
-        return PrepareOrderResponse.builder().prepareToken(token).canFulfill(allocation.outOfStockItems().isEmpty()).voucherCode(voucherCode)
-                .subOrders(enrichedSubOrders).totalSubtotal(totalSubtotal).discountAmount(discountAmount).totalShippingFee(totalShippingFee)
+        return PrepareOrderResponse.builder().prepareToken(token).canFulfill(allocation.outOfStockItems().isEmpty())
+                .voucherCode(voucherCode)
+                .subOrders(enrichedSubOrders).totalSubtotal(totalSubtotal).discountAmount(discountAmount)
+                .totalShippingFee(totalShippingFee)
                 .totalAmount(totalAmount).outOfStockItems(allocation.outOfStockItems()).build();
     }
 
@@ -759,8 +791,7 @@ public class OrderService {
                 confirmLockKey,
                 String.valueOf(userId),
                 PREPARE_CONFIRM_LOCK_TTL_SECONDS,
-                TimeUnit.SECONDS
-        );
+                TimeUnit.SECONDS);
         if (Boolean.FALSE.equals(lockAcquired)) {
             ConfirmOrderResponse lockedResult = getConfirmResultFromRedis(request.getPrepareToken());
             if (lockedResult != null) {
@@ -942,7 +973,8 @@ public class OrderService {
 
         Map<Long, Integer> quantityByVariant = new LinkedHashMap<>();
         for (CartItemDto item : cartItems) {
-            if (item == null || item.getProductVariantId() == null || item.getQuantity() == null || item.getQuantity() <= 0) {
+            if (item == null || item.getProductVariantId() == null || item.getQuantity() == null
+                    || item.getQuantity() <= 0) {
                 continue;
             }
             quantityByVariant.merge(item.getProductVariantId(), item.getQuantity(), Integer::sum);
@@ -961,8 +993,7 @@ public class OrderService {
             String deliveryAddress,
             Integer deliveryDistrictId,
             String deliveryWardCode,
-            String voucherCode
-    ) {
+            String voucherCode) {
         List<CartItemDto> normalizedCart = normalizeCartItems(cartItems);
         if (normalizedCart.isEmpty()) {
             throw new BadRequestException("Gio hang cua ban dang trong");
@@ -980,21 +1011,23 @@ public class OrderService {
         double finalUserLat = userLat != null ? userLat : 10.0341;
         double finalUserLng = userLng != null ? userLng : 105.7904;
 
-        List<BranchWithRealDistance> nearestBranches = branchSearchService.findNearestBranches(finalUserLat, finalUserLng);
+        List<BranchWithRealDistance> nearestBranches = branchSearchService.findNearestBranches(finalUserLat,
+                finalUserLng);
         if (nearestBranches.isEmpty()) {
             throw new NotFoundException("Khong co chi nhanh hoat dong");
         }
 
         List<Long> branchIds = nearestBranches.stream().map(bwr -> bwr.branch().getId()).toList();
-        Map<Long, Map<Long, List<Inventory>>> inventoryMatrix = allocationService.buildInventoryMatrix(branchIds, variantIds);
-        AllocationResult allocation = allocationService.allocate(normalizedCart, variantMap, nearestBranches, inventoryMatrix);
+        Map<Long, Map<Long, List<Inventory>>> inventoryMatrix = allocationService.buildInventoryMatrix(branchIds,
+                variantIds);
+        AllocationResult allocation = allocationService.allocate(normalizedCart, variantMap, nearestBranches,
+                inventoryMatrix);
 
         List<SubOrderDraftDto> draftSubOrders = mergeRestockNeedsIntoSubOrders(
                 allocation.subOrders(),
                 allocation.outOfStockItems(),
                 nearestBranches,
-                variantMap
-        );
+                variantMap);
 
         DeliveryInfo deliveryInfo = DeliveryInfo.builder()
                 .toDistrictId(deliveryDistrictId)
@@ -1007,8 +1040,7 @@ public class OrderService {
         List<SubOrderDraftDto> enrichedSubOrders = shippingService.enrichWithShippingFees(
                 draftSubOrders,
                 deliveryInfo,
-                variantMap
-        );
+                variantMap);
 
         BigDecimal totalSubtotal = enrichedSubOrders.stream()
                 .map(s -> s.getSubtotal() != null ? s.getSubtotal() : BigDecimal.ZERO)
@@ -1037,25 +1069,25 @@ public class OrderService {
                 totalSubtotal,
                 discountAmount,
                 totalShippingFee,
-                totalAmount
-        );
+                totalAmount);
     }
 
     private List<SubOrderDraftDto> mergeRestockNeedsIntoSubOrders(
             List<SubOrderDraftDto> allocatedSubOrders,
             List<OutOfStockItemDto> outOfStockItems,
             List<BranchWithRealDistance> nearestBranches,
-            Map<Long, ProductVariant> variantMap
-    ) {
+            Map<Long, ProductVariant> variantMap) {
         List<SubOrderDraftDto> mergedSubOrders = allocatedSubOrders == null
                 ? new ArrayList<>()
-                : allocatedSubOrders.stream().map(SubOrderDraftDto::toBuilder).map(builder -> builder.build()).collect(Collectors.toCollection(ArrayList::new));
+                : allocatedSubOrders.stream().map(SubOrderDraftDto::toBuilder).map(builder -> builder.build())
+                        .collect(Collectors.toCollection(ArrayList::new));
 
         if (outOfStockItems == null || outOfStockItems.isEmpty()) {
             return mergedSubOrders;
         }
 
         BigDecimal profitMultiplier = settingService.getProfitMultiplier();
+        String roundingRule = settingService.getProfitRoundingRuleRaw();
 
         for (OutOfStockItemDto outOfStockItem : outOfStockItems) {
             int missingQty = Objects.requireNonNullElse(outOfStockItem.getRequestedQty(), 0);
@@ -1063,7 +1095,8 @@ public class OrderService {
                 continue;
             }
 
-            Long targetBranchId = resolveRestockBranchId(mergedSubOrders, nearestBranches, outOfStockItem.getProductVariantId());
+            Long targetBranchId = resolveRestockBranchId(mergedSubOrders, nearestBranches,
+                    outOfStockItem.getProductVariantId());
             if (targetBranchId == null) {
                 continue;
             }
@@ -1075,14 +1108,16 @@ public class OrderService {
                     .quantity(missingQty)
                     .allocatedQuantity(0)
                     .missingQuantity(missingQty)
-                    .unitPrice(resolveFallbackUnitPrice(outOfStockItem.getProductVariantId(), mergedSubOrders, profitMultiplier))
+                    .unitPrice(resolveFallbackUnitPrice(outOfStockItem.getProductVariantId(), mergedSubOrders,
+                            profitMultiplier, roundingRule))
                     .build();
             restockItem.setSubtotal(restockItem.getUnitPrice().multiply(BigDecimal.valueOf(missingQty)));
 
             int existingIndex = findSubOrderIndexByBranchId(mergedSubOrders, targetBranchId);
             if (existingIndex >= 0) {
                 SubOrderDraftDto existing = mergedSubOrders.get(existingIndex);
-                List<OrderItemDto> updatedItems = new ArrayList<>(Objects.requireNonNullElse(existing.getItems(), Collections.emptyList()));
+                List<OrderItemDto> updatedItems = new ArrayList<>(
+                        Objects.requireNonNullElse(existing.getItems(), Collections.emptyList()));
                 updatedItems.add(restockItem);
                 mergedSubOrders.set(existingIndex, existing.toBuilder()
                         .items(updatedItems)
@@ -1127,8 +1162,7 @@ public class OrderService {
     private Long resolveRestockBranchId(
             List<SubOrderDraftDto> subOrders,
             List<BranchWithRealDistance> nearestBranches,
-            Long productVariantId
-    ) {
+            Long productVariantId) {
         for (SubOrderDraftDto subOrder : subOrders) {
             if (subOrder.getItems() != null && subOrder.getItems().stream()
                     .anyMatch(item -> Objects.equals(item.getProductVariantId(), productVariantId))) {
@@ -1143,7 +1177,8 @@ public class OrderService {
         return nearestBranches.isEmpty() ? null : nearestBranches.get(0).branch().getId();
     }
 
-    private BigDecimal resolveFallbackUnitPrice(Long productVariantId, List<SubOrderDraftDto> subOrders, BigDecimal profitMultiplier) {
+    private BigDecimal resolveFallbackUnitPrice(Long productVariantId, List<SubOrderDraftDto> subOrders,
+            BigDecimal profitMultiplier, String roundingRule) {
         for (SubOrderDraftDto subOrder : subOrders) {
             if (subOrder.getItems() == null) {
                 continue;
@@ -1157,7 +1192,8 @@ public class OrderService {
 
         return inventoryRepository.findByProductVariantId(productVariantId).stream()
                 .filter(inventory -> inventory.getImportPrice() != null)
-                .map(inventory -> inventory.getImportPrice().multiply(profitMultiplier))
+                .map(inventory -> settingService.calculateSellingPrice(inventory.getImportPrice(), profitMultiplier,
+                        roundingRule))
                 .findFirst()
                 .orElse(BigDecimal.ZERO);
     }
@@ -1174,7 +1210,8 @@ public class OrderService {
                 || !hasSameMoney(draft.getTotalShippingFee(), liveQuote.totalShippingFee())
                 || !hasSameMoney(draft.getTotalAmount(), liveQuote.totalAmount());
 
-        if (totalsChanged || !Objects.equals(buildSubOrderSignature(draft.getSubOrders()), buildSubOrderSignature(liveQuote.subOrders()))) {
+        if (totalsChanged || !Objects.equals(buildSubOrderSignature(draft.getSubOrders()),
+                buildSubOrderSignature(liveQuote.subOrders()))) {
             throw new ConflictException("Don hang vua thay doi, vui long prepare lai truoc khi dat");
         }
     }
@@ -1192,19 +1229,21 @@ public class OrderService {
         return subOrders.stream()
                 .sorted(Comparator.comparing(SubOrderDraftDto::getBranchId, Comparator.nullsLast(Long::compareTo)))
                 .map(subOrder -> {
-                    String itemSignature = subOrder.getItems() == null ? "" : subOrder.getItems().stream()
-                            .sorted(Comparator
-                                    .comparing(OrderItemDto::getProductVariantId, Comparator.nullsLast(Long::compareTo))
-                                    .thenComparing(item -> safeBigDecimal(item.getUnitPrice()))
-                                    .thenComparing(item -> Objects.requireNonNullElse(item.getQuantity(), 0)))
-                            .map(item -> String.join(":",
-                                    String.valueOf(item.getProductVariantId()),
-                                    String.valueOf(Objects.requireNonNullElse(item.getQuantity(), 0)),
-                                    String.valueOf(Objects.requireNonNullElse(item.getAllocatedQuantity(), 0)),
-                                    String.valueOf(Objects.requireNonNullElse(item.getMissingQuantity(), 0)),
-                                    safeBigDecimal(item.getUnitPrice()),
-                                    safeBigDecimal(item.getSubtotal())))
-                            .collect(Collectors.joining(","));
+                    String itemSignature = subOrder.getItems() == null ? ""
+                            : subOrder.getItems().stream()
+                                    .sorted(Comparator
+                                            .comparing(OrderItemDto::getProductVariantId,
+                                                    Comparator.nullsLast(Long::compareTo))
+                                            .thenComparing(item -> safeBigDecimal(item.getUnitPrice()))
+                                            .thenComparing(item -> Objects.requireNonNullElse(item.getQuantity(), 0)))
+                                    .map(item -> String.join(":",
+                                            String.valueOf(item.getProductVariantId()),
+                                            String.valueOf(Objects.requireNonNullElse(item.getQuantity(), 0)),
+                                            String.valueOf(Objects.requireNonNullElse(item.getAllocatedQuantity(), 0)),
+                                            String.valueOf(Objects.requireNonNullElse(item.getMissingQuantity(), 0)),
+                                            safeBigDecimal(item.getUnitPrice()),
+                                            safeBigDecimal(item.getSubtotal())))
+                                    .collect(Collectors.joining(","));
 
                     return String.join("|",
                             String.valueOf(subOrder.getBranchId()),
@@ -1234,14 +1273,14 @@ public class OrderService {
             String voucherCode,
             BigDecimal orderSubtotal,
             boolean consume,
-            boolean conflictOnUnavailable
-    ) {
+            boolean conflictOnUnavailable) {
         String normalizedVoucherCode = normalizeVoucherCode(voucherCode);
         if (normalizedVoucherCode == null) {
             return new VoucherValidation(null, null, BigDecimal.ZERO);
         }
 
-        Voucher voucher = (consume ? voucherRepository.findByCodeForUpdate(normalizedVoucherCode) : voucherRepository.findByCode(normalizedVoucherCode))
+        Voucher voucher = (consume ? voucherRepository.findByCodeForUpdate(normalizedVoucherCode)
+                : voucherRepository.findByCode(normalizedVoucherCode))
                 .orElseThrow(() -> voucherValidationException(conflictOnUnavailable, "Ma voucher khong ton tai"));
 
         LocalDateTime now = LocalDateTime.now();
@@ -1255,7 +1294,8 @@ public class OrderService {
 
         BigDecimal minOrderValue = voucher.getMinOrderValue() != null ? voucher.getMinOrderValue() : BigDecimal.ZERO;
         if (orderSubtotal.compareTo(minOrderValue) < 0) {
-            throw voucherValidationException(conflictOnUnavailable, "Don hang chua dat gia tri toi thieu de su dung voucher nay");
+            throw voucherValidationException(conflictOnUnavailable,
+                    "Don hang chua dat gia tri toi thieu de su dung voucher nay");
         }
 
         if (Objects.requireNonNullElse(voucher.getQuantity(), 0) <= 0) {
@@ -1266,7 +1306,8 @@ public class OrderService {
                 .orElse(new UserVoucher(user, voucher, 0, false));
         int maxUsagePerUser = voucher.getMaxUsagePerUser() != null ? voucher.getMaxUsagePerUser() : 1;
         if (Objects.requireNonNullElse(userVoucher.getUsageCount(), 0) >= maxUsagePerUser) {
-            throw voucherValidationException(conflictOnUnavailable, "Ban da su dung toi da so luot cho phep cua voucher nay");
+            throw voucherValidationException(conflictOnUnavailable,
+                    "Ban da su dung toi da so luot cho phep cua voucher nay");
         }
 
         BigDecimal discountAmount;
@@ -1331,19 +1372,21 @@ public class OrderService {
             return;
         }
 
-        List<InventoryTransaction> legacyTransactions = transactionRepository.findByReferenceCodeAndType(order.getCode(), TransactionType.SALE);
+        List<InventoryTransaction> legacyTransactions = transactionRepository
+                .findByReferenceCodeAndType(order.getCode(), TransactionType.SALE);
         releaseInventoryTransactions(order.getCode(), legacyTransactions, "Hoan kho do huy don hang");
     }
 
     private void releaseAllocatedInventoryForSubOrder(SubOrder subOrder) {
         List<InventoryTransaction> saleTransactions = transactionRepository.findByReferenceCodeAndType(
                 buildSubOrderReferenceCode(subOrder),
-                TransactionType.SALE
-        );
-        releaseInventoryTransactions(buildSubOrderReferenceCode(subOrder), saleTransactions, "Hoan kho do huy sub-order");
+                TransactionType.SALE);
+        releaseInventoryTransactions(buildSubOrderReferenceCode(subOrder), saleTransactions,
+                "Hoan kho do huy sub-order");
     }
 
-    private void releaseInventoryTransactions(String referenceCode, List<InventoryTransaction> saleTransactions, String reason) {
+    private void releaseInventoryTransactions(String referenceCode, List<InventoryTransaction> saleTransactions,
+            String reason) {
         for (InventoryTransaction saleTransaction : saleTransactions) {
             int quantityToRelease = Math.abs(Objects.requireNonNullElse(saleTransaction.getQuantityChange(), 0));
             if (quantityToRelease <= 0 || saleTransaction.getInventory() == null) {
@@ -1370,7 +1413,8 @@ public class OrderService {
 
     private void saveDraftToRedis(String token, PrepareOrderDraft draft) {
         try {
-            redisTemplate.opsForValue().set(PREPARE_KEY_PREFIX + token, objectMapper.writeValueAsString(draft), PREPARE_TTL_MINUTES, TimeUnit.MINUTES);
+            redisTemplate.opsForValue().set(PREPARE_KEY_PREFIX + token, objectMapper.writeValueAsString(draft),
+                    PREPARE_TTL_MINUTES, TimeUnit.MINUTES);
         } catch (JsonProcessingException e) {
             throw new RuntimeException("Lỗi lưu Redis");
         }
@@ -1378,7 +1422,8 @@ public class OrderService {
 
     private PrepareOrderDraft getDraftFromRedis(String token) {
         String json = redisTemplate.opsForValue().get(PREPARE_KEY_PREFIX + token);
-        if (json == null) return null;
+        if (json == null)
+            return null;
         try {
             return objectMapper.readValue(json, PrepareOrderDraft.class);
         } catch (JsonProcessingException e) {
@@ -1392,8 +1437,7 @@ public class OrderService {
                     PREPARE_CONFIRM_RESULT_PREFIX + token,
                     objectMapper.writeValueAsString(response),
                     PREPARE_TTL_MINUTES,
-                    TimeUnit.MINUTES
-            );
+                    TimeUnit.MINUTES);
         } catch (JsonProcessingException e) {
             log.warn("Khong the luu ket qua confirm vao Redis cho token {}: {}", token, e.getMessage());
         }
@@ -1464,9 +1508,11 @@ public class OrderService {
             List<Inventory> batches = inventoryRepository.findForUpdateFIFO(selectedBranch.getId(), variant.getId());
 
             for (Inventory batch : batches) {
-                if (remainingToDeduct <= 0) break;
+                if (remainingToDeduct <= 0)
+                    break;
                 int available = Objects.requireNonNullElse(batch.getQuantity(), 0);
-                if (available <= 0) continue;
+                if (available <= 0)
+                    continue;
 
                 int deduct = Math.min(available, remainingToDeduct);
                 int newQty = available - deduct;
@@ -1486,7 +1532,7 @@ public class OrderService {
                 remainingToDeduct -= deduct;
 
                 BigDecimal importPrice = batch.getImportPrice() != null ? batch.getImportPrice() : BigDecimal.ZERO;
-                BigDecimal sellingPrice = importPrice.multiply(settingService.getProfitMultiplier());
+                BigDecimal sellingPrice = settingService.calculateSellingPrice(importPrice);
 
                 orderItemRepository.save(OrderItem.builder()
                         .order(savedOrder)
@@ -1538,7 +1584,8 @@ public class OrderService {
 
                 if (voucher.getMaxDiscount() != null && voucher.getMaxDiscount().compareTo(BigDecimal.ZERO) > 0) {
                     BigDecimal maxDiscountDecimal = voucher.getMaxDiscount();
-                    discountAmount = calculatedDiscount.compareTo(maxDiscountDecimal) > 0 ? maxDiscountDecimal : calculatedDiscount;
+                    discountAmount = calculatedDiscount.compareTo(maxDiscountDecimal) > 0 ? maxDiscountDecimal
+                            : calculatedDiscount;
                 } else {
                     discountAmount = calculatedDiscount;
                 }
@@ -1574,7 +1621,8 @@ public class OrderService {
         // 👉 PAYOS LOGIC
         if (PaymentMethod.PAYOS.equals(paymentMethod)) {
             try {
-                com.zone.agri.dto.response.payment.PayOSApiResponse.PayOSLinkData payosData = payOSService.createPaymentLink(savedOrder);
+                com.zone.agri.dto.response.payment.PayOSApiResponse.PayOSLinkData payosData = payOSService
+                        .createPaymentLink(savedOrder);
                 savedOrder.setPayosPaymentLinkId(payosData.getPaymentLinkId());
                 savedOrder.setPayosCheckoutUrl(payosData.getCheckoutUrl());
             } catch (Exception e) {
@@ -1586,7 +1634,8 @@ public class OrderService {
 
         // Xóa sản phẩm khỏi giỏ hàng
         req.getItems().stream().map(CheckoutItemRequest::getVariantId).distinct()
-                .forEach(vId -> cartItemRepository.findByUserIdAndProductVariantId(userId, vId).ifPresent(cartItemRepository::delete));
+                .forEach(vId -> cartItemRepository.findByUserIdAndProductVariantId(userId, vId)
+                        .ifPresent(cartItemRepository::delete));
 
         return savedOrder;
     }

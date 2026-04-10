@@ -15,13 +15,21 @@ public class SettingController {
 
     @GetMapping("/profit-margin")
     public ResponseEntity<?> getProfitMargin() {
-        return ResponseEntity.ok(Map.of("margin", settingService.getProfitMarginRaw()));
+        return ResponseEntity.ok(Map.of(
+                "margin", settingService.getProfitMarginRaw(),
+                "roundingRule", settingService.getProfitRoundingRuleRaw()));
     }
 
     @PutMapping("/profit-margin")
     public ResponseEntity<?> updateProfitMargin(@RequestBody Map<String, String> request) {
-        String margin = request.get("margin");
-        settingService.updateProfitMargin(margin);
-        return ResponseEntity.ok(Map.of("success", true, "message", "Đã cập nhật tỷ lệ lợi nhuận thành " + margin + "%"));
+        String margin = request.getOrDefault("margin", settingService.getProfitMarginRaw());
+        String roundingRule = request.getOrDefault("roundingRule", settingService.getProfitRoundingRuleRaw());
+
+        settingService.updateProfitConfig(margin, roundingRule);
+
+        return ResponseEntity.ok(Map.of(
+                "success", true,
+                "message", "Đã cập nhật tỷ lệ lợi nhuận thành " + margin + "%",
+                "roundingRule", settingService.getProfitRoundingRuleRaw()));
     }
 }
