@@ -29,15 +29,16 @@ public class InventoryAllocationService {
 
     public record AllocationResult(
             List<SubOrderDraftDto> subOrders,
-            List<OutOfStockItemDto> outOfStockItems
-    ) {}
+            List<OutOfStockItemDto> outOfStockItems) {
+    }
 
     // ──────────────────────────────────────────────────────────────
     // Step 1: Build Inventory Matrix (Lưu Danh sách Lô hàng thay vì số lượng)
     // ──────────────────────────────────────────────────────────────
     public Map<Long, Map<Long, List<Inventory>>> buildInventoryMatrix(List<Long> branchIds, List<Long> variantIds) {
         // Dùng raw query để giữ nguyên từng lô riêng lẻ với importPrice đúng.
-        // KHÔNG dùng findInventoryMatrix vì hàm đó gom lô → importPrice bị null → giá = 0đ.
+        // KHÔNG dùng findInventoryMatrix vì hàm đó gom lô → importPrice bị null → giá =
+        // 0đ.
         List<Inventory> inventories = inventoryRepository.rawFindInventoryMatrix(branchIds, variantIds);
 
         // Map<BranchId, Map<VariantId, Danh_Sách_Lô_FIFO>>
@@ -60,10 +61,10 @@ public class InventoryAllocationService {
             List<CartItemDto> cart,
             Map<Long, ProductVariant> variantMap,
             List<BranchWithRealDistance> branchesSortedByDist,
-            Map<Long, Map<Long, List<Inventory>>> inventoryMatrix
-    ) {
+            Map<Long, Map<Long, List<Inventory>>> inventoryMatrix) {
         // Lấy hệ số lợi nhuận 1 lần duy nhất — tránh N query DB trong vòng lặp lô
         BigDecimal profitMultiplier = settingService.getProfitMultiplier();
+        String roundingRule = settingService.getProfitRoundingRuleRaw();
 
         List<CartItemDto> remaining = new ArrayList<>(cart.stream()
                 .map(item -> new CartItemDto(item.getProductVariantId(), item.getQuantity()))
@@ -72,7 +73,8 @@ public class InventoryAllocationService {
         List<SubOrderDraftDto> subOrders = new ArrayList<>();
 
         for (BranchWithRealDistance bwr : branchesSortedByDist) {
-            if (remaining.isEmpty()) break;
+            if (remaining.isEmpty())
+                break;
 
             Long branchId = bwr.branch().getId();
             Map<Long, List<Inventory>> branchBatches = inventoryMatrix.getOrDefault(branchId, Collections.emptyMap());
@@ -94,13 +96,16 @@ public class InventoryAllocationService {
                 while (batchIterator.hasNext() && requested > 0) {
                     Inventory batch = batchIterator.next();
                     int availableInBatch = batch.getQuantity();
-                    if (availableInBatch <= 0) continue;
+                    if (availableInBatch <= 0)
+                        continue;
 
                     int quantityToTake = Math.min(requested, availableInBatch);
 
-                    // Giá bán = giá vốn lô này × biên lợi nhuận admin cài (FIFO: lô cũ nhất ra trước)
+                    // Giá bán = giá vốn lô này × biên lợi nhuận admin cài (FIFO: lô cũ nhất ra
+                    // trước)
                     BigDecimal importPrice = batch.getImportPrice() != null ? batch.getImportPrice() : BigDecimal.ZERO;
-                    BigDecimal unitPrice = importPrice.multiply(profitMultiplier);
+                    BigDecimal unitPrice = settingService.calculateSellingPrice(importPrice, profitMultiplier,
+                            roundingRule);
 
                     allocated.add(OrderItemDto.builder()
                             .productVariantId(variantId)
