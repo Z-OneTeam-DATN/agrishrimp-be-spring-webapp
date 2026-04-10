@@ -134,6 +134,13 @@ public class OrderController {
         return ResponseEntity.ok(orderService.getAdminOrderDetail(id));
     }
 
+    @Operation(summary = "Bao cao no don", description = "Tong hop cac san pham dang thieu hang trong cac sub-order cho nhap hang.")
+    @RequirePermission("ORDER_VIEW")
+    @GetMapping("/admin/backorders")
+    public ResponseEntity<List<MissingItemReportDto>> getBackorderReport() {
+        return ResponseEntity.ok(orderService.getBackorderReport());
+    }
+
     @Operation(summary = "Cập nhật trạng thái đơn hàng (Admin)", description = "Admin duyệt đơn, đóng gói, giao hàng theo quy trình.")
     @RequirePermission("ORDER_UPDATE")
     @PutMapping("/admin/{id}/status")

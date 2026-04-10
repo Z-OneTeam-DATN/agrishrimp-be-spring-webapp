@@ -148,6 +148,29 @@ public class PayOSService {
         return false;
     }
 
+    public void cancelPaymentLink(Order order) {
+        try {
+            long orderCode = parseOrderCode(order);
+            String url = PAYOS_URL + "/" + orderCode + "/cancel";
+
+            Map<String, Object> body = new LinkedHashMap<>();
+            body.put("cancellationReason", "Khách hàng hoặc hệ thống hủy đơn");
+
+            HttpHeaders headers = new HttpHeaders();
+            headers.set("x-client-id", clientId);
+            headers.set("x-api-key", apiKey);
+            headers.setContentType(MediaType.APPLICATION_JSON);
+
+            ResponseEntity<PayOSApiResponse> resp = restTemplate.exchange(
+                    url, HttpMethod.POST, new HttpEntity<>(body, headers), PayOSApiResponse.class
+            );
+
+            log.info("Đã hủy link PayOS cho đơn {}: {}", order.getCode(), resp.getBody() != null ? resp.getBody().getCode() : "unknown");
+        } catch (Exception e) {
+            log.warn("Lỗi khi hủy link PayOS cho đơn {}: {}", order.getCode(), e.getMessage());
+        }
+    }
+
     @Transactional
     public void handleWebhook(ObjectNode webhookBody) {
         try {
@@ -210,13 +233,13 @@ public class PayOSService {
             if (subOrder.getStatus() == OrderStatus.AWAITING_PAYMENT) {
                 boolean hasMissingItems = subOrder.getItems() != null
                         && subOrder.getItems().stream().anyMatch(item -> (item.getMissingQuantity() != null ? item.getMissingQuantity() : 0) > 0);
-                subOrder.setStatus(hasMissingItems ? OrderStatus.AWAITING_REPLENISHMENT : OrderStatus.READY_FOR_PICKUP);
+                subOrder.setStatus(hasMissingItems ? OrderStatus.AWAITING_REPLENISHMENT : OrderStatus.PROCESSING);
                 hasAnyMissingItems = hasAnyMissingItems || hasMissingItems;
             }
         }
 
         if (order.getStatus() == OrderStatus.AWAITING_PAYMENT) {
-            order.setStatus(hasAnyMissingItems ? OrderStatus.AWAITING_REPLENISHMENT : OrderStatus.READY_FOR_PICKUP);
+            order.setStatus(hasAnyMissingItems ? OrderStatus.AWAITING_REPLENISHMENT : OrderStatus.PROCESSING);
         }
 
         orderRepository.save(order);

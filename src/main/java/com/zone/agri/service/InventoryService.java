@@ -32,6 +32,7 @@ public class InventoryService {
     private final BranchRepository branchRepository;
     private final SupplierRepository supplierRepository;
     private final InventoryTransactionRepository transactionRepository;
+    private final BackorderService backorderService;
     private final com.zone.agri.common.WarehouseContext warehouseContext;
 
     // --- 1. TẠO PHIẾU MỚI ---
@@ -156,6 +157,7 @@ public class InventoryService {
             if (note.getStatus() == InventoryNoteStatus.COMPLETED) {
                 // 1. Nhập vào ĐÚNG lô tại kho nhận
                 updateStockBalanceExactBatch(note, note.getBranch(), variant, batch, detailEntity.getPrice(), expiry, itemDTO.getPlannedQuantity(), TransactionType.IMPORT);
+                backorderService.fulfillBackordersOnStockReceive(note.getBranch().getId(), variant.getId(), itemDTO.getPlannedQuantity());
 
                 // 2. Trừ kho xuất (NẾU NHẬP NỘI BỘ -> PHẢI TRỪ FIFO)
                 if ("INTERNAL".equals(importType) && note.getPartnerBranch() != null) {
