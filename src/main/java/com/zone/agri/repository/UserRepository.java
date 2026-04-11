@@ -66,7 +66,7 @@ public interface UserRepository extends JpaRepository<User, Long> {
                         "OR LOWER(u.email) LIKE LOWER(CONCAT('%', :keyword, '%')) " +
                         "OR u.phoneNumber LIKE CONCAT('%', :keyword, '%') " +
                         "OR (:phoneKeyword IS NOT NULL AND :phoneKeyword <> '' AND " +
-                        "FUNCTION('replace', FUNCTION('replace', FUNCTION('replace', COALESCE(u.phoneNumber, ''), ' ', ''), '.', ''), '-', '') LIKE CONCAT('%', :phoneKeyword, '%'))) "
+                        "CAST(FUNCTION('replace', FUNCTION('replace', FUNCTION('replace', COALESCE(u.phoneNumber, ''), ' ', ''), '.', ''), '-', '') AS STRING) LIKE CONCAT('%', :phoneKeyword, '%'))) "
                         +
                         "ORDER BY u.createdAt DESC")
         Page<User> findAllCustomers(
