@@ -1,6 +1,7 @@
 package com.zone.agri.repository;
 
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
@@ -47,14 +48,22 @@ public interface SupplierRepository extends JpaRepository<Supplier, Long> {
                 BigDecimal getTotalDebt();
         }
 
-        // Lấy danh sách NCC có công nợ (Dựa vào debtAmount trong InventoryNote)
         @Query("SELECT s.id AS id, s.code AS supplierCode, s.name AS supplierName, s.phone AS phone, " +
-                        "SUM(i.debtAmount) AS totalDebt " +
-                        "FROM Supplier s JOIN s.inventoryNotes i " +
-                        "WHERE i.type = 'IMPORT' " +
-                        "AND (:search IS NULL OR LOWER(s.name) LIKE LOWER(CONCAT('%', :search, '%')) " +
+                        "COALESCE(SUM(CASE " +
+                        "WHEN i.type = 'IMPORT' " +
+                        "AND (:startDate IS NULL OR i.createdAt >= :startDate) " +
+                        "AND (:endDate IS NULL OR i.createdAt <= :endDate) " +
+                        "AND (:branchId IS NULL OR i.branch.id = :branchId) " +
+                        "AND (:staffId IS NULL OR i.createdBy.id = :staffId) " +
+                        "THEN COALESCE(i.debtAmount, 0) ELSE 0 END), 0) AS totalDebt " +
+                        "FROM Supplier s LEFT JOIN s.inventoryNotes i " +
+                        "WHERE (:search IS NULL OR LOWER(s.name) LIKE LOWER(CONCAT('%', :search, '%')) " +
                         "OR s.code LIKE CONCAT('%', :search, '%') OR s.phone LIKE CONCAT('%', :search, '%')) " +
-                        "GROUP BY s.id, s.code, s.name, s.phone " +
-                        "HAVING SUM(i.debtAmount) > 0")
-        List<SupplierDebtProjection> findSuppliersWithDebt(@Param("search") String search);
+                        "GROUP BY s.id, s.code, s.name, s.phone")
+        List<SupplierDebtProjection> findSuppliersWithDebt(
+                        @Param("search") String search,
+                        @Param("startDate") LocalDateTime startDate,
+                        @Param("endDate") LocalDateTime endDate,
+                        @Param("branchId") Long branchId,
+                        @Param("staffId") Long staffId);
 }
