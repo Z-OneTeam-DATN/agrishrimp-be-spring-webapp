@@ -104,7 +104,7 @@ jobs:
           echo "Waiting for Spring Boot..."
           sleep 20
 
-          RETRIES=6
+          RETRIES=18
           for i in $(seq 1 $RETRIES); do
             STATUS=$(curl -sf http://127.0.0.1:${{ env.APP_PORT }}/actuator/health \
               | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('status','DOWN'))" \
@@ -118,7 +118,10 @@ jobs:
             sleep 10
           done
 
-          echo "❌ Health check failed. Rolling back..."
+          echo "❌ Health check failed. Dumping api logs before rollback..."
+          docker logs --tail 200 agrishrimp-api || true
+
+          echo "❌ Rolling back..."
           if [ "$CURRENT_IMAGE" != "none" ]; then
             docker tag "$CURRENT_IMAGE" "$IMAGE:latest" 2>/dev/null || true
             docker compose -f docker-compose.prod.yml up -d --no-deps --pull never api
