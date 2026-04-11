@@ -55,6 +55,19 @@ public class Customer {
     @JsonManagedReference
     private User user;
 
+    // 🆕 Gán cho chi nhánh & nhân viên phụ trách
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "branch_id")
+    private Branch assignedBranch;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "staff_assigned_id")
+    private User staffAssigned;
+
+    // 🆕 Ghi chú nội bộ (không shared với customer)
+    @Column(columnDefinition = "TEXT")
+    private String internalNotes;
+
     @CreationTimestamp
     private LocalDateTime createdAt;
 

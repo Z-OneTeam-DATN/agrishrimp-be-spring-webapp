@@ -74,4 +74,9 @@ public interface UserRepository extends JpaRepository<User, Long> {
                         @Param("phoneKeyword") String phoneKeyword,
                         @Param("status") String status,
                         Pageable pageable);
+
+        // 🟢 Get staff by branch
+        @Query("SELECT NEW MAP(u.id AS id, u.fullName AS fullName, u.email AS email, u.phoneNumber AS phoneNumber) " +
+                        "FROM User u WHERE u.branch.id = :branchId AND u.role.slug = 'STAFF' ORDER BY u.fullName")
+        List<Map<String, Object>> findByBranchIdAndRole(@Param("branchId") Long branchId, @Param("slug") String slug);
 }

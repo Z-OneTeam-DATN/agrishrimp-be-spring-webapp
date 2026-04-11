@@ -147,4 +147,20 @@ public class CustomerController {
         customerService.toggleUserStatus(id);
         return ResponseEntity.ok("Cập nhật trạng thái tài khoản thành công!");
     }
+
+    // 🟢 Get all branches for FE dropdown
+    @Operation(summary = "Danh sách chi nhánh", description = "Lấy danh sách chi nhánh để assign cho khách hàng")
+    @SecurityRequirement(name = "bearerAuth")
+    @GetMapping("/lookup/branches")
+    public ResponseEntity<?> getBranches() {
+        return ResponseEntity.ok(customerService.getAllBranches());
+    }
+
+    // 🟢 Get staff by branch for FE dropdown
+    @Operation(summary = "Danh sách nhân viên theo chi nhánh", description = "Lấy danh sách nhân viên của chi nhánh để assign")
+    @SecurityRequirement(name = "bearerAuth")
+    @GetMapping("/lookup/staff-by-branch/{branchId}")
+    public ResponseEntity<?> getStaffByBranch(@PathVariable Long branchId) {
+        return ResponseEntity.ok(customerService.getStaffByBranch(branchId));
+    }
 }

@@ -51,6 +51,7 @@ public class CustomerService {
     private final OrderRepository orderRepository;
     private final CustomerInternalNoteRepository customerInternalNoteRepository;
     private final CustomerStatusLogRepository customerStatusLogRepository;
+    private final BranchRepository branchRepository;
 
     // 1. Tạo mới khách hàng
     @Transactional
@@ -395,5 +396,26 @@ public class CustomerService {
         c.setAddressDetail(req.getAddressDetail());
         c.setStatus(req.getStatus());
         c.setNote(req.getNote());
+
+        // 🟢 Assign branch & staff & internal notes
+        if (req.getBranchId() != null) {
+            c.setAssignedBranch(branchRepository.findById(req.getBranchId()).orElse(null));
+        }
+        if (req.getStaffAssignedId() != null) {
+            c.setStaffAssigned(userRepository.findById(req.getStaffAssignedId()).orElse(null));
+        }
+        if (req.getInternalNotes() != null) {
+            c.setInternalNotes(req.getInternalNotes());
+        }
+    }
+
+    // 🟢 Get all staff by branch (for FE dropdown)
+    public List<Map<String, Object>> getStaffByBranch(Long branchId) {
+        return userRepository.findByBranchIdAndRole(branchId, "STAFF");
+    }
+
+    // 🟢 Get all branches (for FE dropdown)
+    public List<?> getAllBranches() {
+        return branchRepository.findAll();
     }
 }
