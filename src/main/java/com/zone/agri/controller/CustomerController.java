@@ -1,7 +1,11 @@
 package com.zone.agri.controller;
 
+import com.zone.agri.dto.request.customer.CustomerInternalNoteRequest;
 import com.zone.agri.dto.request.customer.CustomerRequest;
+import com.zone.agri.dto.response.customer.CustomerDetailResponse;
+import com.zone.agri.dto.response.customer.CustomerInternalNoteResponse;
 import com.zone.agri.dto.response.customer.CustomerResponse;
+import com.zone.agri.dto.response.customer.CustomerStatusLogResponse;
 import com.zone.agri.entity.Customer;
 import com.zone.agri.security.annotation.RequirePermission;
 import com.zone.agri.service.CustomerService;
@@ -18,9 +22,10 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
-import org.springframework.data.domain.Sort;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
 
 @RestController
 @RequestMapping("/api/customers")
@@ -35,18 +40,13 @@ public class CustomerController {
     @RequirePermission("CUSTOMER_VIEW")
     @GetMapping
     public ResponseEntity<Page<CustomerResponse>> getAll(
-                                                          @Parameter(description = "Từ khóa tìm kiếm (Tên, SĐT, Email)", example = "Nguyễn Văn A")
-                                                          @RequestParam(required = false) String keyword,
+            @Parameter(description = "Từ khóa tìm kiếm (Tên, SĐT, Email)", example = "Nguyễn Văn A") @RequestParam(required = false) String keyword,
 
-                                                          @Parameter(description = "Trạng thái tài khoản (ACTIVE, LOCKED)", example = "ACTIVE")
-                                                          @RequestParam(required = false) String status,
+            @Parameter(description = "Trạng thái tài khoản (ACTIVE, LOCKED)", example = "ACTIVE") @RequestParam(required = false) String status,
 
-                                                          @Parameter(description = "Số trang (bắt đầu từ 0)", example = "0")
-                                                          @RequestParam(defaultValue = "0") int page,
+            @Parameter(description = "Số trang (bắt đầu từ 0)", example = "0") @RequestParam(defaultValue = "0") int page,
 
-                                                          @Parameter(description = "Số lượng bản ghi mỗi trang", example = "20")
-                                                          @RequestParam(defaultValue = "10") int size
-    ) {
+            @Parameter(description = "Số lượng bản ghi mỗi trang", example = "20") @RequestParam(defaultValue = "10") int size) {
         Pageable pageable = PageRequest.of(page, size);
         return ResponseEntity.ok(customerService.getCustomers(keyword, status, pageable));
     }
@@ -61,6 +61,49 @@ public class CustomerController {
     @GetMapping("/{id}")
     public ResponseEntity<CustomerResponse> getById(@PathVariable Long id) {
         return ResponseEntity.ok(customerService.getCustomerById(id));
+    }
+
+    @Operation(summary = "Chi tiết khách hàng đầy đủ", description = "Trả dữ liệu đầy đủ cho trang chi tiết: quick stats, địa chỉ giao hàng, ghi chú nội bộ, lịch sử trạng thái")
+    @SecurityRequirement(name = "bearerAuth")
+    @RequirePermission("CUSTOMER_VIEW")
+    @GetMapping("/{id}/detail")
+    public ResponseEntity<CustomerDetailResponse> getDetail(@PathVariable Long id) {
+        return ResponseEntity.ok(customerService.getCustomerDetailById(id));
+    }
+
+    @Operation(summary = "Danh sách ghi chú nội bộ", description = "Lấy toàn bộ ghi chú nội bộ của khách hàng")
+    @SecurityRequirement(name = "bearerAuth")
+    @RequirePermission("CUSTOMER_VIEW")
+    @GetMapping("/{id}/internal-notes")
+    public ResponseEntity<List<CustomerInternalNoteResponse>> getInternalNotes(@PathVariable Long id) {
+        return ResponseEntity.ok(customerService.getInternalNotes(id));
+    }
+
+    @Operation(summary = "Thêm ghi chú nội bộ", description = "Tạo ghi chú nội bộ mới cho khách hàng")
+    @SecurityRequirement(name = "bearerAuth")
+    @RequirePermission("CUSTOMER_UPDATE")
+    @PostMapping("/{id}/internal-notes")
+    public ResponseEntity<CustomerInternalNoteResponse> addInternalNote(
+            @PathVariable Long id,
+            @Valid @RequestBody CustomerInternalNoteRequest request) {
+        return ResponseEntity.ok(customerService.addInternalNote(id, request));
+    }
+
+    @Operation(summary = "Xóa ghi chú nội bộ", description = "Xóa một ghi chú nội bộ theo ID")
+    @SecurityRequirement(name = "bearerAuth")
+    @RequirePermission("CUSTOMER_UPDATE")
+    @DeleteMapping("/internal-notes/{noteId}")
+    public ResponseEntity<String> deleteInternalNote(@PathVariable Long noteId) {
+        customerService.deleteInternalNote(noteId);
+        return ResponseEntity.ok("Đã xóa ghi chú nội bộ");
+    }
+
+    @Operation(summary = "Lịch sử thay đổi trạng thái", description = "Xem lịch sử khóa/mở khóa tài khoản khách hàng")
+    @SecurityRequirement(name = "bearerAuth")
+    @RequirePermission("CUSTOMER_VIEW")
+    @GetMapping("/{id}/status-logs")
+    public ResponseEntity<List<CustomerStatusLogResponse>> getStatusLogs(@PathVariable Long id) {
+        return ResponseEntity.ok(customerService.getStatusLogs(id));
     }
 
     @Operation(summary = "Tạo hồ sơ khách hàng mới", description = "Thêm mới khách hàng vào hệ thống. Hệ thống có thể tự động tạo tài khoản User liên kết nếu được cấu hình.")
@@ -80,10 +123,8 @@ public class CustomerController {
     @RequirePermission("CUSTOMER_UPDATE")
     @PutMapping("/{id}")
     public ResponseEntity<Customer> update(
-            @Parameter(description = "ID khách hàng cần sửa", example = "100", required = true)
-            @PathVariable Long id,
-            @Valid @RequestBody CustomerRequest request
-    ) {
+            @Parameter(description = "ID khách hàng cần sửa", example = "100", required = true) @PathVariable Long id,
+            @Valid @RequestBody CustomerRequest request) {
         return ResponseEntity.ok(customerService.updateCustomer(id, request));
     }
 
