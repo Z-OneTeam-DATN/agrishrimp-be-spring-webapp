@@ -25,6 +25,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.Map;
 import java.util.List;
 
 @RestController
@@ -49,6 +50,16 @@ public class CustomerController {
             @Parameter(description = "Số lượng bản ghi mỗi trang", example = "20") @RequestParam(defaultValue = "10") int size) {
         Pageable pageable = PageRequest.of(page, size);
         return ResponseEntity.ok(customerService.getCustomers(keyword, status, pageable));
+    }
+
+    @Operation(summary = "Kiểm tra trùng email/số điện thoại", description = "Dùng cho validate realtime ở form thêm khách hàng")
+    @SecurityRequirement(name = "bearerAuth")
+    @RequirePermission("CUSTOMER_VIEW")
+    @GetMapping("/check-duplicate")
+    public ResponseEntity<Map<String, Boolean>> checkDuplicate(
+            @RequestParam(required = false) String email,
+            @RequestParam(required = false) String phone) {
+        return ResponseEntity.ok(customerService.checkDuplicate(email, phone));
     }
 
     @Operation(summary = "Chi tiết khách hàng", description = "Xem hồ sơ chi tiết, địa chỉ và thông tin liên lạc của khách hàng.")

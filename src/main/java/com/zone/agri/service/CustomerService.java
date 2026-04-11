@@ -31,6 +31,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -124,8 +125,19 @@ public class CustomerService {
 
     public Page<CustomerResponse> getCustomers(String keyword, String statusStr, Pageable pageable) {
         String finalStatus = (statusStr == null || statusStr.trim().isEmpty()) ? "all" : statusStr.trim();
-        Page<User> users = userRepository.findAllCustomers(keyword, finalStatus, pageable);
+        String normalizedPhoneKeyword = keyword == null ? null : keyword.replaceAll("\\D+", "");
+        Page<User> users = userRepository.findAllCustomers(keyword, normalizedPhoneKeyword, finalStatus, pageable);
         return users.map(this::convertToResponse);
+    }
+
+    public Map<String, Boolean> checkDuplicate(String email, String phone) {
+        Map<String, Boolean> result = new HashMap<>();
+        String normalizedEmail = email == null ? "" : email.trim().toLowerCase();
+        String normalizedPhone = phone == null ? "" : phone.replaceAll("\\D+", "");
+
+        result.put("emailExists", !normalizedEmail.isEmpty() && userRepository.existsByEmail(normalizedEmail));
+        result.put("phoneExists", !normalizedPhone.isEmpty() && userRepository.existsByPhoneNumber(normalizedPhone));
+        return result;
     }
 
     private CustomerResponse convertToResponse(User user) {
