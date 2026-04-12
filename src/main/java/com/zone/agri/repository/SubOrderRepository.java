@@ -9,6 +9,7 @@ import org.springframework.stereotype.Repository;
 
 import java.util.List;
 import java.util.Optional;
+import java.time.LocalDateTime;
 
 @Repository
 public interface SubOrderRepository extends JpaRepository<SubOrder, Long> {
@@ -91,4 +92,21 @@ public interface SubOrderRepository extends JpaRepository<SubOrder, Long> {
             "GROUP BY c.id, c.name " +
             "ORDER BY totalRevenue DESC")
     List<ProductRepository.CategorySalesProjection> getCategorySalesByBranch(@Param("branchId") Long branchId);
+
+    @Query("""
+            SELECT DISTINCT s
+            FROM SubOrder s
+            LEFT JOIN FETCH s.order o
+            LEFT JOIN FETCH o.user u
+            LEFT JOIN FETCH s.branch b
+            LEFT JOIN FETCH s.items i
+            LEFT JOIN FETCH i.productVariant pv
+            LEFT JOIN FETCH pv.product p
+            WHERE s.createdAt BETWEEN :startDate AND :endDate
+              AND (:branchId IS NULL OR b.id = :branchId)
+            ORDER BY s.createdAt DESC
+            """)
+    List<SubOrder> findReportData(@Param("startDate") LocalDateTime startDate,
+                                  @Param("endDate") LocalDateTime endDate,
+                                  @Param("branchId") Long branchId);
 }
