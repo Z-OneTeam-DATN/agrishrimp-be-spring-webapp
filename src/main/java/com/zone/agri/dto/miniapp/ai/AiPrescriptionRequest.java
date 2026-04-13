@@ -19,8 +19,7 @@ public class AiPrescriptionRequest {
     @JsonProperty("user_symptoms")
     private String userSymptoms;
 
-    @JsonProperty("ideal_protocol")
-    private List<Object> idealProtocol;
+    // ideal_protocol đã được loại bỏ — Python AI tự lookup từ protocol_map.py (Knowledge Base)
 
     @JsonProperty("available_stock")
     private List<AiStockItem> availableStock;

@@ -12,6 +12,9 @@ public class AiPredictResponse {
 
     private boolean success;
 
+    /** BLURRY | NON_SHRIMP | HEALTHY | DISEASE */
+    private String status;
+
     @JsonProperty("top_predictions")
     private List<AiPredictionItem> topPredictions;
 

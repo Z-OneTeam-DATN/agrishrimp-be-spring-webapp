@@ -91,10 +91,12 @@ public class AiDiagnosisClient {
         );
 
         AiPredictResponse result = response.getBody();
-        if (result == null || !result.isSuccess()) {
-            log.warn("[AI-Diagnosis] predict trả về kết quả không hợp lệ: {}", result);
+        if (result == null || result.getStatus() == null) {
+            log.warn("[AI-Diagnosis] predict trả về response null hoặc thiếu status: {}", result);
             throw new BadRequestException("AI service trả về kết quả không hợp lệ. Vui lòng thử lại.");
         }
+        // Trả nguyên response — MiniAppDiagnosisService sẽ phân nhánh theo status
+        // (BLURRY, NON_SHRIMP trả success=false nhưng status hợp lệ)
         return result;
     }
 }

@@ -11,7 +11,7 @@
 #
 # Excluded (NOT deployed):
 #   ❌ minizalo      — pending Zalo platform approval
-#   ❌ ai-diagnosis  — not production-ready
+#   ✅ ai-diagnosis  (agrishrimp-ai-diagnosis, internal port 8000)
 # =============================================================
 
 services:
@@ -112,6 +112,7 @@ services:
       SPRING_DATASOURCE_PASSWORD: ${MYSQL_ROOT_PASSWORD}
       SPRING_DATA_REDIS_HOST: redis
       IMAGE_SEARCH_URL: http://ai-visual-search:5001
+      AI_BASE_URL: http://ai-diagnosis:8000
       # Force schema auto-update on startup to avoid validate crash during rollout
       SPRING_JPA_HIBERNATE_DDL_AUTO: update
       # Public URLs
@@ -127,6 +128,8 @@ services:
       redis:
         condition: service_healthy
       ai-visual-search:
+        condition: service_started
+      ai-diagnosis:
         condition: service_started  # không block nếu AI chậm khởi động
     networks:
       - agrishrimp-net
@@ -168,11 +171,33 @@ services:
       retries: 3
       start_period: 20s
 
+  # ─────────────────────────────────────────────────────
+  # AI DIAGNOSIS — FastAPI + YOLOv8 + Gemini (INTERNAL ONLY)
+  # Port 8000 — không expose ra ngoài, chỉ api gọi nội bộ
+  # ─────────────────────────────────────────────────────
+  ai-diagnosis:
+    image: ghcr.io/z-oneteam-datn/agrishrimp-ai-diagnosis:latest
+    container_name: agrishrimp-ai-diagnosis
+    restart: unless-stopped
+    expose:
+      - "8000"
+    environment:
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY}
+      PORT: 8000
+    networks:
+      - agrishrimp-net
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request; urllib.request.urlopen('http://localhost:8000/ai/')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s    # YOLOv8 model cần thời gian load lần đầu
+
 # ─────────────────────────────────────────────────────
 # EXCLUDED SERVICES — do NOT uncomment until ready
 # ─────────────────────────────────────────────────────
 # minizalo:        ❌ excluded — pending Zalo platform approval
-# ai-diagnosis:    ❌ excluded — not production-ready
 
 networks:
   agrishrimp-net:
