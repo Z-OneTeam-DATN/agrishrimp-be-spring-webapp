@@ -16,6 +16,10 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
+import org.springframework.data.web.PageableDefault;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -122,10 +126,11 @@ public class OrderController {
     @Operation(summary = "Lấy danh sách đơn hàng (Admin)", description = "Lấy toàn bộ đơn hàng, có thể lọc theo trạng thái và tìm kiếm mã đơn.")
     @RequirePermission("ORDER_VIEW")
     @GetMapping("/admin/all")
-    public ResponseEntity<?> getAllOrders(
+    public ResponseEntity<Page<OrderResponse>> getAllOrders(
             @RequestParam(required = false) OrderStatus status,
-            @RequestParam(required = false) String search) {
-        return ResponseEntity.ok(orderService.getAdminOrders(status, search));
+            @RequestParam(required = false) String search,
+            @PageableDefault(size = 10, sort = "createdAt", direction = Sort.Direction.DESC) Pageable pageable) {
+        return ResponseEntity.ok(orderService.getAdminOrders(status, search, pageable));
     }
 
     @Operation(summary = "Lấy chi tiết đơn hàng (Admin)", description = "Admin xem chi tiết toàn bộ thông tin đơn hàng")

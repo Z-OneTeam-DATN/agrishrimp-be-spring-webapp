@@ -2,6 +2,7 @@ package com.zone.agri.repository;
 
 import com.zone.agri.entity.Order;
 import com.zone.agri.entity.enums.OrderStatus;
+import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
@@ -61,6 +62,12 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
         List<Order> findByUserIdAndStatusOrderByCreatedAtDesc(Long userId, OrderStatus status);
 
         List<Order> findByStatusOrderByCreatedAtDesc(OrderStatus status);
+
+        @Query("SELECT o FROM Order o WHERE " +
+               "(:status IS NULL OR o.status = :status) AND " +
+               "(:search IS NULL OR LOWER(o.code) LIKE LOWER(CONCAT('%', LOWER(:search), '%')) OR LOWER(o.user.fullName) LIKE LOWER(CONCAT('%', LOWER(:search), '%'))) " +
+               "ORDER BY o.createdAt DESC")
+        Page<Order> findAdminOrdersWithFilter(@Param("status") OrderStatus status, @Param("search") String search, Pageable pageable);
 
         @Query("SELECT o FROM Order o WHERE o.status = :status " +
                         "AND (:branchId IS NULL OR o.branch.id = :branchId) " +
