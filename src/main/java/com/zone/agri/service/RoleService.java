@@ -18,6 +18,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -120,9 +121,27 @@ public class RoleService {
             throw new BadRequestException("Vai trò phải có ít nhất một quyền được gán");
         }
 
-        Set<Permission> permissions = permissionRepository.findAllByCodeIn(allCodes);
-        if (permissions.isEmpty()) {
+        List<String> normalizedCodes = allCodes.stream()
+                .filter(code -> code != null && !code.isBlank())
+                .map(String::trim)
+                .distinct()
+                .toList();
+
+        if (normalizedCodes.isEmpty()) {
             throw new BadRequestException("Danh sách quyền không hợp lệ");
+        }
+
+        Set<Permission> permissions = permissionRepository.findAllByCodeIn(normalizedCodes);
+        Set<String> resolvedCodes = permissions.stream()
+                .map(Permission::getCode)
+                .collect(Collectors.toSet());
+
+        Set<String> invalidCodes = normalizedCodes.stream()
+                .filter(code -> !resolvedCodes.contains(code))
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+
+        if (!invalidCodes.isEmpty()) {
+            throw new BadRequestException("Mã quyền không tồn tại: " + String.join(", ", invalidCodes));
         }
 
         role.setSlug(slug);

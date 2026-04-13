@@ -6,9 +6,12 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.zone.agri.common.AuthUtils;
+import com.zone.agri.common.RoleUtils;
 import com.zone.agri.dto.request.employee.EmployeeCreateRequest;
 import com.zone.agri.dto.response.citizen.CitizenLookupResponse;
 import com.zone.agri.dto.response.employee.EmployeeResponse;
+import com.zone.agri.dto.response.user.UserDetail;
 import com.zone.agri.entity.Branch;
 import com.zone.agri.entity.Role;
 import com.zone.agri.entity.User;
@@ -42,12 +45,11 @@ public class EmployeeService {
         log.info("Creating new employee with email: {}", request.getEmail());
 
         // 1. Validate
-        validateUniqueFields(null, request.getEmail(), request.getPhoneNumber());
+        validateUniqueFields(null, request.getEmail(), request.getPhoneNumber(), request.getCitizenId());
 
         Branch branch = branchRepository.findById(request.getBranchId())
                 .orElseThrow(() -> new NotFoundException("Không tìm thấy chi nhánh"));
-        Role role = roleRepository.findById(request.getRoleId())
-                .orElseThrow(() -> new NotFoundException("Không tìm thấy vai trò"));
+        Role role = resolveAssignableRole(request.getRoleId());
 
         // 2. Password handling
         String rawPassword = (request.getPassword() != null && !request.getPassword().isBlank())
@@ -83,10 +85,12 @@ public class EmployeeService {
     }
 
     private UserStatus parseStatus(String status) {
-        if (status == null || status.isBlank())
+        if (status == null || status.isBlank()) {
             return UserStatus.ACTIVE;
+        }
+
         try {
-            return "active".equalsIgnoreCase(status) ? UserStatus.ACTIVE : UserStatus.INACTIVE;
+            return UserStatus.valueOf(status.trim().toUpperCase());
         } catch (Exception e) {
             return UserStatus.ACTIVE;
         }
@@ -101,7 +105,7 @@ public class EmployeeService {
         }
     }
 
-    private void validateUniqueFields(Long id, String email, String phone) {
+    private void validateUniqueFields(Long id, String email, String phone, String citizenId) {
         boolean emailExists = (id == null)
                 ? userRepository.existsByEmail(email)
                 : userRepository.existsByEmailAndIdNot(email, id);
@@ -116,6 +120,18 @@ public class EmployeeService {
 
         if (phoneExists) {
             throw new ConflictException("Số điện thoại này đã được sử dụng trong hệ thống");
+        }
+
+        if (citizenId == null || citizenId.isBlank()) {
+            return;
+        }
+
+        boolean citizenIdExists = (id == null)
+                ? userRepository.existsByCitizenId(citizenId)
+                : userRepository.existsByCitizenIdAndIdNot(citizenId, id);
+
+        if (citizenIdExists) {
+            throw new ConflictException("Số CCCD này đã được sử dụng trong hệ thống");
         }
     }
 
@@ -145,17 +161,22 @@ public class EmployeeService {
         User existingEmployee = userRepository.findById(employeeId)
                 .orElseThrow(() -> new NotFoundException("Không tìm thấy nhân viên với ID: " + employeeId));
 
-        validateUniqueFields(employeeId, request.getEmail(), request.getPhoneNumber());
+        if (existingEmployee.getRole() != null && Boolean.TRUE.equals(existingEmployee.getRole().getIsSystem())) {
+            throw new Forbidden("Không thể sửa nhân viên có vai trò hệ thống");
+        }
+
+        validateUniqueFields(
+                employeeId,
+                existingEmployee.getEmail(),
+                request.getPhoneNumber(),
+                existingEmployee.getCitizenId());
 
         Branch branch = branchRepository.findById(request.getBranchId())
                 .orElseThrow(() -> new NotFoundException("Không tìm thấy chi nhánh"));
-        Role role = roleRepository.findById(request.getRoleId())
-                .orElseThrow(() -> new NotFoundException("Không tìm thấy vai trò"));
+        Role role = resolveAssignableRole(request.getRoleId());
 
         existingEmployee.setFullName(request.getFullName());
-        existingEmployee.setEmail(request.getEmail());
         existingEmployee.setPhoneNumber(request.getPhoneNumber());
-        existingEmployee.setCitizenId(request.getCitizenId());
         existingEmployee.setDateOfBirth(request.getDateOfBirth());
         existingEmployee.setGender(request.getGender());
         existingEmployee.setAddressDetail(request.getAddressDetail());
@@ -170,6 +191,37 @@ public class EmployeeService {
         }
 
         return mapToResponse(userRepository.save(existingEmployee));
+    }
+
+    private Role resolveAssignableRole(Long roleId) {
+        Role role = roleRepository.findById(roleId)
+                .orElseThrow(() -> new NotFoundException("Không tìm thấy vai trò"));
+
+        if (!canAssignRole(role)) {
+            throw new Forbidden("Bạn không có quyền gán vai trò này");
+        }
+
+        return role;
+    }
+
+    private boolean canAssignRole(Role role) {
+        if (role == null) {
+            return false;
+        }
+
+        boolean isPrivilegedRole = Boolean.TRUE.equals(role.getIsSystem())
+                || RoleUtils.isAdminLikeRole(role.getSlug());
+
+        if (!isPrivilegedRole) {
+            return true;
+        }
+
+        UserDetail currentUser = AuthUtils.getUserDetail();
+        String currentRoleSlug = currentUser != null && currentUser.getRole() != null
+                ? currentUser.getRole().getSlug()
+                : null;
+
+        return RoleUtils.isAdminLikeRole(currentRoleSlug);
     }
 
     @Transactional
