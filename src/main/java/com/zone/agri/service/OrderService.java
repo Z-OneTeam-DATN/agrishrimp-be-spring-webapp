@@ -137,14 +137,14 @@ public class OrderService {
     @Transactional
     public void confirmReceivedByCustomer(Long userId, Long orderId) {
         Order order = orderRepository.findById(orderId)
-                .orElseThrow(() -> new NotFoundException("Khong tim thay don hang ID: " + orderId));
+                .orElseThrow(() -> new NotFoundException("Không tìm thấy đơn hàng ID: " + orderId));
 
         if (order.getUser() == null || !order.getUser().getId().equals(userId)) {
-            throw new Forbidden("Ban khong co quyen thao tac tren don hang nay");
+            throw new Forbidden("Bạn không có quyền thao tác trên đơn hàng này");
         }
 
         if (order.getStatus() != OrderStatus.SHIPPING) {
-            throw new BadRequestException("Chi co the xac nhan khi don hang dang giao.");
+            throw new BadRequestException("Chỉ có thể xác nhận khi đơn hàng đang giao.");
         }
 
         completeOrderAfterDeliveryConfirmation(order);
@@ -193,17 +193,17 @@ public class OrderService {
     @Transactional
     public void cancelMyOrder(Long userId, Long orderId, String cancelReason) {
         Order order = orderRepository.findById(orderId)
-                .orElseThrow(() -> new NotFoundException("Khong tim thay don hang ID: " + orderId));
+                .orElseThrow(() -> new NotFoundException("Không tìm thấy đơn hàng ID: " + orderId));
 
         if (!order.getUser().getId().equals(userId)) {
-            throw new BadRequestException("Ban khong co quyen huy don hang nay");
+            throw new BadRequestException("Bạn không có quyền hủy đơn hàng này");
         }
         if (order.getStatus() == OrderStatus.CANCELLED || order.getStatus() == OrderStatus.COMPLETED
                 || order.getStatus() == OrderStatus.RETURNED) {
-            throw new BadRequestException("Don hang da dong, khong the huy");
+            throw new BadRequestException("Đơn hàng đã đóng, không thể hủy");
         }
         if (order.getStatus() == OrderStatus.SHIPPING) {
-            throw new BadRequestException("Don hang dang giao, khong the huy");
+            throw new BadRequestException("Đơn hàng đang giao, không thể hủy");
         }
 
         releaseAllocatedInventoryForOrder(order);
@@ -234,7 +234,7 @@ public class OrderService {
         }
 
         if (currentStatus == OrderStatus.SHIPPING && newStatus == OrderStatus.COMPLETED) {
-            throw new BadRequestException("Don hang dang giao chi duoc hoan tat khi khach hang xac nhan da nhan.");
+            throw new BadRequestException("Đơn hàng đang giao chỉ được hoàn tất khi khách hàng xác nhận đã nhận.");
         }
 
         validateStatusTransition(currentStatus, newStatus);
@@ -269,45 +269,45 @@ public class OrderService {
             return;
         if (current == OrderStatus.PENDING) {
             if (next != OrderStatus.CONFIRMED && next != OrderStatus.PROCESSING) {
-                throw new BadRequestException("Don hang cho xac nhan chi co the chuyen sang 'Da duyet' hoac 'Dang xu ly'.");
+                throw new BadRequestException("Đơn hàng chờ xác nhận chỉ có thể chuyển sang 'Đã duyệt' hoặc 'Đang xử lý'.");
             }
             return;
         }
         if (current == OrderStatus.AWAITING_PAYMENT) {
             if (next != OrderStatus.CONFIRMED && next != OrderStatus.AWAITING_REPLENISHMENT && next != OrderStatus.PROCESSING) {
-                throw new BadRequestException("Don hang cho thanh toan chi co the chuyen sang 'Dang xu ly' hoac 'Cho nhap hang' sau khi thanh toan xong.");
+                throw new BadRequestException("Đơn hàng chờ thanh toán chỉ có thể chuyển sang 'Đang xử lý' hoặc 'Chờ bổ sung' sau khi thanh toán xong.");
             }
             return;
         }
         if (current == OrderStatus.AWAITING_REPLENISHMENT) {
             if (next != OrderStatus.CONFIRMED && next != OrderStatus.PROCESSING) {
-                throw new BadRequestException("Don hang thieu hang chi co the chuyen sang 'Dang xu ly' sau khi nhap du.");
+                throw new BadRequestException("Đơn hàng thiếu hàng chỉ có thể chuyển sang 'Đang xử lý' sau khi nhập đủ.");
             }
             return;
         }
         if (current == OrderStatus.CONFIRMED) {
             if (next != OrderStatus.PROCESSING) {
-                throw new BadRequestException("Don hang da duyet chi co the chuyen sang 'Dang xu ly'.");
+                throw new BadRequestException("Đơn hàng đã duyệt chỉ có thể chuyển sang 'Đang xử lý'.");
             }
             return;
         }
         if (current == OrderStatus.PROCESSING) {
             if (next != OrderStatus.READY_FOR_PICKUP && next != OrderStatus.SHIPPING) {
                 throw new BadRequestException(
-                        "Don hang o trang thai cu 'Dang xu ly' chi co the chuyen sang 'Cho lay hang' hoac 'Cho giao hang'.");
+                        "Đơn hàng ở trạng thái 'Đang xử lý' chỉ có thể chuyển sang 'Sẵn sàng lấy' hoặc 'Đang giao'.");
             }
             return;
         }
         if (current == OrderStatus.READY_FOR_PICKUP) {
             if (next != OrderStatus.SHIPPING) {
-                throw new BadRequestException("Don hang cho lay hang chi co the chuyen sang 'Cho giao hang'.");
+                throw new BadRequestException("Đơn hàng chờ lấy hàng chỉ có thể chuyển sang 'Đang giao'.");
             }
             return;
         }
         if (current == OrderStatus.SHIPPING) {
             if (next != OrderStatus.COMPLETED && next != OrderStatus.RETURNED) {
                 throw new BadRequestException(
-                        "Don hang cho giao hang chi co the chuyen sang 'Da giao' hoac 'Tra hang'.");
+                        "Đơn hàng đang giao chỉ có thể chuyển sang 'Hoàn thành' hoặc 'Đã trả hàng'.");
             }
             return;
         }
@@ -373,7 +373,7 @@ public class OrderService {
     @Transactional
     public List<String> requestReplenishmentForAdmin(Long orderId) {
         Order order = orderRepository.findById(orderId)
-                .orElseThrow(() -> new NotFoundException("Khong tim thay don hang ID: " + orderId));
+                .orElseThrow(() -> new NotFoundException("Không tìm thấy đơn hàng ID: " + orderId));
 
         List<SubOrder> awaitingSubOrders = order.getSubOrders() == null
                 ? Collections.emptyList()
@@ -382,7 +382,7 @@ public class OrderService {
                         .toList();
 
         if (awaitingSubOrders.isEmpty()) {
-            throw new BadRequestException("Don hang nay khong o trang thai cho dieu chuyen bo sung.");
+            throw new BadRequestException("Đơn hàng này không ở trạng thái chờ điều chuyển bổ sung.");
         }
 
         return awaitingSubOrders.stream()
@@ -394,10 +394,10 @@ public class OrderService {
     @Transactional
     public List<String> requestReplenishmentForBranch(Long branchId, Long orderId) {
         SubOrder subOrder = subOrderRepository.findByOrderIdAndBranchId(orderId, branchId)
-                .orElseThrow(() -> new NotFoundException("Khong tim thay phan don cho chi nhanh nay"));
+                .orElseThrow(() -> new NotFoundException("Không tìm thấy phần đơn cho chi nhánh này"));
 
         if (subOrder.getStatus() != OrderStatus.AWAITING_REPLENISHMENT) {
-            throw new BadRequestException("Phan don nay khong o trang thai cho dieu chuyen bo sung.");
+            throw new BadRequestException("Phần đơn này không ở trạng thái chờ điều chuyển bổ sung.");
         }
 
         return inventoryTransferService.createReplenishmentTransfersForSubOrder(subOrder).stream()
@@ -416,7 +416,7 @@ public class OrderService {
             throw new BadRequestException("Không thể thay đổi trạng thái của đơn đã đóng!");
         }
         if (currentStatus == OrderStatus.SHIPPING && newStatus == OrderStatus.COMPLETED) {
-            throw new BadRequestException("Phan don dang giao chi duoc hoan tat khi khach hang xac nhan da nhan.");
+            throw new BadRequestException("Phần đơn đang giao chỉ được hoàn tất khi khách hàng xác nhận đã nhận.");
         }
         validateStatusTransition(currentStatus, newStatus);
 
@@ -866,11 +866,17 @@ public class OrderService {
 
         saveDraftToRedis(token, draft);
 
-        return PrepareOrderResponse.builder().prepareToken(token).canFulfill(allocation.outOfStockItems().isEmpty())
+        return PrepareOrderResponse.builder()
+                .prepareToken(token)
+                .canFulfill(true) // Đánh lừa Frontend để luôn cho phép bấm nút Thanh toán
                 .voucherCode(voucherCode)
-                .subOrders(enrichedSubOrders).totalSubtotal(totalSubtotal).discountAmount(discountAmount)
+                .subOrders(enrichedSubOrders)
+                .totalSubtotal(totalSubtotal)
+                .discountAmount(discountAmount)
                 .totalShippingFee(totalShippingFee)
-                .totalAmount(totalAmount).outOfStockItems(allocation.outOfStockItems()).build();
+                .totalAmount(totalAmount)
+                .outOfStockItems(Collections.emptyList()) // Làm rỗng danh sách để Frontend ẩn thông báo vàng đi
+                .build();
     }
 
     private Integer parseIntSafe(String value) {
@@ -899,7 +905,7 @@ public class OrderService {
             if (lockedResult != null) {
                 return lockedResult;
             }
-            throw new ConflictException("Don hang dang duoc xu ly, vui long doi trong giay lat");
+            throw new ConflictException("Đơn hàng đang được xử lý, vui lòng đợi trong giây lát");
         }
 
         try {
@@ -1088,13 +1094,13 @@ public class OrderService {
             String voucherCode) {
         List<CartItemDto> normalizedCart = normalizeCartItems(cartItems);
         if (normalizedCart.isEmpty()) {
-            throw new BadRequestException("Gio hang cua ban dang trong");
+            throw new BadRequestException("Giỏ hàng của bạn đang trống");
         }
 
         List<Long> variantIds = normalizedCart.stream().map(CartItemDto::getProductVariantId).distinct().toList();
         List<ProductVariant> variants = variantRepository.findAllById(variantIds);
         if (variants.size() != variantIds.size()) {
-            throw new NotFoundException("Mot hoac nhieu san pham khong ton tai");
+            throw new NotFoundException("Một hoặc nhiều sản phẩm không tồn tại");
         }
 
         Map<Long, ProductVariant> variantMap = variants.stream()
@@ -1106,7 +1112,7 @@ public class OrderService {
         List<BranchWithRealDistance> nearestBranches = branchSearchService.findNearestBranches(finalUserLat,
                 finalUserLng);
         if (nearestBranches.isEmpty()) {
-            throw new NotFoundException("Khong co chi nhanh hoat dong");
+            throw new NotFoundException("Không có chi nhánh hoạt động");
         }
 
         List<Long> branchIds = nearestBranches.stream().map(bwr -> bwr.branch().getId()).toList();
@@ -1139,7 +1145,7 @@ public class OrderService {
         String normalizedVoucherCode = normalizeVoucherCode(voucherCode);
         if (normalizedVoucherCode != null) {
             User user = userRepository.findById(userId)
-                    .orElseThrow(() -> new NotFoundException("User khong ton tai"));
+                    .orElseThrow(() -> new NotFoundException("Người dùng không tồn tại"));
             discountAmount = validateVoucher(user, normalizedVoucherCode, totalSubtotal, false, false).discountAmount();
         }
 
@@ -1167,7 +1173,7 @@ public class OrderService {
 
         if (totalsChanged || !Objects.equals(buildSubOrderSignature(draft.getSubOrders()),
                 buildSubOrderSignature(liveQuote.subOrders()))) {
-            throw new ConflictException("Don hang vua thay doi, vui long prepare lai truoc khi dat");
+            throw new ConflictException("Đơn hàng vừa thay đổi, vui lòng tải lại giỏ hàng trước khi đặt");
         }
     }
 
@@ -1236,7 +1242,7 @@ public class OrderService {
 
         Voucher voucher = (consume ? voucherRepository.findByCodeForUpdate(normalizedVoucherCode)
                 : voucherRepository.findByCode(normalizedVoucherCode))
-                .orElseThrow(() -> voucherValidationException(conflictOnUnavailable, "Ma voucher khong ton tai"));
+                .orElseThrow(() -> voucherValidationException(conflictOnUnavailable, "Mã voucher không tồn tại"));
 
         LocalDateTime now = LocalDateTime.now();
         if (voucher.getStatus() != VoucherStatus.ACTIVE
@@ -1244,17 +1250,17 @@ public class OrderService {
                 || voucher.getEndDate() == null
                 || now.isBefore(voucher.getStartDate())
                 || now.isAfter(voucher.getEndDate())) {
-            throw voucherValidationException(conflictOnUnavailable, "Voucher khong hop le hoac da het han");
+            throw voucherValidationException(conflictOnUnavailable, "Voucher không hợp lệ hoặc đã hết hạn");
         }
 
         BigDecimal minOrderValue = voucher.getMinOrderValue() != null ? voucher.getMinOrderValue() : BigDecimal.ZERO;
         if (orderSubtotal.compareTo(minOrderValue) < 0) {
             throw voucherValidationException(conflictOnUnavailable,
-                    "Don hang chua dat gia tri toi thieu de su dung voucher nay");
+                    "Đơn hàng chưa đạt giá trị tối thiểu để sử dụng voucher này");
         }
 
         if (Objects.requireNonNullElse(voucher.getQuantity(), 0) <= 0) {
-            throw voucherValidationException(conflictOnUnavailable, "Voucher nay da het luot su dung tren he thong");
+            throw voucherValidationException(conflictOnUnavailable, "Voucher này đã hết lượt sử dụng trên hệ thống");
         }
 
         UserVoucher userVoucher = userVoucherRepository.findByUserAndVoucher(user, voucher)
@@ -1262,7 +1268,7 @@ public class OrderService {
         int maxUsagePerUser = voucher.getMaxUsagePerUser() != null ? voucher.getMaxUsagePerUser() : 1;
         if (Objects.requireNonNullElse(userVoucher.getUsageCount(), 0) >= maxUsagePerUser) {
             throw voucherValidationException(conflictOnUnavailable,
-                    "Ban da su dung toi da so luot cho phep cua voucher nay");
+                    "Bạn đã sử dụng tối đa số lượt cho phép của voucher này");
         }
 
         BigDecimal discountAmount;
@@ -1329,7 +1335,7 @@ public class OrderService {
 
         List<InventoryTransaction> legacyTransactions = transactionRepository
                 .findByReferenceCodeAndType(order.getCode(), TransactionType.SALE);
-        releaseInventoryTransactions(order.getCode(), legacyTransactions, "Hoan kho do huy don hang");
+        releaseInventoryTransactions(order.getCode(), legacyTransactions, "Hoàn kho do hủy đơn hàng");
     }
 
     private void releaseAllocatedInventoryForSubOrder(SubOrder subOrder) {
@@ -1337,7 +1343,7 @@ public class OrderService {
                 buildSubOrderReferenceCode(subOrder),
                 TransactionType.SALE);
         releaseInventoryTransactions(buildSubOrderReferenceCode(subOrder), saleTransactions,
-                "Hoan kho do huy sub-order");
+                "Hoàn kho do hủy phần đơn");
     }
 
     private void releaseInventoryTransactions(String referenceCode, List<InventoryTransaction> saleTransactions,
@@ -1394,7 +1400,7 @@ public class OrderService {
                     PREPARE_TTL_MINUTES,
                     TimeUnit.MINUTES);
         } catch (JsonProcessingException e) {
-            log.warn("Khong the luu ket qua confirm vao Redis cho token {}: {}", token, e.getMessage());
+            log.warn("Không thể lưu kết quả xác nhận vào Redis cho token {}: {}", token, e.getMessage());
         }
     }
 

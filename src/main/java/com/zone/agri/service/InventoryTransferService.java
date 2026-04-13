@@ -108,13 +108,13 @@ public class InventoryTransferService {
     @Transactional
     public List<InventoryTransfer> createReplenishmentTransfersForSubOrder(SubOrder subOrder) {
         if (subOrder.getStatus() != OrderStatus.AWAITING_REPLENISHMENT) {
-            throw new RuntimeException("Chi co the tao dieu chuyen bo sung cho phan don dang cho bo sung hang");
+            throw new RuntimeException("Chỉ có thể tạo điều chuyển bổ sung cho phần đơn đang chờ bổ sung hàng");
         }
 
         String referenceCode = subOrder.getOrder().getCode() + "-SUB-" + subOrder.getId();
         if (transferRepo.existsByReferenceCodeAndStatusIn(referenceCode,
                 List.of(InventoryTransferStatus.PENDING, InventoryTransferStatus.SHIPPING))) {
-            throw new RuntimeException("Phan don nay da co lenh dieu chuyen dang xu ly");
+            throw new RuntimeException("Phần đơn này đã có lệnh điều chuyển đang xử lý");
         }
 
         Map<Long, Map<String, Integer>> transferPlanBySourceBranch = new LinkedHashMap<>();
@@ -151,7 +151,7 @@ public class InventoryTransferService {
         }
 
         if (transferPlanBySourceBranch.isEmpty()) {
-            throw new RuntimeException("Khong tim thay chi nhanh nao co ton kho de dieu chuyen bo sung");
+            throw new RuntimeException("Không tìm thấy chi nhánh nào có tồn kho để điều chuyển bổ sung");
         }
 
         List<InventoryTransfer> transfers = new ArrayList<>();
@@ -162,7 +162,7 @@ public class InventoryTransferService {
             request.setFromBranchId(entry.getKey());
             request.setToBranchId(subOrder.getBranch().getId());
             request.setTransferType("ORDER_REPLENISHMENT");
-            request.setDescription("Bo sung hang cho don " + subOrder.getOrder().getCode());
+            request.setDescription("Bổ sung hàng cho đơn " + subOrder.getOrder().getCode());
             request.setReferenceCode(referenceCode);
             request.setPriority("HIGH");
             request.setTransferDate(now);
@@ -173,7 +173,7 @@ public class InventoryTransferService {
                         TransferItemRequest itemRequest = new TransferItemRequest();
                         itemRequest.setSku(itemEntry.getKey());
                         itemRequest.setQuantity(itemEntry.getValue());
-                        itemRequest.setItemNote("Bo sung cho phan don " + referenceCode);
+                        itemRequest.setItemNote("Bổ sung cho phần đơn " + referenceCode);
                         return itemRequest;
                     })
                     .toList();

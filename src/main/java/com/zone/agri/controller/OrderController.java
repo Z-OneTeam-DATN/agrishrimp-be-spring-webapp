@@ -66,10 +66,10 @@ public class OrderController {
     @PostMapping("/v1/orders/{id}/confirm-received")
     public ResponseEntity<?> confirmReceivedByCustomer(@PathVariable Long id) {
         orderService.confirmReceivedByCustomer(getCurrentUserId(), id);
-        return ResponseEntity.ok(Map.of("message", "Xac nhan nhan hang thanh cong"));
+        return ResponseEntity.ok(Map.of("message", "Xác nhận nhận hàng thành công"));
     }
 
-    @Operation(summary = "Huy don hang cua toi")
+    @Operation(summary = "Hủy đơn hàng của tôi")
     @PostMapping("/orders/{id}/cancel")
     public ResponseEntity<?> cancelMyOrder(@PathVariable Long id, @RequestBody(required = false) Map<String, Object> body) {
         Long userId = getCurrentUserId();
@@ -80,7 +80,7 @@ public class OrderController {
             cancelReason = (cancelReason != null ? cancelReason + ": " : "") + otherReasonText;
         }
         orderService.cancelMyOrder(userId, id, cancelReason);
-        return ResponseEntity.ok(Map.of("message", "Huy don hang thanh cong"));
+        return ResponseEntity.ok(Map.of("message", "Hủy đơn hàng thành công"));
     }
 
     @Operation(
@@ -141,7 +141,7 @@ public class OrderController {
         return ResponseEntity.ok(orderService.getAdminOrderDetail(id));
     }
 
-    @Operation(summary = "Bao cao no don", description = "Tong hop cac san pham dang thieu hang trong cac sub-order cho nhap hang.")
+    @Operation(summary = "Báo cáo nợ đơn", description = "Tổng hợp các sản phẩm đang thiếu hàng trong các phần đơn chờ nhập hàng.")
     @RequirePermission("ORDER_VIEW")
     @GetMapping("/admin/backorders")
     public ResponseEntity<List<MissingItemReportDto>> getBackorderReport() {
@@ -231,17 +231,17 @@ public class OrderController {
         return ResponseEntity.ok(Map.of("message", "Cập nhật trạng thái '" + status + "' thành công!"));
     }
 
-    @Operation(summary = "Tao lenh dieu chuyen bo sung cho don hang")
+    @Operation(summary = "Tạo lệnh điều chuyển bổ sung cho đơn hàng")
     @RequirePermission("ORDER_UPDATE")
     @PostMapping("/admin/{id}/request-replenishment")
     public ResponseEntity<?> requestReplenishmentForAdmin(@PathVariable Long id) {
         List<String> transferCodes = orderService.requestReplenishmentForAdmin(id);
         return ResponseEntity.ok(Map.of(
-                "message", "Da tao lenh dieu chuyen bo sung",
+                "message", "Đã tạo lệnh điều chuyển bổ sung",
                 "transferCodes", transferCodes));
     }
 
-    @Operation(summary = "Tao lenh dieu chuyen bo sung cho phan don cua chi nhanh")
+    @Operation(summary = "Tạo lệnh điều chuyển bổ sung cho phần đơn của chi nhánh")
     @RequirePermission("ORDER_UPDATE")
     @PostMapping("/branch/orders/{orderId}/request-replenishment")
     public ResponseEntity<?> requestReplenishmentForBranch(@PathVariable Long orderId) {
@@ -251,8 +251,7 @@ public class OrderController {
         }
         List<String> transferCodes = orderService.requestReplenishmentForBranch(user.getBranch().getId(), orderId);
         return ResponseEntity.ok(Map.of(
-                "message", "Da tao lenh dieu chuyen bo sung",
+                "message", "Đã tạo lệnh điều chuyển bổ sung",
                 "transferCodes", transferCodes));
     }
 }
-
