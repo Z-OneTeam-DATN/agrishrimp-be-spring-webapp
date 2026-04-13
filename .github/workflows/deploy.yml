@@ -99,8 +99,9 @@ jobs:
 
           docker pull "$IMAGE:latest"
 
-          echo "Ensuring compose dependencies and network are up..."
-          docker compose -f docker-compose.prod.yml up -d db redis ai-visual-search ai-diagnosis
+          echo "Ensuring required compose dependencies and network are up..."
+          docker compose -f docker-compose.prod.yml up -d db redis ai-visual-search
+          echo "Skipping ai-diagnosis bootstrap because its GHCR image may be unavailable."
 
           echo "Waiting for MySQL container DNS/health..."
           DB_RETRIES=18
