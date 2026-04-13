@@ -161,6 +161,8 @@ public class EmployeeController {
          * Endpoint: GET /api/employees/lookup-citizen/{citizenId}
          */
         @GetMapping("/lookup-citizen/{citizenId}")
+        @SecurityRequirement(name = "bearerAuth")
+        @RequirePermission({ "STAFF_CREATE", "STAFF_UPDATE" })
         @Operation(summary = "Tra cứu thông tin từ CCCD", description = "Tra cứu thông tin nhân viên (địa chỉ, ngày sinh) từ số CCCD trong hệ thống", responses = {
                         @ApiResponse(responseCode = "200", description = "Tìm thấy thông tin"),
                         @ApiResponse(responseCode = "404", description = "Không tìm thấy CCCD này")

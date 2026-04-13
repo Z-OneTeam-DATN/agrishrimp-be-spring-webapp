@@ -58,19 +58,9 @@ public class DataSeeder implements CommandLineRunner {
     @Transactional
     public void run(String... args) {
         boolean isDevProfile = Arrays.asList(environment.getActiveProfiles()).contains("dev");
+        boolean hasExistingRoles = roleRepository.count() > 0;
 
-        // Kiểm tra nếu đã có dữ liệu vai trò (dữ liệu thiết yếu)
-        if (roleRepository.count() > 0) {
-            if (isDevProfile) {
-                log.info(">>> Dữ liệu hệ thống đã tồn tại. Kiểm tra dữ liệu demo...");
-                seedDemoData();
-            } else {
-                log.info(">>> Dữ liệu hệ thống đã tồn tại. Bỏ qua demo data (profile: prod).");
-            }
-            return;
-        }
-
-        log.info(">>> BẮT ĐẦU KHỞI TẠO DỮ LIỆU HỆ THỐNG (permissions, roles, admin)...");
+        log.info(">>> ĐỒNG BỘ DỮ LIỆU HỆ THỐNG (permissions, roles, admin)...");
 
         // ── 1. PHÂN QUYỀN (Từ EssentialDataSeeder) ───────────────────────
         // GROUP SYSTEM
@@ -249,7 +239,11 @@ public class DataSeeder implements CommandLineRunner {
                     .build());
         }
 
-        log.info(">>> KHỞI TẠO DỮ LIỆU HỆ THỐNG HOÀN TẤT.");
+        if (hasExistingRoles) {
+            log.info(">>> ĐỒNG BỘ DỮ LIỆU HỆ THỐNG HOÀN TẤT.");
+        } else {
+            log.info(">>> KHỞI TẠO DỮ LIỆU HỆ THỐNG HOÀN TẤT.");
+        }
 
         // Chỉ seed demo data khi chạy ở môi trường dev
         if (isDevProfile) {
@@ -653,10 +647,19 @@ public class DataSeeder implements CommandLineRunner {
     }
 
     private Role saveRole(String slug, String displayName, boolean isSystem, Set<Permission> perms) {
-        return roleRepository.findBySlug(slug).orElseGet(() ->
-                roleRepository.save(Role.builder()
-                        .slug(slug).displayName(displayName).isSystem(isSystem).isActive(true)
-                        .description("Vai trò " + displayName).permissions(perms).build()));
+        return roleRepository.findBySlug(slug)
+                .map(existingRole -> {
+                    existingRole.setDisplayName(displayName);
+                    existingRole.setIsSystem(isSystem);
+                    existingRole.setIsActive(true);
+                    existingRole.setDescription("Vai trò " + displayName);
+                    existingRole.setPermissions(perms);
+                    return roleRepository.save(existingRole);
+                })
+                .orElseGet(() ->
+                        roleRepository.save(Role.builder()
+                                .slug(slug).displayName(displayName).isSystem(isSystem).isActive(true)
+                                .description("Vai trò " + displayName).permissions(perms).build()));
     }
 
     private Branch saveBranch(String code, String type, String name, String phone, String email, String address, Double lat, Double lng, Integer provinceId, Integer districtId) {
