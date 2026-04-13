@@ -1,6 +1,6 @@
 # =============================================================
 # docker-compose.prod.yml — VPS Production Stack
-# Vị trí trên VPS: /opt/agrishrimp/docker-compose.prod.yml
+# Vị trí trên VPS: <repo>/infra/docker-compose.prod.yml
 #
 # Services trong scope:
 #   ✅ webapp        (agrishrimp-web,    port 3004)
@@ -102,7 +102,7 @@ services:
     ports:
       - "127.0.0.1:8004:8004"    # bind localhost only — Nginx sẽ proxy
     env_file:
-      - .env.backend             # file secrets trên VPS, KHÔNG commit git
+      - ../.env                  # file secrets đặt ở root repo, KHÔNG commit git
     environment:
       SPRING_PROFILES_ACTIVE: prod
       SERVER_PORT: 8004
