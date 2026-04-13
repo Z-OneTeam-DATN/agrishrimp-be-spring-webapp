@@ -18,8 +18,11 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -27,6 +30,19 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 @Slf4j
 public class RoleService {
+
+    private static final Map<String, String> LEGACY_PERMISSION_ALIASES;
+
+    static {
+        Map<String, String> aliases = new HashMap<>();
+        aliases.put("CHECK_VIEW", "INVENTORY_CHECK_VIEW");
+        aliases.put("CHECK_CREATE", "INVENTORY_CHECK_CREATE");
+        aliases.put("CHECK_UPDATE", "INVENTORY_CHECK_UPDATE");
+        aliases.put("CHECK_APPROVE", "INVENTORY_CHECK_APPROVE");
+        aliases.put("CHECK_CANCEL", "INVENTORY_CHECK_CANCEL");
+        aliases.put("CHECK_DELETE", "INVENTORY_CHECK_DELETE");
+        LEGACY_PERMISSION_ALIASES = Collections.unmodifiableMap(aliases);
+    }
 
     private final RoleRepository roleRepository;
     private final PermissionRepository permissionRepository;
@@ -124,6 +140,7 @@ public class RoleService {
         List<String> normalizedCodes = allCodes.stream()
                 .filter(code -> code != null && !code.isBlank())
                 .map(String::trim)
+                .map(code -> LEGACY_PERMISSION_ALIASES.getOrDefault(code, code))
                 .distinct()
                 .toList();
 

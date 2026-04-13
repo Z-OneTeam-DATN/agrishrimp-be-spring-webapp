@@ -37,7 +37,7 @@ public class InventoryCheckController {
      * Nếu có ID trong request thì cập nhật, ngược lại tạo mới.
      */
     @SecurityRequirement(name = "bearerAuth")
-    @RequirePermission("CHECK_CREATE")
+    @RequirePermission("INVENTORY_CHECK_CREATE")
     @PostMapping
     public ResponseEntity<InventoryNoteResponse> saveOrUpdate(@Valid @RequestBody CheckNoteRequest request) {
         InventoryNoteResponse response;
@@ -47,7 +47,7 @@ public class InventoryCheckController {
             response = inventoryNoteService.createCheckCommand(request);
         }
         
-        if (hasAuthority("CHECK_APPROVE")) {
+        if (hasAuthority("INVENTORY_CHECK_APPROVE")) {
             response = inventoryNoteService.completeCheckCommand(response.getId());
         }
         return ResponseEntity.ok(response);
@@ -57,7 +57,7 @@ public class InventoryCheckController {
      * Cập nhật phiếu (PUT /inventory-checks/{id})
      */
     @SecurityRequirement(name = "bearerAuth")
-    @RequirePermission("CHECK_UPDATE")
+    @RequirePermission("INVENTORY_CHECK_UPDATE")
     @PutMapping("/{id}")
     public ResponseEntity<InventoryNoteResponse> update(@PathVariable Long id, @Valid @RequestBody CheckNoteRequest request) {
         return ResponseEntity.ok(inventoryNoteService.updateCheckCommand(id, request));
@@ -67,7 +67,7 @@ public class InventoryCheckController {
      * C. API Danh sách (GET /inventory-checks)
      */
     @SecurityRequirement(name = "bearerAuth")
-    @RequirePermission("CHECK_VIEW")
+    @RequirePermission("INVENTORY_CHECK_VIEW")
     @GetMapping
     public ResponseEntity<List<InventoryNoteResponse>> getAll() {
         return ResponseEntity.ok(inventoryNoteService.getAllCheckNotes());
@@ -78,7 +78,7 @@ public class InventoryCheckController {
      * Hỗ trợ tìm theo Code (PKK-XXXX) hoặc ID (số)
      */
     @SecurityRequirement(name = "bearerAuth")
-    @RequirePermission("CHECK_VIEW")
+    @RequirePermission("INVENTORY_CHECK_VIEW")
     @GetMapping("/{codeOrId}")
     public ResponseEntity<InventoryNoteResponse> getByCodeOrId(@PathVariable String codeOrId) {
         if (codeOrId.matches("^\\d+$")) {
@@ -91,7 +91,7 @@ public class InventoryCheckController {
      * Chốt phiếu kiểm kê
      */
     @SecurityRequirement(name = "bearerAuth")
-    @RequirePermission("CHECK_APPROVE")
+    @RequirePermission("INVENTORY_CHECK_APPROVE")
     @PostMapping("/{id}/complete")
     public ResponseEntity<InventoryNoteResponse> complete(@PathVariable Long id) {
         return ResponseEntity.ok(inventoryNoteService.completeCheckCommand(id));
@@ -101,7 +101,7 @@ public class InventoryCheckController {
      * Xóa phiếu kiểm kê (chỉ khi trạng thái là PENDING)
      */
     @SecurityRequirement(name = "bearerAuth")
-    @RequirePermission("CHECK_DELETE")
+    @RequirePermission("INVENTORY_CHECK_DELETE")
     @DeleteMapping("/{id}")
     public ResponseEntity<String> delete(@PathVariable Long id) {
         inventoryNoteService.deleteCheckNote(id);
@@ -112,7 +112,7 @@ public class InventoryCheckController {
      * Tìm kiếm sản phẩm để kiểm kho
      */
     @SecurityRequirement(name = "bearerAuth")
-    @RequirePermission("CHECK_CREATE")
+    @RequirePermission("INVENTORY_CHECK_CREATE")
     @GetMapping("/search-products")
     public ResponseEntity<List<InventorySearchResponse>> searchProducts(@RequestParam(required = false) String keyword) {
         return ResponseEntity.ok(inventoryService.searchInventoryForCheck(keyword));
