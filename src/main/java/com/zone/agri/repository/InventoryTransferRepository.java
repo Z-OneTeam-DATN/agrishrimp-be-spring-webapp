@@ -15,6 +15,8 @@ import java.util.Collection;
 @Repository
 public interface InventoryTransferRepository extends JpaRepository<InventoryTransfer, Long> {
 
+    boolean existsByReferenceCodeAndStatusIn(String referenceCode, Collection<InventoryTransferStatus> statuses);
+
     // Kiểm tra sản phẩm có đang nằm trong các phiếu chuyển trạng thái nhất định không
     @Query("SELECT COUNT(it) > 0 FROM InventoryTransfer it " +
             "JOIN it.details detail " +

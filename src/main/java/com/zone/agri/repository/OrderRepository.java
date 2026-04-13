@@ -49,6 +49,8 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
 
     List<Order> findByUserIdAndStatusOrderByCreatedAtDesc(Long userId, OrderStatus status);
 
+    List<Order> findByStatusAndCreatedAtBefore(OrderStatus status, LocalDateTime createdAt);
+
     List<Order> findByStatusOrderByCreatedAtDesc(OrderStatus status);
 
     @Query("SELECT o FROM Order o WHERE o.status = :status " +

@@ -15,6 +15,8 @@ public interface SubOrderRepository extends JpaRepository<SubOrder, Long> {
 
     List<SubOrder> findByOrderId(Long orderId);
 
+    List<SubOrder> findByStatusAndUpdatedAtBefore(OrderStatus status, java.time.LocalDateTime updatedAt);
+
     // ── Truy vấn theo chi nhánh (dùng cho quản lý kho / chi nhánh) ──
 
     @Query("SELECT s FROM SubOrder s WHERE s.branch.id = :branchId ORDER BY s.createdAt DESC")

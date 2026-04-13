@@ -15,6 +15,7 @@ import com.zone.agri.entity.enums.VoucherStatus;
 import com.zone.agri.entity.enums.VoucherDiscountType; // Thêm Enum này để kiểm tra loại Voucher
 import com.zone.agri.exception.BadRequestException;
 import com.zone.agri.exception.ConflictException;
+import com.zone.agri.exception.Forbidden;
 import com.zone.agri.exception.NotFoundException;
 import com.zone.agri.repository.*;
 import com.zone.agri.service.BranchSearchService.BranchWithRealDistance;
@@ -62,6 +63,7 @@ public class OrderService {
     private final PayOSService payOSService;
     private final SettingService settingService;
     private final GeocodingService geocodingService;
+    private final InventoryTransferService inventoryTransferService;
 
     @Lazy
     private final CustomerService customerService;
@@ -130,6 +132,23 @@ public class OrderService {
         }
 
         return mapToOrderResponse(order, true);
+    }
+
+    @Transactional
+    public void confirmReceivedByCustomer(Long userId, Long orderId) {
+        Order order = orderRepository.findById(orderId)
+                .orElseThrow(() -> new NotFoundException("Khong tim thay don hang ID: " + orderId));
+
+        if (order.getUser() == null || !order.getUser().getId().equals(userId)) {
+            throw new Forbidden("Ban khong co quyen thao tac tren don hang nay");
+        }
+
+        if (order.getStatus() != OrderStatus.SHIPPING) {
+            throw new BadRequestException("Chi co the xac nhan khi don hang dang giao.");
+        }
+
+        completeOrderAfterDeliveryConfirmation(order);
+        customerService.evaluateAndHandleCustomerReputation(userId);
     }
 
     // ══════════════════════════════════════════════════════════════════════
@@ -212,6 +231,10 @@ public class OrderService {
         OrderStatus currentStatus = order.getStatus();
         if (currentStatus == OrderStatus.CANCELLED || currentStatus == OrderStatus.COMPLETED || currentStatus == OrderStatus.RETURNED) {
             throw new BadRequestException("Không thể thay đổi trạng thái của đơn hàng đã đóng!");
+        }
+
+        if (currentStatus == OrderStatus.SHIPPING && newStatus == OrderStatus.COMPLETED) {
+            throw new BadRequestException("Don hang dang giao chi duoc hoan tat khi khach hang xac nhan da nhan.");
         }
 
         validateStatusTransition(currentStatus, newStatus);
@@ -348,6 +371,41 @@ public class OrderService {
     }
 
     @Transactional
+    public List<String> requestReplenishmentForAdmin(Long orderId) {
+        Order order = orderRepository.findById(orderId)
+                .orElseThrow(() -> new NotFoundException("Khong tim thay don hang ID: " + orderId));
+
+        List<SubOrder> awaitingSubOrders = order.getSubOrders() == null
+                ? Collections.emptyList()
+                : order.getSubOrders().stream()
+                        .filter(subOrder -> subOrder.getStatus() == OrderStatus.AWAITING_REPLENISHMENT)
+                        .toList();
+
+        if (awaitingSubOrders.isEmpty()) {
+            throw new BadRequestException("Don hang nay khong o trang thai cho dieu chuyen bo sung.");
+        }
+
+        return awaitingSubOrders.stream()
+                .flatMap(subOrder -> inventoryTransferService.createReplenishmentTransfersForSubOrder(subOrder).stream())
+                .map(InventoryTransfer::getTransferCode)
+                .toList();
+    }
+
+    @Transactional
+    public List<String> requestReplenishmentForBranch(Long branchId, Long orderId) {
+        SubOrder subOrder = subOrderRepository.findByOrderIdAndBranchId(orderId, branchId)
+                .orElseThrow(() -> new NotFoundException("Khong tim thay phan don cho chi nhanh nay"));
+
+        if (subOrder.getStatus() != OrderStatus.AWAITING_REPLENISHMENT) {
+            throw new BadRequestException("Phan don nay khong o trang thai cho dieu chuyen bo sung.");
+        }
+
+        return inventoryTransferService.createReplenishmentTransfersForSubOrder(subOrder).stream()
+                .map(InventoryTransfer::getTransferCode)
+                .toList();
+    }
+
+    @Transactional
     public void updateSubOrderStatus(Long branchId, Long orderId, OrderStatus newStatus) {
         SubOrder subOrder = subOrderRepository.findByOrderIdAndBranchId(orderId, branchId)
                 .orElseThrow(() -> new NotFoundException("Không tìm thấy phần đơn cho chi nhánh này"));
@@ -356,6 +414,9 @@ public class OrderService {
         if (currentStatus == OrderStatus.CANCELLED || currentStatus == OrderStatus.COMPLETED
                 || currentStatus == OrderStatus.RETURNED) {
             throw new BadRequestException("Không thể thay đổi trạng thái của đơn đã đóng!");
+        }
+        if (currentStatus == OrderStatus.SHIPPING && newStatus == OrderStatus.COMPLETED) {
+            throw new BadRequestException("Phan don dang giao chi duoc hoan tat khi khach hang xac nhan da nhan.");
         }
         validateStatusTransition(currentStatus, newStatus);
 
@@ -408,6 +469,53 @@ public class OrderService {
         if (newMasterStatus == OrderStatus.COMPLETED || newMasterStatus == OrderStatus.CANCELLED
                 || newMasterStatus == OrderStatus.RETURNED) {
             customerService.evaluateAndHandleCustomerReputation(order.getUser().getId());
+        }
+    }
+
+    @Transactional
+    public void autoCompleteDeliveredOrders() {
+        LocalDateTime cutoff = LocalDateTime.now().minusDays(7);
+
+        List<SubOrder> overdueSubOrders = subOrderRepository.findByStatusAndUpdatedAtBefore(OrderStatus.SHIPPING, cutoff);
+        Set<Long> affectedOrderIds = new HashSet<>();
+
+        for (SubOrder subOrder : overdueSubOrders) {
+            if (subOrder.getOrder() == null || subOrder.getOrder().getStatus() != OrderStatus.SHIPPING) {
+                continue;
+            }
+
+            subOrder.setStatus(OrderStatus.COMPLETED);
+            subOrderRepository.save(subOrder);
+            affectedOrderIds.add(subOrder.getOrder().getId());
+        }
+
+        affectedOrderIds.forEach(this::syncMasterOrderStatus);
+
+        List<Order> overdueLegacyOrders = orderRepository.findByStatusAndCreatedAtBefore(OrderStatus.SHIPPING, cutoff).stream()
+                .filter(order -> order.getSubOrders() == null || order.getSubOrders().isEmpty())
+                .toList();
+
+        for (Order order : overdueLegacyOrders) {
+            completeOrderAfterDeliveryConfirmation(order);
+            customerService.evaluateAndHandleCustomerReputation(order.getUser().getId());
+        }
+    }
+
+    private void completeOrderAfterDeliveryConfirmation(Order order) {
+        order.setStatus(OrderStatus.COMPLETED);
+        if (PaymentMethod.COD.equals(order.getPaymentMethod())) {
+            order.setPaymentStatus(PaymentStatus.PAID);
+        }
+        orderRepository.save(order);
+
+        if (order.getSubOrders() != null) {
+            List<SubOrder> shippingSubOrders = order.getSubOrders().stream()
+                    .filter(subOrder -> subOrder.getStatus() == OrderStatus.SHIPPING)
+                    .peek(subOrder -> subOrder.setStatus(OrderStatus.COMPLETED))
+                    .toList();
+            if (!shippingSubOrders.isEmpty()) {
+                subOrderRepository.saveAll(shippingSubOrders);
+            }
         }
     }
 
@@ -522,9 +630,6 @@ public class OrderService {
         }
 
         String statusStr = order.getStatus() != null ? order.getStatus().name() : "";
-        if (isUserView && "AWAITING_REPLENISHMENT".equals(statusStr)) {
-            statusStr = OrderStatus.PROCESSING.name();
-        }
 
         return OrderResponse.builder()
                 .id(order.getId())
@@ -555,9 +660,6 @@ public class OrderService {
 
     private SubOrderSummaryDto mapSubOrderToSummary(SubOrder subOrder, boolean isUserView) {
         String statusStr = subOrder.getStatus() != null ? subOrder.getStatus().name() : null;
-        if (isUserView && "AWAITING_REPLENISHMENT".equals(statusStr)) {
-            statusStr = OrderStatus.PROCESSING.name();
-        }
 
         return SubOrderSummaryDto.builder()
                 .subOrderId(subOrder.getId())
@@ -829,9 +931,9 @@ public class OrderService {
             boolean hasMissingItems = liveQuote.subOrders().stream()
                     .flatMap(subOrder -> subOrder.getItems().stream())
                     .anyMatch(item -> Objects.requireNonNullElse(item.getMissingQuantity(), 0) > 0);
-            OrderStatus initialStatus = PaymentMethod.PAYOS.equals(paymentMethod)
-                    ? OrderStatus.AWAITING_PAYMENT
-                    : (hasMissingItems ? OrderStatus.AWAITING_REPLENISHMENT : OrderStatus.PROCESSING);
+            OrderStatus initialStatus = hasMissingItems
+                    ? OrderStatus.AWAITING_REPLENISHMENT
+                    : (PaymentMethod.PAYOS.equals(paymentMethod) ? OrderStatus.AWAITING_PAYMENT : OrderStatus.PROCESSING);
     
             Order order = Order.builder().code("ORD" + System.currentTimeMillis()).user(user).status(initialStatus)
                     .paymentMethod(paymentMethod).paymentStatus(PaymentStatus.UNPAID).createdAt(LocalDateTime.now())
@@ -849,9 +951,9 @@ public class OrderService {
                 Branch branch = branchRepository.findById(subDraft.getBranchId()).orElseThrow(() -> new NotFoundException("Branch không tồn tại"));
                 boolean subOrderHasMissingItems = subDraft.getItems().stream()
                         .anyMatch(item -> Objects.requireNonNullElse(item.getMissingQuantity(), 0) > 0);
-                OrderStatus subOrderStatus = PaymentMethod.PAYOS.equals(paymentMethod)
-                        ? OrderStatus.AWAITING_PAYMENT
-                        : (subOrderHasMissingItems ? OrderStatus.AWAITING_REPLENISHMENT : OrderStatus.PROCESSING);
+                OrderStatus subOrderStatus = subOrderHasMissingItems
+                        ? OrderStatus.AWAITING_REPLENISHMENT
+                        : (PaymentMethod.PAYOS.equals(paymentMethod) ? OrderStatus.AWAITING_PAYMENT : OrderStatus.PROCESSING);
                 SubOrder subOrder = SubOrder.builder().order(savedOrder).branch(branch).status(subOrderStatus)
                         .subtotal(subDraft.getSubtotal()).shippingFee(subDraft.getShippingFee())
                         .estimatedDays(subDraft.getEstimatedDays()).carrier(subDraft.getCarrier()).build();
@@ -913,14 +1015,9 @@ public class OrderService {
                     anySubOrderMissing = true;
                 }
     
-                String displaySubStatus = subOrderStatus.name();
-                if ("AWAITING_REPLENISHMENT".equals(displaySubStatus)) {
-                    displaySubStatus = OrderStatus.PROCESSING.name();
-                }
-    
                 subOrderSummaries.add(SubOrderSummaryDto.builder()
                         .subOrderId(savedSubOrder.getId()).branchId(branch.getId()).branchName(branch.getName())
-                        .status(displaySubStatus).subtotal(subDraft.getSubtotal()).shippingFee(subDraft.getShippingFee())
+                        .status(subOrderStatus.name()).subtotal(subDraft.getSubtotal()).shippingFee(subDraft.getShippingFee())
                         .estimatedDays(subDraft.getEstimatedDays()).carrier(subDraft.getCarrier()).build());
             }
     
@@ -928,11 +1025,6 @@ public class OrderService {
                 initialStatus = OrderStatus.AWAITING_REPLENISHMENT;
                 savedOrder.setStatus(initialStatus);
                 orderRepository.save(savedOrder);
-            }
-    
-            String displayStatus = initialStatus.name();
-            if ("AWAITING_REPLENISHMENT".equals(displayStatus)) {
-                displayStatus = OrderStatus.PROCESSING.name();
             }
     
             String checkoutUrl = null;
@@ -953,7 +1045,7 @@ public class OrderService {
                     .forEach(vId -> cartItemRepository.findByUserIdAndProductVariantId(userId, vId).ifPresent(cartItemRepository::delete));
     
             ConfirmOrderResponse response = ConfirmOrderResponse.builder().orderId(savedOrder.getId()).orderCode(savedOrder.getCode())
-                    .status(displayStatus).voucherCode(draft.getVoucherCode()).subOrders(subOrderSummaries).totalAmount(liveQuote.totalAmount())
+                    .status(initialStatus.name()).voucherCode(draft.getVoucherCode()).subOrders(subOrderSummaries).totalAmount(liveQuote.totalAmount())
                     .discountAmount(committedVoucher.discountAmount()).totalShippingFee(liveQuote.totalShippingFee()).checkoutUrl(checkoutUrl).build();
             saveConfirmResultToRedis(request.getPrepareToken(), response);
             return response;
@@ -1023,12 +1115,6 @@ public class OrderService {
         AllocationResult allocation = allocationService.allocate(normalizedCart, variantMap, nearestBranches,
                 inventoryMatrix);
 
-        List<SubOrderDraftDto> draftSubOrders = mergeRestockNeedsIntoSubOrders(
-                allocation.subOrders(),
-                allocation.outOfStockItems(),
-                nearestBranches,
-                variantMap);
-
         DeliveryInfo deliveryInfo = DeliveryInfo.builder()
                 .toDistrictId(deliveryDistrictId)
                 .toWardCode(deliveryWardCode)
@@ -1038,7 +1124,7 @@ public class OrderService {
                 .build();
 
         List<SubOrderDraftDto> enrichedSubOrders = shippingService.enrichWithShippingFees(
-                draftSubOrders,
+                allocation.subOrders(),
                 deliveryInfo,
                 variantMap);
 
@@ -1072,137 +1158,6 @@ public class OrderService {
                 totalAmount);
     }
 
-    private List<SubOrderDraftDto> mergeRestockNeedsIntoSubOrders(
-            List<SubOrderDraftDto> allocatedSubOrders,
-            List<OutOfStockItemDto> outOfStockItems,
-            List<BranchWithRealDistance> nearestBranches,
-            Map<Long, ProductVariant> variantMap) {
-        List<SubOrderDraftDto> mergedSubOrders = allocatedSubOrders == null
-                ? new ArrayList<>()
-                : allocatedSubOrders.stream().map(SubOrderDraftDto::toBuilder).map(builder -> builder.build())
-                        .collect(Collectors.toCollection(ArrayList::new));
-
-        if (outOfStockItems == null || outOfStockItems.isEmpty()) {
-            return mergedSubOrders;
-        }
-
-        BigDecimal profitMultiplier = settingService.getProfitMultiplier();
-        String roundingRule = settingService.getProfitRoundingRuleRaw();
-
-        for (OutOfStockItemDto outOfStockItem : outOfStockItems) {
-            int missingQty = Objects.requireNonNullElse(outOfStockItem.getRequestedQty(), 0);
-            if (missingQty <= 0) {
-                continue;
-            }
-
-            Long targetBranchId = resolveRestockBranchId(mergedSubOrders, nearestBranches,
-                    outOfStockItem.getProductVariantId());
-            if (targetBranchId == null) {
-                continue;
-            }
-
-            OrderItemDto restockItem = OrderItemDto.builder()
-                    .productVariantId(outOfStockItem.getProductVariantId())
-                    .variantName(outOfStockItem.getVariantName())
-                    .variantSku(outOfStockItem.getVariantSku())
-                    .quantity(missingQty)
-                    .allocatedQuantity(0)
-                    .missingQuantity(missingQty)
-                    .unitPrice(resolveFallbackUnitPrice(outOfStockItem.getProductVariantId(), mergedSubOrders,
-                            profitMultiplier, roundingRule))
-                    .build();
-            restockItem.setSubtotal(restockItem.getUnitPrice().multiply(BigDecimal.valueOf(missingQty)));
-
-            int existingIndex = findSubOrderIndexByBranchId(mergedSubOrders, targetBranchId);
-            if (existingIndex >= 0) {
-                SubOrderDraftDto existing = mergedSubOrders.get(existingIndex);
-                List<OrderItemDto> updatedItems = new ArrayList<>(
-                        Objects.requireNonNullElse(existing.getItems(), Collections.emptyList()));
-                updatedItems.add(restockItem);
-                mergedSubOrders.set(existingIndex, existing.toBuilder()
-                        .items(updatedItems)
-                        .subtotal(sumItemSubtotals(updatedItems))
-                        .build());
-            } else {
-                Branch targetBranch = nearestBranches.stream()
-                        .map(BranchWithRealDistance::branch)
-                        .filter(branch -> branch.getId().equals(targetBranchId))
-                        .findFirst()
-                        .orElse(null);
-                if (targetBranch == null) {
-                    continue;
-                }
-
-                mergedSubOrders.add(SubOrderDraftDto.builder()
-                        .branchId(targetBranch.getId())
-                        .branchName(targetBranch.getName())
-                        .branchAddress(targetBranch.getAddressDetail())
-                        .fromDistrictId(targetBranch.getDistrictId())
-                        .distanceKm(0)
-                        .durationMinutes(0)
-                        .items(new ArrayList<>(List.of(restockItem)))
-                        .subtotal(restockItem.getSubtotal())
-                        .shippingFee(BigDecimal.ZERO)
-                        .build());
-            }
-        }
-
-        return mergedSubOrders;
-    }
-
-    private int findSubOrderIndexByBranchId(List<SubOrderDraftDto> subOrders, Long branchId) {
-        for (int index = 0; index < subOrders.size(); index++) {
-            if (Objects.equals(subOrders.get(index).getBranchId(), branchId)) {
-                return index;
-            }
-        }
-        return -1;
-    }
-
-    private Long resolveRestockBranchId(
-            List<SubOrderDraftDto> subOrders,
-            List<BranchWithRealDistance> nearestBranches,
-            Long productVariantId) {
-        for (SubOrderDraftDto subOrder : subOrders) {
-            if (subOrder.getItems() != null && subOrder.getItems().stream()
-                    .anyMatch(item -> Objects.equals(item.getProductVariantId(), productVariantId))) {
-                return subOrder.getBranchId();
-            }
-        }
-
-        if (!subOrders.isEmpty()) {
-            return subOrders.get(0).getBranchId();
-        }
-
-        return nearestBranches.isEmpty() ? null : nearestBranches.get(0).branch().getId();
-    }
-
-    private BigDecimal resolveFallbackUnitPrice(Long productVariantId, List<SubOrderDraftDto> subOrders,
-            BigDecimal profitMultiplier, String roundingRule) {
-        for (SubOrderDraftDto subOrder : subOrders) {
-            if (subOrder.getItems() == null) {
-                continue;
-            }
-            for (OrderItemDto item : subOrder.getItems()) {
-                if (Objects.equals(item.getProductVariantId(), productVariantId) && item.getUnitPrice() != null) {
-                    return item.getUnitPrice();
-                }
-            }
-        }
-
-        return inventoryRepository.findByProductVariantId(productVariantId).stream()
-                .filter(inventory -> inventory.getImportPrice() != null)
-                .map(inventory -> settingService.calculateSellingPrice(inventory.getImportPrice(), profitMultiplier,
-                        roundingRule))
-                .findFirst()
-                .orElse(BigDecimal.ZERO);
-    }
-
-    private BigDecimal sumItemSubtotals(List<OrderItemDto> items) {
-        return items.stream()
-                .map(item -> item.getSubtotal() != null ? item.getSubtotal() : BigDecimal.ZERO)
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
-    }
 
     private void ensurePreparedQuoteStillValid(PrepareOrderDraft draft, PreparedQuote liveQuote) {
         boolean totalsChanged = !hasSameMoney(draft.getTotalSubtotal(), liveQuote.totalSubtotal())

@@ -7,6 +7,7 @@ import com.zone.agri.dto.response.transfer.TransferResponse;
 import com.zone.agri.entity.*;
 import com.zone.agri.entity.enums.InventoryTransferStatus;
 import com.zone.agri.entity.enums.TransactionType;
+import com.zone.agri.entity.enums.OrderStatus;
 import com.zone.agri.repository.*;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
@@ -28,6 +29,7 @@ public class InventoryTransferService {
     private final ProductVariantRepository variantRepo;
     private final InventoryRepository inventoryRepo;
     private final InventoryTransactionRepository transactionRepo;
+    private final BackorderService backorderService;
 
     @Transactional
     public InventoryTransfer createTransfer(TransferRequest req) {
@@ -100,6 +102,86 @@ public class InventoryTransferService {
         transfer.setTotalValue(totalValue);
 
         return transferRepo.save(transfer);
+    }
+
+    @Transactional
+    public List<InventoryTransfer> createReplenishmentTransfersForSubOrder(SubOrder subOrder) {
+        if (subOrder.getStatus() != OrderStatus.AWAITING_REPLENISHMENT) {
+            throw new RuntimeException("Chi co the tao dieu chuyen bo sung cho phan don dang cho bo sung hang");
+        }
+
+        String referenceCode = subOrder.getOrder().getCode() + "-SUB-" + subOrder.getId();
+        if (transferRepo.existsByReferenceCodeAndStatusIn(referenceCode,
+                List.of(InventoryTransferStatus.PENDING, InventoryTransferStatus.SHIPPING))) {
+            throw new RuntimeException("Phan don nay da co lenh dieu chuyen dang xu ly");
+        }
+
+        Map<Long, Map<String, Integer>> transferPlanBySourceBranch = new LinkedHashMap<>();
+
+        List<SubOrderItem> subOrderItems = subOrder.getItems() != null ? subOrder.getItems() : List.of();
+        for (SubOrderItem item : subOrderItems) {
+            int missingQty = Objects.requireNonNullElse(item.getMissingQuantity(), 0);
+            if (missingQty <= 0 || item.getProductVariant() == null) {
+                continue;
+            }
+
+            Map<Long, Integer> availableByBranch = inventoryRepo.findByProductVariantId(item.getProductVariant().getId()).stream()
+                    .filter(inv -> inv.getBranch() != null
+                            && !inv.getBranch().getId().equals(subOrder.getBranch().getId())
+                            && Objects.requireNonNullElse(inv.getQuantity(), 0) > 0)
+                    .collect(Collectors.groupingBy(inv -> inv.getBranch().getId(),
+                            LinkedHashMap::new,
+                            Collectors.summingInt(inv -> Objects.requireNonNullElse(inv.getQuantity(), 0))));
+
+            int remaining = missingQty;
+            for (Map.Entry<Long, Integer> candidate : availableByBranch.entrySet().stream()
+                    .sorted(Map.Entry.<Long, Integer>comparingByValue(Comparator.reverseOrder()))
+                    .toList()) {
+                if (remaining <= 0) {
+                    break;
+                }
+
+                int quantityToTransfer = Math.min(remaining, candidate.getValue());
+                transferPlanBySourceBranch
+                        .computeIfAbsent(candidate.getKey(), key -> new LinkedHashMap<>())
+                        .merge(item.getProductVariant().getSku(), quantityToTransfer, Integer::sum);
+                remaining -= quantityToTransfer;
+            }
+        }
+
+        if (transferPlanBySourceBranch.isEmpty()) {
+            throw new RuntimeException("Khong tim thay chi nhanh nao co ton kho de dieu chuyen bo sung");
+        }
+
+        List<InventoryTransfer> transfers = new ArrayList<>();
+        LocalDateTime now = LocalDateTime.now();
+
+        for (Map.Entry<Long, Map<String, Integer>> entry : transferPlanBySourceBranch.entrySet()) {
+            TransferRequest request = new TransferRequest();
+            request.setFromBranchId(entry.getKey());
+            request.setToBranchId(subOrder.getBranch().getId());
+            request.setTransferType("ORDER_REPLENISHMENT");
+            request.setDescription("Bo sung hang cho don " + subOrder.getOrder().getCode());
+            request.setReferenceCode(referenceCode);
+            request.setPriority("HIGH");
+            request.setTransferDate(now);
+            request.setDeadline(now.plusDays(1));
+
+            List<TransferItemRequest> requestItems = entry.getValue().entrySet().stream()
+                    .map(itemEntry -> {
+                        TransferItemRequest itemRequest = new TransferItemRequest();
+                        itemRequest.setSku(itemEntry.getKey());
+                        itemRequest.setQuantity(itemEntry.getValue());
+                        itemRequest.setItemNote("Bo sung cho phan don " + referenceCode);
+                        return itemRequest;
+                    })
+                    .toList();
+
+            request.setItems(requestItems);
+            transfers.add(createTransfer(request));
+        }
+
+        return transfers;
     }
 
     @Transactional
@@ -221,6 +303,9 @@ public class InventoryTransferService {
                     throw new RuntimeException("Lỗi đồng bộ: Kho xuất (" + transfer.getFromBranch().getName() +
                             ") không đủ số lượng Lô hàng cho sản phẩm " + detail.getProductVariant().getSku());
                 }
+
+                // 👉 KÍCH HOẠT XỬ LÝ BACKORDER: Tự động trừ kho và đẩy đơn AWAITING_REPLENISHMENT -> PROCESSING
+                backorderService.fulfillBackordersOnStockReceive(toBranch.getId(), variantId, qtyReal);
             }
         }
 

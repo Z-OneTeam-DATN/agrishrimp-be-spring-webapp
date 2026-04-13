@@ -66,105 +66,110 @@ public class InventoryAllocationService {
         BigDecimal profitMultiplier = settingService.getProfitMultiplier();
         String roundingRule = settingService.getProfitRoundingRuleRaw();
 
-        List<CartItemDto> remaining = new ArrayList<>(cart.stream()
-                .map(item -> new CartItemDto(item.getProductVariantId(), item.getQuantity()))
-                .toList());
-
         List<SubOrderDraftDto> subOrders = new ArrayList<>();
+        List<OutOfStockItemDto> outOfStockItems = new ArrayList<>();
 
-        for (BranchWithRealDistance bwr : branchesSortedByDist) {
-            if (remaining.isEmpty())
-                break;
-
-            Long branchId = bwr.branch().getId();
-            Map<Long, List<Inventory>> branchBatches = inventoryMatrix.getOrDefault(branchId, Collections.emptyMap());
-
-            List<OrderItemDto> allocated = new ArrayList<>();
-            List<CartItemDto> stillRemaining = new ArrayList<>();
-
-            for (CartItemDto item : remaining) {
-                Long variantId = item.getProductVariantId();
-                int requested = item.getQuantity();
-
-                List<Inventory> batches = branchBatches.getOrDefault(variantId, new ArrayList<>());
-                ProductVariant variant = variantMap.get(variantId);
-                String variantName = (variant != null && variant.getSku() != null) ? variant.getSku() : "Unknown";
-                String variantSku = variant != null ? variant.getSku() : "";
-
-                // Duyệt qua từng LÔ HÀNG để lấy hàng (FIFO)
-                Iterator<Inventory> batchIterator = batches.iterator();
-                while (batchIterator.hasNext() && requested > 0) {
-                    Inventory batch = batchIterator.next();
-                    int availableInBatch = batch.getQuantity();
-                    if (availableInBatch <= 0)
-                        continue;
-
-                    int quantityToTake = Math.min(requested, availableInBatch);
-
-                    // Giá bán = giá vốn lô này × biên lợi nhuận admin cài (FIFO: lô cũ nhất ra
-                    // trước)
-                    BigDecimal importPrice = batch.getImportPrice() != null ? batch.getImportPrice() : BigDecimal.ZERO;
-                    BigDecimal unitPrice = settingService.calculateSellingPrice(importPrice, profitMultiplier,
-                            roundingRule);
-
-                    allocated.add(OrderItemDto.builder()
-                            .productVariantId(variantId)
-                            .variantName(variantName)
-                            .variantSku(variantSku)
-                            .quantity(quantityToTake)
-                            .allocatedQuantity(quantityToTake)
-                            .missingQuantity(0)
-                            .unitPrice(unitPrice)
-                            .subtotal(unitPrice.multiply(BigDecimal.valueOf(quantityToTake)))
-                            .build());
-
-                    // Trừ tồn kho ảo trên RAM
-                    batch.setQuantity(availableInBatch - quantityToTake);
-                    requested -= quantityToTake;
-                }
-
-                if (requested > 0) {
-                    stillRemaining.add(new CartItemDto(variantId, requested)); // Vẫn còn thiếu
-                }
-            }
-
-            if (!allocated.isEmpty()) {
-                BigDecimal subtotal = allocated.stream()
-                        .map(OrderItemDto::getSubtotal)
-                        .reduce(BigDecimal.ZERO, BigDecimal::add);
-
-                subOrders.add(SubOrderDraftDto.builder()
-                        .branchId(branchId)
-                        .branchName(bwr.branch().getName())
-                        .branchAddress(bwr.branch().getAddressDetail())
-                        .fromDistrictId(bwr.branch().getDistrictId())
-                        .durationMinutes(bwr.durationMinutes())
-                        .distanceKm(bwr.distanceKm())
-                        .items(allocated)
-                        .subtotal(subtotal)
-                        .shippingFee(BigDecimal.ZERO)
-                        .build());
-            }
-
-            remaining = stillRemaining; // Chuyển phần thiếu sang chi nhánh tiếp theo
+        if (branchesSortedByDist.isEmpty() || cart.isEmpty()) {
+            return new AllocationResult(subOrders, outOfStockItems);
         }
 
-        // Tạo danh sách OutOfStock cho các item không thể đáp ứng đủ
-        List<OutOfStockItemDto> outOfStockItems = remaining.stream()
-                .map(item -> {
-                    ProductVariant v = variantMap.get(item.getProductVariantId());
-                    int totalAvailable = calculateTotalAvailable(item.getProductVariantId(), inventoryMatrix);
-                    return OutOfStockItemDto.builder()
-                            .productVariantId(item.getProductVariantId())
-                            .variantName(v != null ? v.getSku() : "Unknown")
-                            .variantSku(v != null ? v.getSku() : "")
-                            .requestedQty(item.getQuantity())
-                            .availableQty(totalAvailable)
-                            .build();
-                })
-                .toList();
+        // 👉 CHỈ LẤY CHI NHÁNH GẦN NHẤT ĐỂ TRÁNH TÁCH ĐƠN
+        BranchWithRealDistance nearestBwr = branchesSortedByDist.get(0);
+        Long nearestBranchId = nearestBwr.branch().getId();
+        Map<Long, List<Inventory>> branchBatches = inventoryMatrix.getOrDefault(nearestBranchId, Collections.emptyMap());
+
+        List<OrderItemDto> allocatedItems = new ArrayList<>();
+
+        for (CartItemDto item : cart) {
+            Long variantId = item.getProductVariantId();
+            int requested = item.getQuantity();
+            int originalRequested = requested;
+
+            List<Inventory> batches = branchBatches.getOrDefault(variantId, new ArrayList<>());
+            ProductVariant variant = variantMap.get(variantId);
+            String variantName = (variant != null && variant.getSku() != null) ? variant.getSku() : "Unknown";
+            String variantSku = variant != null ? variant.getSku() : "";
+
+            int totalAllocatedForThisItem = 0;
+            BigDecimal lastUnitPrice = BigDecimal.ZERO;
+
+            // Duyệt FIFO lấy hàng trong kho gần nhất
+            Iterator<Inventory> batchIterator = batches.iterator();
+            while (batchIterator.hasNext() && requested > 0) {
+                Inventory batch = batchIterator.next();
+                int availableInBatch = batch.getQuantity();
+                if (availableInBatch <= 0)
+                    continue;
+
+                int quantityToTake = Math.min(requested, availableInBatch);
+
+                BigDecimal importPrice = batch.getImportPrice() != null ? batch.getImportPrice() : BigDecimal.ZERO;
+                lastUnitPrice = settingService.calculateSellingPrice(importPrice, profitMultiplier, roundingRule);
+
+                totalAllocatedForThisItem += quantityToTake;
+                batch.setQuantity(availableInBatch - quantityToTake);
+                requested -= quantityToTake;
+            }
+
+            // Nếu chi nhánh này hoàn toàn hết hàng, tìm giá dự kiến từ các chi nhánh khác
+            if (lastUnitPrice.compareTo(BigDecimal.ZERO) == 0) {
+                lastUnitPrice = resolveFallbackUnitPrice(variantId, inventoryMatrix, profitMultiplier, roundingRule);
+            }
+
+            allocatedItems.add(OrderItemDto.builder()
+                    .productVariantId(variantId)
+                    .variantName(variantName)
+                    .variantSku(variantSku)
+                    .quantity(originalRequested)
+                    .allocatedQuantity(totalAllocatedForThisItem)
+                    .missingQuantity(requested) // Ghi nhận số lượng thiếu để xin điều chuyển
+                    .unitPrice(lastUnitPrice)
+                    .subtotal(lastUnitPrice.multiply(BigDecimal.valueOf(originalRequested)))
+                    .build());
+
+            if (requested > 0) {
+                int totalAvailableSystemWide = calculateTotalAvailable(variantId, inventoryMatrix);
+                outOfStockItems.add(OutOfStockItemDto.builder()
+                        .productVariantId(variantId)
+                        .variantName(variantName)
+                        .variantSku(variantSku)
+                        .requestedQty(originalRequested)
+                        .availableQty(totalAvailableSystemWide)
+                        .build());
+            }
+        }
+
+        if (!allocatedItems.isEmpty()) {
+            BigDecimal subtotal = allocatedItems.stream()
+                    .map(OrderItemDto::getSubtotal)
+                    .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+            subOrders.add(SubOrderDraftDto.builder()
+                    .branchId(nearestBranchId)
+                    .branchName(nearestBwr.branch().getName())
+                    .branchAddress(nearestBwr.branch().getAddressDetail())
+                    .fromDistrictId(nearestBwr.branch().getDistrictId())
+                    .durationMinutes(nearestBwr.durationMinutes())
+                    .distanceKm(nearestBwr.distanceKm())
+                    .items(allocatedItems)
+                    .subtotal(subtotal)
+                    .shippingFee(BigDecimal.ZERO)
+                    .build());
+        }
 
         return new AllocationResult(subOrders, outOfStockItems);
+    }
+
+    private BigDecimal resolveFallbackUnitPrice(Long variantId, Map<Long, Map<Long, List<Inventory>>> matrix, BigDecimal multiplier, String roundingRule) {
+        for (Map<Long, List<Inventory>> branchMap : matrix.values()) {
+            List<Inventory> batches = branchMap.getOrDefault(variantId, Collections.emptyList());
+            for (Inventory batch : batches) {
+                if (batch.getImportPrice() != null && batch.getImportPrice().compareTo(BigDecimal.ZERO) > 0) {
+                    return settingService.calculateSellingPrice(batch.getImportPrice(), multiplier, roundingRule);
+                }
+            }
+        }
+        return BigDecimal.ZERO;
     }
 
     private int calculateTotalAvailable(Long variantId, Map<Long, Map<Long, List<Inventory>>> matrix) {

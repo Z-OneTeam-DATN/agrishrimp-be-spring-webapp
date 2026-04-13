@@ -62,6 +62,13 @@ public class OrderController {
         return ResponseEntity.ok(orderService.getMyOrderDetail(userId, id));
     }
 
+    @Operation(summary = "Khach hang xac nhan da nhan hang")
+    @PostMapping("/v1/orders/{id}/confirm-received")
+    public ResponseEntity<?> confirmReceivedByCustomer(@PathVariable Long id) {
+        orderService.confirmReceivedByCustomer(getCurrentUserId(), id);
+        return ResponseEntity.ok(Map.of("message", "Xac nhan nhan hang thanh cong"));
+    }
+
     @Operation(summary = "Huy don hang cua toi")
     @PostMapping("/orders/{id}/cancel")
     public ResponseEntity<?> cancelMyOrder(@PathVariable Long id, @RequestBody(required = false) Map<String, Object> body) {
@@ -223,4 +230,29 @@ public class OrderController {
         orderService.updateSubOrderStatus(user.getBranch().getId(), orderId, status);
         return ResponseEntity.ok(Map.of("message", "Cập nhật trạng thái '" + status + "' thành công!"));
     }
+
+    @Operation(summary = "Tao lenh dieu chuyen bo sung cho don hang")
+    @RequirePermission("ORDER_UPDATE")
+    @PostMapping("/admin/{id}/request-replenishment")
+    public ResponseEntity<?> requestReplenishmentForAdmin(@PathVariable Long id) {
+        List<String> transferCodes = orderService.requestReplenishmentForAdmin(id);
+        return ResponseEntity.ok(Map.of(
+                "message", "Da tao lenh dieu chuyen bo sung",
+                "transferCodes", transferCodes));
+    }
+
+    @Operation(summary = "Tao lenh dieu chuyen bo sung cho phan don cua chi nhanh")
+    @RequirePermission("ORDER_UPDATE")
+    @PostMapping("/branch/orders/{orderId}/request-replenishment")
+    public ResponseEntity<?> requestReplenishmentForBranch(@PathVariable Long orderId) {
+        User user = getCurrentUser();
+        if (user.getBranch() == null) {
+            throw new BadRequestException("Tài khoản chưa được gán vào chi nhánh nào");
+        }
+        List<String> transferCodes = orderService.requestReplenishmentForBranch(user.getBranch().getId(), orderId);
+        return ResponseEntity.ok(Map.of(
+                "message", "Da tao lenh dieu chuyen bo sung",
+                "transferCodes", transferCodes));
+    }
 }
+

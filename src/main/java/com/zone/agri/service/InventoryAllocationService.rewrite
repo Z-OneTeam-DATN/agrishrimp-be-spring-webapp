@@ -1,0 +1,162 @@
+package com.zone.agri.service;
+
+import com.zone.agri.dto.response.order.CartItemDto;
+import com.zone.agri.dto.response.order.OrderItemDto;
+import com.zone.agri.dto.response.order.OutOfStockItemDto;
+import com.zone.agri.dto.response.order.SubOrderDraftDto;
+import com.zone.agri.entity.Inventory;
+import com.zone.agri.entity.ProductVariant;
+import com.zone.agri.repository.InventoryRepository;
+import com.zone.agri.service.BranchSearchService.BranchWithRealDistance;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Service;
+
+import java.math.BigDecimal;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+
+@Service
+@RequiredArgsConstructor
+@Slf4j
+public class InventoryAllocationService {
+
+    private final InventoryRepository inventoryRepository;
+    private final SettingService settingService;
+
+    public record AllocationResult(
+            List<SubOrderDraftDto> subOrders,
+            List<OutOfStockItemDto> outOfStockItems) {
+    }
+
+    public Map<Long, Map<Long, List<Inventory>>> buildInventoryMatrix(List<Long> branchIds, List<Long> variantIds) {
+        List<Inventory> inventories = inventoryRepository.rawFindInventoryMatrix(branchIds, variantIds);
+
+        Map<Long, Map<Long, List<Inventory>>> matrix = new HashMap<>();
+        for (Inventory inv : inventories) {
+            Long branchId = inv.getBranch().getId();
+            Long variantId = inv.getProductVariant().getId();
+
+            matrix.computeIfAbsent(branchId, k -> new HashMap<>())
+                    .computeIfAbsent(variantId, k -> new ArrayList<>())
+                    .add(inv);
+        }
+        return matrix;
+    }
+
+    public AllocationResult allocate(
+            List<CartItemDto> cart,
+            Map<Long, ProductVariant> variantMap,
+            List<BranchWithRealDistance> branchesSortedByDist,
+            Map<Long, Map<Long, List<Inventory>>> inventoryMatrix) {
+        BigDecimal profitMultiplier = settingService.getProfitMultiplier();
+        String roundingRule = settingService.getProfitRoundingRuleRaw();
+
+        List<CartItemDto> normalizedCart = new ArrayList<>(cart.stream()
+                .map(item -> new CartItemDto(item.getProductVariantId(), item.getQuantity()))
+                .toList());
+
+        List<SubOrderDraftDto> subOrders = new ArrayList<>();
+        if (branchesSortedByDist.isEmpty() || normalizedCart.isEmpty()) {
+            return new AllocationResult(subOrders, Collections.emptyList());
+        }
+
+        BranchWithRealDistance nearestBranch = branchesSortedByDist.get(0);
+        Long nearestBranchId = nearestBranch.branch().getId();
+        Map<Long, List<Inventory>> branchBatches = inventoryMatrix.getOrDefault(nearestBranchId,
+                Collections.emptyMap());
+
+        List<OrderItemDto> allocatedItems = new ArrayList<>();
+        List<OutOfStockItemDto> outOfStockItems = new ArrayList<>();
+
+        for (CartItemDto item : normalizedCart) {
+            Long variantId = item.getProductVariantId();
+            int requested = item.getQuantity();
+            int originalRequested = requested;
+
+            List<Inventory> batches = branchBatches.getOrDefault(variantId, new ArrayList<>());
+            ProductVariant variant = variantMap.get(variantId);
+            String variantName = (variant != null && variant.getSku() != null) ? variant.getSku() : "Unknown";
+            String variantSku = variant != null ? variant.getSku() : "";
+
+            int allocatedQuantity = 0;
+            BigDecimal resolvedUnitPrice = BigDecimal.ZERO;
+
+            Iterator<Inventory> batchIterator = batches.iterator();
+            while (batchIterator.hasNext() && requested > 0) {
+                Inventory batch = batchIterator.next();
+                int availableInBatch = Objects.requireNonNullElse(batch.getQuantity(), 0);
+                if (availableInBatch <= 0) {
+                    continue;
+                }
+
+                int quantityToTake = Math.min(requested, availableInBatch);
+                BigDecimal importPrice = batch.getImportPrice() != null ? batch.getImportPrice() : BigDecimal.ZERO;
+                resolvedUnitPrice = settingService.calculateSellingPrice(importPrice, profitMultiplier, roundingRule);
+
+                batch.setQuantity(availableInBatch - quantityToTake);
+                requested -= quantityToTake;
+                allocatedQuantity += quantityToTake;
+            }
+
+            if (resolvedUnitPrice.compareTo(BigDecimal.ZERO) <= 0) {
+                resolvedUnitPrice = resolveFallbackUnitPrice(variantId, profitMultiplier, roundingRule);
+            }
+
+            allocatedItems.add(OrderItemDto.builder()
+                    .productVariantId(variantId)
+                    .variantName(variantName)
+                    .variantSku(variantSku)
+                    .quantity(originalRequested)
+                    .allocatedQuantity(allocatedQuantity)
+                    .missingQuantity(requested)
+                    .unitPrice(resolvedUnitPrice)
+                    .subtotal(resolvedUnitPrice.multiply(BigDecimal.valueOf(originalRequested)))
+                    .build());
+
+            if (requested > 0) {
+                outOfStockItems.add(OutOfStockItemDto.builder()
+                        .productVariantId(variantId)
+                        .variantName(variantName)
+                        .variantSku(variantSku)
+                        .requestedQty(originalRequested)
+                        .availableQty(allocatedQuantity)
+                        .build());
+            }
+        }
+
+        BigDecimal subtotal = allocatedItems.stream()
+                .map(OrderItemDto::getSubtotal)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+        subOrders.add(SubOrderDraftDto.builder()
+                .branchId(nearestBranchId)
+                .branchName(nearestBranch.branch().getName())
+                .branchAddress(nearestBranch.branch().getAddressDetail())
+                .fromDistrictId(nearestBranch.branch().getDistrictId())
+                .durationMinutes(nearestBranch.durationMinutes())
+                .distanceKm(nearestBranch.distanceKm())
+                .items(allocatedItems)
+                .subtotal(subtotal)
+                .shippingFee(BigDecimal.ZERO)
+                .build());
+
+        return new AllocationResult(subOrders, outOfStockItems);
+    }
+
+    private BigDecimal resolveFallbackUnitPrice(Long variantId, BigDecimal profitMultiplier, String roundingRule) {
+        return inventoryRepository.findByProductVariantId(variantId).stream()
+                .filter(inv -> inv.getImportPrice() != null)
+                .sorted(Comparator.comparing(Inventory::getId))
+                .map(Inventory::getImportPrice)
+                .findFirst()
+                .map(importPrice -> settingService.calculateSellingPrice(importPrice, profitMultiplier, roundingRule))
+                .orElse(BigDecimal.ZERO);
+    }
+}
