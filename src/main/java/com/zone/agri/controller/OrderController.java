@@ -56,7 +56,7 @@ public class OrderController {
     }
 
     @Operation(summary = "Lấy chi tiết đơn hàng của tôi", description = "Người dùng xem chi tiết thông tin và sản phẩm của một đơn hàng cụ thể")
-    @GetMapping({"/v1/orders/{id}", "/orders/{id}"})
+    @GetMapping({ "/v1/orders/{id}", "/orders/{id}" })
     public ResponseEntity<OrderResponse> getMyOrderDetail(@PathVariable Long id) {
         Long userId = getCurrentUserId();
         return ResponseEntity.ok(orderService.getMyOrderDetail(userId, id));
@@ -71,10 +71,13 @@ public class OrderController {
 
     @Operation(summary = "Hủy đơn hàng của tôi")
     @PostMapping("/orders/{id}/cancel")
-    public ResponseEntity<?> cancelMyOrder(@PathVariable Long id, @RequestBody(required = false) Map<String, Object> body) {
+    public ResponseEntity<?> cancelMyOrder(@PathVariable Long id,
+            @RequestBody(required = false) Map<String, Object> body) {
         Long userId = getCurrentUserId();
         String reasonCode = body != null && body.get("reasonCode") != null ? body.get("reasonCode").toString() : null;
-        String otherReasonText = body != null && body.get("otherReasonText") != null ? body.get("otherReasonText").toString() : null;
+        String otherReasonText = body != null && body.get("otherReasonText") != null
+                ? body.get("otherReasonText").toString()
+                : null;
         String cancelReason = reasonCode;
         if (otherReasonText != null && !otherReasonText.isBlank()) {
             cancelReason = (cancelReason != null ? cancelReason + ": " : "") + otherReasonText;
@@ -83,11 +86,8 @@ public class OrderController {
         return ResponseEntity.ok(Map.of("message", "Hủy đơn hàng thành công"));
     }
 
-    @Operation(
-            summary = "Đặt hàng (Checkout — legacy)",
-            description = "Tạo đơn hàng COD tại 1 chi nhánh có đủ hàng. "
-                    + "Đã thay thế bởi /prepare + /confirm."
-    )
+    @Operation(summary = "Đặt hàng (Checkout — legacy)", description = "Tạo đơn hàng COD tại 1 chi nhánh có đủ hàng. "
+            + "Đã thay thế bởi /prepare + /confirm.")
     @PostMapping("/orders/checkout")
     public ResponseEntity<?> placeOrder(@Valid @RequestBody CheckoutRequest request) {
         Long userId = getCurrentUserId();
@@ -97,11 +97,8 @@ public class OrderController {
 
     // ── NEW: Tách đơn thông minh ──────────────────────────────────
 
-    @Operation(
-            summary = "Chuẩn bị đơn hàng",
-            description = "Bước 1 — Tính toán phân bổ tồn kho + phí ship cho từng chi nhánh. "
-                    + "Không lưu DB. Trả về prepareToken dùng cho /confirm (hết hạn sau 30 phút)."
-    )
+    @Operation(summary = "Chuẩn bị đơn hàng", description = "Bước 1 — Tính toán phân bổ tồn kho + phí ship cho từng chi nhánh. "
+            + "Không lưu DB. Trả về prepareToken dùng cho /confirm (hết hạn sau 30 phút).")
     @PostMapping("/orders/prepare")
     public ResponseEntity<PrepareOrderResponse> prepareOrder(
             @Valid @RequestBody PrepareOrderRequest request) {
@@ -110,11 +107,8 @@ public class OrderController {
         return ResponseEntity.ok(response);
     }
 
-    @Operation(
-            summary = "Xác nhận đơn hàng",
-            description = "Bước 2 — Lưu đơn vào DB, trừ tồn kho (có lock tránh race condition), "
-                    + "tạo SubOrder theo từng chi nhánh."
-    )
+    @Operation(summary = "Xác nhận đơn hàng", description = "Bước 2 — Lưu đơn vào DB, trừ tồn kho (có lock tránh race condition), "
+            + "tạo SubOrder theo từng chi nhánh.")
     @PostMapping("/orders/confirm")
     public ResponseEntity<ConfirmOrderResponse> confirmOrder(
             @Valid @RequestBody ConfirmOrderRequest request) {
@@ -141,7 +135,7 @@ public class OrderController {
         return ResponseEntity.ok(orderService.getAdminOrderDetail(id));
     }
 
-    @Operation(summary = "Báo cáo nợ đơn", description = "Tổng hợp các sản phẩm đang thiếu hàng trong các phần đơn chờ nhập hàng.")
+    @Operation(summary = "Báo cáo nợ đơn", description = "Tổng hợp các sản phẩm đang thiếu hàng trong các phần đơn chờ điều chuyển bổ sung.")
     @RequirePermission("ORDER_VIEW")
     @GetMapping("/admin/backorders")
     public ResponseEntity<List<MissingItemReportDto>> getBackorderReport() {
@@ -179,12 +173,9 @@ public class OrderController {
 
     // ── QUẢN LÝ ĐƠN HÀNG THEO CHI NHÁNH (Branch / Kho) ────────────
 
-    @Operation(
-            summary = "Danh sách đơn hàng của chi nhánh",
-            description = "Nhân viên/quản lý chi nhánh xem danh sách phần đơn được phân bổ về chi nhánh mình. "
-                    + "Có thể lọc theo trạng thái (status) và tìm kiếm theo mã đơn hoặc tên khách (search). "
-                    + "Tài khoản phải được gán vào một chi nhánh (branch_id)."
-    )
+    @Operation(summary = "Danh sách đơn hàng của chi nhánh", description = "Nhân viên/quản lý chi nhánh xem danh sách phần đơn được phân bổ về chi nhánh mình. "
+            + "Có thể lọc theo trạng thái (status) và tìm kiếm theo mã đơn hoặc tên khách (search). "
+            + "Tài khoản phải được gán vào một chi nhánh (branch_id).")
     @RequirePermission("ORDER_VIEW")
     @GetMapping("/branch/orders")
     public ResponseEntity<List<BranchOrderResponse>> getBranchOrders(
@@ -197,11 +188,8 @@ public class OrderController {
         return ResponseEntity.ok(orderService.getBranchOrders(user.getBranch().getId(), status, search));
     }
 
-    @Operation(
-            summary = "Chi tiết đơn hàng của chi nhánh",
-            description = "Xem chi tiết phần đơn (SubOrder) thuộc chi nhánh của người dùng đang đăng nhập, "
-                    + "bao gồm danh sách sản phẩm cần đóng gói và thông tin vận chuyển."
-    )
+    @Operation(summary = "Chi tiết đơn hàng của chi nhánh", description = "Xem chi tiết phần đơn (SubOrder) thuộc chi nhánh của người dùng đang đăng nhập, "
+            + "bao gồm danh sách sản phẩm cần đóng gói và thông tin vận chuyển.")
     @RequirePermission("ORDER_VIEW")
     @GetMapping("/branch/orders/{orderId}")
     public ResponseEntity<BranchOrderResponse> getBranchOrderDetail(@PathVariable Long orderId) {
@@ -212,12 +200,9 @@ public class OrderController {
         return ResponseEntity.ok(orderService.getBranchOrderDetail(user.getBranch().getId(), orderId));
     }
 
-    @Operation(
-            summary = "Cập nhật trạng thái phần đơn của chi nhánh",
-            description = "Chi nhánh tự quản lý trạng thái phần đơn của mình theo quy trình: "
-                    + "PENDING → CONFIRMED → PROCESSING → SHIPPING → COMPLETED. "
-                    + "Trạng thái tổng của đơn hàng sẽ được tự động đồng bộ theo chi nhánh chậm nhất."
-    )
+    @Operation(summary = "Cập nhật trạng thái phần đơn của chi nhánh", description = "Chi nhánh tự quản lý trạng thái phần đơn của mình theo quy trình: "
+            + "PENDING → CONFIRMED → PROCESSING → SHIPPING → COMPLETED. "
+            + "Trạng thái tổng của đơn hàng sẽ được tự động đồng bộ theo chi nhánh chậm nhất.")
     @RequirePermission("ORDER_UPDATE")
     @PutMapping("/branch/orders/{orderId}/status")
     public ResponseEntity<?> updateBranchSubOrderStatus(

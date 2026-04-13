@@ -108,7 +108,7 @@ public class InventoryTransferService {
     @Transactional
     public List<InventoryTransfer> createReplenishmentTransfersForSubOrder(SubOrder subOrder) {
         if (subOrder.getStatus() != OrderStatus.AWAITING_REPLENISHMENT) {
-            throw new RuntimeException("Chỉ có thể tạo điều chuyển bổ sung cho phần đơn đang chờ bổ sung hàng");
+            throw new RuntimeException("Chỉ có thể tạo điều chuyển bổ sung cho phần đơn đang chờ điều chuyển");
         }
 
         String referenceCode = subOrder.getOrder().getCode() + "-SUB-" + subOrder.getId();
@@ -162,7 +162,7 @@ public class InventoryTransferService {
             request.setFromBranchId(entry.getKey());
             request.setToBranchId(subOrder.getBranch().getId());
             request.setTransferType("ORDER_REPLENISHMENT");
-            request.setDescription("Bổ sung hàng cho đơn " + subOrder.getOrder().getCode());
+            request.setDescription("Điều chuyển hàng cho đơn " + subOrder.getOrder().getCode());
             request.setReferenceCode(referenceCode);
             request.setPriority("HIGH");
             request.setTransferDate(now);

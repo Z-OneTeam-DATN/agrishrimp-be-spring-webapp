@@ -1076,10 +1076,11 @@ public class OrderService {
                     try {
                         List<InventoryTransfer> replenishmentTransfers = inventoryTransferService
                                 .createReplenishmentTransfersForSubOrder(savedSubOrder);
-                        log.info("Đã tự động tạo {} phiếu nhập bổ sung cho subOrder {}", replenishmentTransfers.size(),
+                        log.info("Đã tự động tạo {} phiếu điều chuyển bổ sung cho subOrder {}",
+                                replenishmentTransfers.size(),
                                 savedSubOrder.getId());
                     } catch (Exception e) {
-                        log.warn("Không thể tự động tạo phiếu nhập bổ sung cho subOrder {}: {}",
+                        log.warn("Không thể tự động tạo phiếu điều chuyển bổ sung cho subOrder {}: {}",
                                 savedSubOrder.getId(), e.getMessage());
                     }
                 }
