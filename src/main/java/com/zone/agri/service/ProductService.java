@@ -623,16 +623,17 @@ public class ProductService {
 
         List<Inventory> allInventories = inventoryRepository.findByProductVariantId(variant.getId());
 
+        // Cho phép Admin HOẶC người có quyền Điều chuyển/Xuất kho thấy hết các chi nhánh để chọn nguồn
+        boolean canSeeAllBranches = isAdmin || hasExportPermission;
+
         List<Inventory> validBatches = allInventories.stream()
                 .filter(inv -> inv.getQuantity() != null && inv.getQuantity() > 0)
-                // Chỉ lấy tồn kho từ chi nhánh ACTIVE (Admin xem được tất cả)
-                .filter(inv -> isAdmin
-                        || (inv.getBranch() != null && inv.getBranch().getStatus() == BranchStatus.ACTIVE))
-                // Public user thấy tất cả chi nhánh ACTIVE; Staff/Manager chỉ thấy chi nhánh
-                // của họ
-                .filter(inv -> currentUser == null || isAdmin
-                        || (currentBranch != null && inv.getBranch() != null
-                                && inv.getBranch().getId().equals(currentBranch.getId())))
+
+                // Chỉ lấy tồn kho từ chi nhánh ACTIVE (Admin/Exporter xem được tất cả)
+                .filter(inv -> canSeeAllBranches || (inv.getBranch() != null && inv.getBranch().getStatus() == BranchStatus.ACTIVE))
+                // Staff/Manager thông thường chỉ thấy chi nhánh của họ; Admin/Exporter thấy tất cả
+                .filter(inv -> currentUser == null || canSeeAllBranches || (currentBranch != null && inv.getBranch() != null && inv.getBranch().getId().equals(currentBranch.getId())))
+
                 .collect(Collectors.toList());
 
         int displayQuantity = validBatches.stream().mapToInt(Inventory::getQuantity).sum();

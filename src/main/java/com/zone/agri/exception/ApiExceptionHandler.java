@@ -119,6 +119,13 @@ public class ApiExceptionHandler {
     return new ResponseEntity<>(errorVm, HttpStatus.NOT_FOUND);
   }
 
+  @ExceptionHandler(org.springframework.web.server.ResponseStatusException.class)
+  public ResponseEntity<ErrorDetail> handleResponseStatusException(org.springframework.web.server.ResponseStatusException ex, WebRequest request) {
+    ErrorDetail errorVm = new ErrorDetail(ex.getStatusCode().toString(), ex.getReason(), null);
+    log.warn(ERROR_LOG_FORMAT, this.getServletPath(request), ex.getStatusCode().value(), ex.getReason());
+    return new ResponseEntity<>(errorVm, ex.getStatusCode());
+  }
+
   @ExceptionHandler(Exception.class)
   protected ResponseEntity<ErrorDetail> handleOtherException(Exception ex, WebRequest request) {
     String message = ex.getMessage();

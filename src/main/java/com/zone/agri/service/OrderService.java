@@ -1458,7 +1458,7 @@ public class OrderService {
             ProductVariant variant = variantRepository.findById(itemReq.getVariantId())
                     .orElseThrow(() -> new NotFoundException("Sản phẩm không tồn tại"));
 
-            // 👉 LOGIC TRỪ KHO THEO LÔ (FIFO)
+            //  LOGIC TRỪ KHO THEO LÔ (FIFO)
             int remainingToDeduct = itemReq.getQuantity();
             List<Inventory> batches = inventoryRepository.findForUpdateFIFO(selectedBranch.getId(), variant.getId());
 

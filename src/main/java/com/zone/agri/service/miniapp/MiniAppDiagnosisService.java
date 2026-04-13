@@ -62,6 +62,27 @@ public class MiniAppDiagnosisService {
 
         // 2. AI predict-image (fail → toàn bộ request fail, không graceful)
         AiPredictResponse predictResponse = aiDiagnosisClient.predict(image);
+        String aiStatus = predictResponse.getStatus();
+
+        // 2a. Xử lý sớm các trạng thái đặc biệt từ AI
+        if ("BLURRY".equals(aiStatus)) {
+            log.info("[MiniApp] traceId={} BLURRY image", traceId);
+            throw new BadRequestException(
+                    "Ảnh quá mờ hoặc chất lượng thấp. Vui lòng chụp lại ảnh rõ hơn.");
+        }
+        if ("NON_SHRIMP".equals(aiStatus)) {
+            log.info("[MiniApp] traceId={} NON_SHRIMP image", traceId);
+            throw new BadRequestException(
+                    "Không phát hiện tôm trong ảnh. Vui lòng điều chỉnh góc chụp và thử lại.");
+        }
+        if ("HEALTHY".equals(aiStatus)) {
+            log.info("[MiniApp] traceId={} HEALTHY shrimp", traceId);
+            return MiniAppDiagnosisResponse.builder()
+                    .diagnosisId("healthy_" + traceId)
+                    .status("HEALTHY")
+                    .build();
+        }
+
         AiPredictionItem finalPrediction = predictResponse.getFinalPrediction();
 
         if (finalPrediction == null || finalPrediction.getDiseaseCode() == null) {
@@ -84,11 +105,11 @@ public class MiniAppDiagnosisService {
                 traceId, candidateProducts.size(), availableStock.size());
 
         // 4. Build AI prescription request
+        // idealProtocol không cần truyền — Python AI tự lookup từ Knowledge Base nội bộ
         AiPrescriptionRequest prescriptionRequest = AiPrescriptionRequest.builder()
                 .diseaseCode(diseaseCode)
                 .diseaseName(finalPrediction.getVietnameseName())
                 .userSymptoms(normalizedSymptoms)
-                .idealProtocol(Collections.emptyList())
                 .availableStock(availableStock)
                 .build();
 
@@ -178,6 +199,7 @@ public class MiniAppDiagnosisService {
 
         return MiniAppDiagnosisResponse.builder()
                 .diagnosisId(diagnosisId)
+                .status("DISEASE")
                 .imageUrl(null)          // Phase BE-4: upload ảnh lên Cloudinary
                 .disease(disease)
                 .topPredictions(topPredictions)

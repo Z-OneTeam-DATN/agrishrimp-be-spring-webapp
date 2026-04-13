@@ -10,6 +10,7 @@ import org.springframework.stereotype.Service;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.Objects;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -53,16 +54,41 @@ public class FinancialService {
     }
 
     // 2. BÁO CÁO CÔNG NỢ NHÀ CUNG CẤP
-    public List<SupplierDebtResponse> getSupplierDebts(String search) {
-        List<SupplierRepository.SupplierDebtProjection> projections = supplierRepository.findSuppliersWithDebt(search);
+    public List<SupplierDebtResponse> getSupplierDebts(
+            String search,
+            LocalDate startDate,
+            LocalDate endDate,
+            Long branchId,
+            Long staffId,
+            String debtFilter) {
+        LocalDateTime start = startDate != null ? startDate.atStartOfDay() : null;
+        LocalDateTime end = endDate != null ? endDate.atTime(23, 59, 59) : null;
 
-        return projections.stream().map(p -> SupplierDebtResponse.builder()
-                .id(p.getId())
-                .supplierCode(p.getSupplierCode())
-                .supplierName(p.getSupplierName())
-                .phone(p.getPhone())
-                .totalDebt(p.getTotalDebt())
-                .build()
-        ).collect(Collectors.toList());
+        List<SupplierRepository.SupplierDebtProjection> projections = supplierRepository.findSuppliersWithDebt(
+                search,
+                start,
+                end,
+                branchId,
+                staffId);
+
+        return projections.stream()
+                .map(p -> SupplierDebtResponse.builder()
+                        .id(p.getId())
+                        .supplierCode(p.getSupplierCode())
+                        .supplierName(p.getSupplierName())
+                        .phone(p.getPhone())
+                        .totalDebt(getSafeBigDecimal(p.getTotalDebt()))
+                        .build())
+                .filter(item -> {
+                    if ("zero".equalsIgnoreCase(debtFilter)) {
+                        return item.getTotalDebt().compareTo(BigDecimal.ZERO) == 0;
+                    }
+                    if ("all".equalsIgnoreCase(debtFilter)) {
+                        return true;
+                    }
+                    return item.getTotalDebt().compareTo(BigDecimal.ZERO) > 0;
+                })
+                .filter(item -> Objects.nonNull(item.getId()))
+                .collect(Collectors.toList());
     }
 }

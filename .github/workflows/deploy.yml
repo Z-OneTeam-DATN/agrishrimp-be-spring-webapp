@@ -99,12 +99,37 @@ jobs:
 
           docker pull "$IMAGE:latest"
 
+          echo "Ensuring required compose dependencies and network are up..."
+          if ! docker compose -f docker-compose.prod.yml up -d db redis ai-visual-search; then
+            echo "Dependency bootstrap failed. Cleaning stale dependency containers and retrying once..."
+            docker rm -f agrishrimp-db agrishrimp-redis agrishrimp-ai-visual-search 2>/dev/null || true
+            docker compose -f docker-compose.prod.yml up -d db redis ai-visual-search
+          fi
+          echo "Skipping ai-diagnosis bootstrap because its GHCR image may be unavailable."
+
+          echo "Waiting for MySQL container DNS/health..."
+          DB_RETRIES=18
+          for i in $(seq 1 $DB_RETRIES); do
+            DB_STATUS=$(docker inspect --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' agrishrimp-db 2>/dev/null || echo "missing")
+            if [ "$DB_STATUS" = "healthy" ] || [ "$DB_STATUS" = "running" ]; then
+              echo "MySQL container is $DB_STATUS"
+              break
+            fi
+            if [ "$i" = "$DB_RETRIES" ]; then
+              echo "❌ MySQL container is not ready: $DB_STATUS"
+              docker logs --tail 200 agrishrimp-db || true
+              exit 1
+            fi
+            echo "⏳ DB $i/$DB_RETRIES — $DB_STATUS. Retry in 10s..."
+            sleep 10
+          done
+
           docker compose -f docker-compose.prod.yml up -d --no-deps --pull never api
 
           echo "Waiting for Spring Boot..."
           sleep 20
 
-          RETRIES=6
+          RETRIES=18
           for i in $(seq 1 $RETRIES); do
             STATUS=$(curl -sf http://127.0.0.1:${{ env.APP_PORT }}/actuator/health \
               | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('status','DOWN'))" \
@@ -118,7 +143,10 @@ jobs:
             sleep 10
           done
 
-          echo "❌ Health check failed. Rolling back..."
+          echo "❌ Health check failed. Dumping api logs before rollback..."
+          docker logs --tail 200 agrishrimp-api || true
+
+          echo "❌ Rolling back..."
           if [ "$CURRENT_IMAGE" != "none" ]; then
             docker tag "$CURRENT_IMAGE" "$IMAGE:latest" 2>/dev/null || true
             docker compose -f docker-compose.prod.yml up -d --no-deps --pull never api

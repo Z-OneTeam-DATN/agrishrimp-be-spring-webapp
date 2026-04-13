@@ -130,9 +130,14 @@ public class CartService {
             }
         } else {
             // TỐI ƯU: Sử dụng query SUM tại DB thay vì load toàn bộ object Inventory
-            Integer totalStock = inventoryRepository.sumQuantityByVariantId(variantId);
-            if (totalStock == null)
-                totalStock = 0;
+
+//            Integer totalStock = inventoryRepository.sumQuantityByVariantId(variantId);
+//            if (totalStock == null)
+//                totalStock = 0;
+
+            Long totalStockLong = inventoryRepository.sumQuantityByVariantId(variantId);
+            int totalStock = totalStockLong != null ? totalStockLong.intValue() : 0;
+
 
             if (newQuantity > totalStock) {
                 throw new BadRequestException(

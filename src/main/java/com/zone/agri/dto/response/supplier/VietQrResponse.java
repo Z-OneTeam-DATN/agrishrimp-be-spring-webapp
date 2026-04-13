@@ -1,7 +1,11 @@
 package com.zone.agri.dto.response.supplier;
 
+import java.util.List;
+import java.util.Map;
+
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
+
 import lombok.Data;
 
 @Data
@@ -28,5 +32,11 @@ public class VietQrResponse {
         @JsonProperty("email")
         private String email;
         private String content;
+
+        private Map<String, String> fieldStatuses;
+        private Map<String, String> fieldSources;
+        private List<String> queriedSources;
+        private String primarySource;
+        private String lookupMessage;
     }
 }

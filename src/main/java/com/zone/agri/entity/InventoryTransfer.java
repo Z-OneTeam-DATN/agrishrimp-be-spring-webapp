@@ -30,7 +30,7 @@ public class InventoryTransfer {
     String transferCode;
 
     @Enumerated(EnumType.STRING)
-    @Column(columnDefinition = "ENUM('PENDING', 'SHIPPING', 'COMPLETED', 'CANCELLED')")
+    @Column(name = "status", length = 50)
     InventoryTransferStatus status;
 
     // --- CÁC TRƯỜNG BỔ SUNG TỪ GIAO DIỆN UI ---

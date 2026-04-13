@@ -26,6 +26,8 @@ public class InventoryReceiptResponse {
     private BigDecimal paymentAmount;
     private BigDecimal debtAmount;
     private String deliverer;
+    private String creatorName;
+    private String createdByName;
     private String note;
     private List<String> tags;     // Trả về mảng Tags
     private String entryDate;
@@ -41,12 +43,16 @@ public class InventoryReceiptResponse {
         private String productCode;
         private String productName;
         private String unit;
-        private Integer quantity;
+        private Integer quantity; // Expected
+        private Integer quantityReal;
+        private Integer quantityAccepted;
+        private Integer quantityRejected;
         private BigDecimal price;
         private BigDecimal newSellingPrice;
         private String lotNumber;
         private String expiryDate;
         private String imageUrl;
         private Integer maxQuantity;
+        private String note;
     }
 }

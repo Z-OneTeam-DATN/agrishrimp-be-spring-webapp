@@ -1,5 +1,6 @@
 package com.zone.agri.controller;
 
+import com.zone.agri.dto.request.transfer.TransferQCRequest;
 import com.zone.agri.dto.response.transfer.TransferDetailResponse;
 import com.zone.agri.dto.request.transfer.TransferRequest;
 import com.zone.agri.dto.response.transfer.TransferResponse;
@@ -26,7 +27,6 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
-import java.util.Map;
 
 @RestController
 @RequestMapping("/api/transfers")
@@ -90,30 +90,48 @@ public class InventoryTransferController {
         return ResponseEntity.ok(transferService.getById(id));
     }
 
-    @Operation(summary = "Xác nhận Xuất kho", description = "Duyệt phiếu và chuyển trạng thái sang SHIPPING (Đang vận chuyển), đồng thời trừ số lượng tồn kho tại chi nhánh xuất.")
+    @Operation(summary = "Duyệt phiếu điều chuyển", description = "Chuyển trạng thái từ PENDING sang APPROVED.")
+    @SecurityRequirement(name = "bearerAuth")
+    @RequirePermission("TRANSFER_APPROVE")
+    @PostMapping("/{id}/approve")
+    public ResponseEntity<String> approveTransfer(@PathVariable Long id) {
+        transferService.approveTransfer(id);
+        return ResponseEntity.ok("Đã duyệt phiếu điều chuyển.");
+    }
+
+    @Operation(summary = "Xác nhận Xuất kho", description = "Duyệt phiếu và chuyển trạng thái sang SHIPPING (Đang vận chuyển).")
     @SecurityRequirement(name = "bearerAuth")
     @RequirePermission("TRANSFER_APPROVE")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Xuất kho thành công"),
             @ApiResponse(responseCode = "400", description = "Lỗi xuất kho (kho không đủ hàng, sai trạng thái...)")
     })
-    @PutMapping("/{id}/ship")
+    @PostMapping("/{id}/ship")
     public ResponseEntity<String> approveAndShipTransfer(@PathVariable Long id) {
         transferService.approveAndShip(id);
         return ResponseEntity.ok("Đã xuất kho và đang vận chuyển!");
     }
 
-    @Operation(summary = "Xác nhận Nhận hàng", description = "Chi nhánh nhận xác nhận số lượng thực tế nhận được. Chuyển trạng thái sang COMPLETED, cộng tồn kho chi nhánh nhận, xử lý chênh lệch.")
+    @Operation(summary = "Xác nhận Nhận hàng", description = "Chi nhánh nhận xác nhận số lượng thực tế nhận được (QC).")
     @SecurityRequirement(name = "bearerAuth")
     @RequirePermission("TRANSFER_APPROVE")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Nhận hàng thành công"),
             @ApiResponse(responseCode = "400", description = "Lỗi nhận hàng (phiếu không ở trạng thái đang chuyển, sai dữ liệu...)")
     })
-    @PutMapping("/{id}/receive")
-    public ResponseEntity<?> receiveTransfer(@PathVariable Long id, @RequestBody List<Map<String, Object>> receivedItems) {
-        transferService.receiveTransfer(id, receivedItems);
-        return ResponseEntity.ok("Đã xác nhận nhận hàng");
+    @PostMapping("/{id}/receive")
+    public ResponseEntity<?> receiveTransfer(@PathVariable Long id, @RequestBody List<TransferQCRequest> qcItems) {
+        transferService.receiveTransfer(id, qcItems);
+        return ResponseEntity.ok("Đã xác nhận nhận hàng và kiểm đếm QC thành công.");
+    }
+
+    @Operation(summary = "Từ chối phiếu điều chuyển", description = "Chuyển trạng thái từ PENDING sang REJECTED.")
+    @SecurityRequirement(name = "bearerAuth")
+    @RequirePermission("TRANSFER_APPROVE")
+    @PostMapping("/{id}/reject")
+    public ResponseEntity<String> rejectTransfer(@PathVariable Long id) {
+        transferService.rejectTransfer(id);
+        return ResponseEntity.ok("Đã từ chối phiếu điều chuyển.");
     }
 
     @Operation(summary = "Hủy phiếu điều chuyển", description = "Hủy phiếu và hoàn tồn kho nếu đang ở trạng thái SHIPPING.")

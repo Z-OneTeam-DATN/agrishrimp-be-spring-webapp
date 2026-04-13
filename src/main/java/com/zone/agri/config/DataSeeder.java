@@ -179,6 +179,14 @@ public class DataSeeder implements CommandLineRunner {
         Permission aTrfD = pAct("Xóa điều chuyển", "TRANSFER_DELETE", PermissionGroup.INVENTORY, mTrf);
         Permission aTrfU = pAct("Sửa điều chuyển", "TRANSFER_UPDATE", PermissionGroup.INVENTORY, mTrf);
 
+        Permission mChk  = pMod("Kiểm kê kho", "INVENTORY_CHECK", PermissionGroup.INVENTORY);
+        Permission aChkV = pAct("Xem phiếu kiểm kê", "INVENTORY_CHECK_VIEW", PermissionGroup.INVENTORY, mChk);
+        Permission aChkC = pAct("Tạo phiếu kiểm kê", "INVENTORY_CHECK_CREATE", PermissionGroup.INVENTORY, mChk);
+        Permission aChkA = pAct("Duyệt phiếu kiểm kê", "INVENTORY_CHECK_APPROVE", PermissionGroup.INVENTORY, mChk);
+        Permission aChkU = pAct("Sửa phiếu kiểm kê", "INVENTORY_CHECK_UPDATE", PermissionGroup.INVENTORY, mChk);
+        Permission aChkX = pAct("Hủy phiếu kiểm kê", "INVENTORY_CHECK_CANCEL", PermissionGroup.INVENTORY, mChk);
+        Permission aChkD = pAct("Xóa phiếu kiểm kê", "INVENTORY_CHECK_DELETE", PermissionGroup.INVENTORY, mChk);
+
         // GROUP SETTING
         Permission mSet  = pMod("Cài đặt hệ thống", "SETTING", PermissionGroup.SETTING);
         Permission aSetV = pAct("Xem cài đặt", "SETTING_VIEW", PermissionGroup.SETTING, mSet);
@@ -197,6 +205,7 @@ public class DataSeeder implements CommandLineRunner {
                 aImpV, aImpC, aImpA, aImpU, aImpX, aImpD,
                 aExpV, aExpC, aExpA, aExpU, aExpX, aExpD,
                 aTrfV, aTrfC, aTrfA, aTrfU, aTrfX, aTrfD,
+                aChkV, aChkC, aChkA, aChkU, aChkX, aChkD,
                 aCusV, aCusC, aCusU, aCusD,
                 aVouV, aVouC, aVouU, aVouD,
                 aSupV, aSupC, aSupU, aSupD,
@@ -213,6 +222,7 @@ public class DataSeeder implements CommandLineRunner {
                 aImpV, aImpC, aImpU, aImpX, aImpD,
                 aExpV, aExpC, aExpU, aExpX, aExpD,
                 aTrfV, aTrfC, aTrfU, aTrfX, aTrfD,
+                aChkV, aChkC, aChkU, aChkX, aChkD,
                 aCusV, aCusC, aCusU, aCusD,
                 aVouV, aVouC, aVouU,
                 aOrdV, aOrdC, aOrdU, aOrdCnf, aOrdShip, aOrdX, aOrdDone, aOrdExport
@@ -259,6 +269,27 @@ public class DataSeeder implements CommandLineRunner {
         Role managerRole = roleRepository.findBySlug("MANAGER").orElseThrow();
         Role staffRole   = roleRepository.findBySlug("STAFF").orElseThrow();
         Role userRole    = roleRepository.findBySlug("USER").orElseThrow();
+
+        // ── 0. NHÀ CUNG CẤP (Move up to use in Product seeding) ──────────
+        Supplier supCP  = supplierRepository.save(Supplier.builder()
+                .code("NCC-001").name("Công Ty TNHH CP Vietnam").taxCode("0101234567")
+                .contactName("Nguyễn Văn Hùng").phone("0901999101").email("supply@cpvietnam.com.vn")
+                .provinceId("79").addressDetail("KCN Mỹ Phước, Bình Dương").status(SupplierStatus.ACTIVE).build());
+
+        Supplier supGN  = supplierRepository.save(Supplier.builder()
+                .code("NCC-002").name("Công Ty TNHH Green Nature Việt Nam").taxCode("0201234567")
+                .contactName("Trần Thị Lan").phone("0902999202").email("sales@greennature.vn")
+                .provinceId("79").addressDetail("Lô B12, KCN Trà Nóc 2, Cần Thơ").status(SupplierStatus.ACTIVE).build());
+
+        Supplier supTom = supplierRepository.save(Supplier.builder()
+                .code("NCC-003").name("Công Ty TNHH Tomboy Feed Việt Nam").taxCode("0301234567")
+                .contactName("Phạm Minh Tuấn").phone("0903999303").email("sales@tomboyfeed.vn")
+                .provinceId("79").addressDetail("KCN Tân Tạo, Q.Bình Tân, TP.HCM").status(SupplierStatus.ACTIVE).build());
+
+        Supplier supMW  = supplierRepository.save(Supplier.builder()
+                .code("NCC-004").name("HTX Nông Nghiệp Miền Tây Xanh").taxCode("0401234567")
+                .contactName("Võ Thị Hoa").phone("0904999404").email("supply@htxmientay.vn")
+                .provinceId("92").addressDetail("KCN Trà Nóc 1, Q.Bình Thủy, TP.Cần Thơ").status(SupplierStatus.ACTIVE).build());
 
         // ── 1. CHI NHÁNH & KHO ──────────────────────────────────────────
         Branch mainWh  = saveBranch("MAIN_WH",   "WAREHOUSE", "Kho Tổng Cần Thơ",    "02921112222", "khotong@agrishrimp.vn", "99 Nguyễn Văn Cừ, P.An Khánh, Q.Ninh Kiều, Cần Thơ", 10.0341, 105.7904, 92, 916);
@@ -343,6 +374,9 @@ public class DataSeeder implements CommandLineRunner {
         // ── 8. SẢN PHẨM & BIẾN THỂ (LƯU Ý: KHÔNG CÒN SET GIÁ) ────────────
         Product p1  = prod("Thức Ăn Tôm CP 8012", "thuc-an-tom-cp-8012",
                 "Thức ăn viên chìm cho tôm thẻ", "Thức ăn tôm CP 8012...", bCP, catSF, "Việt Nam", "CP8012", "https://res.cloudinary.com/dcl7geun3/image/upload/v1731514488/p1_pjm6uv.jpg");
+        p1.getSuppliers().add(supCP);
+        productRepository.save(p1);
+
         ProductVariant pv1a = pv(p1, "CP8012-5KG",  "8935001001011", VariantStatus.ACTIVE);
         ProductVariant pv1b = pv(p1, "CP8012-25KG", "8935001001012", VariantStatus.ACTIVE);
         skua(pv1a, attrW, av5kg);   skua(pv1a, attrP, avBag);
@@ -350,11 +384,17 @@ public class DataSeeder implements CommandLineRunner {
 
         Product p4  = prod("Chế Phẩm EM Xử Lý Ao Nuôi", "che-pham-em",
                 "Vi khuẩn có lợi làm sạch đáy ao", "Chế phẩm EM chứa Bacillus...", bGN, catPro, "Việt Nam", "EM-XL", "https://res.cloudinary.com/dcl7geun3/image/upload/v1731514488/p4_v8w3zv.jpg");
+        p4.getSuppliers().add(supGN);
+        productRepository.save(p4);
+
         ProductVariant pv4a = pv(p4, "EM-XL-500ML", "8935004001011", VariantStatus.ACTIVE);
         skua(pv4a, attrW, av500g);  skua(pv4a, attrP, avBottle);
 
         Product p2  = prod("Thức Ăn Tôm Tomboy #1 Ươm Giống", "thuc-an-tom-tomboy-1",
                 "Thức ăn micro-pellet ươm giống tôm thẻ chân trắng", "Tomboy #1 giàu protein 42%, lipid 8%...", bTomboy, catSF, "Việt Nam", "TBY-1", "https://res.cloudinary.com/dcl7geun3/image/upload/v1731514488/p2_p8v6zv.jpg");
+        p2.getSuppliers().add(supTom);
+        productRepository.save(p2);
+
         ProductVariant pv2a = pv(p2, "TBY-1-500G", "8935002001001", VariantStatus.ACTIVE);
         ProductVariant pv2b = pv(p2, "TBY-1-5KG",  "8935002001002", VariantStatus.ACTIVE);
         skua(pv2a, attrW, av500g); skua(pv2a, attrP, avBag);
@@ -362,6 +402,9 @@ public class DataSeeder implements CommandLineRunner {
 
         Product p3  = prod("Khoáng Tổng Hợp EDTA Agri-Min", "khoang-edta-tong-hop",
                 "Bổ sung khoáng đa vi lượng Ca, Mg, K, Na cho ao tôm", "Khoáng EDTA hỗn hợp Ca-Mg-K-Na dạng bột tan nhanh...", bGN, catMin, "Việt Nam", "GN-EDTA", "https://res.cloudinary.com/dcl7geun3/image/upload/v1731514488/p3_v8w3zv.jpg");
+        p3.getSuppliers().add(supGN);
+        productRepository.save(p3);
+
         ProductVariant pv3a = pv(p3, "GN-EDTA-1KG", "8935003001001", VariantStatus.ACTIVE);
         ProductVariant pv3b = pv(p3, "GN-EDTA-5KG", "8935003001002", VariantStatus.ACTIVE);
         skua(pv3a, attrW, av1kg);  skua(pv3a, attrP, avBag);
@@ -369,6 +412,9 @@ public class DataSeeder implements CommandLineRunner {
 
         Product p5  = prod("Vitamin C Aqua Stable", "vitamin-c-aqua-stable",
                 "Vitamin C bền vững trong nước, tăng sức đề kháng tôm", "Vitamin C 35% dạng bột, bền pH 5-8, không bị oxy hóa nhanh...", bGN, catVit, "Việt Nam", "GN-VTC", "https://res.cloudinary.com/dcl7geun3/image/upload/v1731514488/p5_pjm6uv.jpg");
+        p5.getSuppliers().add(supGN);
+        productRepository.save(p5);
+
         ProductVariant pv5a = pv(p5, "GN-VTC-500G", "8935005001001", VariantStatus.ACTIVE);
         ProductVariant pv5b = pv(p5, "GN-VTC-5KG",  "8935005001002", VariantStatus.ACTIVE);
         skua(pv5a, attrW, av500g); skua(pv5a, attrP, avBag);
@@ -376,6 +422,9 @@ public class DataSeeder implements CommandLineRunner {
 
         Product p6  = prod("Vôi Dolomite Cân Bằng pH Ao", "voi-dolomite-xu-ly-ao",
                 "Cân bằng pH đáy ao, kiềm hóa môi trường nuôi tôm", "Vôi dolomite CaMg(CO3)2 nghiền mịn, độ tinh khiết >95%...", bCP, catMin, "Việt Nam", "CP-DOLO", "https://res.cloudinary.com/dcl7geun3/image/upload/v1731514488/p6_v8w3zv.jpg");
+        p6.getSuppliers().add(supCP);
+        productRepository.save(p6);
+
         ProductVariant pv6a = pv(p6, "CP-DOLO-25KG", "8935006001001", VariantStatus.ACTIVE);
         ProductVariant pv6b = pv(p6, "CP-DOLO-50KG", "8935006001002", VariantStatus.ACTIVE);
         skua(pv6a, attrW, av25kg); skua(pv6a, attrP, avSack);
@@ -383,6 +432,9 @@ public class DataSeeder implements CommandLineRunner {
 
         Product p7  = prod("Bacillus BioPlus Vi Sinh Đáy Ao", "bacillus-bioplus",
                 "Vi sinh phân giải khí độc H2S, NH3 tích tụ đáy ao", "Bacillus subtilis mật độ 10^9 CFU/g, Bacillus licheniformis...", bGN, catPro, "Việt Nam", "GN-BIO", "https://res.cloudinary.com/dcl7geun3/image/upload/v1731514488/p7_p8v6zv.jpg");
+        p7.getSuppliers().add(supGN);
+        productRepository.save(p7);
+
         ProductVariant pv7a = pv(p7, "GN-BIO-500G", "8935007001001", VariantStatus.ACTIVE);
         ProductVariant pv7b = pv(p7, "GN-BIO-5KG",  "8935007001002", VariantStatus.ACTIVE);
         skua(pv7a, attrW, av500g); skua(pv7a, attrP, avBottle);
@@ -390,6 +442,9 @@ public class DataSeeder implements CommandLineRunner {
 
         Product p8  = prod("OTC-80 Oxytetracycline Kháng Khuẩn", "otc-80-oxytetracycline",
                 "Kháng khuẩn phổ rộng cho tôm cá bị đốm trắng, hoại tử", "Oxytetracycline HCl 80% dạng bột tan nước, phổ kháng khuẩn rộng...", bCP, catMed, "Việt Nam", "CP-OTC", "https://res.cloudinary.com/dcl7geun3/image/upload/v1731514488/p8_v8w3zv.jpg");
+        p8.getSuppliers().add(supCP);
+        productRepository.save(p8);
+
         ProductVariant pv8a = pv(p8, "CP-OTC-500G", "8935008001001", VariantStatus.ACTIVE);
         ProductVariant pv8b = pv(p8, "CP-OTC-1KG",  "8935008001002", VariantStatus.ACTIVE);
         skua(pv8a, attrW, av500g); skua(pv8a, attrP, avBox);
@@ -397,6 +452,9 @@ public class DataSeeder implements CommandLineRunner {
 
         Product p9  = prod("Thức Ăn Cá Da Trơn Tomboy 26%", "thuc-an-ca-da-tron-tomboy-26",
                 "Thức ăn viên nổi cho cá tra, cá basa, protein 26%", "Tomboy 26% protein, lipid 5%, dạng viên nổi 2.5mm...", bTomboy, catFF, "Việt Nam", "TBY-CAT", "https://res.cloudinary.com/dcl7geun3/image/upload/v1731514488/p9_pjm6uv.jpg");
+        p9.getSuppliers().add(supTom);
+        productRepository.save(p9);
+
         ProductVariant pv9a = pv(p9, "TBY-CAT-5KG",  "8935009001001", VariantStatus.ACTIVE);
         ProductVariant pv9b = pv(p9, "TBY-CAT-25KG", "8935009001002", VariantStatus.ACTIVE);
         skua(pv9a, attrW, av5kg);  skua(pv9a, attrP, avBag);
@@ -404,28 +462,14 @@ public class DataSeeder implements CommandLineRunner {
 
         Product p10 = prod("Máy Đo pH-DO-Nhiệt Độ Cầm Tay", "may-do-ph-do-nhiet-do",
                 "Thiết thiết bị đo đa chỉ tiêu: pH, oxy hòa tan, nhiệt độ ao nuôi", "Độ chính xác pH ±0.01, DO ±0.1 mg/L, Temp ±0.5°C, chống nước IP67...", bGN, catMeas, "Nhật Bản", "GN-METER", "https://res.cloudinary.com/dcl7geun3/image/upload/v1731514488/p10_v8w3zv.jpg");
+        p10.getSuppliers().add(supGN);
+        productRepository.save(p10);
+
+        // Define pv10a since it was used below but removed accidentally in last edit
         ProductVariant pv10a = pv(p10, "GN-METER-01", "8935010001001", VariantStatus.ACTIVE);
 
-        // ── 9. NHÀ CUNG CẤP ─────────────────────────────────────────────
-        Supplier supCP  = supplierRepository.save(Supplier.builder()
-                .code("NCC-001").name("Công Ty TNHH CP Vietnam").taxCode("0101234567")
-                .contactName("Nguyễn Văn Hùng").phone("0901999101").email("supply@cpvietnam.com.vn")
-                .provinceId("79").addressDetail("KCN Mỹ Phước, Bình Dương").status(SupplierStatus.ACTIVE).build());
-
-        Supplier supGN  = supplierRepository.save(Supplier.builder()
-                .code("NCC-002").name("Công Ty TNHH Green Nature Việt Nam").taxCode("0201234567")
-                .contactName("Trần Thị Lan").phone("0902999202").email("sales@greennature.vn")
-                .provinceId("79").addressDetail("Lô B12, KCN Trà Nóc 2, Cần Thơ").status(SupplierStatus.ACTIVE).build());
-
-        Supplier supTom = supplierRepository.save(Supplier.builder()
-                .code("NCC-003").name("Công Ty TNHH Tomboy Feed Việt Nam").taxCode("0301234567")
-                .contactName("Phạm Minh Tuấn").phone("0903999303").email("sales@tomboyfeed.vn")
-                .provinceId("79").addressDetail("KCN Tân Tạo, Q.Bình Tân, TP.HCM").status(SupplierStatus.ACTIVE).build());
-
-        Supplier supMW  = supplierRepository.save(Supplier.builder()
-                .code("NCC-004").name("HTX Nông Nghiệp Miền Tây Xanh").taxCode("0401234567")
-                .contactName("Võ Thị Hoa").phone("0904999404").email("supply@htxmientay.vn")
-                .provinceId("92").addressDetail("KCN Trà Nóc 1, Q.Bình Thủy, TP.Cần Thơ").status(SupplierStatus.ACTIVE).build());
+        // ── 9. NHÀ CUNG CẤP (Already moved to top) ───────────────────────
+        // (Removal of duplicate supplier creation)
 
         // ── 10. TỒN KHO THEO LÔ (GÁN GIÁ VỐN + BATCH VÀO INVENTORY) ──────
         LocalDateTime now = LocalDateTime.now();

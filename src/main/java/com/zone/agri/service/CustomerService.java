@@ -1,8 +1,15 @@
 package com.zone.agri.service;
 
+import com.zone.agri.dto.request.customer.CustomerInternalNoteRequest;
 import com.zone.agri.dto.request.customer.CustomerRequest;
+import com.zone.agri.dto.response.customer.CustomerAddressResponse;
+import com.zone.agri.dto.response.customer.CustomerDetailResponse;
+import com.zone.agri.dto.response.customer.CustomerInternalNoteResponse;
 import com.zone.agri.dto.response.customer.CustomerResponse;
+import com.zone.agri.dto.response.customer.CustomerStatusLogResponse;
 import com.zone.agri.entity.Customer;
+import com.zone.agri.entity.CustomerInternalNote;
+import com.zone.agri.entity.CustomerStatusLog;
 import com.zone.agri.entity.Role;
 import com.zone.agri.entity.User;
 import com.zone.agri.entity.UserAddress;
@@ -23,7 +30,12 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -37,6 +49,9 @@ public class CustomerService {
     private final EmailService emailService;
     private final UserAddressRepository userAddressRepository;
     private final OrderRepository orderRepository;
+    private final CustomerInternalNoteRepository customerInternalNoteRepository;
+    private final CustomerStatusLogRepository customerStatusLogRepository;
+    private final BranchRepository branchRepository;
 
     // 1. Tạo mới khách hàng
     @Transactional
@@ -67,7 +82,8 @@ public class CustomerService {
         mapRequestToEntity(req, customer);
         customer.setUser(newUser);
 
-        if (customer.getStatus() == null) customer.setStatus(CustomerStatus.ACTIVE);
+        if (customer.getStatus() == null)
+            customer.setStatus(CustomerStatus.ACTIVE);
 
         Customer savedCustomer = customerRepository.save(customer);
         if (req.getAddressDetail() != null && !req.getAddressDetail().isEmpty()) {
@@ -110,8 +126,19 @@ public class CustomerService {
 
     public Page<CustomerResponse> getCustomers(String keyword, String statusStr, Pageable pageable) {
         String finalStatus = (statusStr == null || statusStr.trim().isEmpty()) ? "all" : statusStr.trim();
-        Page<User> users = userRepository.findAllCustomers(keyword, finalStatus, pageable);
+        String normalizedPhoneKeyword = keyword == null ? null : keyword.replaceAll("\\D+", "");
+        Page<User> users = userRepository.findAllCustomers(keyword, normalizedPhoneKeyword, finalStatus, pageable);
         return users.map(this::convertToResponse);
+    }
+
+    public Map<String, Boolean> checkDuplicate(String email, String phone) {
+        Map<String, Boolean> result = new HashMap<>();
+        String normalizedEmail = email == null ? "" : email.trim().toLowerCase();
+        String normalizedPhone = phone == null ? "" : phone.replaceAll("\\D+", "");
+
+        result.put("emailExists", !normalizedEmail.isEmpty() && userRepository.existsByEmail(normalizedEmail));
+        result.put("phoneExists", !normalizedPhone.isEmpty() && userRepository.existsByPhoneNumber(normalizedPhone));
+        return result;
     }
 
     private CustomerResponse convertToResponse(User user) {
@@ -132,7 +159,8 @@ public class CustomerService {
         if (!defaultAddresses.isEmpty()) {
             UserAddress defaultAddr = defaultAddresses.get(0);
             dto.setAddressDetail(defaultAddr.getAddressDetail());
-            dto.setPhone(defaultAddr.getReceiverPhone() != null ? defaultAddr.getReceiverPhone() : user.getPhoneNumber());
+            dto.setPhone(
+                    defaultAddr.getReceiverPhone() != null ? defaultAddr.getReceiverPhone() : user.getPhoneNumber());
         } else if (customer != null) {
             dto.setAddressDetail(customer.getAddressDetail());
             dto.setPhone(customer.getPhone() != null ? customer.getPhone() : user.getPhoneNumber());
@@ -146,9 +174,11 @@ public class CustomerService {
         }
 
         // Fetch order statistics
-        Long totalOrders = java.util.Optional.ofNullable(orderRepository.countTotalOrdersByUserId(userId)).orElse(0L);
-        Long completedOrders = java.util.Optional.ofNullable(orderRepository.countCompletedOrdersByUserId(userId)).orElse(0L);
-        BigDecimal totalSpent = java.util.Optional.ofNullable(orderRepository.sumTotalSpentByUserId(userId)).orElse(BigDecimal.ZERO);
+        Long totalOrders = Optional.ofNullable(orderRepository.countTotalOrdersByUserId(userId)).orElse(0L);
+        Long completedOrders = Optional.ofNullable(orderRepository.countCompletedOrdersByUserId(userId))
+                .orElse(0L);
+        BigDecimal totalSpent = Optional.ofNullable(orderRepository.sumTotalSpentByUserId(userId))
+                .orElse(BigDecimal.ZERO);
 
         dto.setTotalOrders(totalOrders);
         dto.setTotalSpent(totalSpent);
@@ -169,8 +199,10 @@ public class CustomerService {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new NotFoundException("Không tìm thấy tài khoản người dùng"));
 
+        UserStatus fromStatus = user.getStatus();
         user.setStatus(user.getStatus() == UserStatus.ACTIVE ? UserStatus.INACTIVE : UserStatus.ACTIVE);
         userRepository.save(user);
+        saveStatusLog(user, fromStatus, user.getStatus(), "ADMIN_TOGGLE_STATUS");
     }
 
     public CustomerResponse getCustomerById(Long userId) {
@@ -179,11 +211,141 @@ public class CustomerService {
         return convertToResponse(user);
     }
 
-    // Hàm này để gọi sau khi cập nhật trạng thái đơn hàng (Hủy, Hoàn trả, Thành công)
+    public CustomerDetailResponse getCustomerDetailById(Long userId) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new NotFoundException("Không tìm thấy tài khoản người dùng"));
+        CustomerResponse base = convertToResponse(user);
+
+        LocalDateTime lastOrderDate = orderRepository.findLastOrderDateByUserId(userId);
+        BigDecimal averageOrderValue = Optional.ofNullable(orderRepository.findAverageOrderValueByUserId(userId))
+                .map(BigDecimal::valueOf)
+                .orElse(BigDecimal.ZERO);
+
+        List<CustomerAddressResponse> addresses = userAddressRepository
+                .findByUserIdOrderByIsDefaultDescCreatedAtDesc(userId)
+                .stream()
+                .map(addr -> CustomerAddressResponse.builder()
+                        .id(addr.getId())
+                        .receiverName(addr.getReceiverName())
+                        .receiverPhone(addr.getReceiverPhone())
+                        .addressDetail(addr.getAddressDetail())
+                        .isDefault(Boolean.TRUE.equals(addr.getIsDefault()))
+                        .createdAt(addr.getCreatedAt())
+                        .build())
+                .toList();
+
+        return CustomerDetailResponse.builder()
+                .userId(base.getUserId())
+                .fullName(base.getFullName())
+                .email(base.getEmail())
+                .phone(base.getPhone())
+                .avatarUrl(base.getAvatarUrl())
+                .provider(base.getProvider())
+                .userStatus(base.getUserStatus())
+                .createdAt(base.getCreatedAt())
+                .customerId(base.getCustomerId())
+                .customerStatus(base.getCustomerStatus())
+                .addressDetail(base.getAddressDetail())
+                .totalOrders(base.getTotalOrders())
+                .totalSpent(base.getTotalSpent())
+                .reputationScore(base.getReputationScore())
+                .lastOrderDate(lastOrderDate)
+                .averageOrderValue(averageOrderValue)
+                .addresses(addresses)
+                .internalNotes(getInternalNotes(userId))
+                .statusLogs(getStatusLogs(userId))
+                .build();
+    }
+
+    public List<CustomerInternalNoteResponse> getInternalNotes(Long userId) {
+        List<CustomerInternalNote> notes = customerInternalNoteRepository
+                .findByCustomerUserIdOrderByCreatedAtDesc(userId);
+        return mapNotes(notes);
+    }
+
+    @Transactional
+    public CustomerInternalNoteResponse addInternalNote(Long userId, CustomerInternalNoteRequest request) {
+        User customerUser = userRepository.findById(userId)
+                .orElseThrow(() -> new NotFoundException("Không tìm thấy tài khoản người dùng"));
+
+        CustomerInternalNote note = CustomerInternalNote.builder()
+                .customerUser(customerUser)
+                .content(request.getContent().trim())
+                .build();
+
+        CustomerInternalNote saved = customerInternalNoteRepository.save(note);
+        return mapNotes(Collections.singletonList(saved)).get(0);
+    }
+
+    @Transactional
+    public void deleteInternalNote(Long noteId) {
+        if (!customerInternalNoteRepository.existsById(noteId)) {
+            throw new NotFoundException("Không tìm thấy ghi chú nội bộ");
+        }
+        customerInternalNoteRepository.deleteById(noteId);
+    }
+
+    public List<CustomerStatusLogResponse> getStatusLogs(Long userId) {
+        List<CustomerStatusLog> logs = customerStatusLogRepository.findByCustomerUserIdOrderByCreatedAtDesc(userId);
+        if (logs.isEmpty()) {
+            return Collections.emptyList();
+        }
+        Map<Long, String> userNameById = userRepository.findAllById(
+                logs.stream().map(CustomerStatusLog::getCreatedByUserId).filter(id -> id != null && id > 0).distinct()
+                        .toList())
+                .stream()
+                .collect(Collectors.toMap(User::getId, User::getFullName));
+
+        return logs.stream()
+                .map(log -> CustomerStatusLogResponse.builder()
+                        .id(log.getId())
+                        .fromStatus(log.getFromStatus())
+                        .toStatus(log.getToStatus())
+                        .reason(log.getReason())
+                        .changedByName(userNameById.getOrDefault(log.getCreatedByUserId(), "Hệ thống"))
+                        .createdAt(log.getCreatedAt())
+                        .build())
+                .toList();
+    }
+
+    private List<CustomerInternalNoteResponse> mapNotes(List<CustomerInternalNote> notes) {
+        if (notes.isEmpty()) {
+            return Collections.emptyList();
+        }
+        Map<Long, String> authorNameById = userRepository.findAllById(
+                notes.stream().map(CustomerInternalNote::getCreatedByUserId).filter(id -> id != null && id > 0)
+                        .distinct().toList())
+                .stream()
+                .collect(Collectors.toMap(User::getId, User::getFullName));
+
+        return notes.stream()
+                .map(note -> CustomerInternalNoteResponse.builder()
+                        .id(note.getId())
+                        .content(note.getContent())
+                        .authorName(authorNameById.getOrDefault(note.getCreatedByUserId(), "Hệ thống"))
+                        .createdAt(note.getCreatedAt())
+                        .updatedAt(note.getUpdatedAt())
+                        .build())
+                .toList();
+    }
+
+    private void saveStatusLog(User customerUser, UserStatus fromStatus, UserStatus toStatus, String reason) {
+        CustomerStatusLog statusLog = CustomerStatusLog.builder()
+                .customerUser(customerUser)
+                .fromStatus(fromStatus)
+                .toStatus(toStatus)
+                .reason(reason)
+                .build();
+        customerStatusLogRepository.save(statusLog);
+    }
+
+    // Hàm này để gọi sau khi cập nhật trạng thái đơn hàng (Hủy, Hoàn trả, Thành
+    // công)
     @Transactional
     public void evaluateAndHandleCustomerReputation(Long userId) {
         User user = userRepository.findById(userId).orElse(null);
-        if (user == null || user.getRole().getSlug().equals("ADMIN")) return;
+        if (user == null || user.getRole().getSlug().equals("ADMIN"))
+            return;
 
         Long totalOrders = orderRepository.countTotalOrdersByUserId(userId);
         Long completedOrders = orderRepository.countCompletedOrdersByUserId(userId);
@@ -198,8 +360,10 @@ public class CustomerService {
         // Xử lý theo Rule
         if (reputationScore < 30.0 && user.getStatus() == UserStatus.ACTIVE) {
             // 1. Tự động Khóa
+            UserStatus fromStatus = user.getStatus();
             user.setStatus(UserStatus.INACTIVE);
             userRepository.save(user);
+            saveStatusLog(user, fromStatus, UserStatus.INACTIVE, "AUTO_LOCK_REPUTATION_BELOW_30");
 
             // Gửi email thông báo khóa
             try {
@@ -232,5 +396,26 @@ public class CustomerService {
         c.setAddressDetail(req.getAddressDetail());
         c.setStatus(req.getStatus());
         c.setNote(req.getNote());
+
+        // 🟢 Assign branch & staff & internal notes
+        if (req.getBranchId() != null) {
+            c.setAssignedBranch(branchRepository.findById(req.getBranchId()).orElse(null));
+        }
+        if (req.getStaffAssignedId() != null) {
+            c.setStaffAssigned(userRepository.findById(req.getStaffAssignedId()).orElse(null));
+        }
+        if (req.getInternalNotes() != null) {
+            c.setInternalNotes(req.getInternalNotes());
+        }
+    }
+
+    // 🟢 Get all staff by branch (for FE dropdown)
+    public List<Map<String, Object>> getStaffByBranch(Long branchId) {
+        return userRepository.findByBranchIdAndRole(branchId, "STAFF");
+    }
+
+    // 🟢 Get all branches (for FE dropdown)
+    public List<?> getAllBranches() {
+        return branchRepository.findAll();
     }
 }

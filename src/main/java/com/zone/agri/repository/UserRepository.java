@@ -1,6 +1,7 @@
 package com.zone.agri.repository;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import org.springframework.data.domain.Page;
@@ -64,10 +65,19 @@ public interface UserRepository extends JpaRepository<User, Long> {
                         "AND (:keyword IS NULL OR :keyword = '' OR LOWER(u.fullName) LIKE LOWER(CONCAT('%', :keyword, '%')) "
                         +
                         "OR LOWER(u.email) LIKE LOWER(CONCAT('%', :keyword, '%')) " +
-                        "OR u.phoneNumber LIKE CONCAT('%', :keyword, '%')) " +
+                        "OR u.phoneNumber LIKE CONCAT('%', :keyword, '%') " +
+                        "OR (:phoneKeyword IS NOT NULL AND :phoneKeyword <> '' AND " +
+                        "CAST(FUNCTION('replace', FUNCTION('replace', FUNCTION('replace', COALESCE(u.phoneNumber, ''), ' ', ''), '.', ''), '-', '') AS STRING) LIKE CONCAT('%', :phoneKeyword, '%'))) "
+                        +
                         "ORDER BY u.createdAt DESC")
         Page<User> findAllCustomers(
                         @Param("keyword") String keyword,
+                        @Param("phoneKeyword") String phoneKeyword,
                         @Param("status") String status,
                         Pageable pageable);
+
+        // 🟢 Get staff by branch
+        @Query("SELECT NEW MAP(u.id AS id, u.fullName AS fullName, u.email AS email, u.phoneNumber AS phoneNumber) " +
+                        "FROM User u WHERE u.branch.id = :branchId AND u.role.slug = 'STAFF' ORDER BY u.fullName")
+        List<Map<String, Object>> findByBranchIdAndRole(@Param("branchId") Long branchId, @Param("slug") String slug);
 }

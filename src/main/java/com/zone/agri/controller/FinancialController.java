@@ -28,7 +28,12 @@ public class FinancialController {
 
     @GetMapping("/supplier-debts")
     public ResponseEntity<List<SupplierDebtResponse>> getSupplierDebts(
-            @RequestParam(required = false) String search) {
-        return ResponseEntity.ok(financialService.getSupplierDebts(search));
+            @RequestParam(required = false) String search,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
+            @RequestParam(required = false) Long branchId,
+            @RequestParam(required = false) Long staffId,
+            @RequestParam(required = false, defaultValue = "not_zero") String debtFilter) {
+        return ResponseEntity.ok(financialService.getSupplierDebts(search, startDate, endDate, branchId, staffId, debtFilter));
     }
 }

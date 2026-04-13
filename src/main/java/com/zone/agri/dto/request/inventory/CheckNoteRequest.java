@@ -15,6 +15,7 @@ public class CheckNoteRequest {
     private String type; // Thay checkType thành type
     private java.time.LocalDateTime checkDate;
     private String checkedBy;
+    private String createdByName; // FE sends "createdByName"
     
     @NotNull(message = "Chi nhánh kiểm kho không được để trống")
     private Long branchId;
@@ -36,6 +37,8 @@ public class CheckNoteRequest {
         @NotNull(message = "Số lượng thực tế không được để trống")
         @jakarta.validation.constraints.Min(value = 0, message = "Số lượng thực tế không được âm")
         private Integer quantityReal;
+
+        private Integer quantityRejected; // Số lượng hàng lỗi (defective)
 
         private Integer quantity;
 

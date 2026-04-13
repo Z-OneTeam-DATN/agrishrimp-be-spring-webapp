@@ -20,8 +20,10 @@ public class InventoryNoteDetailResponse {
     private String unit;
     private Integer quantity;           // Số lượng hệ thống (dùng cho Kiểm Kho)
     private Integer systemQuantity;     // Alias cho quantity theo yêu cầu FE
-    private Integer quantityRequested;  // Số lượng yêu cầu (dùng cho Xuất Kho)
-    private Integer quantityReal;       // Số lượng thực tế (dùng cho cả Xuất và Kiểm)
+    private Integer quantityRequested;  // Số lượng yêu cầu (Expected - dùng cho Xuất Kho/Nhập kho)
+    private Integer quantityReal;       // Số lượng thực tế (Actual - dùng cho cả Xuất và Kiểm)
+    private Integer quantityAccepted;   // Số lượng đạt chuẩn
+    private Integer quantityRejected;   // Số lượng hàng lỗi/trả NCC
     private BigDecimal price;
     private String batchNumber;
     private String imageUrl;

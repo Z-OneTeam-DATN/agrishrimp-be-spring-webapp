@@ -30,6 +30,7 @@ public class ExportNoteRequest {
 
     private String specificReceiver;
     private String shippingAddress;
+    private String creatorName; // FE sends "creatorName"
     private Long createdById;
 
     @NotEmpty(message = "Lệnh xuất phải có ít nhất 1 sản phẩm")
@@ -44,6 +45,11 @@ public class ExportNoteRequest {
         @NotNull(message = "Số lượng xuất không được để trống")
         @Positive(message = "Số lượng xuất phải lớn hơn 0")
         private Integer requestedQuantity; // Số lượng xuất
+
+        private String batchNumber;
+        private String expiryDate;
+        private Integer defectiveQuantity; // Số lượng lỗi hiện có
+        private Integer plannedQuantity;   // Số lượng yêu cầu lúc nhập
 
         private BigDecimal price; // Giá xuất
         private String note; // Lý do xuất

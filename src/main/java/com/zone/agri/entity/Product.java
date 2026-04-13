@@ -89,4 +89,16 @@ public class Product {
     @ToString.Exclude
     @EqualsAndHashCode.Exclude
     List<Review> reviews;
-    }
+
+    // --- QUAN HỆ VỚI NHÀ CUNG CẤP ---
+    @ManyToMany(fetch = FetchType.LAZY)
+    @JoinTable(
+            name = "product_suppliers",
+            joinColumns = @JoinColumn(name = "product_id"),
+            inverseJoinColumns = @JoinColumn(name = "supplier_id")
+    )
+    @Builder.Default
+    @ToString.Exclude
+    @EqualsAndHashCode.Exclude
+    Set<Supplier> suppliers = new HashSet<>();
+}

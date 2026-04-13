@@ -71,6 +71,37 @@ public interface InventoryNoteRepository extends JpaRepository<InventoryNote, Lo
             @Param("status") InventoryNoteStatus status,
             @Param("branchId") Long branchId
     );
+    @Query("""
+        SELECT DISTINCT inote 
+        FROM InventoryNote inote 
+        LEFT JOIN FETCH inote.branch 
+        LEFT JOIN FETCH inote.partnerBranch 
+        LEFT JOIN FETCH inote.supplier 
+        LEFT JOIN FETCH inote.createdBy
+        WHERE inote.type = :type AND inote.status IN :statuses
+        ORDER BY inote.createdAt DESC
+    """)
+    List<InventoryNote> findAllByTypeAndStatusInWithPartners(
+            @Param("type") InventoryNoteType type,
+            @Param("statuses") Collection<InventoryNoteStatus> statuses
+    );
+
+    @Query("""
+        SELECT DISTINCT inote 
+        FROM InventoryNote inote 
+        LEFT JOIN FETCH inote.branch 
+        LEFT JOIN FETCH inote.partnerBranch 
+        LEFT JOIN FETCH inote.supplier 
+        LEFT JOIN FETCH inote.createdBy
+        WHERE inote.type = :type AND inote.status IN :statuses AND inote.branch.id = :branchId
+        ORDER BY inote.createdAt DESC
+    """)
+    List<InventoryNote> findAllByTypeAndStatusInAndBranchWithPartners(
+            @Param("type") InventoryNoteType type,
+            @Param("statuses") Collection<InventoryNoteStatus> statuses,
+            @Param("branchId") Long branchId
+    );
+
     // Kiểm tra có phiếu nào thuộc các trạng thái chỉ định không
     boolean existsByStatusIn(Collection<InventoryNoteStatus> statuses);
 
@@ -92,11 +123,30 @@ public interface InventoryNoteRepository extends JpaRepository<InventoryNote, Lo
         SELECT DISTINCT in 
         FROM InventoryNote in 
         LEFT JOIN FETCH in.details 
+        LEFT JOIN FETCH in.branch
+        LEFT JOIN FETCH in.supplier
+        LEFT JOIN FETCH in.partnerBranch
+        LEFT JOIN FETCH in.createdBy
         WHERE in.code = :code
     """)
     Optional<InventoryNote> findByCodeWithDetails(@Param("code") String code);
 
-    @Query("SELECT in FROM InventoryNote in WHERE (:branchId IS NULL OR in.branch.id = :branchId) " +
+    @Query("""
+        SELECT DISTINCT in 
+        FROM InventoryNote in 
+        LEFT JOIN FETCH in.details d
+        LEFT JOIN FETCH d.productVariant
+        LEFT JOIN FETCH in.branch
+        LEFT JOIN FETCH in.supplier
+        LEFT JOIN FETCH in.partnerBranch
+        LEFT JOIN FETCH in.createdBy
+        WHERE in.id = :id
+    """)
+    Optional<InventoryNote> findByIdWithDetails(@Param("id") Long id);
+
+    @Query("SELECT in FROM InventoryNote in " +
+            "LEFT JOIN FETCH in.createdBy " +
+            "WHERE (:branchId IS NULL OR in.branch.id = :branchId) " +
             "ORDER BY in.createdAt DESC")
     List<InventoryNote> findRecentNotes(@Param("branchId") Long branchId, org.springframework.data.domain.Pageable pageable);
 
@@ -104,6 +154,7 @@ public interface InventoryNoteRepository extends JpaRepository<InventoryNote, Lo
     @Query("""
         SELECT in 
         FROM InventoryNote in 
+        LEFT JOIN FETCH in.createdBy
         WHERE in.branch.id = :branchId 
         ORDER BY in.createdAt DESC
     """)

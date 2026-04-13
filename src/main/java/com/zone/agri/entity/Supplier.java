@@ -76,4 +76,11 @@ public class Supplier {
     @ToString.Exclude
     @EqualsAndHashCode.Exclude
     List<InventoryNote> inventoryNotes;
+
+    // --- QUAN HỆ VỚI SẢN PHẨM ---
+    @ManyToMany(mappedBy = "suppliers", fetch = FetchType.LAZY)
+    @Builder.Default
+    @ToString.Exclude
+    @EqualsAndHashCode.Exclude
+    java.util.Set<Product> products = new java.util.HashSet<>();
 }

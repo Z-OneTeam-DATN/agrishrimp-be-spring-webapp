@@ -25,10 +25,16 @@ public class InventoryTransferDetail {
     private Integer quantity;
 
     @Column(name = "quantity_requested")
-    Integer quantityRequested; // Số lượng yêu cầu chuyển đi
+    Integer quantityRequested; // Số lượng yêu cầu ban đầu (Expected Qty)
 
     @Column(name = "quantity_real")
-    Integer quantityReal; // Số lượng thực tế nhận được (Lúc nhận mới điền)
+    Integer quantityReal; // Tổng số lượng thực tế nhận được (Actual Qty)
+
+    @Column(name = "quantity_accepted")
+    Integer quantityAccepted; // Số lượng đạt chuẩn (Accepted Qty)
+
+    @Column(name = "quantity_rejected")
+    Integer quantityRejected; // Số lượng lỗi (Rejected Qty)
 
     @Column(name = "note", columnDefinition = "TEXT")
     String note; // Ghi chú từng dòng sản phẩm

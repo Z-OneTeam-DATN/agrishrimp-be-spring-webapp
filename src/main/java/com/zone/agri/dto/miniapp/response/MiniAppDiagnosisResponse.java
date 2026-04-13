@@ -19,6 +19,9 @@ public class MiniAppDiagnosisResponse {
 
     private String diagnosisId;
 
+    /** HEALTHY | DISEASE — FE dùng để render UI phù hợp */
+    private String status;
+
     /** URL ảnh chẩn đoán — Phase BE-5: upload lên Cloudinary */
     private String imageUrl;
 

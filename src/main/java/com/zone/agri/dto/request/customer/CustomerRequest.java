@@ -37,4 +37,9 @@ public class CustomerRequest {
 
     private CustomerStatus status;
     private String note;
+
+    // 🆕 Gán cho chi nhánh & nhân viên phụ trách
+    private Long branchId;
+    private Long staffAssignedId;
+    private String internalNotes;
 }
