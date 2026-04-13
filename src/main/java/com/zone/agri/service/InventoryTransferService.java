@@ -78,9 +78,11 @@ public class InventoryTransferService {
             details.add(detail);
             totalQty += itemReq.getQuantity();
 
-            // LOGIC LÔ HÀNG ĐỘNG: Ước tính Tổng giá trị phiếu chuyển dựa trên Giá vốn của các lô FIFO ở Kho xuất
+            // LOGIC LÔ HÀNG ĐỘNG: Ước tính Tổng giá trị phiếu chuyển dựa trên Giá vốn của
+            // các lô FIFO ở Kho xuất
             List<Inventory> sourceBatches = inventoryRepo.findByProductVariantId(variant.getId()).stream()
-                    .filter(inv -> inv.getBranch().getId().equals(fromBranch.getId()) && inv.getQuantity() != null && inv.getQuantity() > 0)
+                    .filter(inv -> inv.getBranch().getId().equals(fromBranch.getId()) && inv.getQuantity() != null
+                            && inv.getQuantity() > 0)
                     .sorted(Comparator.comparing(Inventory::getId)) // Sắp xếp FIFO
                     .collect(Collectors.toList());
 
@@ -88,7 +90,8 @@ public class InventoryTransferService {
             BigDecimal itemTotalValue = BigDecimal.ZERO;
 
             for (Inventory batch : sourceBatches) {
-                if (reqQty <= 0) break;
+                if (reqQty <= 0)
+                    break;
                 int take = Math.min(reqQty, batch.getQuantity());
                 BigDecimal importPrice = batch.getImportPrice() != null ? batch.getImportPrice() : BigDecimal.ZERO;
                 itemTotalValue = itemTotalValue.add(importPrice.multiply(BigDecimal.valueOf(take)));
@@ -119,6 +122,12 @@ public class InventoryTransferService {
 
         Map<Long, Map<String, Integer>> transferPlanBySourceBranch = new LinkedHashMap<>();
 
+        // Lấy tọa độ chi nhánh đích (nơi nhận hàng)
+        Branch toBranch = subOrder.getBranch();
+        if (toBranch.getLat() == null || toBranch.getLng() == null) {
+            throw new RuntimeException("Chi nhánh nhận hàng chưa có tọa độ địa lý");
+        }
+
         List<SubOrderItem> subOrderItems = subOrder.getItems() != null ? subOrder.getItems() : List.of();
         for (SubOrderItem item : subOrderItems) {
             int missingQty = Objects.requireNonNullElse(item.getMissingQuantity(), 0);
@@ -126,7 +135,8 @@ public class InventoryTransferService {
                 continue;
             }
 
-            Map<Long, Integer> availableByBranch = inventoryRepo.findByProductVariantId(item.getProductVariant().getId()).stream()
+            Map<Long, Integer> availableByBranch = inventoryRepo
+                    .findByProductVariantId(item.getProductVariant().getId()).stream()
                     .filter(inv -> inv.getBranch() != null
                             && !inv.getBranch().getId().equals(subOrder.getBranch().getId())
                             && Objects.requireNonNullElse(inv.getQuantity(), 0) > 0)
@@ -134,9 +144,23 @@ public class InventoryTransferService {
                             LinkedHashMap::new,
                             Collectors.summingInt(inv -> Objects.requireNonNullElse(inv.getQuantity(), 0))));
 
+            // Sắp xếp chi nhánh theo khoảng cách gần nhất (để tiết kiệm chi phí vận chuyển)
             int remaining = missingQty;
             for (Map.Entry<Long, Integer> candidate : availableByBranch.entrySet().stream()
-                    .sorted(Map.Entry.<Long, Integer>comparingByValue(Comparator.reverseOrder()))
+                    .sorted((e1, e2) -> {
+                        Branch branch1 = branchRepo.findById(e1.getKey()).orElse(null);
+                        Branch branch2 = branchRepo.findById(e2.getKey()).orElse(null);
+                        if (branch1 == null || branch1.getLat() == null || branch1.getLng() == null)
+                            return 1;
+                        if (branch2 == null || branch2.getLat() == null || branch2.getLng() == null)
+                            return -1;
+
+                        double dist1 = calculateHaversineDistance(toBranch.getLat(), toBranch.getLng(),
+                                branch1.getLat(), branch1.getLng());
+                        double dist2 = calculateHaversineDistance(toBranch.getLat(), toBranch.getLng(),
+                                branch2.getLat(), branch2.getLng());
+                        return Double.compare(dist1, dist2);
+                    })
                     .toList()) {
                 if (remaining <= 0) {
                     break;
@@ -203,7 +227,8 @@ public class InventoryTransferService {
         InventoryTransfer transfer = transferRepo.findById(transferId)
                 .orElseThrow(() -> new RuntimeException("Không tìm thấy phiếu điều chuyển"));
 
-        if (transfer.getStatus() != InventoryTransferStatus.APPROVED && transfer.getStatus() != InventoryTransferStatus.PENDING) {
+        if (transfer.getStatus() != InventoryTransferStatus.APPROVED
+                && transfer.getStatus() != InventoryTransferStatus.PENDING) {
             throw new RuntimeException("Chỉ có thể xuất kho phiếu đang ở trạng thái Chờ duyệt hoặc Đã duyệt!");
         }
 
@@ -227,8 +252,7 @@ public class InventoryTransferService {
                 .collect(Collectors.toMap(
                         d -> d.getProductVariant().getId(),
                         d -> d,
-                        (existing, replacement) -> existing
-                ));
+                        (existing, replacement) -> existing));
 
         for (TransferQCRequest qcItemReq : qcItems) {
             Long variantId = qcItemReq.getVariantId();
@@ -238,7 +262,8 @@ public class InventoryTransferService {
             String itemNote = qcItemReq.getNote();
 
             InventoryTransferDetail detail = detailMap.get(variantId);
-            if (detail == null) continue;
+            if (detail == null)
+                continue;
 
             detail.setQuantityReal(qtyReal);
             detail.setQuantityAccepted(qtyAccepted);
@@ -246,7 +271,8 @@ public class InventoryTransferService {
             // Ghi nhận lý do hàng lỗi vào note (Ví dụ: "5 hộp móp méo")
             detail.setNote(itemNote);
 
-            // Xử lý tồn kho: Thực tế bên kia xuất bao nhiêu thì trừ bấy nhiêu, còn bên này nhận bao nhiêu thì cộng bấy nhiêu
+            // Xử lý tồn kho: Thực tế bên kia xuất bao nhiêu thì trừ bấy nhiêu, còn bên này
+            // nhận bao nhiêu thì cộng bấy nhiêu
             if (qtyReal > 0) {
                 Long fromBranchId = transfer.getFromBranch().getId();
                 Branch toBranch = transfer.getToBranch();
@@ -257,7 +283,8 @@ public class InventoryTransferService {
                 // 2. Cộng kho nhận (Chỉ cộng hàng Đạt vào Available, hàng Lỗi vào Defective)
                 addDestinationStock(transfer, toBranch, detail.getProductVariant(), qtyAccepted, qtyRejected);
 
-                // 👉 KÍCH HOẠT XỬ LÝ BACKORDER: Tự động trừ kho và đẩy đơn AWAITING_REPLENISHMENT -> PROCESSING
+                // 👉 KÍCH HOẠT XỬ LÝ BACKORDER: Tự động trừ kho và đẩy đơn
+                // AWAITING_REPLENISHMENT -> PROCESSING
                 // Dùng qtyAccepted (hàng đạt chất lượng) để trả nợ đơn hàng
                 backorderService.fulfillBackordersOnStockReceive(toBranch.getId(), variantId, qtyAccepted);
             }
@@ -272,9 +299,11 @@ public class InventoryTransferService {
         List<Inventory> sourceBatches = inventoryRepo.findForUpdateFIFO(fromBranchId, variantId);
 
         for (Inventory sBatch : sourceBatches) {
-            if (remaining <= 0) break;
+            if (remaining <= 0)
+                break;
             int available = Objects.requireNonNullElse(sBatch.getQuantity(), 0);
-            if (available <= 0) continue;
+            if (available <= 0)
+                continue;
 
             int deduct = Math.min(available, remaining);
             sBatch.setQuantity(available - deduct);
@@ -283,7 +312,8 @@ public class InventoryTransferService {
             transactionRepo.save(InventoryTransaction.builder()
                     .type(TransactionType.TRANSFER_OUT)
                     .quantityChange(-deduct)
-                    .newBalance(Objects.requireNonNullElse(sBatch.getQuantity(), 0) + Objects.requireNonNullElse(sBatch.getDefectiveQuantity(), 0))
+                    .newBalance(Objects.requireNonNullElse(sBatch.getQuantity(), 0)
+                            + Objects.requireNonNullElse(sBatch.getDefectiveQuantity(), 0))
                     .referenceCode(transfer.getTransferCode())
                     .reason("Xuất điều chuyển (Phiếu: " + transfer.getTransferCode() + ")")
                     .createdAt(LocalDateTime.now())
@@ -294,12 +324,15 @@ public class InventoryTransferService {
         }
     }
 
-    private void addDestinationStock(InventoryTransfer transfer, Branch toBranch, ProductVariant variant, int accepted, int rejected) {
-        // Vì điều chuyển thường đi theo lô gốc từ kho xuất, nhưng ở đây để đơn giản ta gộp vào lô DEFAULT của kho nhận 
-        // hoặc logic phức tạp hơn là phải mapping từng lô. Ở đây ta giả định nhập vào lô của kho xuất chuyển sang.
-        // Tuy nhiên hàm deductSourceStock ở trên chưa trả về info lô. 
+    private void addDestinationStock(InventoryTransfer transfer, Branch toBranch, ProductVariant variant, int accepted,
+            int rejected) {
+        // Vì điều chuyển thường đi theo lô gốc từ kho xuất, nhưng ở đây để đơn giản ta
+        // gộp vào lô DEFAULT của kho nhận
+        // hoặc logic phức tạp hơn là phải mapping từng lô. Ở đây ta giả định nhập vào
+        // lô của kho xuất chuyển sang.
+        // Tuy nhiên hàm deductSourceStock ở trên chưa trả về info lô.
         // Để đúng yêu cầu QC: Ta sẽ tìm lô phù hợp ở kho nhận để cộng vào.
-        
+
         if (accepted > 0) {
             updateSingleDestinationBatch(transfer, toBranch, variant, accepted, 0);
         }
@@ -308,7 +341,8 @@ public class InventoryTransferService {
         }
     }
 
-    private void updateSingleDestinationBatch(InventoryTransfer transfer, Branch branch, ProductVariant variant, int accepted, int rejected) {
+    private void updateSingleDestinationBatch(InventoryTransfer transfer, Branch branch, ProductVariant variant,
+            int accepted, int rejected) {
         // Tìm hoặc tạo lô DEFAULT tại kho nhận để nhận hàng điều chuyển
         Inventory inv = inventoryRepo.findExactBatchWithLock(branch, variant, "TRANSFER", BigDecimal.ZERO)
                 .orElseGet(() -> inventoryRepo.save(Inventory.builder()
@@ -322,7 +356,8 @@ public class InventoryTransferService {
         transactionRepo.save(InventoryTransaction.builder()
                 .type(TransactionType.TRANSFER_IN)
                 .quantityChange(accepted + rejected)
-                .newBalance(Objects.requireNonNullElse(inv.getQuantity(), 0) + Objects.requireNonNullElse(inv.getDefectiveQuantity(), 0))
+                .newBalance(Objects.requireNonNullElse(inv.getQuantity(), 0)
+                        + Objects.requireNonNullElse(inv.getDefectiveQuantity(), 0))
                 .referenceCode(transfer.getTransferCode())
                 .reason("Nhập điều chuyển QC (Phiếu: " + transfer.getTransferCode() + ")")
                 .createdAt(LocalDateTime.now())
@@ -344,7 +379,10 @@ public class InventoryTransferService {
     public Page<TransferResponse> getTransfers(String keyword, String statusStr, Pageable pageable) {
         InventoryTransferStatus status = null;
         if (statusStr != null && !statusStr.isEmpty() && !statusStr.equalsIgnoreCase("all")) {
-            try { status = InventoryTransferStatus.valueOf(statusStr.toUpperCase()); } catch (Exception e) {}
+            try {
+                status = InventoryTransferStatus.valueOf(statusStr.toUpperCase());
+            } catch (Exception e) {
+            }
         }
         return transferRepo.searchTransfers(keyword, status, pageable);
     }
@@ -363,7 +401,8 @@ public class InventoryTransferService {
     @Transactional
     public void cancelTransfer(Long id) {
         InventoryTransfer transfer = transferRepo.findById(id).orElseThrow();
-        if (transfer.getStatus() == InventoryTransferStatus.COMPLETED || transfer.getStatus() == InventoryTransferStatus.CANCELLED) {
+        if (transfer.getStatus() == InventoryTransferStatus.COMPLETED
+                || transfer.getStatus() == InventoryTransferStatus.CANCELLED) {
             throw new RuntimeException("Chỉ có thể hủy phiếu đang ở trạng thái Chờ xuất hoặc Đang vận chuyển!");
         }
         transfer.setStatus(InventoryTransferStatus.CANCELLED);
@@ -373,10 +412,12 @@ public class InventoryTransferService {
     @Transactional
     public void changeDestination(Long id, Long newBranchId) {
         InventoryTransfer transfer = transferRepo.findById(id).orElseThrow();
-        if (transfer.getStatus() == InventoryTransferStatus.COMPLETED || transfer.getStatus() == InventoryTransferStatus.CANCELLED) {
+        if (transfer.getStatus() == InventoryTransferStatus.COMPLETED
+                || transfer.getStatus() == InventoryTransferStatus.CANCELLED) {
             throw new RuntimeException("Không thể đổi chi nhánh cho phiếu đã chốt hoặc đã hủy!");
         }
-        if (transfer.getFromBranch().getId().equals(newBranchId)) throw new RuntimeException("Chi nhánh nhận trùng chi nhánh xuất!");
+        if (transfer.getFromBranch().getId().equals(newBranchId))
+            throw new RuntimeException("Chi nhánh nhận trùng chi nhánh xuất!");
         Branch newBranch = branchRepo.findById(newBranchId).orElseThrow();
         transfer.setToBranch(newBranch);
         transferRepo.save(transfer);
@@ -408,8 +449,7 @@ public class InventoryTransferService {
                 t.getPriority(),
                 t.getTotalQuantity(),
                 t.getDetails() != null ? t.getDetails().size() : 0,
-                t.getTotalValue()
-        );
+                t.getTotalValue());
     }
 
     private TransferDetailResponse convertToDetailResponse(InventoryTransfer t) {
@@ -440,5 +480,28 @@ public class InventoryTransferService {
                         .note(d.getNote())
                         .build()).toList())
                 .build();
+    }
+
+    /**
+     * Tính khoảng cách Haversine giữa hai điểm (lat1, lng1) và (lat2, lng2) - đơn
+     * vị KM
+     */
+    private double calculateHaversineDistance(Double lat1, Double lng1, Double lat2, Double lng2) {
+        if (lat1 == null || lng1 == null || lat2 == null || lng2 == null) {
+            return Double.MAX_VALUE;
+        }
+
+        final int EARTH_RADIUS = 6371; // Bán kính Trái Đất tính bằng km
+
+        double dLat = Math.toRadians(lat2 - lat1);
+        double dLng = Math.toRadians(lng2 - lng1);
+
+        double a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+                Math.cos(Math.toRadians(lat1)) * Math.cos(Math.toRadians(lat2)) *
+                        Math.sin(dLng / 2) * Math.sin(dLng / 2);
+
+        double c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+        return EARTH_RADIUS * c;
     }
 }
