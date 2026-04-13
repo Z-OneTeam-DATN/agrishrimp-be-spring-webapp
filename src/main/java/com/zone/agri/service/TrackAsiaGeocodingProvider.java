@@ -14,6 +14,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 @Component
 @RequiredArgsConstructor
@@ -61,9 +62,18 @@ public class TrackAsiaGeocodingProvider implements GeocodingProvider {
 
     @SuppressWarnings("unchecked")
     public List<AddressSuggestionDto> autocomplete(String query) {
+        return autocomplete(query, null, null, null);
+    }
+
+    @SuppressWarnings("unchecked")
+    public List<AddressSuggestionDto> autocomplete(String query, String province, String district, String ward) {
         try {
+            String contextualQuery = Stream.of(query, ward, district, province)
+                    .filter(this::hasText)
+                    .collect(Collectors.joining(", "));
+
             String uri = UriComponentsBuilder.fromHttpUrl(autocompleteUrl)
-                    .queryParam("text", query)
+                    .queryParam("text", contextualQuery)
                     .queryParam("api_key", apiKey)
                     .queryParam("lang", "vi")
                     .queryParam("boundary.country", "VN")
@@ -82,19 +92,52 @@ public class TrackAsiaGeocodingProvider implements GeocodingProvider {
                         List<Double> coords = geometry != null ? (List<Double>) geometry.get("coordinates") : null;
 
                         String label = (String) props.getOrDefault("label", "");
-                        String province = (String) props.getOrDefault("region", "");
-                        String district = (String) props.getOrDefault("county", "");
-                        String ward = (String) props.getOrDefault("locality", "");
+                        String suggestionProvince = (String) props.getOrDefault("region", "");
+                        String suggestionDistrict = (String) props.getOrDefault("county", "");
+                        String suggestionWard = (String) props.getOrDefault("locality", "");
                         double lng = coords != null && coords.size() > 0 ? coords.get(0) : 0;
                         double lat = coords != null && coords.size() > 1 ? coords.get(1) : 0;
 
-                        return new AddressSuggestionDto(label, province, district, ward, lat, lng);
+                        return new AddressSuggestionDto(label, suggestionProvince, suggestionDistrict, suggestionWard, lat, lng);
                     })
-                    .limit(5)
+                    .filter(item -> matchesAdministrativeScope(item, province, district, ward))
+                    .limit(8)
                     .collect(Collectors.toList());
         } catch (Exception e) {
-            log.warn("TrackAsia autocomplete failed for query '{}': {}", query, e.getMessage());
+            log.warn("TrackAsia autocomplete failed for query '{}' with scope [{}, {}, {}]: {}",
+                    query, province, district, ward, e.getMessage());
             return List.of();
         }
+    }
+
+    private boolean matchesAdministrativeScope(AddressSuggestionDto suggestion, String province, String district, String ward) {
+        return matchesText(province, suggestion.getProvince())
+                && matchesText(district, suggestion.getDistrict())
+                && matchesText(ward, suggestion.getWard());
+    }
+
+    private boolean matchesText(String expected, String actual) {
+        if (!hasText(expected)) {
+            return true;
+        }
+        String left = normalizeAdministrativeName(expected);
+        String right = normalizeAdministrativeName(actual);
+        return !right.isEmpty() && (right.contains(left) || left.contains(right));
+    }
+
+    private boolean hasText(String value) {
+        return value != null && !value.trim().isEmpty();
+    }
+
+    private String normalizeAdministrativeName(String value) {
+        if (value == null) {
+            return "";
+        }
+        return value
+                .toLowerCase()
+                .replaceAll("^(thành phố|tỉnh|quận|huyện|thị xã|thị trấn|phường|xã)\\s+", "")
+                .replaceAll("[^\\p{L}\\p{Nd}\\s]", " ")
+                .replaceAll("\\s+", " ")
+                .trim();
     }
 }

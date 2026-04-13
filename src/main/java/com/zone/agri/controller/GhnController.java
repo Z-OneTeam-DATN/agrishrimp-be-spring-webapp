@@ -40,13 +40,18 @@ public class GhnController {
 
     /**
      * Gợi ý địa chỉ theo chuỗi nhập vào (dùng TrackAsia Autocomplete).
-     * Trả về label + province/district/ward để FE tự fill vào các ô select.
+     * Có thể truyền thêm province/district/ward để khóa kết quả trong địa bàn đã chọn.
      *
-     * GET /api/ghn/address-suggestions?input=99 Nguyen Van Cu
+     * GET /api/ghn/address-suggestions?input=99 Nguyen Van Cu&province=Can Tho&district=Ninh Kieu&ward=An Hoa
      */
     @GetMapping("/address-suggestions")
-    public ResponseEntity<List<AddressSuggestionDto>> getSuggestions(@RequestParam String input) {
-        List<AddressSuggestionDto> suggestions = trackAsiaProvider.autocomplete(input);
+    public ResponseEntity<List<AddressSuggestionDto>> getSuggestions(
+            @RequestParam String input,
+            @RequestParam(required = false) String province,
+            @RequestParam(required = false) String district,
+            @RequestParam(required = false) String ward
+    ) {
+        List<AddressSuggestionDto> suggestions = trackAsiaProvider.autocomplete(input, province, district, ward);
         return ResponseEntity.ok(suggestions);
     }
 
