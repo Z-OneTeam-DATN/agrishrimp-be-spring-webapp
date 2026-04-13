@@ -27,6 +27,7 @@ public class InventoryReceiptRequest {
     private String supplierCode;
     private String branchName;
     private String deliverer;
+    private String creator; // FE sends "creator"
     private String entryDate;
     private String note;
     private String importStatus;
@@ -48,7 +49,11 @@ public class InventoryReceiptRequest {
 
         @NotNull(message = "Số lượng không được để trống")
         @Positive(message = "Số lượng phải lớn hơn 0")
-        private Integer plannedQuantity;
+        private Integer plannedQuantity; // Expected Qty
+
+        private Integer quantityReal;   // Actual Qty (QC fill)
+        private Integer quantityAccepted; // Accepted Qty (QC fill)
+        private Integer quantityRejected; // Rejected Qty (QC fill)
 
         private String lotNumber;
         private String expiryDate;

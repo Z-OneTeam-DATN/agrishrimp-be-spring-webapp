@@ -33,8 +33,10 @@ public class TransferDetailResponse {
         private String productName;
         private String sku;
         private String unit;
-        private Integer quantityRequested;
-        private Integer quantityReal;
+        private Integer quantityRequested; // Expected
+        private Integer quantityReal;      // Actual
+        private Integer quantityAccepted;  // Accepted
+        private Integer quantityRejected;  // Rejected
         private String note;
     }
 }

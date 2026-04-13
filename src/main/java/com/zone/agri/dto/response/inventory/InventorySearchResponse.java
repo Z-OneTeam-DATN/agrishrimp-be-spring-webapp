@@ -18,9 +18,13 @@ public class InventorySearchResponse {
     private String sku;
     private String barcode;
     private String batchNumber;
-    private Integer quantity;
+    private Integer quantity; // Tồn tốt hiện tại
+    private Integer defectiveQuantity; // SL lỗi hiện tại
+    private Integer plannedQuantity; // SL yêu cầu lúc nhập
+    private String reason; // Lý do lỗi lúc nhập
     private BigDecimal importPrice;
     private String shelfLocation;
     private LocalDateTime expiryDate;
     private String imageUrl;
+    private String unit;
 }

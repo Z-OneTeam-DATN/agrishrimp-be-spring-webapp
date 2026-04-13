@@ -21,8 +21,13 @@ public class Inventory {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     Long id;
 
+    @Builder.Default
     @Column(name = "quantity")
-    Integer quantity;
+    Integer quantity = 0; // Tồn kho có thể bán (Accepted)
+
+    @Builder.Default
+    @Column(name = "defective_quantity")
+    Integer defectiveQuantity = 0; // Tồn kho hàng lỗi (Rejected) - Chờ xuất trả
 
     // --- QUẢN LÝ THEO LÔ VÀ GIÁ ---
     @Column(name = "batch_number", length = 50)

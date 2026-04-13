@@ -27,10 +27,16 @@ public class InventoryNoteDetail {
     BigDecimal price;
 
     @Column(name = "quantity_requested")
-    Integer quantityRequested;
+    Integer quantityRequested; // Số lượng yêu cầu ban đầu (Expected Qty)
 
     @Column(name = "quantity_real")
-    Integer quantityReal;
+    Integer quantityReal; // Tổng số lượng thực tế nhà cung cấp giao (Actual Qty)
+
+    @Column(name = "quantity_accepted")
+    Integer quantityAccepted; // Số lượng đạt chuẩn, nhập kho (Accepted Qty)
+
+    @Column(name = "quantity_rejected")
+    Integer quantityRejected; // Số lượng lỗi, đưa vào kho ảo/trả NCC (Rejected Qty)
 
     @Column(name = "batch_number", length = 50)
     String batchNumber;

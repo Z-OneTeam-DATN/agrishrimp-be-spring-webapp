@@ -15,11 +15,13 @@ public interface ProductVariantRepository extends JpaRepository<ProductVariant, 
     @Query("SELECT pv FROM ProductVariant pv WHERE pv.sku = :sku")
     Optional<ProductVariant> findBySku(@Param("sku") String sku);
 
-    // [CẬP NHẬT QUAN TRỌNG]: Trả về Entity thay vì DTO, để Service xử lý tồn kho
-    @Query("SELECT v FROM ProductVariant v JOIN v.product p " +
-            "WHERE (:keyword IS NULL OR :keyword = '' " +
+    @Query("SELECT DISTINCT v FROM ProductVariant v JOIN FETCH v.product p " +
+            "LEFT JOIN Inventory i ON i.productVariant.id = v.id " +
+            "WHERE (v.status = com.zone.agri.entity.enums.VariantStatus.ACTIVE) " +
+            "AND (:keyword IS NULL OR :keyword = '' " +
             "OR LOWER(p.name) LIKE LOWER(CONCAT('%', :keyword, '%')) " +
             "OR LOWER(v.sku) LIKE LOWER(CONCAT('%', :keyword, '%')) " +
-            "OR LOWER(v.barcode) LIKE LOWER(CONCAT('%', :keyword, '%')))")
-    List<ProductVariant> searchByKeyword(@Param("keyword") String keyword);
+            "OR LOWER(v.barcode) LIKE LOWER(CONCAT('%', :keyword, '%')) " +
+            "OR LOWER(i.batchNumber) LIKE LOWER(CONCAT('%', :keyword, '%')))")
+    List<ProductVariant> findAllActiveWithProduct(@Param("keyword") String keyword);
 }

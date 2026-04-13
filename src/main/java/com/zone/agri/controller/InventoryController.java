@@ -1,6 +1,7 @@
 package com.zone.agri.controller;
 
 import com.zone.agri.dto.request.inventory.CheckNoteRequest;
+import com.zone.agri.dto.request.inventory.InventoryQCRequest;
 import com.zone.agri.dto.request.inventory.InventoryReceiptRequest;
 import com.zone.agri.dto.response.inventory.InventoryReceiptResponse;
 import com.zone.agri.dto.request.inventory.ExportNoteRequest;
@@ -56,6 +57,27 @@ public class InventoryController {
     }
 
     @SecurityRequirement(name = "bearerAuth")
+    @RequirePermission("IMPORT_APPROVE")
+    @PostMapping("/receipts/{id}/approve")
+    public ResponseEntity<InventoryReceiptResponse> approveReceipt(@PathVariable Long id) {
+        return ResponseEntity.ok(inventoryService.approveReceipt(id));
+    }
+
+    @PostMapping("/receipts/{id}/reject")
+    public ResponseEntity<InventoryReceiptResponse> rejectReceipt(@PathVariable Long id) {
+        return ResponseEntity.ok(inventoryService.rejectReceipt(id));
+    }
+
+    @SecurityRequirement(name = "bearerAuth")
+    @RequirePermission("IMPORT_CREATE")
+    @PostMapping("/receipts/{id}/complete")
+    public ResponseEntity<InventoryReceiptResponse> completeReceipt(
+            @PathVariable Long id,
+            @Valid @RequestBody InventoryQCRequest qcRequest) {
+        return ResponseEntity.ok(inventoryService.completeReceipt(id, qcRequest));
+    }
+
+    @SecurityRequirement(name = "bearerAuth")
     @RequirePermission("IMPORT_UPDATE")
     @PutMapping("/receipts/{id}")
     public ResponseEntity<InventoryReceiptResponse> updateReceipt(
@@ -89,6 +111,14 @@ public class InventoryController {
         return ResponseEntity.ok(inventoryService.getReceiptById(id));
     }
 
+    @SecurityRequirement(name = "bearerAuth")
+    @GetMapping("/defective-items")
+    public ResponseEntity<List<com.zone.agri.dto.response.inventory.InventorySearchResponse>> getDefectiveItemsBySupplier(
+            @RequestParam Long supplierId,
+            @RequestParam(required = false) Long branchId) {
+        return ResponseEntity.ok(inventoryService.getDefectiveItemsBySupplier(supplierId, branchId));
+    }
+
     // ==============================
     // LỆNH XUẤT KHO (EXPORT)
     // ==============================
@@ -112,11 +142,21 @@ public class InventoryController {
     @PostMapping("/export-commands")
     public ResponseEntity<?> createExportCommand(@Valid @RequestBody ExportNoteRequest request) {
         InventoryNoteResponse response = inventoryNoteService.createExportCommand(request);
-        // Có EXPORT_APPROVE → tự động chốt phiếu & trừ kho
-        if (hasAuthority("EXPORT_APPROVE")) {
-            response = inventoryNoteService.completeExportCommand(response.getId());
-        }
         return ResponseEntity.ok(response);
+    }
+
+    @SecurityRequirement(name = "bearerAuth")
+    @RequirePermission("EXPORT_APPROVE")
+    @PostMapping("/export-commands/{id}/approve")
+    public ResponseEntity<?> approveExportCommand(@PathVariable Long id) {
+        return ResponseEntity.ok(inventoryNoteService.approveExportCommand(id));
+    }
+
+    @SecurityRequirement(name = "bearerAuth")
+    @RequirePermission("EXPORT_APPROVE")
+    @PostMapping("/export-commands/{id}/complete")
+    public ResponseEntity<?> completeExportCommand(@PathVariable Long id) {
+        return ResponseEntity.ok(inventoryNoteService.completeExportCommand(id));
     }
 
     @SecurityRequirement(name = "bearerAuth")
@@ -125,13 +165,6 @@ public class InventoryController {
     public ResponseEntity<?> deleteExportCommand(@PathVariable Long id) {
         inventoryNoteService.deleteExportCommand(id);
         return ResponseEntity.ok("Xóa lệnh xuất thành công");
-    }
-
-    @SecurityRequirement(name = "bearerAuth")
-    @RequirePermission("EXPORT_APPROVE")
-    @PostMapping("/export-commands/{id}/complete")
-    public ResponseEntity<?> completeExportCommand(@PathVariable Long id) {
-        return ResponseEntity.ok(inventoryNoteService.completeExportCommand(id));
     }
 
     @SecurityRequirement(name = "bearerAuth")

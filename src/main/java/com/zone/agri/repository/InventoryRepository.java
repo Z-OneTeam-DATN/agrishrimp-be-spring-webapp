@@ -3,6 +3,7 @@ package com.zone.agri.repository;
 import com.zone.agri.entity.Branch;
 import com.zone.agri.entity.Inventory;
 import com.zone.agri.entity.ProductVariant;
+import com.zone.agri.entity.enums.VariantStatus;
 import com.zone.agri.dto.response.inventory.InventorySearchResponse;
 import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -49,11 +50,19 @@ public interface InventoryRepository extends JpaRepository<Inventory, Long> {
             "ORDER BY i.expiryDate ASC, i.lastReceiptDate ASC")
     List<Inventory> findAvailableBatchesForVariant(@Param("branchId") Long branchId, @Param("variantId") Long variantId);
 
-    @Query("SELECT COALESCE(SUM(i.quantity), 0) FROM Inventory i WHERE i.branch.id = :branchId AND i.productVariant.id = :variantId")
-    Integer sumQuantityByBranchAndVariant(@Param("branchId") Long branchId, @Param("variantId") Long variantId);
+    @Query("SELECT CAST(COALESCE(SUM(i.quantity), 0) AS Long) FROM Inventory i WHERE i.branch.id = :branchId AND i.productVariant.id = :variantId")
+    Long sumQuantityByBranchAndVariant(@Param("branchId") Long branchId, @Param("variantId") Long variantId);
 
-    @Query("SELECT COALESCE(SUM(i.quantity), 0) FROM Inventory i WHERE i.branch.id = :branchId AND i.productVariant.id = :variantId AND i.batchNumber = :batchNumber")
-    Integer sumQuantityByBranchAndVariantAndBatch(@Param("branchId") Long branchId, @Param("variantId") Long variantId, @Param("batchNumber") String batchNumber);
+    @Query("SELECT CAST(COALESCE(SUM(i.defectiveQuantity), 0) AS Long) FROM Inventory i WHERE i.branch.id = :branchId AND i.productVariant.id = :variantId")
+    Long sumDefectiveQuantityByBranchAndVariant(@Param("branchId") Long branchId, @Param("variantId") Long variantId);
+
+    @Query("SELECT CAST(COALESCE(SUM(i.defectiveQuantity), 0) AS Long) FROM Inventory i " +
+           "WHERE i.branch.id = :branchId AND i.productVariant.id = :variantId " +
+           "AND (TRIM(LOWER(i.batchNumber)) = TRIM(LOWER(:batchNumber)) OR (i.batchNumber IS NULL AND :batchNumber IS NULL))")
+    Long sumDefectiveQuantityByBranchAndVariantAndBatch(@Param("branchId") Long branchId, @Param("variantId") Long variantId, @Param("batchNumber") String batchNumber);
+
+    @Query("SELECT COALESCE(SUM(i.quantity), 0L) FROM Inventory i WHERE i.branch.id = :branchId AND i.productVariant.id = :variantId AND i.batchNumber = :batchNumber")
+    Long sumQuantityByBranchAndVariantAndBatch(@Param("branchId") Long branchId, @Param("variantId") Long variantId, @Param("batchNumber") String batchNumber);
 
     @Query("SELECT i FROM Inventory i WHERE i.branch.id = :branchId AND i.productVariant.id = :variantId AND i.batchNumber = :batchNumber")
     List<Inventory> findExactBatchListByNumber(@Param("branchId") Long branchId, @Param("variantId") Long variantId, @Param("batchNumber") String batchNumber);
@@ -62,12 +71,8 @@ public interface InventoryRepository extends JpaRepository<Inventory, Long> {
             Branch branch, ProductVariant variant, String batchNumber, BigDecimal importPrice
     );
 
-    // 👉 Tìm tất cả lô hàng của 1 Variant (dùng trong ProductService và InventoryTransferService)
     List<Inventory> findByProductVariantId(Long variantId);
 
-    // ==============================
-    // TỔNG TỒN KHO TOÀN HỆ THỐNG THEO PRODUCT
-    // ==============================
     @Query("""
            SELECT COALESCE(SUM(i.quantity), 0L)
            FROM Inventory i
@@ -79,22 +84,18 @@ public interface InventoryRepository extends JpaRepository<Inventory, Long> {
     Long sumQuantityByProductVariantId(@Param("variantId") Long variantId);
 
     @Query("SELECT SUM(i.quantity) FROM Inventory i WHERE i.productVariant.id = :variantId")
-    Integer sumQuantityByVariantId(@Param("variantId") Long variantId);
+    Long sumQuantityByVariantId(@Param("variantId") Long variantId);
 
     boolean existsByProductVariantProductId(Long productId);
 
-    // ==============================
-    // BATCH: tổng tồn kho cho nhiều sản phẩm (dùng cho API public list)
-    // ==============================
     @Query("""
-           SELECT i.productVariant.product.id, COALESCE(SUM(i.quantity), 0)
+           SELECT i.productVariant.product.id, COALESCE(SUM(i.quantity), 0L)
            FROM Inventory i
            WHERE i.productVariant.product.id IN :productIds
            GROUP BY i.productVariant.product.id
            """)
     List<Object[]> sumQuantityGroupByProductIds(@Param("productIds") List<Long> productIds);
 
-    // --- MINI APP: lấy giá nhập thấp nhất (còn hàng) theo batch productIds ---
     @Query("""
            SELECT i.productVariant.product.id, MIN(i.importPrice)
            FROM Inventory i
@@ -103,27 +104,21 @@ public interface InventoryRepository extends JpaRepository<Inventory, Long> {
            """)
     List<Object[]> findMinImportPriceGroupByProductIds(@Param("productIds") List<Long> productIds);
 
-
-    @Query("""
-           SELECT new com.zone.agri.dto.response.inventory.InventorySearchResponse(
-               pv.id, p.name, pv.customSpecs, pv.sku, pv.barcode,
-               i.batchNumber, i.quantity, i.importPrice, i.shelfLocation,
-               i.expiryDate, pv.imageUrl
-           )
-           FROM Inventory i
-           JOIN i.productVariant pv
-           JOIN pv.product p
-           WHERE pv.status = com.zone.agri.entity.enums.VariantStatus.ACTIVE
-             AND (:branchId IS NULL OR i.branch.id = :branchId)
-             AND (
-                 :keyword IS NULL OR :keyword = ''
-                 OR LOWER(p.name) LIKE LOWER(CONCAT('%', :keyword, '%'))
-                 OR LOWER(pv.customSpecs) LIKE LOWER(CONCAT('%', :keyword, '%'))
-                 OR LOWER(pv.sku) LIKE LOWER(CONCAT('%', :keyword, '%'))
-                 OR LOWER(pv.barcode) LIKE LOWER(CONCAT('%', :keyword, '%'))
-                 OR LOWER(i.batchNumber) LIKE LOWER(CONCAT('%', :keyword, '%'))
-             )
-           """)
+    @Query("SELECT new com.zone.agri.dto.response.inventory.InventorySearchResponse(" +
+            "pv.id, p.name, pv.customSpecs, pv.sku, pv.barcode, " +
+            "i.batchNumber, i.quantity, i.defectiveQuantity, 0, '', i.importPrice, i.shelfLocation, " +
+            "i.expiryDate, pv.imageUrl, 'Cái') " +
+            "FROM Inventory i " +
+            "JOIN i.productVariant pv " +
+            "JOIN pv.product p " +
+            "WHERE pv.status = com.zone.agri.entity.enums.VariantStatus.ACTIVE " +
+            "AND (:branchId IS NULL OR i.branch.id = :branchId) " +
+            "AND (:keyword IS NULL OR :keyword = '' " +
+            "OR LOWER(p.name) LIKE LOWER(CONCAT('%', :keyword, '%')) " +
+            "OR LOWER(pv.customSpecs) LIKE LOWER(CONCAT('%', :keyword, '%')) " +
+            "OR LOWER(pv.sku) LIKE LOWER(CONCAT('%', :keyword, '%')) " +
+            "OR LOWER(pv.barcode) LIKE LOWER(CONCAT('%', :keyword, '%')) " +
+            "OR LOWER(i.batchNumber) LIKE LOWER(CONCAT('%', :keyword, '%')))")
     List<InventorySearchResponse> searchInventoryForCheck(@Param("keyword") String keyword, @Param("branchId") Long branchId);
 
     @Query("SELECT COUNT(DISTINCT i.productVariant.product.id) FROM Inventory i " +
@@ -141,15 +136,16 @@ public interface InventoryRepository extends JpaRepository<Inventory, Long> {
             "WHERE (:branchId IS NULL OR i.branch.id = :branchId) AND i.quantity > 0)")
     long countOutOfStockProducts(@Param("branchId") Long branchId);
 
+    @Query("SELECT i FROM Inventory i WHERE i.defectiveQuantity > :threshold")
+    List<Inventory> findAllByDefectiveQuantityGreaterThan(@Param("threshold") int threshold);
+
+    @Query("SELECT i FROM Inventory i WHERE i.branch.id = :branchId AND i.defectiveQuantity > :threshold")
+    List<Inventory> findAllByBranchIdAndDefectiveQuantityGreaterThan(@Param("branchId") Long branchId, @Param("threshold") int threshold);
+
     @Query("SELECT COALESCE(SUM(i.quantity * i.importPrice), 0) FROM Inventory i " +
             "WHERE (:branchId IS NULL OR i.branch.id = :branchId)")
     BigDecimal sumTotalValue(@Param("branchId") Long branchId);
 
-    // ==============================================================
-    // 2. ADAPTER: VIẾT LẠI CÁC HÀM CŨ ĐỂ KHÔNG LÀM LỖI CODE NGƯỜI KHÁC
-    // ==============================================================
-
-    // --- BƯỚC 2.1: Các raw query lấy danh sách tất cả các lô ---
     @Query("SELECT i FROM Inventory i WHERE i.branch = :branch AND i.productVariant = :variant")
     List<Inventory> rawFindByBranchAndProductVariant(@Param("branch") Branch branch, @Param("variant") ProductVariant variant);
 
@@ -162,10 +158,6 @@ public interface InventoryRepository extends JpaRepository<Inventory, Long> {
     @Query("SELECT i FROM Inventory i WHERE i.productVariant.id IN :variantIds")
     List<Inventory> rawFindByProductVariantIdIn(@Param("variantIds") List<Long> variantIds);
 
-    /**
-     * Query gộp tồn kho nhiều chi nhánh + nhiều variant — 1 lần duy nhất.
-     * ORDER BY i.id ASC để lấy lô hàng cũ xuất trước (FIFO).
-     */
     @Query("""
            SELECT i FROM Inventory i
            WHERE i.branch.id IN :branchIds
@@ -182,7 +174,12 @@ public interface InventoryRepository extends JpaRepository<Inventory, Long> {
             @Param("variantId") Long variantId
     );
 
-    // --- BƯỚC 2.2: Khai báo lại các tên hàm cũ mà file khác đang gọi ---
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT i FROM Inventory i WHERE i.branch.id = :branchId AND i.productVariant.id = :variantId AND i.defectiveQuantity > 0 ORDER BY i.id ASC")
+    List<Inventory> findForUpdateDefectiveFIFO(
+            @Param("branchId") Long branchId,
+            @Param("variantId") Long variantId
+    );
 
     default Optional<Inventory> findByBranchAndProductVariant(Branch branch, ProductVariant variant) {
         return aggregateInventoryList(rawFindByBranchAndProductVariant(branch, variant));
@@ -204,13 +201,6 @@ public interface InventoryRepository extends JpaRepository<Inventory, Long> {
         return aggregateInventoryListToArray(rawFindInventoryMatrix(branchIds, variantIds));
     }
 
-
-    // --- HÀM BỔ TRỢ: Gom nhiều Lô hàng thành 1 Inventory "Đại diện" ---
-
-    /**
-     * Dành cho những logic cũ (như Check stock, Get quantity).
-     * Gom N lô hàng thành 1 Inventory với Quantity = Tổng N lô.
-     */
     default Optional<Inventory> aggregateInventoryList(List<Inventory> list) {
         if (list == null || list.isEmpty()) {
             return Optional.empty();
@@ -228,9 +218,6 @@ public interface InventoryRepository extends JpaRepository<Inventory, Long> {
         return Optional.of(aggregated);
     }
 
-    /**
-     * Dành cho các hàm cũ trả về List (vd: Giỏ hàng check tồn kho nhiều món 1 lúc).
-     */
     default List<Inventory> aggregateInventoryListToArray(List<Inventory> rawList) {
         if (rawList == null || rawList.isEmpty()) return new ArrayList<>();
 

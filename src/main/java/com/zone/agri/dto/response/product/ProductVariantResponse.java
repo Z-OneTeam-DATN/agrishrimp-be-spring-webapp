@@ -1,14 +1,19 @@
 package com.zone.agri.dto.response.product;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import com.zone.agri.entity.enums.VariantStatus;
+import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
+import lombok.NoArgsConstructor;
 
 import java.math.BigDecimal;
 import java.util.List;
 
 @Data
 @Builder
+@NoArgsConstructor
+@AllArgsConstructor
 public class ProductVariantResponse {
     private Long id;
     private String sku;
@@ -19,6 +24,10 @@ public class ProductVariantResponse {
     private String imageUrl;
     private VariantStatus status;
     private Integer quantity;
+    
+    @JsonProperty("isLowStock")
+    private boolean lowStock;
+
     private List<BatchInfoDto> batches;
 
     private List<AttributeValueResponse> attributeValues;

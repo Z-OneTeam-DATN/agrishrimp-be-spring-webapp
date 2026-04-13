@@ -27,14 +27,14 @@ public class InventoryNote {
     String code;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "type", columnDefinition = "ENUM('IMPORT', 'EXPORT', 'CHECK')")
+    @Column(name = "type")
     InventoryNoteType type;
 
     @Column(name = "reason", columnDefinition = "TEXT")
     String reason;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "status", columnDefinition = "ENUM('PENDING', 'COMPLETED', 'CANCELLED')")
+    @Column(name = "status", length = 50)
     InventoryNoteStatus status;
 
     @Column(name = "total_amount", precision = 38, scale = 2)
@@ -60,6 +60,9 @@ public class InventoryNote {
 
     @Column(name = "debt_amount", precision = 38, scale = 2)
     BigDecimal debtAmount;
+
+    @Column(name = "shipping_address", columnDefinition = "TEXT")
+    String shippingAddress;
 
     @Column(name = "check_type", length = 50)
     String checkType;
