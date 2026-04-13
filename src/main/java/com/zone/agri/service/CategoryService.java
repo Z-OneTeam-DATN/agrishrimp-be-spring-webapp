@@ -1,24 +1,23 @@
 package com.zone.agri.service;
 
-import com.zone.agri.dto.response.admin.CategoryDTO;
-import com.zone.agri.entity.Category;
-import com.zone.agri.entity.Product;
-import com.zone.agri.entity.enums.CategoryStatus;
-import com.zone.agri.entity.enums.ProductStatus;
-import com.zone.agri.entity.enums.VariantStatus;
-import com.zone.agri.common.CloudinaryService;
-import com.zone.agri.exception.ConflictException; // Chắc chắn đã import đúng class Exception của bạn
-import com.zone.agri.exception.NotFoundException;
-import com.zone.agri.repository.CategoryRepository;
-import com.zone.agri.repository.ProductRepository;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
-
 import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
+
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional; // Chắc chắn đã import đúng class Exception của bạn
+
+import com.zone.agri.common.CloudinaryService;
+import com.zone.agri.dto.response.admin.CategoryDTO;
+import com.zone.agri.entity.Category;
+import com.zone.agri.entity.enums.CategoryStatus;
+import com.zone.agri.exception.ConflictException;
+import com.zone.agri.exception.NotFoundException;
+import com.zone.agri.repository.CategoryRepository;
+import com.zone.agri.repository.ProductRepository;
+
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 
 @Service
 @RequiredArgsConstructor
@@ -36,7 +35,8 @@ public class CategoryService {
 
     // TỐI ƯU: Logic tính tổng sản phẩm đệ quy
     private long countAllProductsRecursive(Category category) {
-        if (category == null) return 0;
+        if (category == null)
+            return 0;
         long count = productRepository.countByCategoryId(category.getId());
         if (category.getChildren() != null && !category.getChildren().isEmpty()) {
             for (Category child : category.getChildren()) {
@@ -74,6 +74,12 @@ public class CategoryService {
             cascadeHide(category);
         }
 
+        // Khi mở lại danh mục cha, khôi phục trạng thái danh mục con và sản phẩm thuộc
+        // cây danh mục
+        if (oldStatus == CategoryStatus.INACTIVE && category.getStatus() == CategoryStatus.ACTIVE) {
+            cascadeRestore(category);
+        }
+
         return convertToDTO(categoryRepository.save(category));
     }
 
@@ -95,7 +101,8 @@ public class CategoryService {
                 throw new ConflictException("Danh mục không thể làm cha của chính nó!");
             }
             Category parent = categoryRepository.findById(dto.getParentId())
-                    .orElseThrow(() -> new NotFoundException("Không tìm thấy danh mục cha với ID: " + dto.getParentId()));
+                    .orElseThrow(
+                            () -> new NotFoundException("Không tìm thấy danh mục cha với ID: " + dto.getParentId()));
             entity.setParent(parent);
         } else {
             entity.setParent(null);
@@ -113,8 +120,25 @@ public class CategoryService {
                 if (child.getStatus() != CategoryStatus.INACTIVE) {
                     child.setStatus(CategoryStatus.INACTIVE);
                     categoryRepository.save(child);
-                    cascadeHide(child);
                 }
+                cascadeHide(child);
+            }
+        }
+    }
+
+    private void cascadeRestore(Category category) {
+        // Mở lại tất cả sản phẩm thuộc danh mục này
+        productRepository.activateByCategoryId(category.getId());
+
+        // Đệ quy mở lại danh mục con và sản phẩm của con
+        List<Category> children = category.getChildren();
+        if (children != null && !children.isEmpty()) {
+            for (Category child : children) {
+                if (child.getStatus() != CategoryStatus.ACTIVE) {
+                    child.setStatus(CategoryStatus.ACTIVE);
+                    categoryRepository.save(child);
+                }
+                cascadeRestore(child);
             }
         }
     }
@@ -127,7 +151,8 @@ public class CategoryService {
         // Chặn xóa nếu có sản phẩm (tính cả SP trong danh mục con)
         long totalProducts = countAllProductsRecursive(category);
         if (totalProducts > 0) {
-            throw new ConflictException("Không thể xóa! Danh mục này hoặc danh mục con đang chứa " + totalProducts + " sản phẩm.");
+            throw new ConflictException(
+                    "Không thể xóa! Danh mục này hoặc danh mục con đang chứa " + totalProducts + " sản phẩm.");
         }
 
         categoryRepository.delete(category);
@@ -152,7 +177,8 @@ public class CategoryService {
 
     public List<CategoryDTO> getPublicCategories() {
         List<Category> categories = categoryRepository.findByStatus(CategoryStatus.ACTIVE);
-        if (categories == null) return new ArrayList<>();
+        if (categories == null)
+            return new ArrayList<>();
 
         return categories.stream()
                 .map(this::convertToDTO)

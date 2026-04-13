@@ -124,7 +124,7 @@ After startup:
 
 ### Option 2: Run in a more production-like container setup
 
-- Use `.env.example` as the template for your `.env` or `.env.backend` file.
+- Use `.env.example` as the template for your `.env` file.
 - The repository `docker-compose.yml` includes `ai-visual-search`, which points to an external sibling repository at `../agrishrimp-ai-visual-search`, so that part is optional if you only need the core backend running.
 
 ## 🔐 Environment & Configuration
