@@ -32,6 +32,26 @@ services:
       retries: 5
 
   # ─────────────────────────────────────────────
+  #  PYTHON AI — DIAGNOSIS (YOLOv8 + Gemini)
+  # ─────────────────────────────────────────────
+  ai-diagnosis:
+    build:
+      context: ../agrishrimp-ai-diagnosis
+      dockerfile: Dockerfile
+    container_name: agri-shrimp-ai-diagnosis
+    restart: always
+    env_file:
+      - ../agrishrimp-ai-diagnosis/.env
+    environment:
+      PORT: 8000
+    healthcheck:
+      test: [ "CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/ai/')" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # ─────────────────────────────────────────────
   #  PYTHON AI — IMAGE SEARCH
   # ─────────────────────────────────────────────
   ai-visual-search:
@@ -120,6 +140,7 @@ services:
       AWS_S3_UPLOAD_DIR: ${AWS_S3_UPLOAD_DIR:-webapp}
       # Python AI Service
       IMAGE_SEARCH_URL: http://ai-visual-search:5001
+      AI_BASE_URL: http://ai-diagnosis:8000
       # Geocoding / Routing
       GEOCODING_PROVIDER: ${GEOCODING_PROVIDER:-trackasia}
       TRACKASIA_API_KEY: ${TRACKASIA_API_KEY}
