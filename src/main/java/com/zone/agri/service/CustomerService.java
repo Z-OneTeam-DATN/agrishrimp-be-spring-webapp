@@ -21,7 +21,6 @@ import com.zone.agri.exception.NotFoundException;
 import com.zone.agri.repository.*;
 import lombok.extern.slf4j.Slf4j;
 import lombok.RequiredArgsConstructor;
-import org.apache.commons.lang3.RandomStringUtils;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -35,6 +34,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.UUID;
 import java.util.stream.Collectors;
 
 @Service
@@ -63,7 +63,7 @@ public class CustomerService {
             throw new ConflictException("SĐT " + req.getPhone() + " đã được sử dụng!");
         }
 
-        String randomPassword = RandomStringUtils.randomAlphanumeric(8);
+        String randomPassword = UUID.randomUUID().toString().replace("-", "").substring(0, 8);
 
         Role customerRole = roleRepository.findBySlug("CUSTOMER")
                 .orElseThrow(() -> new NotFoundException("Role CUSTOMER chưa được cấu hình"));
@@ -183,14 +183,45 @@ public class CustomerService {
         dto.setTotalOrders(totalOrders);
         dto.setTotalSpent(totalSpent);
 
+        double reputationScore = 0.0;
         if (totalOrders > 0) {
             double score = (double) completedOrders / totalOrders * 100;
-            dto.setReputationScore(Math.round(score * 100.0) / 100.0);
-        } else {
-            dto.setReputationScore(0.0);
+            reputationScore = Math.round(score * 100.0) / 100.0;
         }
 
+        dto.setReputationScore(reputationScore);
+        dto.setRiskLevel(determineRiskLevel(reputationScore));
+        dto.setOnlinePaymentOnly(requiresOnlinePayment(reputationScore));
+
         return dto;
+    }
+
+    public boolean requiresOnlinePayment(Long userId) {
+        User user = userRepository.findById(userId).orElse(null);
+        if (user == null || user.getRole() == null || user.getRole().getSlug().equals("ADMIN")) {
+            return false;
+        }
+
+        Long totalOrders = orderRepository.countTotalOrdersByUserId(userId);
+        Long completedOrders = orderRepository.countCompletedOrdersByUserId(userId);
+        if (totalOrders == null || totalOrders < 3) {
+            return false;
+        }
+
+        double reputationScore = (double) (completedOrders != null ? completedOrders : 0) / totalOrders * 100;
+        return requiresOnlinePayment(reputationScore);
+    }
+
+    private boolean requiresOnlinePayment(double reputationScore) {
+        return reputationScore < 50.0;
+    }
+
+    private String determineRiskLevel(double reputationScore) {
+        if (reputationScore >= 80.0)
+            return "LOW";
+        if (reputationScore >= 50.0)
+            return "MEDIUM";
+        return "HIGH";
     }
 
     // 5. Khóa / Mở khóa tài khoản
@@ -217,9 +248,9 @@ public class CustomerService {
         CustomerResponse base = convertToResponse(user);
 
         LocalDateTime lastOrderDate = orderRepository.findLastOrderDateByUserId(userId);
-        BigDecimal averageOrderValue = Optional.ofNullable(orderRepository.findAverageOrderValueByUserId(userId))
-                .map(BigDecimal::valueOf)
-                .orElse(BigDecimal.ZERO);
+        Double averageOrderValueRaw = orderRepository.findAverageOrderValueByUserId(userId);
+        BigDecimal averageOrderValue = averageOrderValueRaw != null ? BigDecimal.valueOf(averageOrderValueRaw)
+                : BigDecimal.ZERO;
 
         List<CustomerAddressResponse> addresses = userAddressRepository
                 .findByUserIdOrderByIsDefaultDescCreatedAtDesc(userId)
@@ -249,6 +280,8 @@ public class CustomerService {
                 .totalOrders(base.getTotalOrders())
                 .totalSpent(base.getTotalSpent())
                 .reputationScore(base.getReputationScore())
+                .riskLevel(base.getRiskLevel())
+                .onlinePaymentOnly(base.getOnlinePaymentOnly())
                 .lastOrderDate(lastOrderDate)
                 .averageOrderValue(averageOrderValue)
                 .addresses(addresses)
@@ -297,13 +330,13 @@ public class CustomerService {
                 .collect(Collectors.toMap(User::getId, User::getFullName));
 
         return logs.stream()
-                .map(log -> CustomerStatusLogResponse.builder()
-                        .id(log.getId())
-                        .fromStatus(log.getFromStatus())
-                        .toStatus(log.getToStatus())
-                        .reason(log.getReason())
-                        .changedByName(userNameById.getOrDefault(log.getCreatedByUserId(), "Hệ thống"))
-                        .createdAt(log.getCreatedAt())
+                .map(statusLog -> CustomerStatusLogResponse.builder()
+                        .id(statusLog.getId())
+                        .fromStatus(statusLog.getFromStatus())
+                        .toStatus(statusLog.getToStatus())
+                        .reason(statusLog.getReason())
+                        .changedByName(userNameById.getOrDefault(statusLog.getCreatedByUserId(), "Hệ thống"))
+                        .createdAt(statusLog.getCreatedAt())
                         .build())
                 .toList();
     }
@@ -357,24 +390,8 @@ public class CustomerService {
 
         double reputationScore = (double) (completedOrders != null ? completedOrders : 0) / totalOrders * 100;
 
-        // Xử lý theo Rule
-        if (reputationScore < 30.0 && user.getStatus() == UserStatus.ACTIVE) {
-            // 1. Tự động Khóa
-            UserStatus fromStatus = user.getStatus();
-            user.setStatus(UserStatus.INACTIVE);
-            userRepository.save(user);
-            saveStatusLog(user, fromStatus, UserStatus.INACTIVE, "AUTO_LOCK_REPUTATION_BELOW_30");
-
-            // Gửi email thông báo khóa
-            try {
-                emailService.sendAccountLockedEmail(user.getEmail(), user.getFullName(), reputationScore);
-                log.info("Đã tự động KHÓA tài khoản user_id {} do uy tín quá thấp ({}%)", userId, reputationScore);
-            } catch (Exception e) {
-                log.error("Lỗi gửi mail khóa TK: {}", e.getMessage());
-            }
-
-        } else if (reputationScore < 50.0 && reputationScore >= 30.0) {
-            // 2. Cảnh cáo (Chỉ gửi mail, không khóa)
+        // Xử lý theo Rule mới: không khóa, chỉ cảnh báo và đánh dấu rủi ro
+        if (reputationScore < 50.0) {
             try {
                 emailService.sendWarningEmail(user.getEmail(), user.getFullName(), reputationScore);
                 log.info("Đã gửi cảnh báo tài khoản user_id {} do uy tín thấp ({}%)", userId, reputationScore);

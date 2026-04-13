@@ -33,6 +33,8 @@ public class CustomerDetailResponse {
     private Long totalOrders;
     private BigDecimal totalSpent;
     private Double reputationScore;
+    private String riskLevel;
+    private Boolean onlinePaymentOnly;
 
     private LocalDateTime lastOrderDate;
     private BigDecimal averageOrderValue;

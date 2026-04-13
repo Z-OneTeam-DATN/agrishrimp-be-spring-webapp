@@ -1,6 +1,8 @@
 package com.zone.agri.exception;
 
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
@@ -47,6 +49,17 @@ public class ApiExceptionHandler {
     return ResponseEntity.badRequest().body(errorVm);
   }
 
+  @ExceptionHandler(RateLimitException.class)
+  public ResponseEntity<Map<String, Object>> handleRateLimitException(RateLimitException ex,
+      WebRequest request) {
+    Map<String, Object> payload = new HashMap<>();
+    payload.put("message", ex.getMessage());
+    payload.put("code", ex.getCode());
+    payload.put("retryAfterSeconds", ex.getRetryAfterSeconds());
+    log.warn(ERROR_LOG_FORMAT, this.getServletPath(request), 409, ex.getMessage());
+    return ResponseEntity.status(HttpStatus.CONFLICT).body(payload);
+  }
+
   @ExceptionHandler(HttpMessageNotReadableException.class)
   public ResponseEntity<ErrorDetail> handleHttpMessageNotReadable(
       HttpMessageNotReadableException ex, WebRequest request) {
@@ -67,14 +80,14 @@ public class ApiExceptionHandler {
     return ResponseEntity.badRequest().body(errorVm);
   }
 
-  @ExceptionHandler({SignInRequiredException.class})
+  @ExceptionHandler({ SignInRequiredException.class })
   public ResponseEntity<ErrorDetail> handleSignInRequired(SignInRequiredException ex) {
     String message = ex.getMessage();
     ErrorDetail errorVm = new ErrorDetail(HttpStatus.UNAUTHORIZED.toString(), "Authentication required", message);
     return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(errorVm);
   }
 
-  @ExceptionHandler({Forbidden.class})
+  @ExceptionHandler({ Forbidden.class })
   public ResponseEntity<ErrorDetail> handleForbidden(Forbidden ex, WebRequest request) {
     String message = ex.getMessage();
     ErrorDetail errorVm = new ErrorDetail(HttpStatus.FORBIDDEN.toString(), "Forbidden", message);
@@ -83,7 +96,7 @@ public class ApiExceptionHandler {
     return new ResponseEntity<>(errorVm, HttpStatus.FORBIDDEN);
   }
 
-  @ExceptionHandler({AuthenticationException.class})
+  @ExceptionHandler({ AuthenticationException.class })
   public ResponseEntity<ErrorDetail> handleAuthenticationException(AuthenticationException ex,
       WebRequest request) {
     String message = ex.getMessage();
@@ -120,7 +133,8 @@ public class ApiExceptionHandler {
   }
 
   @ExceptionHandler(org.springframework.web.server.ResponseStatusException.class)
-  public ResponseEntity<ErrorDetail> handleResponseStatusException(org.springframework.web.server.ResponseStatusException ex, WebRequest request) {
+  public ResponseEntity<ErrorDetail> handleResponseStatusException(
+      org.springframework.web.server.ResponseStatusException ex, WebRequest request) {
     ErrorDetail errorVm = new ErrorDetail(ex.getStatusCode().toString(), ex.getReason(), null);
     log.warn(ERROR_LOG_FORMAT, this.getServletPath(request), ex.getStatusCode().value(), ex.getReason());
     return new ResponseEntity<>(errorVm, ex.getStatusCode());

@@ -1,14 +1,15 @@
 package com.zone.agri.dto.response.customer;
 
+import java.math.BigDecimal;
+import java.time.LocalDateTime;
+
 import com.zone.agri.entity.enums.AuthProvider;
 import com.zone.agri.entity.enums.CustomerStatus;
 import com.zone.agri.entity.enums.UserStatus;
+
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
-
-import java.math.BigDecimal;
-import java.time.LocalDateTime;
 
 @Data
 @NoArgsConstructor
@@ -24,7 +25,8 @@ public class CustomerResponse {
     private UserStatus userStatus;
     private LocalDateTime createdAt;
 
-    // Thông tin từ bảng Customer (Hồ sơ thêm, có thể null nếu khách chỉ mới login Google)
+    // Thông tin từ bảng Customer (Hồ sơ thêm, có thể null nếu khách chỉ mới login
+    // Google)
     private Long customerId;
     private CustomerStatus customerStatus;
     private String addressDetail;
@@ -32,5 +34,7 @@ public class CustomerResponse {
     private Long totalOrders;
     private BigDecimal totalSpent;
     private Double reputationScore; // Điểm uy tín (%)
+    private String riskLevel;
+    private Boolean onlinePaymentOnly;
 
 }

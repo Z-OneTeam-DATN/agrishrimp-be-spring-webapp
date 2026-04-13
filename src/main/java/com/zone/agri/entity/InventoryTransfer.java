@@ -1,7 +1,6 @@
 package com.zone.agri.entity;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
-import com.fasterxml.jackson.annotation.JsonManagedReference;
 import com.zone.agri.entity.enums.InventoryTransferStatus;
 import jakarta.persistence.*;
 import lombok.*;
@@ -19,7 +18,7 @@ import java.util.List;
 @AllArgsConstructor
 @Builder
 @FieldDefaults(level = AccessLevel.PRIVATE)
-@JsonIgnoreProperties({"hibernateLazyInitializer", "handler"})
+@JsonIgnoreProperties({ "hibernateLazyInitializer", "handler" })
 public class InventoryTransfer {
 
     @Id
@@ -97,6 +96,11 @@ public class InventoryTransfer {
     @EqualsAndHashCode.Exclude
     User receiver;
 
+    @Builder.Default
     @OneToMany(mappedBy = "inventoryTransfer", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<InventoryTransferDetail> details = new ArrayList<>();
+
+    public String getTransferCode() {
+        return transferCode;
+    }
 }
