@@ -20,4 +20,7 @@ public class AiPredictResponse {
 
     @JsonProperty("final_prediction")
     private AiPredictionItem finalPrediction;
+
+    @JsonProperty("annotated_image")
+    private String annotatedImage;
 }

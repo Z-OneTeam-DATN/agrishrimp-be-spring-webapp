@@ -1,5 +1,6 @@
 package com.zone.agri.service.miniapp;
 
+import com.zone.agri.common.CloudinaryService;
 import com.zone.agri.client.ai.AiDiagnosisClient;
 import com.zone.agri.client.ai.AiPrescriptionClient;
 import com.zone.agri.dto.miniapp.ai.*;
@@ -31,6 +32,7 @@ import java.util.stream.Collectors;
 @Slf4j
 public class MiniAppDiagnosisService {
 
+    private final CloudinaryService cloudinaryService;
     private final AiDiagnosisClient aiDiagnosisClient;
     private final AiPrescriptionClient aiPrescriptionClient;
     private final MiniAppProductSuggestionService productSuggestionService;
@@ -63,6 +65,7 @@ public class MiniAppDiagnosisService {
         // 2. AI predict-image (fail → toàn bộ request fail, không graceful)
         AiPredictResponse predictResponse = aiDiagnosisClient.predict(image);
         String aiStatus = predictResponse.getStatus();
+        String diagnosisImageUrl = uploadAnnotatedImageGracefully(predictResponse, traceId);
 
         // 2a. Xử lý sớm các trạng thái đặc biệt từ AI
         if ("BLURRY".equals(aiStatus)) {
@@ -80,6 +83,7 @@ public class MiniAppDiagnosisService {
             return MiniAppDiagnosisResponse.builder()
                     .diagnosisId("healthy_" + traceId)
                     .status("HEALTHY")
+                    .imageUrl(diagnosisImageUrl)
                     .build();
         }
 
@@ -124,7 +128,7 @@ public class MiniAppDiagnosisService {
 
         // 6. Build response (diagnosisId tạm — sẽ được thay bằng DB id ở bước sau)
         MiniAppDiagnosisResponse response = buildResponse(
-                predictResponse, finalPrediction, prescriptionResponse, productMap, priceMap);
+                predictResponse, finalPrediction, prescriptionResponse, productMap, priceMap, diagnosisImageUrl);
 
         // 7. Phase BE-4: lưu history + gắn real DB id vào diagnosisId
         // Graceful: nếu save fail vẫn trả diagnosis cho FE, log lỗi để fix sau.
@@ -151,7 +155,8 @@ public class MiniAppDiagnosisService {
             AiPredictionItem finalPrediction,
             AiPrescriptionResponse prescription,
             Map<Long, Product> productMap,
-            Map<Long, Long> priceMap) {
+            Map<Long, Long> priceMap,
+            String diagnosisImageUrl) {
 
         DiseaseResponse disease = DiseaseResponse.builder()
                 .code(finalPrediction.getDiseaseCode())
@@ -200,7 +205,7 @@ public class MiniAppDiagnosisService {
         return MiniAppDiagnosisResponse.builder()
                 .diagnosisId(diagnosisId)
                 .status("DISEASE")
-                .imageUrl(null)          // Phase BE-4: upload ảnh lên Cloudinary
+                .imageUrl(diagnosisImageUrl)
                 .disease(disease)
                 .topPredictions(topPredictions)
                 .causes(causes)
@@ -208,5 +213,20 @@ public class MiniAppDiagnosisService {
                 .treatmentStages(treatmentStages)
                 .purchaseUrl(null)       // Phase BE-4: purchase link
                 .build();
+    }
+
+    private String uploadAnnotatedImageGracefully(AiPredictResponse predictResponse, String traceId) {
+        String annotatedImage = predictResponse.getAnnotatedImage();
+        if (annotatedImage == null || annotatedImage.isBlank()) {
+            return null;
+        }
+
+        try {
+            return cloudinaryService.uploadImage(annotatedImage, "miniapp/diagnosis");
+        } catch (Exception e) {
+            log.warn("[MiniApp] traceId={} upload annotated image fail (graceful): {}",
+                    traceId, e.getMessage());
+            return null;
+        }
     }
 }
