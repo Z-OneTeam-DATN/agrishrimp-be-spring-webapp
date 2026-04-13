@@ -99,6 +99,26 @@ jobs:
 
           docker pull "$IMAGE:latest"
 
+          echo "Ensuring compose dependencies and network are up..."
+          docker compose -f docker-compose.prod.yml up -d db redis ai-visual-search ai-diagnosis
+
+          echo "Waiting for MySQL container DNS/health..."
+          DB_RETRIES=18
+          for i in $(seq 1 $DB_RETRIES); do
+            DB_STATUS=$(docker inspect --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' agrishrimp-db 2>/dev/null || echo "missing")
+            if [ "$DB_STATUS" = "healthy" ] || [ "$DB_STATUS" = "running" ]; then
+              echo "MySQL container is $DB_STATUS"
+              break
+            fi
+            if [ "$i" = "$DB_RETRIES" ]; then
+              echo "❌ MySQL container is not ready: $DB_STATUS"
+              docker logs --tail 200 agrishrimp-db || true
+              exit 1
+            fi
+            echo "⏳ DB $i/$DB_RETRIES — $DB_STATUS. Retry in 10s..."
+            sleep 10
+          done
+
           docker compose -f docker-compose.prod.yml up -d --no-deps --pull never api
 
           echo "Waiting for Spring Boot..."
