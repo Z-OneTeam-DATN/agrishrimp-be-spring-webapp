@@ -100,7 +100,11 @@ jobs:
           docker pull "$IMAGE:latest"
 
           echo "Ensuring required compose dependencies and network are up..."
-          docker compose -f docker-compose.prod.yml up -d db redis ai-visual-search
+          if ! docker compose -f docker-compose.prod.yml up -d db redis ai-visual-search; then
+            echo "Dependency bootstrap failed. Cleaning stale dependency containers and retrying once..."
+            docker rm -f agrishrimp-db agrishrimp-redis agrishrimp-ai-visual-search 2>/dev/null || true
+            docker compose -f docker-compose.prod.yml up -d db redis ai-visual-search
+          fi
           echo "Skipping ai-diagnosis bootstrap because its GHCR image may be unavailable."
 
           echo "Waiting for MySQL container DNS/health..."
