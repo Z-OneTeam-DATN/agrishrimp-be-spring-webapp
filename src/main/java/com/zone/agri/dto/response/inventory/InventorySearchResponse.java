@@ -30,4 +30,38 @@ public class InventorySearchResponse {
     private Long supplierId;
     private String supplierName;
     private String branchName;
+
+    public InventorySearchResponse(
+            Long variantId,
+            String productName,
+            String variantName,
+            String sku,
+            String barcode,
+            String batchNumber,
+            Integer quantity,
+            Integer defectiveQuantity,
+            Integer plannedQuantity,
+            String reason,
+            BigDecimal importPrice,
+            String shelfLocation,
+            LocalDateTime expiryDate,
+            String imageUrl,
+            String unit
+    ) {
+        this.variantId = variantId;
+        this.productName = productName;
+        this.variantName = variantName;
+        this.sku = sku;
+        this.barcode = barcode;
+        this.batchNumber = batchNumber;
+        this.quantity = quantity;
+        this.defectiveQuantity = defectiveQuantity;
+        this.plannedQuantity = plannedQuantity;
+        this.reason = reason;
+        this.importPrice = importPrice;
+        this.shelfLocation = shelfLocation;
+        this.expiryDate = expiryDate;
+        this.imageUrl = imageUrl;
+        this.unit = unit;
+    }
 }
