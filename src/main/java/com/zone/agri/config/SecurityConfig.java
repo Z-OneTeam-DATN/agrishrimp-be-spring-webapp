@@ -71,6 +71,7 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
 
                         // CHỈ CẦN DÙNG PUBLIC_MATCHERS LÀ ĐỦ
+                        .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                         .requestMatchers(PUBLIC_MATCHERS).permitAll()
                         .anyRequest().authenticated()
 
