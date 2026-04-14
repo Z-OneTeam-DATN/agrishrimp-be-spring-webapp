@@ -13,6 +13,7 @@ import com.zone.agri.entity.enums.PaymentStatus;
 import com.zone.agri.entity.enums.TransactionType;
 import com.zone.agri.entity.enums.VoucherStatus;
 import com.zone.agri.entity.enums.VoucherDiscountType; // Thêm Enum này để kiểm tra loại Voucher
+import com.zone.agri.event.OrderAwaitingReplenishmentCreatedEvent;
 import com.zone.agri.exception.BadRequestException;
 import com.zone.agri.exception.ConflictException;
 import com.zone.agri.exception.Forbidden;
@@ -25,6 +26,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.context.annotation.Lazy;
@@ -72,6 +74,7 @@ public class OrderService {
 
     private final StringRedisTemplate redisTemplate;
     private final ObjectMapper objectMapper;
+    private final ApplicationEventPublisher applicationEventPublisher;
 
     private static final String PREPARE_KEY_PREFIX = "prepare:";
     private static final String PREPARE_CONFIRM_LOCK_PREFIX = "prepare:confirm:lock:";
@@ -104,7 +107,8 @@ public class OrderService {
         if (status != null) {
             if (status == OrderStatus.PROCESSING) {
                 orders = orderRepository.findByUserIdOrderByCreatedAtDesc(userId).stream()
-                        .filter(o -> o.getStatus() == OrderStatus.PROCESSING || o.getStatus() == OrderStatus.AWAITING_REPLENISHMENT)
+                        .filter(o -> o.getStatus() == OrderStatus.PROCESSING
+                                || o.getStatus() == OrderStatus.AWAITING_REPLENISHMENT)
                         .collect(Collectors.toList());
             } else if (status == OrderStatus.AWAITING_REPLENISHMENT) {
                 orders = new ArrayList<>();
@@ -159,7 +163,7 @@ public class OrderService {
 
     public Page<OrderResponse> getAdminOrders(OrderStatus status, String search, Pageable pageable) {
         Page<Order> orderPage = orderRepository.findAdminOrdersWithFilter(status, search, pageable);
-        
+
         syncPayOSPaymentStatuses(orderPage.getContent());
         return orderPage.map(o -> mapToOrderResponse(o, false));
     }
@@ -200,7 +204,8 @@ public class OrderService {
         if (order.getSubOrders() != null) {
             order.getSubOrders().forEach(subOrder -> subOrder.setStatus(OrderStatus.CANCELLED));
         }
-        if (PaymentMethod.PAYOS.equals(order.getPaymentMethod()) && PaymentStatus.UNPAID.equals(order.getPaymentStatus())) {
+        if (PaymentMethod.PAYOS.equals(order.getPaymentMethod())
+                && PaymentStatus.UNPAID.equals(order.getPaymentStatus())) {
             payOSService.cancelPaymentLink(order);
         }
         if (cancelReason != null && !cancelReason.isBlank()) {
@@ -217,7 +222,8 @@ public class OrderService {
                 .orElseThrow(() -> new NotFoundException("Không tìm thấy đơn hàng ID: " + orderId));
 
         OrderStatus currentStatus = order.getStatus();
-        if (currentStatus == OrderStatus.CANCELLED || currentStatus == OrderStatus.COMPLETED || currentStatus == OrderStatus.RETURNED) {
+        if (currentStatus == OrderStatus.CANCELLED || currentStatus == OrderStatus.COMPLETED
+                || currentStatus == OrderStatus.RETURNED) {
             throw new BadRequestException("Không thể thay đổi trạng thái của đơn hàng đã đóng!");
         }
 
@@ -238,9 +244,10 @@ public class OrderService {
                         .filter(subOrder -> subOrder.getStatus() != OrderStatus.CANCELLED)
                         .forEach(subOrder -> subOrder.setStatus(OrderStatus.CANCELLED));
             }
-        if (PaymentMethod.PAYOS.equals(order.getPaymentMethod()) && PaymentStatus.UNPAID.equals(order.getPaymentStatus())) {
-            payOSService.cancelPaymentLink(order);
-        }
+            if (PaymentMethod.PAYOS.equals(order.getPaymentMethod())
+                    && PaymentStatus.UNPAID.equals(order.getPaymentStatus())) {
+                payOSService.cancelPaymentLink(order);
+            }
         }
 
         order.setStatus(newStatus);
@@ -257,19 +264,23 @@ public class OrderService {
             return;
         if (current == OrderStatus.PENDING) {
             if (next != OrderStatus.CONFIRMED && next != OrderStatus.PROCESSING) {
-                throw new BadRequestException("Đơn hàng chờ xác nhận chỉ có thể chuyển sang 'Đã duyệt' hoặc 'Đang xử lý'.");
+                throw new BadRequestException(
+                        "Đơn hàng chờ xác nhận chỉ có thể chuyển sang 'Đã duyệt' hoặc 'Đang xử lý'.");
             }
             return;
         }
         if (current == OrderStatus.AWAITING_PAYMENT) {
-            if (next != OrderStatus.CONFIRMED && next != OrderStatus.AWAITING_REPLENISHMENT && next != OrderStatus.PROCESSING) {
-                throw new BadRequestException("Đơn hàng chờ thanh toán chỉ có thể chuyển sang 'Đang xử lý' hoặc 'Chờ bổ sung' sau khi thanh toán xong.");
+            if (next != OrderStatus.CONFIRMED && next != OrderStatus.AWAITING_REPLENISHMENT
+                    && next != OrderStatus.PROCESSING) {
+                throw new BadRequestException(
+                        "Đơn hàng chờ thanh toán chỉ có thể chuyển sang 'Đang xử lý' hoặc 'Chờ bổ sung' sau khi thanh toán xong.");
             }
             return;
         }
         if (current == OrderStatus.AWAITING_REPLENISHMENT) {
             if (next != OrderStatus.CONFIRMED && next != OrderStatus.PROCESSING) {
-                throw new BadRequestException("Đơn hàng thiếu hàng chỉ có thể chuyển sang 'Đang xử lý' sau khi nhập đủ.");
+                throw new BadRequestException(
+                        "Đơn hàng thiếu hàng chỉ có thể chuyển sang 'Đang xử lý' sau khi nhập đủ.");
             }
             return;
         }
@@ -352,7 +363,8 @@ public class OrderService {
                         .sku(row.getSku())
                         .productName(row.getProductName())
                         .variantName(row.getVariantName())
-                        .totalMissingQuantity(row.getTotalMissingQuantity() != null ? row.getTotalMissingQuantity().intValue() : 0)
+                        .totalMissingQuantity(
+                                row.getTotalMissingQuantity() != null ? row.getTotalMissingQuantity().intValue() : 0)
                         .affectedSubOrders(row.getAffectedSubOrders())
                         .build())
                 .collect(Collectors.toList());
@@ -374,7 +386,8 @@ public class OrderService {
         }
 
         return awaitingSubOrders.stream()
-                .flatMap(subOrder -> inventoryTransferService.createReplenishmentTransfersForSubOrder(subOrder).stream())
+                .flatMap(
+                        subOrder -> inventoryTransferService.createReplenishmentTransfersForSubOrder(subOrder).stream())
                 .map(InventoryTransfer::getTransferCode)
                 .toList();
     }
@@ -443,10 +456,12 @@ public class OrderService {
                     .orElse(OrderStatus.PENDING);
         }
 
-        // Fix lỗi: Khi tất cả SubOrder bị hủy, Master Order chuyển thành Hủy -> Hoàn Voucher và Hủy link PayOS
+        // Fix lỗi: Khi tất cả SubOrder bị hủy, Master Order chuyển thành Hủy -> Hoàn
+        // Voucher và Hủy link PayOS
         if (newMasterStatus == OrderStatus.CANCELLED && order.getStatus() != OrderStatus.CANCELLED) {
             restoreVoucherForOrder(order);
-            if (PaymentMethod.PAYOS.equals(order.getPaymentMethod()) && PaymentStatus.UNPAID.equals(order.getPaymentStatus())) {
+            if (PaymentMethod.PAYOS.equals(order.getPaymentMethod())
+                    && PaymentStatus.UNPAID.equals(order.getPaymentStatus())) {
                 payOSService.cancelPaymentLink(order);
             }
         }
@@ -464,7 +479,8 @@ public class OrderService {
     public void autoCompleteDeliveredOrders() {
         LocalDateTime cutoff = LocalDateTime.now().minusDays(7);
 
-        List<SubOrder> overdueSubOrders = subOrderRepository.findByStatusAndUpdatedAtBefore(OrderStatus.SHIPPING, cutoff);
+        List<SubOrder> overdueSubOrders = subOrderRepository.findByStatusAndUpdatedAtBefore(OrderStatus.SHIPPING,
+                cutoff);
         Set<Long> affectedOrderIds = new HashSet<>();
 
         for (SubOrder subOrder : overdueSubOrders) {
@@ -479,7 +495,8 @@ public class OrderService {
 
         affectedOrderIds.forEach(this::syncMasterOrderStatus);
 
-        List<Order> overdueLegacyOrders = orderRepository.findByStatusAndCreatedAtBefore(OrderStatus.SHIPPING, cutoff).stream()
+        List<Order> overdueLegacyOrders = orderRepository.findByStatusAndCreatedAtBefore(OrderStatus.SHIPPING, cutoff)
+                .stream()
                 .filter(order -> order.getSubOrders() == null || order.getSubOrders().isEmpty())
                 .toList();
 
@@ -584,8 +601,8 @@ public class OrderService {
         List<OrderItemResponse> itemResponses = new ArrayList<>();
         List<SubOrderSummaryDto> subOrderSummaries = order.getSubOrders() != null
                 ? order.getSubOrders().stream()
-                .map(sub -> mapSubOrderToSummary(sub, isUserView))
-                .collect(Collectors.toList())
+                        .map(sub -> mapSubOrderToSummary(sub, isUserView))
+                        .collect(Collectors.toList())
                 : Collections.emptyList();
 
         if (order.getOrderItems() != null && !order.getOrderItems().isEmpty()) {
@@ -608,8 +625,8 @@ public class OrderService {
             branchAddress = order.getBranch().getAddressDetail();
         } else if (order.getSubOrders() != null && order.getSubOrders().size() == 1) {
             Branch singleBranch = order.getSubOrders().get(0).getBranch();
-            branchName    = singleBranch != null ? singleBranch.getName()          : "Nhiều chi nhánh";
-            branchPhone   = singleBranch != null ? singleBranch.getPhone()         : null;
+            branchName = singleBranch != null ? singleBranch.getName() : "Nhiều chi nhánh";
+            branchPhone = singleBranch != null ? singleBranch.getPhone() : null;
             branchAddress = singleBranch != null ? singleBranch.getAddressDetail() : null;
         } else if (order.getSubOrders() != null && order.getSubOrders().size() > 1) {
             branchName = "Nhiều chi nhánh";
@@ -754,7 +771,8 @@ public class OrderService {
     public PrepareOrderResponse prepareOrder(Long userId, PrepareOrderRequest request) {
         com.zone.agri.entity.UserAddress addr = userAddressRepository
                 .findByIdAndUserId(request.getUserAddressId(), userId)
-                .orElseThrow(() -> new NotFoundException("Không tìm thấy địa chỉ trong sổ địa chỉ của bạn. ID: " + request.getUserAddressId()));
+                .orElseThrow(() -> new NotFoundException(
+                        "Không tìm thấy địa chỉ trong sổ địa chỉ của bạn. ID: " + request.getUserAddressId()));
 
         String receiverName = addr.getReceiverName();
         String receiverPhone = addr.getReceiverPhone();
@@ -774,7 +792,8 @@ public class OrderService {
                 userLat = coord.getLat();
                 userLng = coord.getLng();
             } catch (Exception e) {
-                log.warn("Geocode thất bại cho địa chỉ '{}', dùng tọa độ mặc định: {}", deliveryAddress, e.getMessage());
+                log.warn("Geocode thất bại cho địa chỉ '{}', dùng tọa độ mặc định: {}", deliveryAddress,
+                        e.getMessage());
                 userLat = 10.0341;
                 userLng = 105.7904;
             }
@@ -783,7 +802,8 @@ public class OrderService {
         List<CartItemDto> finalCart = request.getCart();
         if (finalCart == null || finalCart.isEmpty()) {
             List<com.zone.agri.entity.CartItem> dbItems = cartItemRepository.findByUserId(userId);
-            if (dbItems.isEmpty()) throw new BadRequestException("Giỏ hàng của bạn đang trống");
+            if (dbItems.isEmpty())
+                throw new BadRequestException("Giỏ hàng của bạn đang trống");
 
             finalCart = dbItems.stream()
                     .map(item -> new CartItemDto(item.getProductVariant().getId(),
@@ -796,13 +816,15 @@ public class OrderService {
 
         List<Long> variantIds = finalCart.stream().map(CartItemDto::getProductVariantId).distinct().toList();
         List<ProductVariant> variants = variantRepository.findAllById(variantIds);
-        if (variants.size() != variantIds.size()) throw new NotFoundException("Một hoặc nhiều sản phẩm không tồn tại");
+        if (variants.size() != variantIds.size())
+            throw new NotFoundException("Một hoặc nhiều sản phẩm không tồn tại");
 
         Map<Long, ProductVariant> variantMap = variants.stream()
                 .collect(Collectors.toMap(ProductVariant::getId, Function.identity()));
 
         List<BranchWithRealDistance> nearestBranches = branchSearchService.findNearestBranches(userLat, userLng);
-        if (nearestBranches.isEmpty()) throw new NotFoundException("Không có chi nhánh hoạt động");
+        if (nearestBranches.isEmpty())
+            throw new NotFoundException("Không có chi nhánh hoạt động");
 
         List<Long> branchIds = nearestBranches.stream().map(bwr -> bwr.branch().getId()).toList();
 
@@ -898,9 +920,11 @@ public class OrderService {
 
         try {
             PrepareOrderDraft draft = getDraftFromRedis(request.getPrepareToken());
-            if (draft == null) throw new BadRequestException("Token hết hạn");
-            if (!userId.equals(draft.getUserId())) throw new BadRequestException("Token không hợp lệ");
-    
+            if (draft == null)
+                throw new BadRequestException("Token hết hạn");
+            if (!userId.equals(draft.getUserId()))
+                throw new BadRequestException("Token không hợp lệ");
+
             User user = userRepository.findById(userId).orElseThrow(() -> new NotFoundException("User không tồn tại"));
             List<CartItemDto> cartSnapshot = normalizeCartItems(draft.getCartItems());
             PreparedQuote liveQuote = buildPreparedQuote(
@@ -911,69 +935,76 @@ public class OrderService {
                     draft.getDeliveryAddress(),
                     draft.getDeliveryDistrictId(),
                     draft.getDeliveryWardCode(),
-                    draft.getVoucherCode()
-            );
+                    draft.getVoucherCode());
             ensurePreparedQuoteStillValid(draft, liveQuote);
             VoucherValidation committedVoucher = validateVoucher(
                     user,
                     draft.getVoucherCode(),
                     liveQuote.totalSubtotal(),
                     true,
-                    true
-            );
-            PaymentMethod paymentMethod = request.getPaymentMethod() != null ? request.getPaymentMethod() : PaymentMethod.COD;
+                    true);
+            PaymentMethod paymentMethod = request.getPaymentMethod() != null ? request.getPaymentMethod()
+                    : PaymentMethod.COD;
             boolean hasMissingItems = liveQuote.subOrders().stream()
                     .flatMap(subOrder -> subOrder.getItems().stream())
                     .anyMatch(item -> Objects.requireNonNullElse(item.getMissingQuantity(), 0) > 0);
             OrderStatus initialStatus = hasMissingItems
                     ? OrderStatus.AWAITING_REPLENISHMENT
-                    : (PaymentMethod.PAYOS.equals(paymentMethod) ? OrderStatus.AWAITING_PAYMENT : OrderStatus.PROCESSING);
-    
+                    : (PaymentMethod.PAYOS.equals(paymentMethod) ? OrderStatus.AWAITING_PAYMENT
+                            : OrderStatus.PROCESSING);
+
             Order order = Order.builder().code("ORD" + System.currentTimeMillis()).user(user).status(initialStatus)
                     .paymentMethod(paymentMethod).paymentStatus(PaymentStatus.UNPAID).createdAt(LocalDateTime.now())
-                    .totalAmount(liveQuote.totalSubtotal()).discountAmount(committedVoucher.discountAmount()).finalAmount(liveQuote.totalAmount())
-                    .totalShippingFee(liveQuote.totalShippingFee()).userLat(draft.getUserLat()).userLng(draft.getUserLng())
+                    .totalAmount(liveQuote.totalSubtotal()).discountAmount(committedVoucher.discountAmount())
+                    .finalAmount(liveQuote.totalAmount())
+                    .totalShippingFee(liveQuote.totalShippingFee()).userLat(draft.getUserLat())
+                    .userLng(draft.getUserLng())
                     .deliveryAddress(draft.getDeliveryAddress()).shippingAddress(draft.getDeliveryAddress())
                     .receiverName(draft.getReceiverName()).receiverPhone(draft.getReceiverPhone())
                     .voucher(committedVoucher.voucher()).note(request.getNote()).build();
             Order savedOrder = orderRepository.save(order);
-    
+
             List<SubOrderSummaryDto> subOrderSummaries = new ArrayList<>();
             boolean anySubOrderMissing = hasMissingItems;
-    
+
             for (SubOrderDraftDto subDraft : liveQuote.subOrders()) {
-                Branch branch = branchRepository.findById(subDraft.getBranchId()).orElseThrow(() -> new NotFoundException("Branch không tồn tại"));
+                Branch branch = branchRepository.findById(subDraft.getBranchId())
+                        .orElseThrow(() -> new NotFoundException("Branch không tồn tại"));
                 boolean subOrderHasMissingItems = subDraft.getItems().stream()
                         .anyMatch(item -> Objects.requireNonNullElse(item.getMissingQuantity(), 0) > 0);
                 OrderStatus subOrderStatus = subOrderHasMissingItems
                         ? OrderStatus.AWAITING_REPLENISHMENT
-                        : (PaymentMethod.PAYOS.equals(paymentMethod) ? OrderStatus.AWAITING_PAYMENT : OrderStatus.PROCESSING);
+                        : (PaymentMethod.PAYOS.equals(paymentMethod) ? OrderStatus.AWAITING_PAYMENT
+                                : OrderStatus.PROCESSING);
                 SubOrder subOrder = SubOrder.builder().order(savedOrder).branch(branch).status(subOrderStatus)
                         .subtotal(subDraft.getSubtotal()).shippingFee(subDraft.getShippingFee())
                         .estimatedDays(subDraft.getEstimatedDays()).carrier(subDraft.getCarrier()).build();
                 SubOrder savedSubOrder = subOrderRepository.save(subOrder);
                 boolean dynamicallyMissing = false;
-    
+
                 for (OrderItemDto item : subDraft.getItems()) {
                     ProductVariant variant = variantRepository.findById(item.getProductVariantId())
                             .orElseThrow(() -> new NotFoundException("Sản phẩm không tồn tại"));
-    
+
                     int targetToDeduct = Objects.requireNonNullElse(item.getAllocatedQuantity(), item.getQuantity());
                     int originallyMissing = Objects.requireNonNullElse(item.getMissingQuantity(), 0);
                     int actuallyDeducted = 0;
-    
-                    List<Inventory> batches = inventoryRepository.findForUpdateFIFO(subDraft.getBranchId(), item.getProductVariantId());
-    
+
+                    List<Inventory> batches = inventoryRepository.findForUpdateFIFO(subDraft.getBranchId(),
+                            item.getProductVariantId());
+
                     for (Inventory batch : batches) {
-                        if (targetToDeduct <= 0) break;
+                        if (targetToDeduct <= 0)
+                            break;
                         int available = Objects.requireNonNullElse(batch.getQuantity(), 0);
-                        if (available <= 0) continue;
-    
+                        if (available <= 0)
+                            continue;
+
                         int deductAmount = Math.min(available, targetToDeduct);
                         int newQty = available - deductAmount;
                         batch.setQuantity(newQty);
                         inventoryRepository.save(batch);
-    
+
                         transactionRepository.save(InventoryTransaction.builder()
                                 .type(TransactionType.SALE)
                                 .quantityChange(-deductAmount)
@@ -983,15 +1014,16 @@ public class OrderService {
                                 .createdAt(LocalDateTime.now())
                                 .inventory(batch)
                                 .build());
-    
+
                         targetToDeduct -= deductAmount;
                         actuallyDeducted += deductAmount;
                     }
-    
+
                     int finalMissing = originallyMissing + targetToDeduct;
                     int finalAllocated = actuallyDeducted;
-                    if (finalMissing > 0) dynamicallyMissing = true;
-    
+                    if (finalMissing > 0)
+                        dynamicallyMissing = true;
+
                     subOrderItemRepository.save(SubOrderItem.builder()
                             .subOrder(savedSubOrder)
                             .productVariant(variant)
@@ -1001,30 +1033,32 @@ public class OrderService {
                             .unitPrice(item.getUnitPrice())
                             .build());
                 }
-    
+
                 if (dynamicallyMissing && subOrderStatus == OrderStatus.PROCESSING) {
                     subOrderStatus = OrderStatus.AWAITING_REPLENISHMENT;
                     savedSubOrder.setStatus(subOrderStatus);
                     subOrderRepository.save(savedSubOrder);
                     anySubOrderMissing = true;
                 }
-    
+
                 subOrderSummaries.add(SubOrderSummaryDto.builder()
                         .subOrderId(savedSubOrder.getId()).branchId(branch.getId()).branchName(branch.getName())
-                        .status(subOrderStatus.name()).subtotal(subDraft.getSubtotal()).shippingFee(subDraft.getShippingFee())
+                        .status(subOrderStatus.name()).subtotal(subDraft.getSubtotal())
+                        .shippingFee(subDraft.getShippingFee())
                         .estimatedDays(subDraft.getEstimatedDays()).carrier(subDraft.getCarrier()).build());
             }
-    
+
             if (anySubOrderMissing && initialStatus == OrderStatus.PROCESSING) {
                 initialStatus = OrderStatus.AWAITING_REPLENISHMENT;
                 savedOrder.setStatus(initialStatus);
                 orderRepository.save(savedOrder);
             }
-    
+
             String checkoutUrl = null;
             if (PaymentMethod.PAYOS.equals(paymentMethod)) {
                 try {
-                    com.zone.agri.dto.response.payment.PayOSApiResponse.PayOSLinkData payosData = payOSService.createPaymentLink(savedOrder);
+                    com.zone.agri.dto.response.payment.PayOSApiResponse.PayOSLinkData payosData = payOSService
+                            .createPaymentLink(savedOrder);
                     savedOrder.setPayosPaymentLinkId(payosData.getPaymentLinkId());
                     savedOrder.setPayosCheckoutUrl(payosData.getCheckoutUrl());
                     orderRepository.save(savedOrder);
@@ -1033,14 +1067,23 @@ public class OrderService {
                     throw new BadRequestException("Lỗi tạo PayOS link: " + e.getMessage());
                 }
             }
-    
+
             redisTemplate.delete(PREPARE_KEY_PREFIX + request.getPrepareToken());
             cartSnapshot.stream().map(CartItemDto::getProductVariantId).distinct()
-                    .forEach(vId -> cartItemRepository.findByUserIdAndProductVariantId(userId, vId).ifPresent(cartItemRepository::delete));
-    
-            ConfirmOrderResponse response = ConfirmOrderResponse.builder().orderId(savedOrder.getId()).orderCode(savedOrder.getCode())
-                    .status(initialStatus.name()).voucherCode(draft.getVoucherCode()).subOrders(subOrderSummaries).totalAmount(liveQuote.totalAmount())
-                    .discountAmount(committedVoucher.discountAmount()).totalShippingFee(liveQuote.totalShippingFee()).checkoutUrl(checkoutUrl).build();
+                    .forEach(vId -> cartItemRepository.findByUserIdAndProductVariantId(userId, vId)
+                            .ifPresent(cartItemRepository::delete));
+
+            ConfirmOrderResponse response = ConfirmOrderResponse.builder().orderId(savedOrder.getId())
+                    .orderCode(savedOrder.getCode())
+                    .status(initialStatus.name()).voucherCode(draft.getVoucherCode()).subOrders(subOrderSummaries)
+                    .totalAmount(liveQuote.totalAmount())
+                    .discountAmount(committedVoucher.discountAmount()).totalShippingFee(liveQuote.totalShippingFee())
+                    .checkoutUrl(checkoutUrl).build();
+
+            if (anySubOrderMissing) {
+                applicationEventPublisher.publishEvent(new OrderAwaitingReplenishmentCreatedEvent(savedOrder.getId()));
+            }
+
             saveConfirmResultToRedis(request.getPrepareToken(), response);
             return response;
         } finally {
@@ -1151,7 +1194,6 @@ public class OrderService {
                 totalShippingFee,
                 totalAmount);
     }
-
 
     private void ensurePreparedQuoteStillValid(PrepareOrderDraft draft, PreparedQuote liveQuote) {
         boolean totalsChanged = !hasSameMoney(draft.getTotalSubtotal(), liveQuote.totalSubtotal())
@@ -1419,7 +1461,8 @@ public class OrderService {
                     .orElseThrow(() -> new NotFoundException("Chi nhánh không tồn tại"));
         } else {
             selectedBranch = findBranchWithEnoughStock(req.getItems());
-            if (selectedBranch == null) throw new BadRequestException("Không chi nhánh nào đủ hàng");
+            if (selectedBranch == null)
+                throw new BadRequestException("Không chi nhánh nào đủ hàng");
         }
 
         PaymentMethod paymentMethod = req.getPaymentMethod() != null ? req.getPaymentMethod() : PaymentMethod.COD;
@@ -1452,7 +1495,7 @@ public class OrderService {
             ProductVariant variant = variantRepository.findById(itemReq.getVariantId())
                     .orElseThrow(() -> new NotFoundException("Sản phẩm không tồn tại"));
 
-            //  LOGIC TRỪ KHO THEO LÔ (FIFO)
+            // LOGIC TRỪ KHO THEO LÔ (FIFO)
             int remainingToDeduct = itemReq.getQuantity();
             List<Inventory> batches = inventoryRepository.findForUpdateFIFO(selectedBranch.getId(), variant.getId());
 
@@ -1507,11 +1550,13 @@ public class OrderService {
 
             LocalDateTime now = LocalDateTime.now();
 
-            if (voucher.getStatus() != VoucherStatus.ACTIVE || now.isBefore(voucher.getStartDate()) || now.isAfter(voucher.getEndDate())) {
+            if (voucher.getStatus() != VoucherStatus.ACTIVE || now.isBefore(voucher.getStartDate())
+                    || now.isAfter(voucher.getEndDate())) {
                 throw new BadRequestException("Voucher không hợp lệ hoặc đã hết hạn");
             }
 
-            if (subTotal.compareTo(voucher.getMinOrderValue() != null ? voucher.getMinOrderValue() : BigDecimal.ZERO) < 0) {
+            if (subTotal
+                    .compareTo(voucher.getMinOrderValue() != null ? voucher.getMinOrderValue() : BigDecimal.ZERO) < 0) {
                 throw new BadRequestException("Đơn hàng chưa đạt giá trị tối thiểu để sử dụng voucher này");
             }
 
@@ -1522,7 +1567,8 @@ public class OrderService {
             UserVoucher userVoucher = userVoucherRepository.findByUserAndVoucher(user, voucher)
                     .orElse(new UserVoucher(user, voucher, 0, false));
 
-            if (userVoucher.getUsageCount() >= (voucher.getMaxUsagePerUser() != null ? voucher.getMaxUsagePerUser() : 1)) {
+            if (userVoucher
+                    .getUsageCount() >= (voucher.getMaxUsagePerUser() != null ? voucher.getMaxUsagePerUser() : 1)) {
                 throw new BadRequestException("Bạn đã sử dụng tối đa số lượt cho phép của voucher này");
             }
 
