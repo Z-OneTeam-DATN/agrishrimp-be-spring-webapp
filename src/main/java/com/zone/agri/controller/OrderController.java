@@ -51,6 +51,15 @@ public class OrderController {
         return userRepository.findByEmail(auth.getName())
                 .orElseThrow(() -> new SignInRequiredException("Tài khoản không tồn tại"));
     }
+    
+    // Hàm kiểm tra chặn không cho Chi nhánh gọi API của Admin
+    private void verifyAdminAccess() {
+        User user = getCurrentUser();
+        String roleSlug = user.getRole() != null ? user.getRole().getSlug() : "";
+        if (!"ADMIN".equals(roleSlug) && !"SUPER_ADMIN".equals(roleSlug)) {
+            throw new com.zone.agri.exception.Forbidden("Tài khoản chi nhánh không được phép xem/thao tác toàn bộ đơn hàng hệ thống. Vui lòng sử dụng chức năng dành cho chi nhánh!");
+        }
+    }
 
     @Operation(summary = "Lấy danh sách đơn hàng của tôi", description = "Người dùng xem lịch sử đơn hàng, có thể lọc theo trạng thái (PENDING, CONFIRMED...)")
     @GetMapping("/v1/orders/my-orders")
@@ -130,6 +139,7 @@ public class OrderController {
             @RequestParam(required = false) OrderStatus status,
             @RequestParam(required = false) String search,
             @PageableDefault(size = 10, sort = "createdAt", direction = Sort.Direction.DESC) Pageable pageable) {
+        verifyAdminAccess();
         return ResponseEntity.ok(orderService.getAdminOrders(status, search, pageable));
     }
 
@@ -137,6 +147,7 @@ public class OrderController {
     @RequirePermission("ORDER_VIEW")
     @GetMapping("/admin/{id}")
     public ResponseEntity<OrderResponse> getAdminOrderDetail(@PathVariable Long id) {
+        verifyAdminAccess();
         return ResponseEntity.ok(orderService.getAdminOrderDetail(id));
     }
 
@@ -144,6 +155,7 @@ public class OrderController {
     @RequirePermission("ORDER_VIEW")
     @GetMapping("/admin/backorders")
     public ResponseEntity<List<MissingItemReportDto>> getBackorderReport() {
+        verifyAdminAccess();
         return ResponseEntity.ok(orderService.getBackorderReport());
     }
 
@@ -153,6 +165,7 @@ public class OrderController {
     public ResponseEntity<?> updateOrderStatus(
             @PathVariable Long id,
             @RequestParam OrderStatus status) {
+        verifyAdminAccess();
         orderService.updateOrderStatus(id, status);
         return ResponseEntity.ok(Map.of("message", "Cập nhật trạng thái '" + status + "' thành công!"));
     }
@@ -161,6 +174,7 @@ public class OrderController {
     @RequirePermission("ORDER_VIEW")
     @GetMapping("/admin/orders/user/{userId}")
     public ResponseEntity<?> getCustomerOrderHistory(@PathVariable Long userId) {
+        verifyAdminAccess();
         List<Order> orders = orderService.getOrdersByUserId(userId);
 
         List<java.util.Map<String, Object>> responseList = orders.stream().map(order -> {
@@ -225,6 +239,7 @@ public class OrderController {
     @RequirePermission("ORDER_UPDATE")
     @PostMapping("/admin/{id}/request-replenishment")
     public ResponseEntity<?> requestReplenishmentForAdmin(@PathVariable Long id) {
+        verifyAdminAccess();
         List<String> transferCodes = orderService.requestReplenishmentForAdmin(id);
         return ResponseEntity.ok(Map.of(
                 "message", "Đã tạo lệnh điều chuyển bổ sung",

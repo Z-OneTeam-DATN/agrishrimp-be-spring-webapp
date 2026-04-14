@@ -73,10 +73,22 @@ public class InventoryAllocationService {
             return new AllocationResult(subOrders, outOfStockItems);
         }
 
-        // 👉 CHỈ LẤY CHI NHÁNH GẦN NHẤT ĐỂ TRÁNH TÁCH ĐƠN
-        BranchWithRealDistance nearestBwr = branchesSortedByDist.get(0);
-        Long nearestBranchId = nearestBwr.branch().getId();
-        Map<Long, List<Inventory>> branchBatches = inventoryMatrix.getOrDefault(nearestBranchId, Collections.emptyMap());
+        // 👉 THUẬT TOÁN MỚI: Ưu tiên chọn chi nhánh ĐỦ HÀNG trước (không quan trọng xa gần)
+        BranchWithRealDistance selectedBwr = null;
+        for (BranchWithRealDistance bwr : branchesSortedByDist) {
+            if (isBranchFullyStocked(bwr.branch().getId(), cart, inventoryMatrix)) {
+                selectedBwr = bwr;
+                break; // Tìm thấy chi nhánh đủ 100% hàng -> Chốt ngay!
+            }
+        }
+        
+        // Nếu không có chi nhánh nào đủ 100% hàng -> Fallback về chi nhánh gần nhất để chờ điều chuyển
+        if (selectedBwr == null) {
+            selectedBwr = branchesSortedByDist.get(0);
+        }
+
+        Long selectedBranchId = selectedBwr.branch().getId();
+        Map<Long, List<Inventory>> branchBatches = inventoryMatrix.getOrDefault(selectedBranchId, Collections.emptyMap());
 
         List<OrderItemDto> allocatedItems = new ArrayList<>();
 
@@ -145,12 +157,12 @@ public class InventoryAllocationService {
                     .reduce(BigDecimal.ZERO, BigDecimal::add);
 
             subOrders.add(SubOrderDraftDto.builder()
-                    .branchId(nearestBranchId)
-                    .branchName(nearestBwr.branch().getName())
-                    .branchAddress(nearestBwr.branch().getAddressDetail())
-                    .fromDistrictId(nearestBwr.branch().getDistrictId())
-                    .durationMinutes(nearestBwr.durationMinutes())
-                    .distanceKm(nearestBwr.distanceKm())
+                    .branchId(selectedBranchId)
+                    .branchName(selectedBwr.branch().getName())
+                    .branchAddress(selectedBwr.branch().getAddressDetail())
+                    .fromDistrictId(selectedBwr.branch().getDistrictId())
+                    .durationMinutes(selectedBwr.durationMinutes())
+                    .distanceKm(selectedBwr.distanceKm())
                     .items(allocatedItems)
                     .subtotal(subtotal)
                     .shippingFee(BigDecimal.ZERO)
@@ -170,6 +182,19 @@ public class InventoryAllocationService {
             }
         }
         return BigDecimal.ZERO;
+    }
+
+    // Hàm helper kiểm tra xem một chi nhánh có đủ 100% số lượng cho toàn bộ giỏ hàng hay không
+    private boolean isBranchFullyStocked(Long branchId, List<CartItemDto> cart, Map<Long, Map<Long, List<Inventory>>> matrix) {
+        Map<Long, List<Inventory>> branchBatches = matrix.getOrDefault(branchId, Collections.emptyMap());
+        for (CartItemDto item : cart) {
+            int totalAvailable = branchBatches.getOrDefault(item.getProductVariantId(), Collections.emptyList())
+                    .stream().mapToInt(inv -> inv.getQuantity() != null ? inv.getQuantity() : 0).sum();
+            if (totalAvailable < item.getQuantity()) {
+                return false; // Chỉ cần 1 sản phẩm bị thiếu là coi như chi nhánh này không đủ hàng
+            }
+        }
+        return true;
     }
 
     private int calculateTotalAvailable(Long variantId, Map<Long, Map<Long, List<Inventory>>> matrix) {
