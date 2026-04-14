@@ -20,6 +20,18 @@ public interface InventoryNoteDetailRepository extends JpaRepository<InventoryNo
     @Query("SELECT d FROM InventoryNoteDetail d " +
            "JOIN d.inventoryNote n " +
            "WHERE n.type = com.zone.agri.entity.enums.InventoryNoteType.IMPORT " +
+           "AND d.productVariant.sku = :sku " +
+           "AND d.batchNumber = :batchNumber " +
+           "AND n.status = com.zone.agri.entity.enums.InventoryNoteStatus.COMPLETED " +
+           "ORDER BY n.createdAt DESC")
+    List<InventoryNoteDetail> findOriginalImportDetailBySkuAndBatch(
+            @Param("sku") String sku, 
+            @Param("batchNumber") String batchNumber
+    );
+
+    @Query("SELECT d FROM InventoryNoteDetail d " +
+           "JOIN d.inventoryNote n " +
+           "WHERE n.type = com.zone.agri.entity.enums.InventoryNoteType.IMPORT " +
            "AND n.supplier.id = :supplierId " +
            "AND d.productVariant.sku = :sku " +
            "AND d.batchNumber = :batchNumber " +

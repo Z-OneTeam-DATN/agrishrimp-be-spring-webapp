@@ -27,4 +27,7 @@ public class InventorySearchResponse {
     private LocalDateTime expiryDate;
     private String imageUrl;
     private String unit;
+    private Long supplierId;
+    private String supplierName;
+    private String branchName;
 }

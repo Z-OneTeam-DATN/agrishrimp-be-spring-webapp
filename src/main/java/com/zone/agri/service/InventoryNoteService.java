@@ -496,8 +496,28 @@ public class InventoryNoteService {
         }
 
         // XỬ LÝ ĐỐI TÁC: NHÀ CUNG CẤP HOẶC CHI NHÁNH NHẬN
-        if (request.getSupplierId() != null) {
-            note.setSupplier(supplierRepository.findById(request.getSupplierId()).orElse(null));
+        if (request.getSupplierId() != null || "RETURN".equals(request.getExportType())) {
+            // RÀNG BUỘC: Chỉ Kho tổng mới được xuất trả NCC
+            if (!"WAREHOUSE".equalsIgnoreCase(sourceBranch.getBranchType())) {
+                throw new BadRequestException("Chỉ có Kho tổng mới được phép thực hiện nghiệp vụ xuất trả nhà cung cấp.");
+            }
+            
+            if (request.getSupplierId() != null) {
+                note.setSupplier(supplierRepository.findById(request.getSupplierId()).orElse(null));
+            } else if (request.getDetails() != null && !request.getDetails().isEmpty()) {
+                // TỰ ĐỘNG TRUY VẾT NCC TỪ LÔ HÀNG ĐẦU TIÊN NẾU FE KHÔNG GỬI SUPPLIER_ID
+                String firstBatch = request.getDetails().get(0).getBatchNumber();
+                String firstSku = productVariantRepository.findById(request.getDetails().get(0).getProductVariantId())
+                        .map(ProductVariant::getSku).orElse(null);
+                
+                if (firstBatch != null && firstSku != null) {
+                    List<InventoryNoteDetail> importDetails = inventoryNoteDetailRepository.findOriginalImportDetailBySkuAndBatch(firstSku, firstBatch);
+                    if (!importDetails.isEmpty()) {
+                        note.setSupplier(importDetails.get(0).getInventoryNote().getSupplier());
+                    }
+                }
+            }
+            
             note.setPartnerBranch(null);
         } else if (request.getTargetBranchId() != null) {
             note.setPartnerBranch(branchRepository.findById(request.getTargetBranchId()).orElse(null));
@@ -528,6 +548,33 @@ public class InventoryNoteService {
             String batchNum = reqDetail.getBatchNumber();
             
             if (isReturn) {
+                if (batchNum == null || batchNum.isBlank()) {
+                    throw new BadRequestException("Xuất trả nhà cung cấp bắt buộc chọn đúng lô hàng lỗi.");
+                }
+
+                if (note.getSupplier() == null) {
+                    throw new BadRequestException("Phiếu xuất trả nhà cung cấp thiếu thông tin nhà cung cấp.");
+                }
+
+                List<InventoryNoteDetail> originalImportDetails = inventoryNoteDetailRepository.findOriginalImportDetail(
+                        note.getSupplier().getId(),
+                        variant.getSku(),
+                        batchNum
+                );
+
+                boolean matchesOriginalWarehouse = originalImportDetails.stream()
+                        .anyMatch(d -> d.getInventoryNote() != null
+                                && d.getInventoryNote().getBranch() != null
+                                && Objects.equals(d.getInventoryNote().getBranch().getId(), note.getBranch().getId()));
+
+                if (!matchesOriginalWarehouse) {
+                    throw new BadRequestException(String.format(
+                            "Lô %s của sản phẩm %s không thuộc đúng nhà cung cấp hoặc đúng kho nhập hiện tại.",
+                            batchNum,
+                            variant.getSku()
+                    ));
+                }
+
                 Long defectiveStockLong;
                 if (batchNum != null && !batchNum.isBlank()) {
                     defectiveStockLong = inventoryRepository.sumDefectiveQuantityByBranchAndVariantAndBatch(note.getBranch().getId(), variant.getId(), batchNum);

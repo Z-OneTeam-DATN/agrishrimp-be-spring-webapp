@@ -250,6 +250,11 @@ public class InventoryService {
     }
 
     private void updateMetadata(InventoryNote note, InventoryReceiptRequest request, Branch destBranch) {
+        // RÀNG BUỘC: Chỉ Kho tổng mới được nhập hàng từ NCC
+        if ("SUPPLIER".equals(request.getImportType()) && !"WAREHOUSE".equalsIgnoreCase(destBranch.getBranchType())) {
+            throw new BadRequestException("Chỉ có Kho tổng mới được phép thực hiện nghiệp vụ nhập hàng từ nhà cung cấp.");
+        }
+
         note.setBranch(destBranch);
         note.setNote(request.getNote());
         note.setDeliverer(request.getDeliverer());
@@ -267,10 +272,15 @@ public class InventoryService {
         }
 
         // CHỈ CHO PHÉP TƯƠNG TÁC VỚI NHÀ CUNG CẤP (SUPPLIER)
-        Supplier supplier = supplierRepository.findByCode(request.getSupplierCode())
+        if ("SUPPLIER".equals(request.getImportType())) {
+            Supplier supplier = supplierRepository.findByCode(request.getSupplierCode())
                 .orElseThrow(() -> new NotFoundException("Nhà cung cấp không tồn tại"));
-        note.setSupplier(supplier);
-        note.setPartnerBranch(null);
+            note.setSupplier(supplier);
+            note.setPartnerBranch(null);
+        } else {
+            note.setSupplier(null);
+            note.setPartnerBranch(null);
+        }
     }
 
     // --- 3. XÓA PHIẾU (CHẶN NẾU ĐÃ NHẬP KHO) ---
@@ -405,30 +415,34 @@ public class InventoryService {
             return new ArrayList<>();
         }
 
-        // Chỉ tìm hàng lỗi tại đúng chi nhánh đã xác định
+        // 1. Tìm tất cả các lô có hàng lỗi tại chi nhánh này
         List<Inventory> defectiveInventories = inventoryRepository.findAllByBranchIdAndDefectiveQuantityGreaterThan(branchId, 0);
-        // Lọc theo Nhà cung cấp
+        
+        // 2. Lọc theo Nhà cung cấp bằng cách truy vết ngược về phiếu nhập gốc (IMPORT) 
+        // dựa trên SKU và BatchNumber (vì BatchNumber đã được giữ nguyên khi điều chuyển)
         return defectiveInventories.stream()
                 .filter(inv -> {
-                    // Tìm giao dịch nhập (IMPORT) của lô hàng này tại chi nhánh này
-                    return transactionRepository.findFirstByInventoryAndTypeOrderByCreatedAtAsc(inv, com.zone.agri.entity.enums.TransactionType.IMPORT)
-                            .map(t -> t.getInventoryNote() != null &&
-                                     t.getInventoryNote().getSupplier() != null &&
-                                     t.getInventoryNote().getSupplier().getId().equals(supplierId) &&
-                                     t.getInventoryNote().getBranch().getId().equals(branchId)) // Đảm bảo đúng chi nhánh nhập
-                            .orElse(false);
+                    List<InventoryNoteDetail> importDetails = noteDetailRepository.findOriginalImportDetailBySkuAndBatch(
+                            inv.getProductVariant().getSku(), 
+                            inv.getBatchNumber()
+                    );
+                    
+                    return importDetails.stream()
+                            .anyMatch(d -> d.getInventoryNote().getSupplier() != null && 
+                                          d.getInventoryNote().getSupplier().getId().equals(supplierId));
                 })
-
                 .map(inv -> {
                     ProductVariant variant = inv.getProductVariant();
-                    // Tìm lại thông tin chi tiết từ phiếu nhập (Số lượng yêu cầu và Lý do lỗi gốc)
-                    var originalDetail = transactionRepository.findFirstByInventoryAndTypeOrderByCreatedAtAsc(inv, com.zone.agri.entity.enums.TransactionType.IMPORT)
-                            .flatMap(t -> t.getInventoryNote() != null ? t.getInventoryNote().getDetails().stream()
-                                    .filter(d -> d.getProductVariant().getId().equals(variant.getId()) && Objects.equals(d.getBatchNumber(), inv.getBatchNumber()))
-                                    .findFirst() : Optional.empty());
+                    // Lấy thông tin từ phiếu nhập đầu tiên tìm được
+                    List<InventoryNoteDetail> importDetails = noteDetailRepository.findOriginalImportDetailBySkuAndBatch(
+                            variant.getSku(), 
+                            inv.getBatchNumber()
+                    );
+                    
+                    var originalDetail = importDetails.isEmpty() ? Optional.<InventoryNoteDetail>empty() : Optional.of(importDetails.get(0));
 
                     Integer originalPlannedQty = originalDetail.map(d -> d.getQuantity()).orElse(0);
-                    String originalReason = originalDetail.map(d -> d.getNote()).orElse("");
+                    String originalReason = originalDetail.map(d -> d.getNote()).orElse("Hàng lỗi chờ xử lý");
 
                     return com.zone.agri.dto.response.inventory.InventorySearchResponse.builder()
                             .variantId(variant.getId())
@@ -439,11 +453,53 @@ public class InventoryService {
                             .quantity(inv.getQuantity()) 
                             .defectiveQuantity(inv.getDefectiveQuantity()) 
                             .plannedQuantity(originalPlannedQty) 
-                            .reason(originalReason) // Gán lý do lỗi gốc
+                            .reason(originalReason)
                             .importPrice(inv.getImportPrice())
                             .expiryDate(inv.getExpiryDate())
                             .imageUrl(variant.getImageUrl())
                             .unit("Cái")
+                            .build();
+                })
+                .collect(Collectors.toList());
+    }
+
+    @Transactional(readOnly = true)
+    public List<com.zone.agri.dto.response.inventory.InventorySearchResponse> getAllDefectiveItemsWithSuppliers() {
+        Long branchId = warehouseContext.resolveWarehouseId();
+        List<Inventory> defectiveInventories;
+        
+        if (branchId == null) {
+            defectiveInventories = inventoryRepository.findAllByDefectiveQuantityGreaterThan(0);
+        } else {
+            defectiveInventories = inventoryRepository.findAllByBranchIdAndDefectiveQuantityGreaterThan(branchId, 0);
+        }
+
+        return defectiveInventories.stream()
+                .map(inv -> {
+                    ProductVariant variant = inv.getProductVariant();
+                    List<InventoryNoteDetail> importDetails = noteDetailRepository.findOriginalImportDetailBySkuAndBatch(
+                            variant.getSku(), 
+                            inv.getBatchNumber()
+                    );
+                    
+                    var originalDetail = importDetails.isEmpty() ? Optional.<InventoryNoteDetail>empty() : Optional.of(importDetails.get(0));
+                    Supplier supplier = originalDetail.map(d -> d.getInventoryNote().getSupplier()).orElse(null);
+
+                    return com.zone.agri.dto.response.inventory.InventorySearchResponse.builder()
+                            .variantId(variant.getId())
+                            .sku(variant.getSku())
+                            .productName(variant.getProduct().getName())
+                            .variantName(variant.getCustomSpecs())
+                            .batchNumber(inv.getBatchNumber())
+                            .quantity(inv.getQuantity()) 
+                            .defectiveQuantity(inv.getDefectiveQuantity()) 
+                            .importPrice(inv.getImportPrice())
+                            .expiryDate(inv.getExpiryDate())
+                            .imageUrl(variant.getImageUrl())
+                            .unit("Cái")
+                            .supplierId(supplier != null ? supplier.getId() : null)
+                            .supplierName(supplier != null ? supplier.getName() : "Không xác định")
+                            .branchName(inv.getBranch().getName())
                             .build();
                 })
                 .collect(Collectors.toList());
