@@ -524,7 +524,10 @@ public class InventoryService {
 
         BigDecimal totalAmount = Objects.requireNonNullElse(entity.getTotalAmount(), BigDecimal.ZERO);
         BigDecimal paymentAmount = Objects.requireNonNullElse(entity.getPaymentAmount(), BigDecimal.ZERO);
-        BigDecimal debtAmount = totalAmount.subtract(paymentAmount);
+        BigDecimal debtAmount = Objects.requireNonNullElse(
+                entity.getDebtAmount(),
+                totalAmount.subtract(paymentAmount)
+        );
 
         List<InventoryReceiptResponse.ItemResponse> itemResponses = new ArrayList<>();
         if (entity.getDetails() != null) {
