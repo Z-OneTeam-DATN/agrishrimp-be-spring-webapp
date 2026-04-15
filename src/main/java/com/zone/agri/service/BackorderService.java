@@ -43,7 +43,8 @@ public class BackorderService {
             return;
         }
 
-        List<SubOrderItem> waitingItems = subOrderItemRepository.findBackorderItemsForFulfillment(branchId, productVariantId);
+        List<SubOrderItem> waitingItems = subOrderItemRepository.findBackorderItemsForFulfillment(branchId,
+                productVariantId);
         if (waitingItems.isEmpty()) {
             return;
         }
@@ -126,7 +127,8 @@ public class BackorderService {
         }
 
         if (remainingToDeduct > 0) {
-            throw new ConflictException("Ton kho da thay doi trong luc tra no backorder cho sub-order " + subOrder.getId());
+            throw new ConflictException(
+                    "Ton kho da thay doi trong luc tra no backorder cho sub-order " + subOrder.getId(), true);
         }
     }
 

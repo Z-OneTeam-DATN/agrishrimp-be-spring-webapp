@@ -53,13 +53,11 @@ public class AuthService {
     private final RestTemplate restTemplate;
 
     private static final String ZALO_VERIFY_URL = "https://graph.zalo.me/v2.0/me?fields=id";
-    private static final String ZALO_PHONE_URL   = "https://graph.zalo.me/v2.0/me/info";
+    private static final String ZALO_PHONE_URL = "https://graph.zalo.me/v2.0/me/info";
 
-    private static final Pattern EMAIL_PATTERN =
-            Pattern.compile("^[\\w-\\.]+@([\\w-]+\\.)+[\\w-]{2,4}$");
+    private static final Pattern EMAIL_PATTERN = Pattern.compile("^[\\w-\\.]+@([\\w-]+\\.)+[\\w-]{2,4}$");
 
-    private static final Pattern PHONE_PATTERN =
-            Pattern.compile("^\\d{10}$");
+    private static final Pattern PHONE_PATTERN = Pattern.compile("^\\d{10}$");
 
     private static final String ROLE_USER = "USER";
 
@@ -84,8 +82,7 @@ public class AuthService {
         // 3. Kiểm tra provider (chỉ LOCAL mới đăng nhập bằng password)
         if (user.getProvider() != AuthProvider.LOCAL) {
             throw new BadRequestException(
-                    "Tài khoản này đăng nhập bằng " + user.getProvider() + ". Vui lòng dùng đăng nhập Google."
-            );
+                    "Tài khoản này đăng nhập bằng " + user.getProvider() + ". Vui lòng dùng đăng nhập Google.");
         }
 
         // 4. Kiểm tra password
@@ -125,12 +122,12 @@ public class AuthService {
         if (EMAIL_PATTERN.matcher(contact).matches()) {
             email = contact;
             if (userRepository.existsByEmail(email)) {
-                throw new ConflictException("Email này đã được sử dụng");
+                throw new ConflictException("Email này đã được sử dụng", true);
             }
         } else if (PHONE_PATTERN.matcher(contact).matches()) {
             phone = contact;
             if (userRepository.existsByPhoneNumber(phone)) {
-                throw new ConflictException("Số điện thoại này đã được sử dụng");
+                throw new ConflictException("Số điện thoại này đã được sử dụng", true);
             }
         } else {
             throw new BadRequestException("Email hoặc số điện thoại không hợp lệ");
@@ -175,8 +172,7 @@ public class AuthService {
         Map<String, Object> googleUser;
         try {
             ResponseEntity<Map> response = restTemplate.exchange(
-                    googleApiUrl, HttpMethod.GET, entity, Map.class
-            );
+                    googleApiUrl, HttpMethod.GET, entity, Map.class);
             googleUser = response.getBody();
         } catch (Exception e) {
             log.error("Google Login Error: ", e);
@@ -212,8 +208,7 @@ public class AuthService {
         } else {
             if (user.getProvider() != AuthProvider.GOOGLE) {
                 throw new BadRequestException(
-                        "Email này đã đăng ký bằng " + user.getProvider() + ". Vui lòng đăng nhập theo cách đó."
-                );
+                        "Email này đã đăng ký bằng " + user.getProvider() + ". Vui lòng đăng nhập theo cách đó.");
             }
             checkUserStatus(user);
             if (user.getAvatarUrl() == null && picture != null) {
@@ -251,7 +246,8 @@ public class AuthService {
             case BANNED -> throw new CustomAuthenticationException("Tài khoản đã bị khóa vĩnh viễn");
             case INACTIVE -> throw new CustomAuthenticationException("Tài khoản tạm thời bị vô hiệu hóa");
             case UNVERIFIED -> throw new CustomAuthenticationException("Tài khoản chưa được xác thực");
-            default -> { /* ACTIVE — OK */ }
+            default -> {
+                /* ACTIVE — OK */ }
         }
     }
 
@@ -259,7 +255,8 @@ public class AuthService {
     // HELPER: Tạo avatar từ tên
     // =========================================================
     private String generateSmartAvatar(String fullName) {
-        if (fullName == null || fullName.isBlank()) return null;
+        if (fullName == null || fullName.isBlank())
+            return null;
         try {
             return "https://ui-avatars.com/api/?name=" +
                     URLEncoder.encode(fullName, StandardCharsets.UTF_8) +
@@ -275,7 +272,8 @@ public class AuthService {
 
     public ZaloAuthResponse loginWithZaloUserInfo(ZaloAuthRequest request) {
 
-        // 1. Verify + lấy phone TRƯỚC khi vào transaction (các bước này gọi Zalo API, không cần TX)
+        // 1. Verify + lấy phone TRƯỚC khi vào transaction (các bước này gọi Zalo API,
+        // không cần TX)
         verifyZaloUserId(request.getZaloAccessToken(), request.getUserId());
         String normalizedPhone = normalizePhoneNumber(
                 getPhoneFromZalo(request.getZaloAccessToken(), request.getPhoneToken()));
@@ -302,9 +300,11 @@ public class AuthService {
                     .orElseThrow(() -> new BadRequestException("Cấu hình hệ thống lỗi: Role USER chưa được tạo"));
 
             String displayName = (request.getName() != null && !request.getName().isBlank())
-                    ? request.getName().trim() : "Zalo User";
+                    ? request.getName().trim()
+                    : "Zalo User";
             String avatarUrl = (request.getAvatar() != null && !request.getAvatar().isBlank())
-                    ? request.getAvatar() : generateSmartAvatar(displayName);
+                    ? request.getAvatar()
+                    : generateSmartAvatar(displayName);
 
             user = User.builder()
                     .fullName(displayName)
@@ -384,8 +384,7 @@ public class AuthService {
         try {
             log.info("Verifying Zalo Access Token for userId: {}", expectedUserId);
             ResponseEntity<Map> response = restTemplate.exchange(
-                    ZALO_VERIFY_URL, HttpMethod.GET, entity, Map.class
-            );
+                    ZALO_VERIFY_URL, HttpMethod.GET, entity, Map.class);
             body = response.getBody();
             log.info("Zalo Verify Token Response: {}", body);
         } catch (Exception e) {
@@ -434,8 +433,7 @@ public class AuthService {
         try {
             log.info("Calling Zalo Phone API with access_token and code/phoneToken");
             ResponseEntity<Map> response = restTemplate.exchange(
-                    ZALO_PHONE_URL, HttpMethod.GET, entity, Map.class
-            );
+                    ZALO_PHONE_URL, HttpMethod.GET, entity, Map.class);
             body = response.getBody();
             log.info("Zalo Phone API Raw Response: {}", body);
         } catch (Exception e) {
@@ -479,7 +477,8 @@ public class AuthService {
     // HELPER: Chuẩn hoá số điện thoại Zalo (+84 → 0)
     // =========================================================
     private String normalizePhoneNumber(String phone) {
-        if (phone == null) return null;
+        if (phone == null)
+            return null;
         String cleaned = phone.trim().replaceAll("\\s+", "");
         if (cleaned.startsWith("+84")) {
             cleaned = "0" + cleaned.substring(3);

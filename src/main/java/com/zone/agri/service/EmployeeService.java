@@ -111,7 +111,7 @@ public class EmployeeService {
                 : userRepository.existsByEmailAndIdNot(email, id);
 
         if (emailExists) {
-            throw new ConflictException("Email này đã được sử dụng trong hệ thống");
+            throw new ConflictException("Email này đã được sử dụng trong hệ thống", true);
         }
 
         boolean phoneExists = (id == null)
@@ -119,7 +119,7 @@ public class EmployeeService {
                 : userRepository.existsByPhoneNumberAndIdNot(phone, id);
 
         if (phoneExists) {
-            throw new ConflictException("Số điện thoại này đã được sử dụng trong hệ thống");
+            throw new ConflictException("Số điện thoại này đã được sử dụng trong hệ thống", true);
         }
 
         if (citizenId == null || citizenId.isBlank()) {
@@ -131,7 +131,7 @@ public class EmployeeService {
                 : userRepository.existsByCitizenIdAndIdNot(citizenId, id);
 
         if (citizenIdExists) {
-            throw new ConflictException("Số CCCD này đã được sử dụng trong hệ thống");
+            throw new ConflictException("Số CCCD này đã được sử dụng trong hệ thống", true);
         }
     }
 

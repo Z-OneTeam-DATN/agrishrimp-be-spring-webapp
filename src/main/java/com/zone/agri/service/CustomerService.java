@@ -81,10 +81,10 @@ public class CustomerService {
     @Transactional
     public Customer createCustomer(CustomerRequest req) {
         if (userRepository.existsByEmail(req.getEmail())) {
-            throw new ConflictException("Email " + req.getEmail() + " da co tai khoan trong he thong!");
+            throw new ConflictException("Email " + req.getEmail() + " da co tai khoan trong he thong!", true);
         }
         if (userRepository.existsByPhoneNumber(req.getPhone())) {
-            throw new ConflictException("SDT " + req.getPhone() + " da duoc su dung!");
+            throw new ConflictException("SDT " + req.getPhone() + " da duoc su dung!", true);
         }
 
         String randomPassword = UUID.randomUUID().toString().replace("-", "").substring(0, 8);
@@ -141,7 +141,7 @@ public class CustomerService {
                 .orElseThrow(() -> new NotFoundException("Khong tim thay khach hang"));
 
         if (!customer.getPhone().equals(req.getPhone()) && customerRepository.existsByPhone(req.getPhone())) {
-            throw new ConflictException("So dien thoai moi da duoc su dung boi nguoi khac!");
+            throw new ConflictException("So dien thoai moi da duoc su dung boi nguoi khac!", true);
         }
 
         mapRequestToEntity(req, customer);
@@ -198,7 +198,8 @@ public class CustomerService {
         dto.setCreatedAt(user.getCreatedAt());
         dto.setAvatarUrl(user.getAvatarUrl());
 
-        List<UserAddress> defaultAddresses = Optional.ofNullable(userAddressRepository.findByUserIdAndIsDefaultTrue(userId))
+        List<UserAddress> defaultAddresses = Optional
+                .ofNullable(userAddressRepository.findByUserIdAndIsDefaultTrue(userId))
                 .orElse(Collections.emptyList());
         if (!defaultAddresses.isEmpty()) {
             UserAddress defaultAddr = defaultAddresses.get(0);
@@ -433,7 +434,8 @@ public class CustomerService {
 
     public List<CustomerStatusLogResponse> getStatusLogs(Long identifier) {
         Long resolvedUserId = getAccessibleCustomerUser(identifier).getId();
-        List<CustomerStatusLog> logs = customerStatusLogRepository.findByCustomerUserIdOrderByCreatedAtDesc(resolvedUserId);
+        List<CustomerStatusLog> logs = customerStatusLogRepository
+                .findByCustomerUserIdOrderByCreatedAtDesc(resolvedUserId);
         if (logs.isEmpty()) {
             return Collections.emptyList();
         }

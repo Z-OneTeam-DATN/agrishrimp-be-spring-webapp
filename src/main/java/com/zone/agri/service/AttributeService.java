@@ -45,7 +45,7 @@ public class AttributeService {
         // KIỂM TRA TRÙNG MÃ CODE
         Optional<Attribute> existing = repository.findByCodeIgnoreCase(dto.getCode());
         if (existing.isPresent()) {
-            throw new ConflictException("Mã Code '" + dto.getCode() + "' đã tồn tại! Vui lòng sử dụng mã khác.");
+            throw new ConflictException("Mã Code '" + dto.getCode() + "' đã tồn tại! Vui lòng sử dụng mã khác.", true);
         }
 
         Attribute attr = new Attribute();
@@ -61,7 +61,8 @@ public class AttributeService {
         // KIỂM TRA TRÙNG MÃ CODE NHƯNG BỎ QUA CHÍNH NÓ
         Optional<Attribute> existing = repository.findByCodeIgnoreCase(dto.getCode());
         if (existing.isPresent() && !existing.get().getId().equals(id)) {
-            throw new ConflictException("Mã Code '" + dto.getCode() + "' đã được sử dụng cho một thuộc tính khác!");
+            throw new ConflictException("Mã Code '" + dto.getCode() + "' đã được sử dụng cho một thuộc tính khác!",
+                    true);
         }
 
         List<String> newValues = dto.getValues() != null ? dto.getValues().stream()
@@ -73,7 +74,7 @@ public class AttributeService {
 
         // Check that attribute has at least 1 value
         if (newValues.isEmpty()) {
-            throw new ConflictException("Thuộc tính phải có ít nhất 1 giá trị!");
+            throw new ConflictException("Thuộc tính phải có ít nhất 1 giá trị!", true);
         }
 
         List<AttributeValue> valuesToRemove = attr.getAttributeValues() != null
@@ -86,7 +87,8 @@ public class AttributeService {
             if (skuAttributeValueRepository.existsByAttributeValueId(value.getId())) {
                 throw new ConflictException(
                         "Không thể xóa giá trị '" + value.getValue() +
-                                "' vì đang được sử dụng bởi biến thể sản phẩm. Chỉ được xóa khi giá trị này chưa được gán cho bất kỳ biến thể nào.");
+                                "' vì đang được sử dụng bởi biến thể sản phẩm. Chỉ được xóa khi giá trị này chưa được gán cho bất kỳ biến thể nào.",
+                        true);
             }
         }
 
@@ -100,7 +102,7 @@ public class AttributeService {
             return toDTO(repository.saveAndFlush(attr));
         } catch (DataIntegrityViolationException e) {
             throw new ConflictException(
-                    "Không thể lưu: Có giá trị thuộc tính bạn vừa xóa đang được gắn cho biến thể sản phẩm!");
+                    "Không thể lưu: Có giá trị thuộc tính bạn vừa xóa đang được gắn cho biến thể sản phẩm!", true);
         }
     }
 
@@ -109,7 +111,8 @@ public class AttributeService {
         boolean isUsedInProducts = skuAttributeValueRepository.existsByAttributeId(id);
         if (isUsedInProducts) {
             throw new ConflictException(
-                    "Không thể xóa thuộc tính này vì nó đang được gắn cho các biến thể sản phẩm. Vui lòng chuyển trạng thái sang 'Tạm ngừng' thay vì xóa.");
+                    "Không thể xóa thuộc tính này vì nó đang được gắn cho các biến thể sản phẩm. Vui lòng chuyển trạng thái sang 'Tạm ngừng' thay vì xóa.",
+                    true);
         }
         repository.deleteById(id);
     }

@@ -915,7 +915,7 @@ public class OrderService {
             if (lockedResult != null) {
                 return lockedResult;
             }
-            throw new ConflictException("Đơn hàng đang được xử lý, vui lòng đợi trong giây lát");
+            throw new ConflictException("Đơn hàng đang được xử lý, vui lòng đợi trong giây lát", true);
         }
 
         try {
@@ -1203,7 +1203,7 @@ public class OrderService {
 
         if (totalsChanged || !Objects.equals(buildSubOrderSignature(draft.getSubOrders()),
                 buildSubOrderSignature(liveQuote.subOrders()))) {
-            throw new ConflictException("Đơn hàng vừa thay đổi, vui lòng tải lại giỏ hàng trước khi đặt");
+            throw new ConflictException("Đơn hàng vừa thay đổi, vui lòng tải lại giỏ hàng trước khi đặt", true);
         }
     }
 

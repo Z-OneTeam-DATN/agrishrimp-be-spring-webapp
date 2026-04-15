@@ -49,7 +49,7 @@ public class CategoryService {
     @Transactional
     public CategoryDTO createCategory(CategoryDTO dto) {
         if (categoryRepository.existsByNameIgnoreCase(dto.getName())) {
-            throw new ConflictException("Tên danh mục '" + dto.getName() + "' đã tồn tại!");
+            throw new ConflictException("Tên danh mục '" + dto.getName() + "' đã tồn tại!", true);
         }
 
         Category category = new Category();
@@ -63,7 +63,7 @@ public class CategoryService {
                 .orElseThrow(() -> new NotFoundException("Không tìm thấy danh mục"));
 
         if (categoryRepository.existsByNameIgnoreCaseAndIdNot(dto.getName(), id)) {
-            throw new ConflictException("Tên danh mục '" + dto.getName() + "' đã tồn tại!");
+            throw new ConflictException("Tên danh mục '" + dto.getName() + "' đã tồn tại!", true);
         }
 
         CategoryStatus oldStatus = category.getStatus();
@@ -98,7 +98,7 @@ public class CategoryService {
 
         if (dto.getParentId() != null) {
             if (entity.getId() != null && entity.getId().equals(dto.getParentId())) {
-                throw new ConflictException("Danh mục không thể làm cha của chính nó!");
+                throw new ConflictException("Danh mục không thể làm cha của chính nó!", true);
             }
             Category parent = categoryRepository.findById(dto.getParentId())
                     .orElseThrow(
@@ -152,7 +152,7 @@ public class CategoryService {
         long totalProducts = countAllProductsRecursive(category);
         if (totalProducts > 0) {
             throw new ConflictException(
-                    "Không thể xóa! Danh mục này hoặc danh mục con đang chứa " + totalProducts + " sản phẩm.");
+                    "Không thể xóa! Danh mục này hoặc danh mục con đang chứa " + totalProducts + " sản phẩm.", true);
         }
 
         categoryRepository.delete(category);
