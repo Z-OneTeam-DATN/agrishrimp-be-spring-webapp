@@ -71,6 +71,11 @@ public class AttributeService {
                 .collect(Collectors.toList())
                 : new ArrayList<>();
 
+        // Check that attribute has at least 1 value
+        if (newValues.isEmpty()) {
+            throw new ConflictException("Thuộc tính phải có ít nhất 1 giá trị!");
+        }
+
         List<AttributeValue> valuesToRemove = attr.getAttributeValues() != null
                 ? attr.getAttributeValues().stream()
                         .filter(av -> !newValues.contains(av.getValue()))
