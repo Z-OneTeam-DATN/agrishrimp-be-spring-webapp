@@ -20,6 +20,12 @@ public class TransferRequest {
     @NotBlank(message = "Loại chuyển hàng không được để trống")
     private String transferType;
 
+    /**
+     * Loại nghiệp vụ: STOCK_TRANSFER (mặc định) hoặc INTERNAL_SALE.
+     * Khi INTERNAL_SALE, mỗi dòng hàng phải có unitTransferPrice.
+     */
+    private String transferBusinessType; // Nếu null, mặc định STOCK_TRANSFER
+
     private String description;
     private String transporter;
     private String vehicle;

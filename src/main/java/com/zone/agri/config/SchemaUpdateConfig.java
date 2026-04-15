@@ -50,6 +50,28 @@ public class SchemaUpdateConfig {
                 "Patch sub_order_items them missing_quantity",
                 "ALTER TABLE sub_order_items ADD COLUMN missing_quantity INT NULL"
             );
+            applyPatch(
+                "Tạo bảng inventory_receipt_payments nếu chưa có",
+                """
+                CREATE TABLE IF NOT EXISTS inventory_receipt_payments (
+                    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+                    inventory_note_id BIGINT NOT NULL,
+                    supplier_id BIGINT NULL,
+                    branch_id BIGINT NULL,
+                    created_by BIGINT NULL,
+                    payment_date DATETIME NULL,
+                    amount DECIMAL(38,2) NOT NULL DEFAULT 0,
+                    remaining_debt_after DECIMAL(38,2) NOT NULL DEFAULT 0,
+                    payment_method VARCHAR(50) NULL,
+                    reference_code VARCHAR(255) NULL,
+                    note TEXT NULL,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    INDEX idx_irp_receipt (inventory_note_id),
+                    INDEX idx_irp_payment_date (payment_date),
+                    INDEX idx_irp_branch (branch_id)
+                )
+                """
+            );
         };
     }
 

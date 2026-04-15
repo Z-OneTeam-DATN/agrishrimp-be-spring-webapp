@@ -9,6 +9,8 @@ import com.zone.agri.entity.*;
 import com.zone.agri.entity.enums.InventoryTransferStatus;
 import com.zone.agri.entity.enums.TransactionType;
 import com.zone.agri.entity.enums.OrderStatus;
+import com.zone.agri.entity.enums.TransferBusinessType;
+import com.zone.agri.entity.enums.TransferSettlementStatus;
 import com.zone.agri.repository.*;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
@@ -39,6 +41,22 @@ public class InventoryTransferService {
         Branch toBranch = branchRepo.findById(req.getToBranchId())
                 .orElseThrow(() -> new RuntimeException("Không tìm thấy Kho nhận"));
 
+        // Xác định loại nghiệp vụ (mặc định STOCK_TRANSFER nếu không truyền)
+        TransferBusinessType businessType = TransferBusinessType.STOCK_TRANSFER;
+        if ("INTERNAL_SALE".equalsIgnoreCase(req.getTransferBusinessType())) {
+            businessType = TransferBusinessType.INTERNAL_SALE;
+        }
+
+        // Validate: INTERNAL_SALE bắt buộc mỗi dòng phải có unitTransferPrice > 0
+        if (businessType == TransferBusinessType.INTERNAL_SALE) {
+            for (TransferItemRequest itemReq : req.getItems()) {
+                if (itemReq.getUnitTransferPrice() == null || itemReq.getUnitTransferPrice().compareTo(BigDecimal.ZERO) <= 0) {
+                    throw new RuntimeException(
+                            "Phiếu bán nội bộ yêu cầu đơn giá điều chuyển > 0 cho từng mặt hàng (SKU: " + itemReq.getSku() + ")");
+                }
+            }
+        }
+
         String newCode = String.format("PDC-%06d", transferRepo.countTotalTransfers() + 1);
 
         InventoryTransfer transfer = InventoryTransfer.builder()
@@ -56,15 +74,28 @@ public class InventoryTransferService {
                 .priority(req.getPriority())
                 .transferDate(req.getTransferDate())
                 .deadline(req.getDeadline())
+                .transferBusinessType(businessType)
+                // INTERNAL_SALE: khởi tạo trạng thái nợ nội bộ = UNPAID
+                .settlementStatus(businessType == TransferBusinessType.INTERNAL_SALE ? TransferSettlementStatus.UNPAID : null)
                 .build();
 
         List<InventoryTransferDetail> details = new ArrayList<>();
         int totalQty = 0;
-        BigDecimal totalValue = BigDecimal.ZERO;
+        BigDecimal totalValue = BigDecimal.ZERO;     // Tổng theo giá vốn FIFO (quản trị kho)
+        BigDecimal transferAmount = BigDecimal.ZERO; // Tổng theo giá bán nội bộ (chỉ INTERNAL_SALE)
 
         for (TransferItemRequest itemReq : req.getItems()) {
             ProductVariant variant = variantRepo.findBySku(itemReq.getSku())
                     .orElseThrow(() -> new RuntimeException("Sản phẩm với SKU " + itemReq.getSku() + " không tồn tại"));
+
+            // Tính giá bán nội bộ cho dòng này (INTERNAL_SALE)
+            BigDecimal unitPrice = BigDecimal.ZERO;
+            BigDecimal lineTotalTransferPrice = BigDecimal.ZERO;
+            if (businessType == TransferBusinessType.INTERNAL_SALE && itemReq.getUnitTransferPrice() != null) {
+                unitPrice = itemReq.getUnitTransferPrice();
+                lineTotalTransferPrice = unitPrice.multiply(BigDecimal.valueOf(itemReq.getQuantity()));
+                transferAmount = transferAmount.add(lineTotalTransferPrice);
+            }
 
             InventoryTransferDetail detail = InventoryTransferDetail.builder()
                     .inventoryTransfer(transfer)
@@ -73,6 +104,8 @@ public class InventoryTransferService {
                     .quantityRequested(itemReq.getQuantity())
                     .quantityReal(0)
                     .note(itemReq.getItemNote())
+                    .unitTransferPrice(businessType == TransferBusinessType.INTERNAL_SALE ? unitPrice : null)
+                    .totalTransferPrice(businessType == TransferBusinessType.INTERNAL_SALE ? lineTotalTransferPrice : null)
                     .build();
 
             details.add(detail);
@@ -104,6 +137,13 @@ public class InventoryTransferService {
         transfer.setDetails(details);
         transfer.setTotalQuantity(totalQty);
         transfer.setTotalValue(totalValue);
+
+        // INTERNAL_SALE: gán tổng thành tiền nội bộ và công nợ nội bộ 2 phía
+        if (businessType == TransferBusinessType.INTERNAL_SALE) {
+            transfer.setTransferAmount(transferAmount);
+            transfer.setSourceReceivableAmount(transferAmount); // Kho xuất: phải thu nội bộ
+            transfer.setDestPayableAmount(transferAmount);       // Kho nhận: phải trả nội bộ
+        }
 
         return transferRepo.save(transfer);
     }
@@ -449,7 +489,10 @@ public class InventoryTransferService {
                 t.getPriority(),
                 t.getTotalQuantity(),
                 t.getDetails() != null ? t.getDetails().size() : 0,
-                t.getTotalValue());
+                t.getTotalValue(),
+                t.getTransferBusinessType(),
+                t.getSettlementStatus(),
+                t.getTransferAmount());
     }
 
     private TransferDetailResponse convertToDetailResponse(InventoryTransfer t) {
@@ -468,6 +511,11 @@ public class InventoryTransferService {
                 .toBranchName(t.getToBranch() != null ? t.getToBranch().getName() : "N/A")
                 .totalQuantity(t.getTotalQuantity())
                 .totalValue(t.getTotalValue())
+                .transferBusinessType(t.getTransferBusinessType())
+                .transferAmount(t.getTransferAmount())
+                .settlementStatus(t.getSettlementStatus())
+                .sourceReceivableAmount(t.getSourceReceivableAmount())
+                .destPayableAmount(t.getDestPayableAmount())
                 .items(t.getDetails().stream().map(d -> TransferDetailResponse.ItemDetail.builder()
                         .variantId(d.getProductVariant().getId())
                         .productName(d.getProductVariant().getProduct().getName())
@@ -478,6 +526,8 @@ public class InventoryTransferService {
                         .quantityAccepted(d.getQuantityAccepted())
                         .quantityRejected(d.getQuantityRejected())
                         .note(d.getNote())
+                        .unitTransferPrice(d.getUnitTransferPrice())
+                        .totalTransferPrice(d.getTotalTransferPrice())
                         .build()).toList())
                 .build();
     }
