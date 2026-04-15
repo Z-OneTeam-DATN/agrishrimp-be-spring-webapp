@@ -12,10 +12,13 @@ import java.util.stream.Collectors;
 
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.zone.agri.common.AuthUtils;
+import com.zone.agri.common.RoleUtils;
 import com.zone.agri.dto.request.customer.CustomerInternalNoteRequest;
 import com.zone.agri.dto.request.customer.CustomerRequest;
 import com.zone.agri.dto.response.customer.CustomerAddressResponse;
@@ -136,8 +139,21 @@ public class CustomerService {
     public Page<CustomerResponse> getCustomers(String keyword, String statusStr, Pageable pageable) {
         String finalStatus = (statusStr == null || statusStr.trim().isEmpty()) ? "all" : statusStr.trim();
         String normalizedPhoneKeyword = keyword == null ? null : keyword.replaceAll("\\D+", "");
-        Page<User> users = userRepository.findAllCustomers(keyword, normalizedPhoneKeyword, finalStatus, pageable);
-        return users.map(this::convertToResponse);
+        if (normalizedPhoneKeyword != null && normalizedPhoneKeyword.isBlank()) {
+            normalizedPhoneKeyword = null;
+        }
+
+        Long branchScopeId = resolveCustomerScopeBranchId();
+        UserStatus userStatus = "all".equalsIgnoreCase(finalStatus) ? null : UserStatus.valueOf(finalStatus);
+
+        Page<Customer> customers = customerRepository.searchCustomers(
+                keyword,
+                normalizedPhoneKeyword,
+                branchScopeId,
+                userStatus,
+                pageable);
+
+        return customers.map(this::convertToResponse);
     }
 
     public Map<String, Boolean> checkDuplicate(String email, String phone) {
@@ -208,6 +224,43 @@ public class CustomerService {
         return dto;
     }
 
+    private CustomerResponse convertToResponse(Customer customer) {
+        return convertToResponse(customer.getUser());
+    }
+
+    private Long resolveCustomerScopeBranchId() {
+        var currentUser = AuthUtils.getUserDetail();
+        if (currentUser == null || currentUser.getRole() == null) {
+            return null;
+        }
+
+        String roleSlug = currentUser.getRole().getSlug();
+        if (RoleUtils.isAdminLikeRole(roleSlug)) {
+            return null;
+        }
+
+        if (currentUser.getBranchId() == null) {
+            throw new AccessDeniedException("Tài khoản này chưa được gán chi nhánh.");
+        }
+
+        return currentUser.getBranchId();
+    }
+
+    private Customer getAccessibleCustomerByUserId(Long userId) {
+        Customer customer = customerRepository.findByUserId(userId)
+                .orElseThrow(() -> new NotFoundException("Không tìm thấy khách hàng"));
+
+        Long branchScopeId = resolveCustomerScopeBranchId();
+        if (branchScopeId != null) {
+            Long customerBranchId = customer.getAssignedBranch() != null ? customer.getAssignedBranch().getId() : null;
+            if (customerBranchId == null || !branchScopeId.equals(customerBranchId)) {
+                throw new AccessDeniedException("Bạn không có quyền xem khách hàng ngoài chi nhánh của mình.");
+            }
+        }
+
+        return customer;
+    }
+
     public boolean requiresOnlinePayment(Long userId) {
         User user = userRepository.findById(userId).orElse(null);
         if (user == null || user.getRole() == null || user.getRole().getSlug().equals("ADMIN")) {
@@ -249,15 +302,12 @@ public class CustomerService {
     }
 
     public CustomerResponse getCustomerById(Long userId) {
-        User user = userRepository.findById(userId)
-                .orElseThrow(() -> new NotFoundException("Không tìm thấy tài khoản người dùng"));
-        return convertToResponse(user);
+        return convertToResponse(getAccessibleCustomerByUserId(userId).getUser());
     }
 
     public CustomerDetailResponse getCustomerDetailById(Long userId) {
-        User user = userRepository.findById(userId)
-                .orElseThrow(() -> new NotFoundException("Không tìm thấy tài khoản người dùng"));
-        CustomerResponse base = convertToResponse(user);
+        Customer customer = getAccessibleCustomerByUserId(userId);
+        CustomerResponse base = convertToResponse(customer.getUser());
 
         LocalDateTime lastOrderDate = orderRepository.findLastOrderDateByUserId(userId);
         Double averageOrderValueRaw = orderRepository.findAverageOrderValueByUserId(userId);
@@ -303,6 +353,7 @@ public class CustomerService {
     }
 
     public List<CustomerInternalNoteResponse> getInternalNotes(Long userId) {
+        getAccessibleCustomerByUserId(userId);
         List<CustomerInternalNote> notes = customerInternalNoteRepository
                 .findByCustomerUserIdOrderByCreatedAtDesc(userId);
         return mapNotes(notes);
@@ -310,8 +361,7 @@ public class CustomerService {
 
     @Transactional
     public CustomerInternalNoteResponse addInternalNote(Long userId, CustomerInternalNoteRequest request) {
-        User customerUser = userRepository.findById(userId)
-                .orElseThrow(() -> new NotFoundException("Không tìm thấy tài khoản người dùng"));
+        User customerUser = getAccessibleCustomerByUserId(userId).getUser();
 
         CustomerInternalNote note = CustomerInternalNote.builder()
                 .customerUser(customerUser)
@@ -331,6 +381,7 @@ public class CustomerService {
     }
 
     public List<CustomerStatusLogResponse> getStatusLogs(Long userId) {
+        getAccessibleCustomerByUserId(userId);
         List<CustomerStatusLog> logs = customerStatusLogRepository.findByCustomerUserIdOrderByCreatedAtDesc(userId);
         if (logs.isEmpty()) {
             return Collections.emptyList();
@@ -392,7 +443,6 @@ public class CustomerService {
         if (user == null || user.getRole().getSlug().equals("ADMIN"))
             return;
 
-        Long totalOrders = orderRepository.countTotalOrdersByUserId(userId);
         Long completedOrders = orderRepository.countCompletedOrdersByUserId(userId);
         Long settledOrders = orderRepository.countSettledOrdersByUserId(userId);
 
