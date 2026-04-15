@@ -11,4 +11,5 @@ public class AttributeValueResponse {
     private String attributeCode;
     private Long valueId;
     private String value;
+    private Boolean usedInVariant;
 }

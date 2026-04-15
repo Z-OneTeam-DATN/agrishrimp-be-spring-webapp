@@ -141,6 +141,7 @@ public class AttributeService {
                         .attributeCode(entity.getCode())
                         .valueId(av.getId())
                         .value(av.getValue())
+                        .usedInVariant(skuAttributeValueRepository.existsByAttributeValueId(av.getId()))
                         .build());
             }
             dto.setValues(values);
