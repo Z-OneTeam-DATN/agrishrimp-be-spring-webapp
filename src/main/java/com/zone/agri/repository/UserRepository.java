@@ -76,6 +76,24 @@ public interface UserRepository extends JpaRepository<User, Long> {
                         @Param("status") String status,
                         Pageable pageable);
 
+        @EntityGraph(attributePaths = { "customer" })
+        @Query("SELECT u FROM User u LEFT JOIN u.customer c LEFT JOIN c.assignedBranch b WHERE " +
+                        "u.role.slug IN ('CUSTOMER', 'USER') AND " +
+                        "(:status IS NULL OR u.status = :status) AND " +
+                        "(:branchId IS NULL OR b.id = :branchId) AND " +
+                        "(:keyword IS NULL OR :keyword = '' OR LOWER(u.fullName) LIKE LOWER(CONCAT('%', :keyword, '%')) "
+                        +
+                        "OR LOWER(u.email) LIKE LOWER(CONCAT('%', :keyword, '%')) " +
+                        "OR u.phoneNumber LIKE CONCAT('%', :keyword, '%') " +
+                        "OR (:phoneKeyword IS NOT NULL AND :phoneKeyword <> '' AND " +
+                        "CAST(FUNCTION('replace', FUNCTION('replace', FUNCTION('replace', COALESCE(u.phoneNumber, ''), ' ', ''), '.', ''), '-', '') AS STRING) LIKE CONCAT('%', :phoneKeyword, '%')))")
+        Page<User> searchCustomerUsers(
+                        @Param("keyword") String keyword,
+                        @Param("phoneKeyword") String phoneKeyword,
+                        @Param("status") com.zone.agri.entity.enums.UserStatus status,
+                        @Param("branchId") Long branchId,
+                        Pageable pageable);
+
         // 🟢 Get staff by branch
         @Query("SELECT NEW MAP(u.id AS id, u.fullName AS fullName, u.email AS email, u.phoneNumber AS phoneNumber) " +
                         "FROM User u WHERE u.branch.id = :branchId AND u.role.slug = 'STAFF' ORDER BY u.fullName")

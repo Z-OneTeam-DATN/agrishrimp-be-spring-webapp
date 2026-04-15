@@ -144,16 +144,23 @@ public class CustomerService {
         }
 
         Long branchScopeId = resolveCustomerScopeBranchId();
-        UserStatus userStatus = "all".equalsIgnoreCase(finalStatus) ? null : UserStatus.valueOf(finalStatus);
+        UserStatus userStatus = null;
+        if (!"all".equalsIgnoreCase(finalStatus)) {
+            try {
+                userStatus = UserStatus.valueOf(finalStatus.toUpperCase());
+            } catch (IllegalArgumentException ex) {
+                throw new IllegalArgumentException("Trạng thái khách hàng không hợp lệ: " + finalStatus);
+            }
+        }
 
-        Page<Customer> customers = customerRepository.searchCustomers(
+        Page<User> users = userRepository.searchCustomerUsers(
                 keyword,
                 normalizedPhoneKeyword,
-                branchScopeId,
                 userStatus,
+                branchScopeId,
                 pageable);
 
-        return customers.map(this::convertToResponse);
+        return users.map(this::convertToResponse);
     }
 
     public Map<String, Boolean> checkDuplicate(String email, String phone) {
@@ -222,10 +229,6 @@ public class CustomerService {
         dto.setOnlinePaymentOnly(hasEnoughOrdersForAssessment && requiresOnlinePayment(reputationScore));
 
         return dto;
-    }
-
-    private CustomerResponse convertToResponse(Customer customer) {
-        return convertToResponse(customer.getUser());
     }
 
     private Long resolveCustomerScopeBranchId() {
