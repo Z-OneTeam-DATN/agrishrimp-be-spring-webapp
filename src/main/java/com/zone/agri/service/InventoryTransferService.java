@@ -489,7 +489,10 @@ public class InventoryTransferService {
                 t.getPriority(),
                 t.getTotalQuantity(),
                 t.getDetails() != null ? t.getDetails().size() : 0,
-                t.getTotalValue());
+                t.getTotalValue(),
+                t.getTransferBusinessType(),
+                t.getSettlementStatus(),
+                t.getTransferAmount());
     }
 
     private TransferDetailResponse convertToDetailResponse(InventoryTransfer t) {
