@@ -161,7 +161,19 @@ public interface InventoryNoteRepository extends JpaRepository<InventoryNote, Lo
     List<InventoryNote> findAllByBranchId(@Param("branchId") Long branchId);
 
     // Lấy phiếu nhập của NCC, sắp xếp mới nhất lên đầu
-    List<InventoryNote> findBySupplierIdAndTypeOrderByCreatedAtDesc(Long supplierId, InventoryNoteType type);
+    @Query("""
+        SELECT DISTINCT note
+        FROM InventoryNote note
+        LEFT JOIN FETCH note.details detail
+        LEFT JOIN FETCH detail.productVariant
+        WHERE note.supplier.id = :supplierId
+          AND note.type = :type
+        ORDER BY note.createdAt DESC
+    """)
+    List<InventoryNote> findImportHistoryBySupplierId(
+            @Param("supplierId") Long supplierId,
+            @Param("type") InventoryNoteType type
+    );
 
     @Query("""
         SELECT COALESCE(SUM(d.quantityRequested), 0)

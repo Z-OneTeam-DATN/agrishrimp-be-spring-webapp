@@ -15,6 +15,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.Objects;
 import java.util.stream.Collectors;
 
 @Service
@@ -87,8 +88,9 @@ public class SupplierService {
     }
 
     // THÊM HÀM NÀY VÀO CUỐI: Lấy lịch sử nhập hàng
+    @Transactional(readOnly = true)
     public List<SupplierImportDto> getImportHistory(Long supplierId) {
-        List<InventoryNote> notes = inventoryNoteRepository.findBySupplierIdAndTypeOrderByCreatedAtDesc(supplierId, InventoryNoteType.IMPORT);
+        List<InventoryNote> notes = inventoryNoteRepository.findImportHistoryBySupplierId(supplierId, InventoryNoteType.IMPORT);
 
         return notes.stream().map(note -> SupplierImportDto.builder()
                 .id(note.getId())
@@ -96,6 +98,14 @@ public class SupplierService {
                 .status(note.getStatus().name()) // PENDING, COMPLETED, CANCELLED
                 .totalAmount(note.getTotalAmount())
                 .createdAt(note.getCreatedAt())
+                .itemCount(note.getDetails() != null ? note.getDetails().size() : 0)
+                .totalQuantity(note.getDetails() != null
+                        ? note.getDetails().stream()
+                                .mapToInt(detail -> Objects.requireNonNullElse(
+                                        detail.getQuantityReal(),
+                                        Objects.requireNonNullElse(detail.getQuantityRequested(), Objects.requireNonNullElse(detail.getQuantity(), 0))))
+                                .sum()
+                        : 0)
                 .build()).collect(Collectors.toList());
     }
 

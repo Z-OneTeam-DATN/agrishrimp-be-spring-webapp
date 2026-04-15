@@ -13,4 +13,6 @@ public class SupplierImportDto {
     private String status;
     private BigDecimal totalAmount;
     private LocalDateTime createdAt;
+    private Integer itemCount;
+    private Integer totalQuantity;
 }
