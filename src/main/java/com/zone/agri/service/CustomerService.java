@@ -234,6 +234,11 @@ public class CustomerService {
             return null;
         }
 
+        // System roles (e.g. seeded admin role) are always global-scope.
+        if (Boolean.TRUE.equals(currentUser.getRole().getIsSystem())) {
+            return null;
+        }
+
         String roleSlug = currentUser.getRole().getSlug();
         if (RoleUtils.isAdminLikeRole(roleSlug)) {
             return null;
