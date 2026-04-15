@@ -1,5 +1,21 @@
 package com.zone.agri.service;
 
+import java.math.BigDecimal;
+import java.time.LocalDateTime;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.UUID;
+import java.util.stream.Collectors;
+
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
 import com.zone.agri.dto.request.customer.CustomerInternalNoteRequest;
 import com.zone.agri.dto.request.customer.CustomerRequest;
 import com.zone.agri.dto.response.customer.CustomerAddressResponse;
@@ -18,24 +34,17 @@ import com.zone.agri.entity.enums.CustomerStatus;
 import com.zone.agri.entity.enums.UserStatus;
 import com.zone.agri.exception.ConflictException;
 import com.zone.agri.exception.NotFoundException;
-import com.zone.agri.repository.*;
-import lombok.extern.slf4j.Slf4j;
-import lombok.RequiredArgsConstructor;
-import org.springframework.data.domain.Page;
-import org.springframework.data.domain.Pageable;
-import org.springframework.security.crypto.password.PasswordEncoder;
-import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
+import com.zone.agri.repository.BranchRepository;
+import com.zone.agri.repository.CustomerInternalNoteRepository;
+import com.zone.agri.repository.CustomerRepository;
+import com.zone.agri.repository.CustomerStatusLogRepository;
+import com.zone.agri.repository.OrderRepository;
+import com.zone.agri.repository.RoleRepository;
+import com.zone.agri.repository.UserAddressRepository;
+import com.zone.agri.repository.UserRepository;
 
-import java.math.BigDecimal;
-import java.time.LocalDateTime;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
-import java.util.UUID;
-import java.util.stream.Collectors;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 
 @Service
 @RequiredArgsConstructor
@@ -175,6 +184,7 @@ public class CustomerService {
 
         // Fetch order statistics
         Long totalOrders = Optional.ofNullable(orderRepository.countTotalOrdersByUserId(userId)).orElse(0L);
+        Long settledOrders = Optional.ofNullable(orderRepository.countSettledOrdersByUserId(userId)).orElse(0L);
         Long completedOrders = Optional.ofNullable(orderRepository.countCompletedOrdersByUserId(userId))
                 .orElse(0L);
         BigDecimal totalSpent = Optional.ofNullable(orderRepository.sumTotalSpentByUserId(userId))
@@ -184,14 +194,16 @@ public class CustomerService {
         dto.setTotalSpent(totalSpent);
 
         double reputationScore = 0.0;
-        if (totalOrders > 0) {
-            double score = (double) completedOrders / totalOrders * 100;
+        if (settledOrders > 0) {
+            double score = (double) completedOrders / settledOrders * 100;
             reputationScore = Math.round(score * 100.0) / 100.0;
         }
 
+        boolean hasEnoughOrdersForAssessment = settledOrders != null && settledOrders >= 3;
+
         dto.setReputationScore(reputationScore);
-        dto.setRiskLevel(determineRiskLevel(reputationScore));
-        dto.setOnlinePaymentOnly(requiresOnlinePayment(reputationScore));
+        dto.setRiskLevel(hasEnoughOrdersForAssessment ? determineRiskLevel(reputationScore) : "UNKNOWN");
+        dto.setOnlinePaymentOnly(hasEnoughOrdersForAssessment && requiresOnlinePayment(reputationScore));
 
         return dto;
     }
@@ -202,13 +214,13 @@ public class CustomerService {
             return false;
         }
 
-        Long totalOrders = orderRepository.countTotalOrdersByUserId(userId);
+        Long settledOrders = orderRepository.countSettledOrdersByUserId(userId);
         Long completedOrders = orderRepository.countCompletedOrdersByUserId(userId);
-        if (totalOrders == null || totalOrders < 3) {
+        if (settledOrders == null || settledOrders < 3) {
             return false;
         }
 
-        double reputationScore = (double) (completedOrders != null ? completedOrders : 0) / totalOrders * 100;
+        double reputationScore = (double) (completedOrders != null ? completedOrders : 0) / settledOrders * 100;
         return requiresOnlinePayment(reputationScore);
     }
 
@@ -382,13 +394,14 @@ public class CustomerService {
 
         Long totalOrders = orderRepository.countTotalOrdersByUserId(userId);
         Long completedOrders = orderRepository.countCompletedOrdersByUserId(userId);
+        Long settledOrders = orderRepository.countSettledOrdersByUserId(userId);
 
-        if (totalOrders == null || totalOrders < 3) {
+        if (settledOrders == null || settledOrders < 3) {
             // Chưa đủ dữ liệu (ít hơn 3 đơn) thì khoan hãy phạt
             return;
         }
 
-        double reputationScore = (double) (completedOrders != null ? completedOrders : 0) / totalOrders * 100;
+        double reputationScore = (double) (completedOrders != null ? completedOrders : 0) / settledOrders * 100;
 
         // Xử lý theo Rule mới: không khóa, chỉ cảnh báo và đánh dấu rủi ro
         if (reputationScore < 50.0) {

@@ -1,19 +1,24 @@
 package com.zone.agri.service;
 
-import com.zone.agri.common.CloudinaryService;
-import com.zone.agri.dto.response.ImageSearchResult;
-import com.zone.agri.dto.response.admin.CategoryDTO;
-import com.zone.agri.repository.ProductVectorRepository;
-import com.zone.agri.dto.request.product.*;
-import com.zone.agri.dto.response.product.*;
-import com.zone.agri.entity.*;
-import com.zone.agri.entity.enums.*;
-import com.zone.agri.exception.BadRequestException;
-import com.zone.agri.exception.ConflictException;
-import com.zone.agri.exception.NotFoundException;
-import com.zone.agri.repository.*;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
+import java.math.BigDecimal;
+import java.text.Normalizer;
+import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.Set;
+import java.util.stream.Collectors;
+
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
@@ -24,11 +29,57 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
-import java.math.BigDecimal;
-import java.text.Normalizer;
-import java.time.LocalDateTime;
-import java.util.*;
-import java.util.stream.Collectors;
+import com.zone.agri.common.CloudinaryService;
+import com.zone.agri.dto.request.product.CreateProductRequest;
+import com.zone.agri.dto.request.product.ProductRequest;
+import com.zone.agri.dto.request.product.VariantRequest;
+import com.zone.agri.dto.response.ImageSearchResult;
+import com.zone.agri.dto.response.admin.CategoryDTO;
+import com.zone.agri.dto.response.product.AttributeValueResponse;
+import com.zone.agri.dto.response.product.BrandResponse;
+import com.zone.agri.dto.response.product.ProductResponse;
+import com.zone.agri.dto.response.product.ProductVariantResponse;
+import com.zone.agri.entity.AttributeValue;
+import com.zone.agri.entity.Branch;
+import com.zone.agri.entity.Brand;
+import com.zone.agri.entity.Category;
+import com.zone.agri.entity.Inventory;
+import com.zone.agri.entity.Product;
+import com.zone.agri.entity.ProductImage;
+import com.zone.agri.entity.ProductVariant;
+import com.zone.agri.entity.SKUAttributeValue;
+import com.zone.agri.entity.User;
+import com.zone.agri.entity.enums.AttributeStatus;
+import com.zone.agri.entity.enums.BranchStatus;
+import com.zone.agri.entity.enums.BrandStatus;
+import com.zone.agri.entity.enums.CategoryStatus;
+import com.zone.agri.entity.enums.InventoryNoteStatus;
+import com.zone.agri.entity.enums.InventoryTransferStatus;
+import com.zone.agri.entity.enums.OrderStatus;
+import com.zone.agri.entity.enums.ProductStatus;
+import com.zone.agri.entity.enums.VariantStatus;
+import com.zone.agri.exception.BadRequestException;
+import com.zone.agri.exception.ConflictException;
+import com.zone.agri.exception.NotFoundException;
+import com.zone.agri.repository.AttributeValueRepository;
+import com.zone.agri.repository.BrandRepository;
+import com.zone.agri.repository.CategoryRepository;
+import com.zone.agri.repository.InventoryNoteDetailRepository;
+import com.zone.agri.repository.InventoryNoteRepository;
+import com.zone.agri.repository.InventoryRepository;
+import com.zone.agri.repository.InventoryTransactionRepository;
+import com.zone.agri.repository.InventoryTransferRepository;
+import com.zone.agri.repository.OrderItemRepository;
+import com.zone.agri.repository.OrderRepository;
+import com.zone.agri.repository.ProductImageRepository;
+import com.zone.agri.repository.ProductRepository;
+import com.zone.agri.repository.ProductVariantRepository;
+import com.zone.agri.repository.ProductVectorRepository;
+import com.zone.agri.repository.SKUAttributeValueRepository;
+import com.zone.agri.repository.UserRepository;
+
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 
 @Service
 @RequiredArgsConstructor
@@ -544,6 +595,8 @@ public class ProductService {
 
         // TRUYỀN HỆ SỐ profitMultiplier VÀO HÀM MAP BIẾN THẾ
         List<ProductVariantResponse> variantResponses = product.getVariants() != null ? product.getVariants().stream()
+                .filter(variant -> variant.getStatus() == VariantStatus.ACTIVE)
+                .filter(this::hasOnlyActiveAttributes)
                 .map(variant -> mapVariantToResponse(variant, currentUser, profitMultiplier, roundingRule))
                 .collect(Collectors.toList()) : Collections.emptyList();
 
@@ -623,16 +676,21 @@ public class ProductService {
 
         List<Inventory> allInventories = inventoryRepository.findByProductVariantId(variant.getId());
 
-        // Cho phép Admin HOẶC người có quyền Điều chuyển/Xuất kho thấy hết các chi nhánh để chọn nguồn
+        // Cho phép Admin HOẶC người có quyền Điều chuyển/Xuất kho thấy hết các chi
+        // nhánh để chọn nguồn
         boolean canSeeAllBranches = isAdmin || hasExportPermission;
 
         List<Inventory> validBatches = allInventories.stream()
                 .filter(inv -> inv.getQuantity() != null && inv.getQuantity() > 0)
 
                 // Chỉ lấy tồn kho từ chi nhánh ACTIVE (Admin/Exporter xem được tất cả)
-                .filter(inv -> canSeeAllBranches || (inv.getBranch() != null && inv.getBranch().getStatus() == BranchStatus.ACTIVE))
-                // Staff/Manager thông thường chỉ thấy chi nhánh của họ; Admin/Exporter thấy tất cả
-                .filter(inv -> currentUser == null || canSeeAllBranches || (currentBranch != null && inv.getBranch() != null && inv.getBranch().getId().equals(currentBranch.getId())))
+                .filter(inv -> canSeeAllBranches
+                        || (inv.getBranch() != null && inv.getBranch().getStatus() == BranchStatus.ACTIVE))
+                // Staff/Manager thông thường chỉ thấy chi nhánh của họ; Admin/Exporter thấy tất
+                // cả
+                .filter(inv -> currentUser == null || canSeeAllBranches
+                        || (currentBranch != null && inv.getBranch() != null
+                                && inv.getBranch().getId().equals(currentBranch.getId())))
 
                 .collect(Collectors.toList());
 
@@ -690,6 +748,16 @@ public class ProductService {
                 .attributeValues(attributeValues)
                 .batches(batchDtos)
                 .build();
+    }
+
+    private boolean hasOnlyActiveAttributes(ProductVariant variant) {
+        if (variant == null || variant.getAttributeValues() == null || variant.getAttributeValues().isEmpty()) {
+            return true;
+        }
+
+        return variant.getAttributeValues().stream()
+                .allMatch(sav -> sav.getAttribute() != null
+                        && sav.getAttribute().getStatus() == AttributeStatus.ACTIVE);
     }
 
     private Brand getOrCreateBrand(String name) {
