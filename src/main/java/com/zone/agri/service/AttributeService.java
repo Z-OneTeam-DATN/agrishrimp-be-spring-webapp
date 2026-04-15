@@ -64,11 +64,33 @@ public class AttributeService {
             throw new ConflictException("Mã Code '" + dto.getCode() + "' đã được sử dụng cho một thuộc tính khác!");
         }
 
+        List<String> newValues = dto.getValues() != null ? dto.getValues().stream()
+                .map(String::trim)
+                .filter(s -> !s.isEmpty())
+                .distinct()
+                .collect(Collectors.toList())
+                : new ArrayList<>();
+
+        List<AttributeValue> valuesToRemove = attr.getAttributeValues() != null
+                ? attr.getAttributeValues().stream()
+                        .filter(av -> !newValues.contains(av.getValue()))
+                        .collect(Collectors.toList())
+                : Collections.emptyList();
+
+        for (AttributeValue value : valuesToRemove) {
+            if (skuAttributeValueRepository.existsByAttributeValueId(value.getId())) {
+                throw new ConflictException(
+                        "Không thể xóa giá trị '" + value.getValue() +
+                                "' vì đang được sử dụng bởi biến thể sản phẩm. Chỉ được xóa khi giá trị này chưa được gán cho bất kỳ biến thể nào.");
+            }
+        }
+
         mapToEntity(attr, dto);
         try {
             return toDTO(repository.saveAndFlush(attr));
         } catch (DataIntegrityViolationException e) {
-            throw new ConflictException("Không thể lưu: Có giá trị thuộc tính bạn vừa xóa đang được gắn cho biến thể sản phẩm!");
+            throw new ConflictException(
+                    "Không thể lưu: Có giá trị thuộc tính bạn vừa xóa đang được gắn cho biến thể sản phẩm!");
         }
     }
 
