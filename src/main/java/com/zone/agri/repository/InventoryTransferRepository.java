@@ -34,7 +34,8 @@ public interface InventoryTransferRepository extends JpaRepository<InventoryTran
                         "t.id, t.transferCode, t.status, t.createdAt, " +
                         "t.transferDate, t.deadline, " +
                         "fb.name, tb.name, t.transporter, t.priority, " +
-                        "t.totalQuantity, SIZE(t.details), t.totalValue) " +
+                        "t.totalQuantity, SIZE(t.details), t.totalValue, " +
+                        "t.transferBusinessType, t.settlementStatus, t.transferAmount) " +
                         "FROM InventoryTransfer t " +
                         "LEFT JOIN t.fromBranch fb " +
                         "LEFT JOIN t.toBranch tb " +

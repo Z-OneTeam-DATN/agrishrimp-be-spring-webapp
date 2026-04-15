@@ -3,6 +3,7 @@ package com.zone.agri.entity;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonManagedReference;
 import jakarta.persistence.*;
+import java.math.BigDecimal;
 import lombok.*;
 import lombok.experimental.FieldDefaults;
 
@@ -38,6 +39,22 @@ public class InventoryTransferDetail {
 
     @Column(name = "note", columnDefinition = "TEXT")
     String note; // Ghi chú từng dòng sản phẩm
+
+    // --- GIÁ ĐIỀU CHUYỂN NỘI BỘ (chỉ có giá trị khi INTERNAL_SALE) ---
+
+    /**
+     * Đơn giá điều chuyển nội bộ do người dùng nhập.
+     * Có thể khác giá vốn FIFO - đây là giá bán nội bộ giữa 2 chi nhánh.
+     */
+    @Column(name = "unit_transfer_price", precision = 38, scale = 2)
+    BigDecimal unitTransferPrice;
+
+    /**
+     * Thành tiền điều chuyển nội bộ = unitTransferPrice × quantityRequested.
+     * Được tính tự động khi tạo phiếu loại INTERNAL_SALE.
+     */
+    @Column(name = "total_transfer_price", precision = 38, scale = 2)
+    BigDecimal totalTransferPrice;
 
     // --- KHÓA NGOẠI ---
     @ManyToOne(fetch = FetchType.LAZY)

@@ -3,11 +3,14 @@ package com.zone.agri.controller;
 import com.zone.agri.dto.request.inventory.CheckNoteRequest;
 import com.zone.agri.dto.request.inventory.InventoryQCRequest;
 import com.zone.agri.dto.request.inventory.InventoryReceiptRequest;
+import com.zone.agri.dto.request.inventory.ReceiptPaymentRequest;
 import com.zone.agri.dto.response.inventory.InventoryReceiptResponse;
 import com.zone.agri.dto.request.inventory.ExportNoteRequest;
 import com.zone.agri.dto.response.inventory.InventoryNoteResponse;
+import com.zone.agri.dto.response.inventory.ReceiptPaymentResponse;
 import com.zone.agri.dto.response.inventory.InventorySearchResponse;
 import com.zone.agri.security.annotation.RequirePermission;
+import com.zone.agri.service.InventoryReceiptPaymentService;
 import com.zone.agri.service.InventoryService;
 import com.zone.agri.service.InventoryNoteService;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
@@ -29,6 +32,7 @@ public class InventoryController {
 
     private final InventoryService inventoryService;
     private final InventoryNoteService inventoryNoteService;
+    private final InventoryReceiptPaymentService inventoryReceiptPaymentService;
 
     /**
      * Kiểm tra user hiện tại có authority cụ thể không.
@@ -109,6 +113,22 @@ public class InventoryController {
     @GetMapping("/receipts/{id}")
     public ResponseEntity<InventoryReceiptResponse> getReceiptDetail(@PathVariable Long id) {
         return ResponseEntity.ok(inventoryService.getReceiptById(id));
+    }
+
+    @SecurityRequirement(name = "bearerAuth")
+    @RequirePermission("IMPORT_VIEW")
+    @GetMapping("/receipts/{id}/payments")
+    public ResponseEntity<List<ReceiptPaymentResponse>> getReceiptPayments(@PathVariable Long id) {
+        return ResponseEntity.ok(inventoryReceiptPaymentService.getReceiptPayments(id));
+    }
+
+    @SecurityRequirement(name = "bearerAuth")
+    @RequirePermission("IMPORT_APPROVE")
+    @PostMapping("/receipts/{id}/payments")
+    public ResponseEntity<ReceiptPaymentResponse> createReceiptPayment(
+            @PathVariable Long id,
+            @Valid @RequestBody ReceiptPaymentRequest request) {
+        return ResponseEntity.ok(inventoryReceiptPaymentService.createReceiptPayment(id, request));
     }
 
     @SecurityRequirement(name = "bearerAuth")

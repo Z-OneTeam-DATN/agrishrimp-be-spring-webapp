@@ -300,7 +300,12 @@ public class InventoryService {
         note.setNote(request.getNote());
         note.setDeliverer(request.getDeliverer());
         note.setCreatedBy(getCurrentUser()); // Set Auditor
-        note.setPaymentAmount(Objects.requireNonNullElse(request.getPaymentAmount(), BigDecimal.ZERO));
+        if (note.getPaymentAmount() == null) {
+            note.setPaymentAmount(BigDecimal.ZERO);
+        }
+        if (note.getDebtAmount() == null) {
+            note.setDebtAmount(BigDecimal.ZERO);
+        }
 
         if (request.getEntryDate() != null && !request.getEntryDate().isBlank()) {
             note.setEntryDate(LocalDate.parse(request.getEntryDate()).atStartOfDay());

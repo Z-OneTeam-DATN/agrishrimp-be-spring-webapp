@@ -1,8 +1,10 @@
 package com.zone.agri.controller;
 
 import com.zone.agri.dto.response.financial.ProfitLossResponse;
+import com.zone.agri.dto.response.inventory.ReceiptPaymentResponse;
 import com.zone.agri.dto.response.supplier.SupplierDebtResponse;
 import com.zone.agri.service.FinancialService;
+import com.zone.agri.service.InventoryReceiptPaymentService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.ResponseEntity;
@@ -17,6 +19,7 @@ import java.util.List;
 public class FinancialController {
 
     private final FinancialService financialService;
+    private final InventoryReceiptPaymentService inventoryReceiptPaymentService;
 
     @GetMapping("/profit-loss")
     public ResponseEntity<ProfitLossResponse> getProfitLoss(
@@ -35,5 +38,13 @@ public class FinancialController {
             @RequestParam(required = false) Long staffId,
             @RequestParam(required = false, defaultValue = "not_zero") String debtFilter) {
         return ResponseEntity.ok(financialService.getSupplierDebts(search, startDate, endDate, branchId, staffId, debtFilter));
+    }
+
+    @GetMapping("/supplier-payments")
+    public ResponseEntity<List<ReceiptPaymentResponse>> getSupplierPayments(
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
+            @RequestParam(required = false) Long branchId) {
+        return ResponseEntity.ok(inventoryReceiptPaymentService.getAllPayments(startDate, endDate, branchId));
     }
 }

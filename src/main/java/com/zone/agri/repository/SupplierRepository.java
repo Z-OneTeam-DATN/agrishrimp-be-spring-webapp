@@ -51,6 +51,7 @@ public interface SupplierRepository extends JpaRepository<Supplier, Long> {
         @Query("SELECT s.id AS id, s.code AS supplierCode, s.name AS supplierName, s.phone AS phone, " +
                         "COALESCE(SUM(CASE " +
                         "WHEN i.type = 'IMPORT' " +
+                        "AND i.status = 'COMPLETED' " +
                         "AND (:startDate IS NULL OR i.createdAt >= :startDate) " +
                         "AND (:endDate IS NULL OR i.createdAt <= :endDate) " +
                         "AND (:branchId IS NULL OR i.branch.id = :branchId) " +
