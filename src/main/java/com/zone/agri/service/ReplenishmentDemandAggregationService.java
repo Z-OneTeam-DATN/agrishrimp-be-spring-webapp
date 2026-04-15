@@ -46,7 +46,13 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class ReplenishmentDemandAggregationService {
 
-    private static final int AGGREGATION_WINDOW_SECONDS = 90;
+    /** Đọc từ application.yml: transfer.aggregation.window-minutes (default 60 phút) */
+    @org.springframework.beans.factory.annotation.Value("${transfer.aggregation.window-minutes:60}")
+    private int aggregationWindowMinutes;
+
+    /** Đọc từ application.yml: transfer.aggregation.merge-open-hours (default 24 giờ) */
+    @org.springframework.beans.factory.annotation.Value("${transfer.aggregation.merge-open-hours:24}")
+    private int mergeOpenHours;
 
     private final SubOrderRepository subOrderRepository;
     private final SubOrderItemRepository subOrderItemRepository;
@@ -94,10 +100,10 @@ public class ReplenishmentDemandAggregationService {
             // Track this branch as having pending demands (Option 2)
             branchesWithPendingDemands.add(branchId);
 
-            // Option 1: If only 1 sub-order, process IMMEDIATELY (no 90s wait)
-            // Otherwise, schedule after AGGREGATION_WINDOW_SECONDS to aggregate with future
-            // orders
-            long delaySeconds = subOrderIds.size() == 1 ? 0 : AGGREGATION_WINDOW_SECONDS;
+            // Luôn chờ đủ cửa sổ gom đơn (aggregationWindowMinutes) trước khi tạo phiếu.
+            // Không xử lý ngay kể cả khi chỉ có 1 đơn — các đơn tiếp theo trong cùng window
+            // sẽ được gom vào cùng phiếu (trường hợp 1).
+            long delaySeconds = (long) aggregationWindowMinutes * 60;
 
             scheduledJobsByBranch.computeIfAbsent(branchId, key -> scheduler.schedule(
                     () -> processBranchDemandWindow(branchId),
@@ -183,34 +189,53 @@ public class ReplenishmentDemandAggregationService {
         }
 
         LocalDateTime now = LocalDateTime.now();
-        String referenceCode = buildAggregatedReferenceCode(toBranchId, now);
+        // Cửa sổ merge: nếu đã có phiếu PENDING cùng tuyến trong N giờ qua → gộp vào đó
+        LocalDateTime mergeCutoff = now.minusHours(mergeOpenHours);
 
         for (Map.Entry<Long, Map<String, Integer>> entry : transferPlanBySourceBranch.entrySet()) {
-            List<TransferItemRequest> items = entry.getValue().entrySet().stream()
-                    .map(it -> {
-                        TransferItemRequest req = new TransferItemRequest();
-                        req.setSku(it.getKey());
-                        req.setQuantity(it.getValue());
-                        req.setItemNote("Gom nhu cầu bổ sung tự động theo cửa sổ thời gian");
-                        return req;
-                    })
-                    .toList();
+            Long fromBranchId = entry.getKey();
+            Map<String, Integer> skuQtys = entry.getValue();
+            String mergeNote = "Gom nhu cầu bổ sung tự động theo cửa sổ thời gian";
 
-            TransferRequest request = new TransferRequest();
-            request.setFromBranchId(entry.getKey());
-            request.setToBranchId(toBranchId);
-            request.setTransferType("ORDER_REPLENISHMENT");
-            request.setDescription("Gom nhu cầu bổ sung tự động cho chi nhánh " + toBranch.getName());
-            request.setReferenceCode(referenceCode);
-            request.setPriority("HIGH");
-            request.setTransferDate(now);
-            request.setDeadline(now.plusDays(1));
-            request.setItems(items);
+            // --- Trường hợp 2: tìm phiếu PENDING cùng tuyến trong cửa sổ merge ---
+            var openTransfer = inventoryTransferRepository
+                    .findLatestOpenReplenishmentTransfer(fromBranchId, toBranchId, mergeCutoff);
 
-            inventoryTransferService.createTransfer(request);
+            if (openTransfer.isPresent()) {
+                // Gộp hàng mới vào phiếu đang PENDING thay vì tạo thêm phiếu
+                inventoryTransferService.mergeItemsIntoTransfer(openTransfer.get(), skuQtys, mergeNote);
+                log.info("Merged {} SKU(s) into existing transfer {} for route {}→{}",
+                        skuQtys.size(), openTransfer.get().getTransferCode(), fromBranchId, toBranchId);
+            } else {
+                // Tạo phiếu mới nếu chưa có phiếu cùng tuyến trong cửa sổ
+                List<TransferItemRequest> items = skuQtys.entrySet().stream()
+                        .map(it -> {
+                            TransferItemRequest req = new TransferItemRequest();
+                            req.setSku(it.getKey());
+                            req.setQuantity(it.getValue());
+                            req.setItemNote(mergeNote);
+                            return req;
+                        })
+                        .toList();
+
+                TransferRequest request = new TransferRequest();
+                request.setFromBranchId(fromBranchId);
+                request.setToBranchId(toBranchId);
+                request.setTransferType("ORDER_REPLENISHMENT");
+                request.setDescription("Gom nhu cầu bổ sung tự động cho chi nhánh " + toBranch.getName());
+                request.setReferenceCode(buildAggregatedReferenceCode(toBranchId, now));
+                request.setPriority("HIGH");
+                request.setTransferDate(now);
+                request.setDeadline(now.plusDays(1));
+                request.setItems(items);
+
+                inventoryTransferService.createTransfer(request);
+                log.info("Created new replenishment transfer for route {}→{} with {} SKU(s)",
+                        fromBranchId, toBranchId, skuQtys.size());
+            }
         }
 
-        log.info("Created aggregated replenishment transfers for branch {} with {} SKU(s)", toBranchId,
+        log.info("Aggregated replenishment done for branch {} — {} SKU(s) net demand", toBranchId,
                 netDemandBySku.size());
     }
 
@@ -309,11 +334,9 @@ public class ReplenishmentDemandAggregationService {
         return "AUTO-AGG-B" + toBranchId + "-" + minuteBucket;
     }
 
-    // Option 2: Periodic flush - every 10 minutes, force process all pending
-    // demands
-    // This prevents sub-orders from waiting too long (e.g., 2-3 days)
-    // It's a safety valve to ensure stale queued demands get processed
-    @Scheduled(fixedRate = 600000) // 10 minutes = 600000 ms
+    // Safety valve: flush định kỳ để tránh đơn hàng bị kẹt trong queue khi server restart
+    // hoặc khi có lỗi trong scheduled job. Chạy mỗi 30 phút.
+    @Scheduled(fixedRate = 1800000) // 30 phút = 1800000 ms
     public void periodicFlushPendingDemands() {
         Set<Long> branchesToFlush = new java.util.HashSet<>(branchesWithPendingDemands);
         if (branchesToFlush.isEmpty()) {

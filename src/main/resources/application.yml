@@ -23,6 +23,16 @@ management:
     readinessState:
       enabled: true
   
+# Transfer Replenishment Aggregation Configuration
+transfer:
+  aggregation:
+    # Cửa sổ gom đơn: thời gian (phút) chờ trước khi tạo phiếu điều chuyển.
+    # Các đơn hàng thiếu hàng trong cùng cửa sổ + cùng tuyến sẽ được gom vào 1 phiếu.
+    window-minutes: ${TRANSFER_AGGREGATION_WINDOW_MINUTES:60}
+    # Cửa sổ merge: nếu đã có phiếu điều chuyển PENDING cùng tuyến tạo trong N giờ qua
+    # thì gộp hàng vào phiếu đó thay vì tạo mới (tránh nhiều phiếu trùng tuyến nhiều ngày).
+    merge-open-hours: ${TRANSFER_MERGE_OPEN_HOURS:24}
+
 # OCR Configuration
 ocr:
   tesseract:

@@ -1,7 +1,9 @@
 package com.zone.agri.repository;
 
+import java.time.LocalDateTime;
 import java.util.Collection;
 import java.util.List;
+import java.util.Optional;
 
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -65,4 +67,21 @@ public interface InventoryTransferRepository extends JpaRepository<InventoryTran
                         @Param("toBranchId") Long toBranchId,
                         @Param("statuses") Collection<InventoryTransferStatus> statuses,
                         @Param("skus") Collection<String> skus);
+
+        /**
+         * Tìm phiếu điều chuyển ORDER_REPLENISHMENT đang PENDING cho cùng tuyến
+         * (fromBranch → toBranch) được tạo trong khoảng thời gian merge-open-hours.
+         * Dùng để gộp hàng mới vào phiếu cũ thay vì tạo phiếu trùng.
+         */
+        @Query("SELECT t FROM InventoryTransfer t " +
+                        "WHERE t.fromBranch.id = :fromBranchId " +
+                        "AND t.toBranch.id = :toBranchId " +
+                        "AND t.transferType = 'ORDER_REPLENISHMENT' " +
+                        "AND t.status = com.zone.agri.entity.enums.InventoryTransferStatus.PENDING " +
+                        "AND t.createdAt >= :cutoffTime " +
+                        "ORDER BY t.createdAt DESC")
+        Optional<InventoryTransfer> findLatestOpenReplenishmentTransfer(
+                        @Param("fromBranchId") Long fromBranchId,
+                        @Param("toBranchId") Long toBranchId,
+                        @Param("cutoffTime") LocalDateTime cutoffTime);
 }

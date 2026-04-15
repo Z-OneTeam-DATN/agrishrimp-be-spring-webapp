@@ -33,6 +33,8 @@ public class InventoryTransferService {
     private final InventoryRepository inventoryRepo;
     private final InventoryTransactionRepository transactionRepo;
     private final BackorderService backorderService;
+    private final com.zone.agri.repository.InventoryTransferDetailRepository transferDetailRepo;
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(InventoryTransferService.class);
 
     @Transactional
     public InventoryTransfer createTransfer(TransferRequest req) {
@@ -470,6 +472,93 @@ public class InventoryTransferService {
             throw new RuntimeException("Chỉ có thể xóa hoàn toàn phiếu đang ở trạng thái Chờ xuất (PENDING)!");
         }
         transferRepo.delete(transfer);
+    }
+
+    // ==========================================
+    // MERGE HÀNG VÀO PHIẾU ĐANG PENDING (GOM ĐƠN)
+    // ==========================================
+
+    /**
+     * Gộp thêm hàng hóa ({sku → qty}) vào phiếu điều chuyển đang PENDING.
+     * <p>
+     * Quy tắc:
+     * - Nếu SKU đã có trong phiếu → cộng thêm quantity
+     * - Nếu SKU chưa có           → thêm dòng detail mới
+     * - Cập nhật lại totalQuantity và totalValue (tính theo giá vốn FIFO kho xuất)
+     */
+    @Transactional
+    public void mergeItemsIntoTransfer(InventoryTransfer transfer,
+                                       Map<String, Integer> skuQuantities,
+                                       String itemNote) {
+        if (skuQuantities == null || skuQuantities.isEmpty()) return;
+
+        Long fromBranchId = transfer.getFromBranch().getId();
+        BigDecimal addedValue = BigDecimal.ZERO;
+
+        for (Map.Entry<String, Integer> entry : skuQuantities.entrySet()) {
+            String sku = entry.getKey();
+            int addQty = entry.getValue();
+            if (addQty <= 0) continue;
+
+            ProductVariant variant = variantRepo.findBySku(sku).orElse(null);
+            if (variant == null) continue;
+
+            // Tìm dòng chi tiết hiện tại trong phiếu
+            com.zone.agri.entity.InventoryTransferDetail existing =
+                    transferDetailRepo.findByInventoryTransferIdAndProductVariantId(
+                            transfer.getId(), variant.getId()).orElse(null);
+
+            if (existing != null) {
+                existing.setQuantity(existing.getQuantity() + addQty);
+                existing.setQuantityRequested(
+                        Objects.requireNonNullElse(existing.getQuantityRequested(), existing.getQuantity()) + addQty);
+                transferDetailRepo.save(existing);
+            } else {
+                com.zone.agri.entity.InventoryTransferDetail newDetail =
+                        com.zone.agri.entity.InventoryTransferDetail.builder()
+                                .inventoryTransfer(transfer)
+                                .productVariant(variant)
+                                .quantity(addQty)
+                                .quantityRequested(addQty)
+                                .quantityReal(0)
+                                .note(itemNote)
+                                .build();
+                transferDetailRepo.save(newDetail);
+            }
+
+            // Cộng thêm giá trị FIFO của lô hàng mới vào totalValue
+            addedValue = addedValue.add(estimateFifoValue(fromBranchId, variant.getId(), addQty));
+        }
+
+        // Cập nhật totals trực tiếp trên transfer
+        int newTotalQty = transferDetailRepo.findByInventoryTransferId(transfer.getId())
+                .stream().mapToInt(d -> Objects.requireNonNullElse(d.getQuantity(), 0)).sum();
+        transfer.setTotalQuantity(newTotalQty);
+        transfer.setTotalValue(Objects.requireNonNullElse(transfer.getTotalValue(), BigDecimal.ZERO).add(addedValue));
+        transferRepo.save(transfer);
+
+        log.info("Merged {} SKU(s) into transfer {} (total qty now: {})",
+                skuQuantities.size(), transfer.getTransferCode(), newTotalQty);
+    }
+
+    /** Ước tính giá trị FIFO cho qty đơn vị của một variant tại kho xuất. */
+    private BigDecimal estimateFifoValue(Long fromBranchId, Long variantId, int qty) {
+        List<Inventory> batches = inventoryRepo.findByProductVariantId(variantId).stream()
+                .filter(inv -> inv.getBranch().getId().equals(fromBranchId)
+                        && Objects.requireNonNullElse(inv.getQuantity(), 0) > 0)
+                .sorted(Comparator.comparing(Inventory::getId))
+                .collect(Collectors.toList());
+
+        int remaining = qty;
+        BigDecimal value = BigDecimal.ZERO;
+        for (Inventory batch : batches) {
+            if (remaining <= 0) break;
+            int take = Math.min(remaining, batch.getQuantity());
+            BigDecimal price = batch.getImportPrice() != null ? batch.getImportPrice() : BigDecimal.ZERO;
+            value = value.add(price.multiply(BigDecimal.valueOf(take)));
+            remaining -= take;
+        }
+        return value;
     }
 
     // ==========================================
