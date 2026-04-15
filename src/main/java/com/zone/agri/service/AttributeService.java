@@ -85,6 +85,11 @@ public class AttributeService {
             }
         }
 
+        // Remove safe-to-delete values from entity
+        if (!valuesToRemove.isEmpty()) {
+            attr.getAttributeValues().removeAll(valuesToRemove);
+        }
+
         mapToEntity(attr, dto);
         try {
             return toDTO(repository.saveAndFlush(attr));
@@ -158,15 +163,13 @@ public class AttributeService {
                 .collect(Collectors.toList())
                 : new ArrayList<>();
 
-        // 1. Loại bỏ các giá trị không còn xuất hiện trong danh sách mới truyền lên
-        entity.getAttributeValues().removeIf(av -> !newValues.contains(av.getValue()));
-
-        // 2. Lấy danh sách các giá trị đang có (sau khi đã lọc ở bước 1)
+        // Do NOT remove values here - removal is handled in update() method after
+        // constraint check
+        // Only add new values that don't exist yet
         List<String> existingValues = entity.getAttributeValues().stream()
                 .map(AttributeValue::getValue)
                 .collect(Collectors.toList());
 
-        // 3. Thêm mới những giá trị người dùng vừa gõ thêm
         for (String val : newValues) {
             if (!existingValues.contains(val)) {
                 entity.getAttributeValues().add(AttributeValue.builder()
