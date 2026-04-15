@@ -7,6 +7,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -54,6 +55,11 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class CustomerService {
 
+    private static final Set<String> MANAGED_CUSTOMER_ROLE_SLUGS = Set.of("CUSTOMER", "USER");
+    private static final long MIN_SETTLED_ORDERS_FOR_RISK_ASSESSMENT = 3L;
+    private static final double LOW_RISK_REPUTATION_THRESHOLD = 80.0;
+    private static final double HIGH_RISK_REPUTATION_THRESHOLD = 50.0;
+
     private final CustomerRepository customerRepository;
     private final UserRepository userRepository;
     private final RoleRepository roleRepository;
@@ -65,20 +71,26 @@ public class CustomerService {
     private final CustomerStatusLogRepository customerStatusLogRepository;
     private final BranchRepository branchRepository;
 
-    // 1. Tạo mới khách hàng
+    private record CustomerRiskAssessment(long settledOrders, double reputationScore, String riskLevel,
+            boolean onlinePaymentOnly) {
+        private boolean hasEnoughData() {
+            return settledOrders >= MIN_SETTLED_ORDERS_FOR_RISK_ASSESSMENT;
+        }
+    }
+
     @Transactional
     public Customer createCustomer(CustomerRequest req) {
         if (userRepository.existsByEmail(req.getEmail())) {
-            throw new ConflictException("Email " + req.getEmail() + " đã có tài khoản trong hệ thống!");
+            throw new ConflictException("Email " + req.getEmail() + " da co tai khoan trong he thong!");
         }
         if (userRepository.existsByPhoneNumber(req.getPhone())) {
-            throw new ConflictException("SĐT " + req.getPhone() + " đã được sử dụng!");
+            throw new ConflictException("SDT " + req.getPhone() + " da duoc su dung!");
         }
 
         String randomPassword = UUID.randomUUID().toString().replace("-", "").substring(0, 8);
 
         Role customerRole = roleRepository.findBySlug("CUSTOMER")
-                .orElseThrow(() -> new NotFoundException("Role CUSTOMER chưa được cấu hình"));
+                .orElseThrow(() -> new NotFoundException("Role CUSTOMER chua duoc cau hinh"));
 
         User newUser = User.builder()
                 .fullName(req.getName())
@@ -94,8 +106,9 @@ public class CustomerService {
         mapRequestToEntity(req, customer);
         customer.setUser(newUser);
 
-        if (customer.getStatus() == null)
+        if (customer.getStatus() == null) {
             customer.setStatus(CustomerStatus.ACTIVE);
+        }
 
         Customer savedCustomer = customerRepository.save(customer);
         if (req.getAddressDetail() != null && !req.getAddressDetail().isEmpty()) {
@@ -116,20 +129,19 @@ public class CustomerService {
         try {
             emailService.sendAccountInfo(req.getEmail(), req.getName(), randomPassword);
         } catch (Exception e) {
-            log.error("Không gửi được email thông báo tài khoản cho {}: {}", req.getEmail(), e.getMessage());
+            log.error("Khong gui duoc email thong bao tai khoan cho {}: {}", req.getEmail(), e.getMessage());
         }
 
         return savedCustomer;
     }
 
-    // 2. Cập nhật khách hàng
     @Transactional
     public Customer updateCustomer(Long id, CustomerRequest req) {
         Customer customer = customerRepository.findById(id)
-                .orElseThrow(() -> new NotFoundException("Không tìm thấy khách hàng"));
+                .orElseThrow(() -> new NotFoundException("Khong tim thay khach hang"));
 
         if (!customer.getPhone().equals(req.getPhone()) && customerRepository.existsByPhone(req.getPhone())) {
-            throw new ConflictException("Số điện thoại mới đã được sử dụng bởi người khác!");
+            throw new ConflictException("So dien thoai moi da duoc su dung boi nguoi khac!");
         }
 
         mapRequestToEntity(req, customer);
@@ -149,7 +161,7 @@ public class CustomerService {
             try {
                 userStatus = UserStatus.valueOf(finalStatus.toUpperCase());
             } catch (IllegalArgumentException ex) {
-                throw new IllegalArgumentException("Trạng thái khách hàng không hợp lệ: " + finalStatus);
+                throw new IllegalArgumentException("Trang thai khach hang khong hop le: " + finalStatus);
             }
         }
 
@@ -186,8 +198,8 @@ public class CustomerService {
         dto.setCreatedAt(user.getCreatedAt());
         dto.setAvatarUrl(user.getAvatarUrl());
 
-        // Ưu tiên địa chỉ mặc định từ bảng UserAddress
-        List<UserAddress> defaultAddresses = userAddressRepository.findByUserIdAndIsDefaultTrue(userId);
+        List<UserAddress> defaultAddresses = Optional.ofNullable(userAddressRepository.findByUserIdAndIsDefaultTrue(userId))
+                .orElse(Collections.emptyList());
         if (!defaultAddresses.isEmpty()) {
             UserAddress defaultAddr = defaultAddresses.get(0);
             dto.setAddressDetail(defaultAddr.getAddressDetail());
@@ -205,28 +217,16 @@ public class CustomerService {
             dto.setCustomerStatus(customer.getStatus());
         }
 
-        // Fetch order statistics
         Long totalOrders = Optional.ofNullable(orderRepository.countTotalOrdersByUserId(userId)).orElse(0L);
-        Long settledOrders = Optional.ofNullable(orderRepository.countSettledOrdersByUserId(userId)).orElse(0L);
-        Long completedOrders = Optional.ofNullable(orderRepository.countCompletedOrdersByUserId(userId))
-                .orElse(0L);
         BigDecimal totalSpent = Optional.ofNullable(orderRepository.sumTotalSpentByUserId(userId))
                 .orElse(BigDecimal.ZERO);
+        CustomerRiskAssessment riskAssessment = assessCustomerRisk(userId);
 
         dto.setTotalOrders(totalOrders);
         dto.setTotalSpent(totalSpent);
-
-        double reputationScore = 0.0;
-        if (settledOrders > 0) {
-            double score = (double) completedOrders / settledOrders * 100;
-            reputationScore = Math.round(score * 100.0) / 100.0;
-        }
-
-        boolean hasEnoughOrdersForAssessment = settledOrders != null && settledOrders >= 3;
-
-        dto.setReputationScore(reputationScore);
-        dto.setRiskLevel(hasEnoughOrdersForAssessment ? determineRiskLevel(reputationScore) : "UNKNOWN");
-        dto.setOnlinePaymentOnly(hasEnoughOrdersForAssessment && requiresOnlinePayment(reputationScore));
+        dto.setReputationScore(riskAssessment.reputationScore());
+        dto.setRiskLevel(riskAssessment.riskLevel());
+        dto.setOnlinePaymentOnly(riskAssessment.onlinePaymentOnly());
 
         return dto;
     }
@@ -237,7 +237,6 @@ public class CustomerService {
             return null;
         }
 
-        // System roles (e.g. seeded admin role) are always global-scope.
         if (Boolean.TRUE.equals(currentUser.getRole().getIsSystem())) {
             return null;
         }
@@ -248,60 +247,102 @@ public class CustomerService {
         }
 
         if (currentUser.getBranchId() == null) {
-            throw new AccessDeniedException("Tài khoản này chưa được gán chi nhánh.");
+            throw new AccessDeniedException("Tai khoan nay chua duoc gan chi nhanh.");
         }
 
         return currentUser.getBranchId();
     }
 
-    private Customer getAccessibleCustomerByUserId(Long userId) {
-        Customer customer = customerRepository.findByUserId(userId)
-                .orElseThrow(() -> new NotFoundException("Không tìm thấy khách hàng"));
-
-        Long branchScopeId = resolveCustomerScopeBranchId();
-        if (branchScopeId != null) {
-            Long customerBranchId = customer.getAssignedBranch() != null ? customer.getAssignedBranch().getId() : null;
-            if (customerBranchId == null || !branchScopeId.equals(customerBranchId)) {
-                throw new AccessDeniedException("Bạn không có quyền xem khách hàng ngoài chi nhánh của mình.");
-            }
+    private Optional<User> resolveManagedCustomerUser(Long identifier) {
+        Optional<User> userMatch = userRepository.findById(identifier)
+                .filter(this::isManagedCustomerUser);
+        if (userMatch.isPresent()) {
+            return userMatch;
         }
 
-        return customer;
+        return customerRepository.findById(identifier)
+                .map(Customer::getUser)
+                .filter(this::isManagedCustomerUser);
+    }
+
+    private boolean isManagedCustomerUser(User user) {
+        return user != null
+                && user.getRole() != null
+                && MANAGED_CUSTOMER_ROLE_SLUGS.contains(user.getRole().getSlug());
+    }
+
+    private void validateCustomerAccess(User customerUser) {
+        Long branchScopeId = resolveCustomerScopeBranchId();
+        if (branchScopeId == null) {
+            return;
+        }
+
+        Customer customer = customerUser.getCustomer();
+        Long customerBranchId = customer != null && customer.getAssignedBranch() != null
+                ? customer.getAssignedBranch().getId()
+                : null;
+        if (customerBranchId == null || !branchScopeId.equals(customerBranchId)) {
+            throw new AccessDeniedException("Ban khong co quyen xem khach hang ngoai chi nhanh cua minh.");
+        }
+    }
+
+    private User getAccessibleCustomerUser(Long identifier) {
+        User customerUser = resolveManagedCustomerUser(identifier)
+                .orElseThrow(() -> new NotFoundException("Khong tim thay khach hang"));
+        validateCustomerAccess(customerUser);
+        return customerUser;
+    }
+
+    private CustomerRiskAssessment assessCustomerRisk(Long userId) {
+        long settledOrders = Optional.ofNullable(orderRepository.countSettledOrdersByUserId(userId)).orElse(0L);
+        long completedOrders = Optional.ofNullable(orderRepository.countCompletedOrdersByUserId(userId)).orElse(0L);
+
+        double reputationScore = 0.0;
+        if (settledOrders > 0) {
+            double score = (double) completedOrders / settledOrders * 100;
+            reputationScore = Math.round(score * 100.0) / 100.0;
+        }
+
+        boolean hasEnoughData = settledOrders >= MIN_SETTLED_ORDERS_FOR_RISK_ASSESSMENT;
+        return new CustomerRiskAssessment(
+                settledOrders,
+                reputationScore,
+                hasEnoughData ? determineRiskLevel(reputationScore) : "UNKNOWN",
+                hasEnoughData && requiresOnlinePayment(reputationScore));
     }
 
     public boolean requiresOnlinePayment(Long userId) {
-        User user = userRepository.findById(userId).orElse(null);
+        User user = resolveManagedCustomerUser(userId).orElse(null);
         if (user == null || user.getRole() == null || user.getRole().getSlug().equals("ADMIN")) {
             return false;
         }
 
-        Long settledOrders = orderRepository.countSettledOrdersByUserId(userId);
-        Long completedOrders = orderRepository.countCompletedOrdersByUserId(userId);
-        if (settledOrders == null || settledOrders < 3) {
+        CustomerRiskAssessment riskAssessment = assessCustomerRisk(user.getId());
+        if (!riskAssessment.hasEnoughData()) {
             return false;
         }
 
-        double reputationScore = (double) (completedOrders != null ? completedOrders : 0) / settledOrders * 100;
-        return requiresOnlinePayment(reputationScore);
+        return riskAssessment.onlinePaymentOnly();
     }
 
     private boolean requiresOnlinePayment(double reputationScore) {
-        return reputationScore < 50.0;
+        return reputationScore < HIGH_RISK_REPUTATION_THRESHOLD;
     }
 
     private String determineRiskLevel(double reputationScore) {
-        if (reputationScore >= 80.0)
+        if (reputationScore >= LOW_RISK_REPUTATION_THRESHOLD) {
             return "LOW";
-        if (reputationScore >= 50.0)
+        }
+        if (reputationScore >= HIGH_RISK_REPUTATION_THRESHOLD) {
             return "MEDIUM";
+        }
         return "HIGH";
     }
 
-    // 5. Khóa / Mở khóa tài khoản
     @Transactional
     public void toggleUserStatus(Long userId) {
         User user = userRepository.findById(userId)
-                .orElseThrow(() -> new NotFoundException("Không tìm thấy tài khoản người dùng"));
+                .orElseThrow(() -> new NotFoundException("Khong tim thay tai khoan nguoi dung"));
 
         UserStatus fromStatus = user.getStatus();
         user.setStatus(user.getStatus() == UserStatus.ACTIVE ? UserStatus.INACTIVE : UserStatus.ACTIVE);
@@ -309,21 +350,23 @@ public class CustomerService {
         saveStatusLog(user, fromStatus, user.getStatus(), "ADMIN_TOGGLE_STATUS");
     }
 
-    public CustomerResponse getCustomerById(Long userId) {
-        return convertToResponse(getAccessibleCustomerByUserId(userId).getUser());
+    public CustomerResponse getCustomerById(Long identifier) {
+        return convertToResponse(getAccessibleCustomerUser(identifier));
     }
 
-    public CustomerDetailResponse getCustomerDetailById(Long userId) {
-        Customer customer = getAccessibleCustomerByUserId(userId);
-        CustomerResponse base = convertToResponse(customer.getUser());
+    public CustomerDetailResponse getCustomerDetailById(Long identifier) {
+        User customerUser = getAccessibleCustomerUser(identifier);
+        Long resolvedUserId = customerUser.getId();
+        CustomerResponse base = convertToResponse(customerUser);
 
-        LocalDateTime lastOrderDate = orderRepository.findLastOrderDateByUserId(userId);
-        Double averageOrderValueRaw = orderRepository.findAverageOrderValueByUserId(userId);
+        LocalDateTime lastOrderDate = orderRepository.findLastOrderDateByUserId(resolvedUserId);
+        Double averageOrderValueRaw = orderRepository.findAverageOrderValueByUserId(resolvedUserId);
         BigDecimal averageOrderValue = averageOrderValueRaw != null ? BigDecimal.valueOf(averageOrderValueRaw)
                 : BigDecimal.ZERO;
 
-        List<CustomerAddressResponse> addresses = userAddressRepository
-                .findByUserIdOrderByIsDefaultDescCreatedAtDesc(userId)
+        List<CustomerAddressResponse> addresses = Optional
+                .ofNullable(userAddressRepository.findByUserIdOrderByIsDefaultDescCreatedAtDesc(resolvedUserId))
+                .orElse(Collections.emptyList())
                 .stream()
                 .map(addr -> CustomerAddressResponse.builder()
                         .id(addr.getId())
@@ -355,21 +398,21 @@ public class CustomerService {
                 .lastOrderDate(lastOrderDate)
                 .averageOrderValue(averageOrderValue)
                 .addresses(addresses)
-                .internalNotes(getInternalNotes(userId))
-                .statusLogs(getStatusLogs(userId))
+                .internalNotes(getInternalNotes(resolvedUserId))
+                .statusLogs(getStatusLogs(resolvedUserId))
                 .build();
     }
 
-    public List<CustomerInternalNoteResponse> getInternalNotes(Long userId) {
-        getAccessibleCustomerByUserId(userId);
+    public List<CustomerInternalNoteResponse> getInternalNotes(Long identifier) {
+        Long resolvedUserId = getAccessibleCustomerUser(identifier).getId();
         List<CustomerInternalNote> notes = customerInternalNoteRepository
-                .findByCustomerUserIdOrderByCreatedAtDesc(userId);
+                .findByCustomerUserIdOrderByCreatedAtDesc(resolvedUserId);
         return mapNotes(notes);
     }
 
     @Transactional
-    public CustomerInternalNoteResponse addInternalNote(Long userId, CustomerInternalNoteRequest request) {
-        User customerUser = getAccessibleCustomerByUserId(userId).getUser();
+    public CustomerInternalNoteResponse addInternalNote(Long identifier, CustomerInternalNoteRequest request) {
+        User customerUser = getAccessibleCustomerUser(identifier);
 
         CustomerInternalNote note = CustomerInternalNote.builder()
                 .customerUser(customerUser)
@@ -383,19 +426,23 @@ public class CustomerService {
     @Transactional
     public void deleteInternalNote(Long noteId) {
         if (!customerInternalNoteRepository.existsById(noteId)) {
-            throw new NotFoundException("Không tìm thấy ghi chú nội bộ");
+            throw new NotFoundException("Khong tim thay ghi chu noi bo");
         }
         customerInternalNoteRepository.deleteById(noteId);
     }
 
-    public List<CustomerStatusLogResponse> getStatusLogs(Long userId) {
-        getAccessibleCustomerByUserId(userId);
-        List<CustomerStatusLog> logs = customerStatusLogRepository.findByCustomerUserIdOrderByCreatedAtDesc(userId);
+    public List<CustomerStatusLogResponse> getStatusLogs(Long identifier) {
+        Long resolvedUserId = getAccessibleCustomerUser(identifier).getId();
+        List<CustomerStatusLog> logs = customerStatusLogRepository.findByCustomerUserIdOrderByCreatedAtDesc(resolvedUserId);
         if (logs.isEmpty()) {
             return Collections.emptyList();
         }
+
         Map<Long, String> userNameById = userRepository.findAllById(
-                logs.stream().map(CustomerStatusLog::getCreatedByUserId).filter(id -> id != null && id > 0).distinct()
+                logs.stream()
+                        .map(CustomerStatusLog::getCreatedByUserId)
+                        .filter(id -> id != null && id > 0)
+                        .distinct()
                         .toList())
                 .stream()
                 .collect(Collectors.toMap(User::getId, User::getFullName));
@@ -406,7 +453,7 @@ public class CustomerService {
                         .fromStatus(statusLog.getFromStatus())
                         .toStatus(statusLog.getToStatus())
                         .reason(statusLog.getReason())
-                        .changedByName(userNameById.getOrDefault(statusLog.getCreatedByUserId(), "Hệ thống"))
+                        .changedByName(userNameById.getOrDefault(statusLog.getCreatedByUserId(), "He thong"))
                         .createdAt(statusLog.getCreatedAt())
                         .build())
                 .toList();
@@ -416,9 +463,13 @@ public class CustomerService {
         if (notes.isEmpty()) {
             return Collections.emptyList();
         }
+
         Map<Long, String> authorNameById = userRepository.findAllById(
-                notes.stream().map(CustomerInternalNote::getCreatedByUserId).filter(id -> id != null && id > 0)
-                        .distinct().toList())
+                notes.stream()
+                        .map(CustomerInternalNote::getCreatedByUserId)
+                        .filter(id -> id != null && id > 0)
+                        .distinct()
+                        .toList())
                 .stream()
                 .collect(Collectors.toMap(User::getId, User::getFullName));
 
@@ -426,7 +477,7 @@ public class CustomerService {
                 .map(note -> CustomerInternalNoteResponse.builder()
                         .id(note.getId())
                         .content(note.getContent())
-                        .authorName(authorNameById.getOrDefault(note.getCreatedByUserId(), "Hệ thống"))
+                        .authorName(authorNameById.getOrDefault(note.getCreatedByUserId(), "He thong"))
                         .createdAt(note.getCreatedAt())
                         .updatedAt(note.getUpdatedAt())
                         .build())
@@ -443,36 +494,30 @@ public class CustomerService {
         customerStatusLogRepository.save(statusLog);
     }
 
-    // Hàm này để gọi sau khi cập nhật trạng thái đơn hàng (Hủy, Hoàn trả, Thành
-    // công)
     @Transactional
     public void evaluateAndHandleCustomerReputation(Long userId) {
         User user = userRepository.findById(userId).orElse(null);
-        if (user == null || user.getRole().getSlug().equals("ADMIN"))
-            return;
-
-        Long completedOrders = orderRepository.countCompletedOrdersByUserId(userId);
-        Long settledOrders = orderRepository.countSettledOrdersByUserId(userId);
-
-        if (settledOrders == null || settledOrders < 3) {
-            // Chưa đủ dữ liệu (ít hơn 3 đơn) thì khoan hãy phạt
+        if (user == null || user.getRole() == null || user.getRole().getSlug().equals("ADMIN")) {
             return;
         }
 
-        double reputationScore = (double) (completedOrders != null ? completedOrders : 0) / settledOrders * 100;
+        CustomerRiskAssessment riskAssessment = assessCustomerRisk(userId);
+        if (!riskAssessment.hasEnoughData()) {
+            return;
+        }
 
-        // Xử lý theo Rule mới: không khóa, chỉ cảnh báo và đánh dấu rủi ro
-        if (reputationScore < 50.0) {
+        if ("HIGH".equals(riskAssessment.riskLevel())) {
             try {
-                emailService.sendWarningEmail(user.getEmail(), user.getFullName(), reputationScore);
-                log.info("Đã gửi cảnh báo tài khoản user_id {} do uy tín thấp ({}%)", userId, reputationScore);
+                emailService.sendWarningEmail(user.getEmail(), user.getFullName(), riskAssessment.reputationScore());
+                log.info("Da gui canh bao tai khoan user_id {} do uy tin thap ({}%)",
+                        userId,
+                        riskAssessment.reputationScore());
             } catch (Exception e) {
-                log.error("Lỗi gửi mail cảnh báo: {}", e.getMessage());
+                log.error("Loi gui mail canh bao: {}", e.getMessage());
             }
         }
     }
 
-    // Hàm map dữ liệu
     private void mapRequestToEntity(CustomerRequest req, Customer c) {
         c.setName(req.getName());
         c.setPhone(req.getPhone());
@@ -485,7 +530,6 @@ public class CustomerService {
         c.setStatus(req.getStatus());
         c.setNote(req.getNote());
 
-        // 🟢 Assign branch & staff & internal notes
         if (req.getBranchId() != null) {
             c.setAssignedBranch(branchRepository.findById(req.getBranchId()).orElse(null));
         }
@@ -497,12 +541,10 @@ public class CustomerService {
         }
     }
 
-    // 🟢 Get all staff by branch (for FE dropdown)
     public List<Map<String, Object>> getStaffByBranch(Long branchId) {
         return userRepository.findByBranchIdAndRole(branchId, "STAFF");
     }
 
-    // 🟢 Get all branches (for FE dropdown)
     public List<?> getAllBranches() {
         return branchRepository.findAll();
     }

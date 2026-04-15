@@ -1,11 +1,14 @@
 package com.zone.agri.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.math.BigDecimal;
+import java.util.Collections;
 import java.util.Optional;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -16,6 +19,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
+import com.zone.agri.dto.response.customer.CustomerDetailResponse;
 import com.zone.agri.dto.response.customer.CustomerResponse;
 import com.zone.agri.entity.Customer;
 import com.zone.agri.entity.Role;
@@ -102,6 +106,9 @@ class CustomerServiceTest {
         setId(customerUser, 1L, "id");
 
         customer.setUser(customerUser);
+
+        lenient().when(userAddressRepository.findByUserIdAndIsDefaultTrue(anyLong()))
+                .thenReturn(Collections.emptyList());
     }
 
     @Test
@@ -133,6 +140,65 @@ class CustomerServiceTest {
         assertThat(response.getReputationScore()).isEqualTo(50.0);
         assertThat(response.getRiskLevel()).isEqualTo("MEDIUM");
         assertThat(response.getOnlinePaymentOnly()).isFalse();
+    }
+
+    @Test
+    void getCustomerById_shouldResolveCustomerIdentifierFromCustomerId() {
+        when(userRepository.findById(11L)).thenReturn(Optional.empty());
+        when(customerRepository.findById(11L)).thenReturn(Optional.of(customer));
+        when(orderRepository.countTotalOrdersByUserId(1L)).thenReturn(3L);
+        when(orderRepository.countSettledOrdersByUserId(1L)).thenReturn(3L);
+        when(orderRepository.countCompletedOrdersByUserId(1L)).thenReturn(3L);
+        when(orderRepository.sumTotalSpentByUserId(1L)).thenReturn(new BigDecimal("3200000"));
+
+        CustomerResponse response = customerService.getCustomerById(11L);
+
+        assertThat(response.getUserId()).isEqualTo(1L);
+        assertThat(response.getCustomerId()).isEqualTo(11L);
+        assertThat(response.getRiskLevel()).isEqualTo("LOW");
+    }
+
+    @Test
+    void getCustomerDetailById_shouldSupportWebsiteUsersWithoutCustomerProfile() {
+        Role websiteUserRole = Role.builder()
+                .slug("USER")
+                .displayName("Nguoi dung")
+                .isActive(true)
+                .isSystem(true)
+                .build();
+
+        User websiteUser = User.builder()
+                .fullName("Tran Thi B")
+                .email("b@example.com")
+                .phoneNumber("0911222333")
+                .passwordHash("hashed")
+                .status(UserStatus.ACTIVE)
+                .provider(AuthProvider.LOCAL)
+                .role(websiteUserRole)
+                .build();
+        setId(websiteUser, 7L, "id");
+
+        when(userRepository.findById(7L)).thenReturn(Optional.of(websiteUser));
+        when(orderRepository.countTotalOrdersByUserId(7L)).thenReturn(2L);
+        when(orderRepository.countSettledOrdersByUserId(7L)).thenReturn(2L);
+        when(orderRepository.countCompletedOrdersByUserId(7L)).thenReturn(1L);
+        when(orderRepository.sumTotalSpentByUserId(7L)).thenReturn(BigDecimal.ZERO);
+        when(orderRepository.findLastOrderDateByUserId(7L)).thenReturn(null);
+        when(orderRepository.findAverageOrderValueByUserId(7L)).thenReturn(null);
+        when(userAddressRepository.findByUserIdOrderByIsDefaultDescCreatedAtDesc(7L))
+                .thenReturn(Collections.emptyList());
+        when(customerInternalNoteRepository.findByCustomerUserIdOrderByCreatedAtDesc(7L))
+                .thenReturn(Collections.emptyList());
+        when(customerStatusLogRepository.findByCustomerUserIdOrderByCreatedAtDesc(7L))
+                .thenReturn(Collections.emptyList());
+
+        CustomerDetailResponse response = customerService.getCustomerDetailById(7L);
+
+        assertThat(response.getUserId()).isEqualTo(7L);
+        assertThat(response.getCustomerId()).isNull();
+        assertThat(response.getRiskLevel()).isEqualTo("UNKNOWN");
+        assertThat(response.getInternalNotes()).isEmpty();
+        assertThat(response.getStatusLogs()).isEmpty();
     }
 
     @Test
