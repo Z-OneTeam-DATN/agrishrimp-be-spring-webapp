@@ -30,9 +30,13 @@ public class InventoryQCRequest {
 
         @NotNull(message = "Số lượng thực nhận không được để trống")
         @Min(value = 0, message = "Số lượng không được âm")
-        private Integer quantityReal;
+        private Integer quantityReal; // Số lượng đạt QC (accepted)
 
-        private Integer quantityRejected; // Số lượng hàng lỗi (Nếu có)
+        @Min(value = 0, message = "Tổng số lượng NCC giao không được âm")
+        private Integer quantityDelivered; // Tổng NCC giao trong đợt này (optional, ưu tiên dùng nếu FE gửi)
+
+        @Min(value = 0, message = "Số lượng hàng lỗi không được âm")
+        private Integer quantityRejected; // Số lượng hàng lỗi / bị từ chối nhận
 
         private String lotNumber;
         private String expiryDate;

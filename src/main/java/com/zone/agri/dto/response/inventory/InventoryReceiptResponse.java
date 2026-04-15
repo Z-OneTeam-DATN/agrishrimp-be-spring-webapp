@@ -19,6 +19,10 @@ public class InventoryReceiptResponse {
     private String importType;     // Trả về cho Frontend biết loại gì
     private Long sourceBranchId;   // Trả về ID kho xuất (nếu có)
     private String status;
+
+    // Liên kết với Phiếu yêu cầu mua (nếu có)
+    private Long purchaseRequestId;
+    private String purchaseRequestCode;
     private String supplierName;
     private String supplierCode;
     private String branchName;

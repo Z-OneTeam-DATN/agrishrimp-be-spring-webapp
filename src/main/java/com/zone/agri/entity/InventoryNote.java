@@ -100,4 +100,11 @@ public class InventoryNote {
     @OneToMany(mappedBy = "inventoryNote", fetch = FetchType.LAZY, cascade = CascadeType.ALL, orphanRemoval = true)
     @ToString.Exclude
     List<InventoryNoteDetail> details;
+
+    // Liên kết với Phiếu yêu cầu mua (nếu phiếu nhập này thuộc về một yêu cầu mua)
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "purchase_request_id")
+    @ToString.Exclude
+    @EqualsAndHashCode.Exclude
+    PurchaseRequest purchaseRequest;
 }

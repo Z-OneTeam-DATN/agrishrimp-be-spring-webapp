@@ -162,4 +162,20 @@ public interface InventoryNoteRepository extends JpaRepository<InventoryNote, Lo
 
     // Lấy phiếu nhập của NCC, sắp xếp mới nhất lên đầu
     List<InventoryNote> findBySupplierIdAndTypeOrderByCreatedAtDesc(Long supplierId, InventoryNoteType type);
+
+    @Query("""
+        SELECT COALESCE(SUM(d.quantityRequested), 0)
+        FROM InventoryNote n
+        JOIN n.details d
+        WHERE n.purchaseRequest.id = :purchaseRequestId
+          AND d.productVariant.id = :variantId
+          AND n.status IN :statuses
+          AND (:excludeNoteId IS NULL OR n.id <> :excludeNoteId)
+    """)
+    long sumReservedQtyByPurchaseRequestAndVariantAndStatuses(
+            @Param("purchaseRequestId") Long purchaseRequestId,
+            @Param("variantId") Long variantId,
+            @Param("statuses") Collection<InventoryNoteStatus> statuses,
+            @Param("excludeNoteId") Long excludeNoteId
+    );
 }

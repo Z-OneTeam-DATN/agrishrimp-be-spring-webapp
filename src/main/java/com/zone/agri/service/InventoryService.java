@@ -6,6 +6,7 @@ import com.zone.agri.dto.response.inventory.InventoryReceiptResponse;
 import com.zone.agri.entity.*;
 import com.zone.agri.entity.enums.InventoryNoteStatus;
 import com.zone.agri.entity.enums.InventoryNoteType;
+import com.zone.agri.entity.enums.PurchaseRequestStatus;
 import com.zone.agri.entity.enums.TransactionType;
 import com.zone.agri.exception.BadRequestException;
 import com.zone.agri.exception.NotFoundException;
@@ -23,6 +24,9 @@ import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.stream.Collectors;
 
+// Lazy injection để tránh circular dependency
+import org.springframework.context.ApplicationContext;
+
 @Service
 @RequiredArgsConstructor
 public class InventoryService {
@@ -37,6 +41,12 @@ public class InventoryService {
     private final InventoryTransactionRepository transactionRepository;
     private final BackorderService backorderService;
     private final com.zone.agri.common.WarehouseContext warehouseContext;
+    private final PurchaseRequestRepository purchaseRequestRepository;
+    private final ApplicationContext applicationContext; // Dùng để lazy-get PurchaseRequestService tránh circular dep
+    private static final Set<InventoryNoteStatus> OPEN_RECEIPT_STATUSES = Set.of(
+            InventoryNoteStatus.PENDING,
+            InventoryNoteStatus.APPROVED
+    );
 
     private User getCurrentUser() {
         org.springframework.security.core.Authentication auth = org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication();
@@ -55,10 +65,11 @@ public class InventoryService {
     // --- 1. TẠO PHIẾU MỚI ---
     @Transactional
     public InventoryReceiptResponse createReceipt(InventoryReceiptRequest request) {
-        Branch destBranch = branchRepository.findByName(request.getBranchName())
-                .orElseThrow(() -> new NotFoundException("Chi nhánh không tồn tại: " + request.getBranchName()));
+        PurchaseRequest linkedPurchaseRequest = resolveLinkedPurchaseRequestForCreate(request);
+        Branch destBranch = resolveDestinationBranch(request, linkedPurchaseRequest);
+        warehouseContext.assertAccess(destBranch.getId());
 
-        if ("SUPPLIER".equals(request.getImportType()) && request.getSupplierCode() == null) {
+        if ("SUPPLIER".equals(request.getImportType()) && resolveSupplierCode(request, linkedPurchaseRequest) == null) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Lỗi: Nhập từ NCC phải có mã nhà cung cấp.");
         }
 
@@ -68,8 +79,10 @@ public class InventoryService {
         noteEntity.setCreatedAt(LocalDateTime.now());
         noteEntity.setDetails(new ArrayList<>());
 
-        updateMetadata(noteEntity, request, destBranch);
-        
+        Supplier supplier = resolveSupplier(request, linkedPurchaseRequest);
+        updateMetadata(noteEntity, request, destBranch, supplier);
+        noteEntity.setPurchaseRequest(linkedPurchaseRequest);
+
         // LUỒNG MỚI: Nếu là Admin (có quyền IMPORT_APPROVE) tạo thì APPROVED luôn, ngược lại PENDING
         if (hasAuthority("IMPORT_APPROVE")) {
             noteEntity.setStatus(InventoryNoteStatus.APPROVED);
@@ -78,6 +91,7 @@ public class InventoryService {
         }
 
         noteEntity = noteRepository.save(noteEntity);
+        validateReceiptItemsAgainstPurchaseRequest(linkedPurchaseRequest, request.getItems(), noteEntity.getId());
         processItemsAndStock(noteEntity, request.getItems(), request.getImportType());
 
         return mapToResponse(noteRepository.save(noteEntity));
@@ -88,15 +102,19 @@ public class InventoryService {
     public InventoryReceiptResponse updateReceipt(Long id, InventoryReceiptRequest request) {
         InventoryNote existingNote = noteRepository.findById(id)
                 .orElseThrow(() -> new NotFoundException("Không tìm thấy phiếu ID: " + id));
+        warehouseContext.assertAccess(existingNote.getBranch().getId());
 
         if (existingNote.getStatus() == InventoryNoteStatus.COMPLETED) {
             throw new BadRequestException("Phiếu đã nhập kho thành công, không thể sửa đổi.");
         }
 
-        Branch destBranch = branchRepository.findByName(request.getBranchName())
-                .orElseThrow(() -> new NotFoundException("Chi nhánh không tồn tại: " + request.getBranchName()));
+        PurchaseRequest linkedPurchaseRequest = resolveLinkedPurchaseRequestForUpdate(existingNote, request);
+        Branch destBranch = resolveDestinationBranch(request, linkedPurchaseRequest);
+        warehouseContext.assertAccess(destBranch.getId());
+        Supplier supplier = resolveSupplier(request, linkedPurchaseRequest);
 
-        updateMetadata(existingNote, request, destBranch);
+        updateMetadata(existingNote, request, destBranch, supplier);
+        existingNote.setPurchaseRequest(linkedPurchaseRequest);
 
         // Chặn không cho phép cập nhật status thành COMPLETED qua API update thông thường
         if (existingNote.getStatus() == InventoryNoteStatus.COMPLETED) {
@@ -107,6 +125,7 @@ public class InventoryService {
         existingNote.getDetails().clear();
         noteRepository.flush();
 
+        validateReceiptItemsAgainstPurchaseRequest(linkedPurchaseRequest, request.getItems(), existingNote.getId());
         processItemsAndStock(existingNote, request.getItems(), request.getImportType());
         return mapToResponse(noteRepository.save(existingNote));
     }
@@ -116,6 +135,7 @@ public class InventoryService {
     public InventoryReceiptResponse approveReceipt(Long id) {
         InventoryNote note = noteRepository.findById(id)
                 .orElseThrow(() -> new NotFoundException("Không tìm thấy phiếu ID: " + id));
+        warehouseContext.assertAccess(note.getBranch().getId());
         if (note.getStatus() != InventoryNoteStatus.PENDING) {
             throw new BadRequestException("Chỉ có thể duyệt phiếu đang ở trạng thái Chờ duyệt.");
         }
@@ -127,6 +147,7 @@ public class InventoryService {
     public InventoryReceiptResponse rejectReceipt(Long id) {
         InventoryNote note = noteRepository.findById(id)
                 .orElseThrow(() -> new NotFoundException("Không tìm thấy phiếu ID: " + id));
+        warehouseContext.assertAccess(note.getBranch().getId());
         if (note.getStatus() != InventoryNoteStatus.PENDING) {
             throw new BadRequestException("Chỉ có thể từ chối phiếu đang ở trạng thái Chờ duyệt.");
         }
@@ -139,6 +160,7 @@ public class InventoryService {
     public InventoryReceiptResponse completeReceipt(Long id, InventoryQCRequest qcRequest) {
         InventoryNote note = noteRepository.findById(id)
                 .orElseThrow(() -> new NotFoundException("Không tìm thấy phiếu ID: " + id));
+        warehouseContext.assertAccess(note.getBranch().getId());
 
         if (note.getStatus() != InventoryNoteStatus.APPROVED && note.getStatus() != InventoryNoteStatus.PENDING) {
             throw new BadRequestException("Phiếu phải ở trạng thái Đã duyệt hoặc Chờ duyệt mới có thể nhập kho.");
@@ -152,14 +174,25 @@ public class InventoryService {
         for (InventoryNoteDetail detail : note.getDetails()) {
             InventoryQCRequest.ItemQCRequest qcItem = qcMap.get(detail.getProductVariant().getSku());
             if (qcItem != null) {
-                // Yêu cầu từ người dùng: Hàng lỗi = Yêu cầu - Thực nhận
                 int plannedQty = Objects.requireNonNullElse(detail.getQuantityRequested(), 0);
-                int realGoodQty = Objects.requireNonNullElse(qcItem.getQuantityReal(), 0);
-                int rejectedQty = Math.max(0, plannedQty - realGoodQty);
-                
-                detail.setQuantityReal(realGoodQty);
-                detail.setQuantityAccepted(realGoodQty);
-                detail.setQuantityRejected(rejectedQty);
+                int acceptedQty = Objects.requireNonNullElse(qcItem.getQuantityReal(), 0);
+                int defectiveQty = Objects.requireNonNullElse(qcItem.getQuantityRejected(), 0);
+                int deliveredQty = resolveDeliveredQty(qcItem, acceptedQty, defectiveQty);
+
+                if (acceptedQty + defectiveQty > deliveredQty) {
+                    throw new BadRequestException("SKU " + detail.getProductVariant().getSku() + ": accepted + defective không được lớn hơn số NCC giao.");
+                }
+                if (deliveredQty > plannedQty) {
+                    throw new BadRequestException("SKU " + detail.getProductVariant().getSku() + ": số NCC giao không được vượt số lượng đã lập trên phiếu nhập.");
+                }
+
+                if (note.getPurchaseRequest() != null) {
+                    validateCompletedQtyAgainstPurchaseRequest(note.getPurchaseRequest().getId(), detail.getProductVariant().getId(), acceptedQty, note.getId());
+                }
+
+                detail.setQuantityReal(deliveredQty);
+                detail.setQuantityAccepted(acceptedQty);
+                detail.setQuantityRejected(defectiveQty);
                 
                 // CẬP NHẬT SỐ LÔ VÀ HẠN DÙNG (Nếu có thay đổi lúc kiểm đếm)
                 if (qcItem.getLotNumber() != null && !qcItem.getLotNumber().isBlank()) {
@@ -186,9 +219,17 @@ public class InventoryService {
         note.setTotalAmount(totalAmount);
         // Cập nhật lại số nợ thực tế dựa trên hàng tốt thực nhận
         note.setDebtAmount(totalAmount.subtract(Objects.requireNonNullElse(note.getPaymentAmount(), BigDecimal.ZERO)));
-        
+
         note.setStatus(InventoryNoteStatus.COMPLETED);
-        return mapToResponse(noteRepository.save(note));
+        InventoryNote savedNote = noteRepository.save(note);
+
+        // Cập nhật lũy kế số lượng trên Phiếu yêu cầu mua (nếu phiếu nhập này thuộc về 1 PR)
+        if (savedNote.getPurchaseRequest() != null) {
+            PurchaseRequestService prService = applicationContext.getBean(PurchaseRequestService.class);
+            prService.updateCumulativeQtyAfterReceipt(savedNote);
+        }
+
+        return mapToResponse(savedNote);
     }
 
     private void updateStockWithQC(InventoryNote note, InventoryNoteDetail detail) {
@@ -249,7 +290,7 @@ public class InventoryService {
                 .build());
     }
 
-    private void updateMetadata(InventoryNote note, InventoryReceiptRequest request, Branch destBranch) {
+    private void updateMetadata(InventoryNote note, InventoryReceiptRequest request, Branch destBranch, Supplier supplier) {
         // RÀNG BUỘC: Chỉ Kho tổng mới được nhập hàng từ NCC
         if ("SUPPLIER".equals(request.getImportType()) && !"WAREHOUSE".equalsIgnoreCase(destBranch.getBranchType())) {
             throw new BadRequestException("Chỉ có Kho tổng mới được phép thực hiện nghiệp vụ nhập hàng từ nhà cung cấp.");
@@ -271,16 +312,8 @@ public class InventoryService {
             note.setTags(null);
         }
 
-        // CHỈ CHO PHÉP TƯƠNG TÁC VỚI NHÀ CUNG CẤP (SUPPLIER)
-        if ("SUPPLIER".equals(request.getImportType())) {
-            Supplier supplier = supplierRepository.findByCode(request.getSupplierCode())
-                .orElseThrow(() -> new NotFoundException("Nhà cung cấp không tồn tại"));
-            note.setSupplier(supplier);
-            note.setPartnerBranch(null);
-        } else {
-            note.setSupplier(null);
-            note.setPartnerBranch(null);
-        }
+        note.setSupplier(supplier);
+        note.setPartnerBranch(null);
     }
 
     // --- 3. XÓA PHIẾU (CHẶN NẾU ĐÃ NHẬP KHO) ---
@@ -288,6 +321,7 @@ public class InventoryService {
     public void deleteReceipt(Long id) {
         InventoryNote note = noteRepository.findById(id)
                 .orElseThrow(() -> new NotFoundException("Không tìm thấy phiếu ID: " + id));
+        warehouseContext.assertAccess(note.getBranch().getId());
 
         if (note.getStatus() == InventoryNoteStatus.COMPLETED) {
             throw new BadRequestException("Không thể xóa phiếu đã hoàn thành nhập kho. Vui lòng sử dụng phiếu xuất trả hoặc điều chỉnh kho để đảm bảo tính nhất quán dữ liệu.");
@@ -305,7 +339,8 @@ public class InventoryService {
             ProductVariant variant = variantRepository.findBySku(itemDTO.getProductCode())
                     .orElseThrow(() -> new NotFoundException("SKU không tồn tại: " + itemDTO.getProductCode()));
 
-            BigDecimal itemSubtotal = itemDTO.getImportPrice().multiply(BigDecimal.valueOf(itemDTO.getPlannedQuantity()));
+            BigDecimal importPrice = Objects.requireNonNullElse(itemDTO.getImportPrice(), BigDecimal.ZERO);
+            BigDecimal itemSubtotal = importPrice.multiply(BigDecimal.valueOf(itemDTO.getPlannedQuantity()));
             totalAmount = totalAmount.add(itemSubtotal);
 
             LocalDateTime expiry = (itemDTO.getExpiryDate() != null && !itemDTO.getExpiryDate().isBlank())
@@ -321,7 +356,7 @@ public class InventoryService {
                     .quantityReal(itemDTO.getQuantityReal() != null ? itemDTO.getQuantityReal() : 0)
                     .quantityAccepted(itemDTO.getQuantityAccepted() != null ? itemDTO.getQuantityAccepted() : 0)
                     .quantityRejected(itemDTO.getQuantityRejected() != null ? itemDTO.getQuantityRejected() : 0)
-                    .price(itemDTO.getImportPrice())
+                    .price(importPrice)
                     .batchNumber(batch)
                     .expiryDate(expiry)
                     .newSellingPrice(itemDTO.getNewSellingPrice())
@@ -401,9 +436,10 @@ public class InventoryService {
 
     @Transactional(readOnly = true)
     public InventoryReceiptResponse getReceiptById(Long id) {
-        return noteRepository.findById(id)
-                .map(this::mapToResponse)
+        InventoryNote note = noteRepository.findById(id)
                 .orElseThrow(() -> new NotFoundException("Không tìm thấy phiếu ID: " + id));
+        warehouseContext.assertAccess(note.getBranch().getId());
+        return mapToResponse(note);
     }
 
     @Transactional(readOnly = true)
@@ -557,6 +593,8 @@ public class InventoryService {
                 .importType(isInternal ? "INTERNAL" : "SUPPLIER")
                 .sourceBranchId(partnerBranchId)
                 .status(entity.getStatus() != null ? entity.getStatus().name() : "PENDING")
+                .purchaseRequestId(entity.getPurchaseRequest() != null ? entity.getPurchaseRequest().getId() : null)
+                .purchaseRequestCode(entity.getPurchaseRequest() != null ? entity.getPurchaseRequest().getCode() : null)
                 .supplierName(entity.getSupplier() != null ? entity.getSupplier().getName() : "")
                 .supplierCode(entity.getSupplier() != null ? entity.getSupplier().getCode() : "")
                 .branchName(entity.getBranch() != null ? entity.getBranch().getName() : "N/A")
@@ -572,5 +610,138 @@ public class InventoryService {
                 .entryDate(entity.getEntryDate() != null ? entity.getEntryDate().format(DateTimeFormatter.ISO_LOCAL_DATE) : "")
                 .items(itemResponses)
                 .build();
+    }
+
+    private PurchaseRequest resolveLinkedPurchaseRequestForCreate(InventoryReceiptRequest request) {
+        if (request.getPurchaseRequestId() == null) {
+            return null;
+        }
+        PurchaseRequest pr = purchaseRequestRepository.findByIdWithDetails(request.getPurchaseRequestId())
+                .orElseThrow(() -> new NotFoundException("Không tìm thấy phiếu yêu cầu mua ID: " + request.getPurchaseRequestId()));
+        warehouseContext.assertAccess(pr.getBranch().getId());
+        ensurePurchaseRequestReceivable(pr);
+        return pr;
+    }
+
+    private PurchaseRequest resolveLinkedPurchaseRequestForUpdate(InventoryNote existingNote, InventoryReceiptRequest request) {
+        if (existingNote.getPurchaseRequest() != null) {
+            Long incomingId = request.getPurchaseRequestId();
+            if (incomingId != null && !incomingId.equals(existingNote.getPurchaseRequest().getId())) {
+                throw new BadRequestException("Không được đổi phiếu yêu cầu mua của phiếu nhập đã liên kết.");
+            }
+            PurchaseRequest pr = purchaseRequestRepository.findByIdWithDetails(existingNote.getPurchaseRequest().getId())
+                    .orElseThrow(() -> new NotFoundException("Không tìm thấy phiếu yêu cầu mua ID: " + existingNote.getPurchaseRequest().getId()));
+            warehouseContext.assertAccess(pr.getBranch().getId());
+            ensurePurchaseRequestReceivable(pr);
+            return pr;
+        }
+        return resolveLinkedPurchaseRequestForCreate(request);
+    }
+
+    private void ensurePurchaseRequestReceivable(PurchaseRequest pr) {
+        Set<PurchaseRequestStatus> receivableStatuses = Set.of(
+                PurchaseRequestStatus.SENT_TO_SUPPLIER,
+                PurchaseRequestStatus.PARTIALLY_RECEIVED
+        );
+        if (!receivableStatuses.contains(pr.getStatus())) {
+            throw new BadRequestException("Phiếu yêu cầu mua không ở trạng thái cho phép nhận hàng (trạng thái hiện tại: " + pr.getStatus() + ").");
+        }
+    }
+
+    private Branch resolveDestinationBranch(InventoryReceiptRequest request, PurchaseRequest linkedPurchaseRequest) {
+        if (linkedPurchaseRequest != null) {
+            if (request.getBranchName() != null && !request.getBranchName().isBlank()
+                    && !linkedPurchaseRequest.getBranch().getName().equals(request.getBranchName())) {
+                throw new BadRequestException("Chi nhánh nhập của phiếu nhập phải trùng với chi nhánh trên phiếu yêu cầu mua.");
+            }
+            return linkedPurchaseRequest.getBranch();
+        }
+
+        return branchRepository.findByName(request.getBranchName())
+                .orElseThrow(() -> new NotFoundException("Chi nhánh không tồn tại: " + request.getBranchName()));
+    }
+
+    private Supplier resolveSupplier(InventoryReceiptRequest request, PurchaseRequest linkedPurchaseRequest) {
+        String supplierCode = resolveSupplierCode(request, linkedPurchaseRequest);
+        if (!"SUPPLIER".equals(request.getImportType()) && linkedPurchaseRequest == null) {
+            return null;
+        }
+        if (supplierCode == null || supplierCode.isBlank()) {
+            throw new NotFoundException("Nhà cung cấp không tồn tại");
+        }
+
+        Supplier supplier = supplierRepository.findByCode(supplierCode)
+                .orElseThrow(() -> new NotFoundException("Nhà cung cấp không tồn tại"));
+
+        if (linkedPurchaseRequest != null && !supplier.getId().equals(linkedPurchaseRequest.getSupplier().getId())) {
+            throw new BadRequestException("Nhà cung cấp của phiếu nhập phải trùng với nhà cung cấp trên phiếu yêu cầu mua.");
+        }
+
+        return supplier;
+    }
+
+    private String resolveSupplierCode(InventoryReceiptRequest request, PurchaseRequest linkedPurchaseRequest) {
+        if (request.getSupplierCode() != null && !request.getSupplierCode().isBlank()) {
+            return request.getSupplierCode();
+        }
+        return linkedPurchaseRequest != null && linkedPurchaseRequest.getSupplier() != null
+                ? linkedPurchaseRequest.getSupplier().getCode()
+                : null;
+    }
+
+    private void validateReceiptItemsAgainstPurchaseRequest(PurchaseRequest pr, List<InventoryReceiptRequest.ItemRequest> items, Long excludeNoteId) {
+        if (pr == null || items == null) {
+            return;
+        }
+
+        Map<String, PurchaseRequestItem> prItemsBySku = pr.getItems().stream()
+                .filter(i -> i.getProductVariant() != null)
+                .collect(Collectors.toMap(i -> i.getProductVariant().getSku(), i -> i, (a, b) -> a));
+
+        Set<String> seenSkus = new HashSet<>();
+        for (InventoryReceiptRequest.ItemRequest item : items) {
+            String sku = item.getProductCode();
+            if (!seenSkus.add(sku)) {
+                throw new BadRequestException("Phiếu nhập không được chứa SKU trùng lặp: " + sku);
+            }
+
+            PurchaseRequestItem prItem = prItemsBySku.get(sku);
+            if (prItem == null) {
+                throw new BadRequestException("SKU " + sku + " không tồn tại trên phiếu yêu cầu mua.");
+            }
+
+            int remainingQty = Objects.requireNonNullElse(prItem.getRemainingQty(), 0);
+            long reservedQty = noteRepository.sumReservedQtyByPurchaseRequestAndVariantAndStatuses(
+                    pr.getId(),
+                    prItem.getProductVariant().getId(),
+                    OPEN_RECEIPT_STATUSES,
+                    excludeNoteId
+            );
+            long availableQty = Math.max(0, remainingQty - reservedQty);
+
+            if (item.getPlannedQuantity() > availableQty) {
+                throw new BadRequestException("SKU " + sku + " vượt quá số lượng còn có thể lập phiếu nhập. Còn lại: " + availableQty + ".");
+            }
+        }
+    }
+
+    private int resolveDeliveredQty(InventoryQCRequest.ItemQCRequest qcItem, int acceptedQty, int defectiveQty) {
+        if (qcItem.getQuantityDelivered() != null) {
+            return qcItem.getQuantityDelivered();
+        }
+        return acceptedQty + defectiveQty;
+    }
+
+    private void validateCompletedQtyAgainstPurchaseRequest(Long purchaseRequestId, Long variantId, int acceptedQty, Long currentNoteId) {
+        PurchaseRequestItem prItem = purchaseRequestRepository.findByIdWithDetails(purchaseRequestId)
+                .flatMap(pr -> pr.getItems().stream()
+                        .filter(i -> i.getProductVariant() != null && i.getProductVariant().getId().equals(variantId))
+                        .findFirst())
+                .orElseThrow(() -> new BadRequestException("Sản phẩm không tồn tại trên phiếu yêu cầu mua."));
+
+        int remainingQty = Objects.requireNonNullElse(prItem.getRemainingQty(), 0);
+        if (acceptedQty > remainingQty) {
+            throw new BadRequestException("Số lượng đạt QC vượt quá phần còn thiếu của phiếu yêu cầu.");
+        }
     }
 }

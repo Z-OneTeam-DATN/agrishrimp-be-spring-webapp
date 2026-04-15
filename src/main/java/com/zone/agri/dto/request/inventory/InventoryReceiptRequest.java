@@ -35,6 +35,9 @@ public class InventoryReceiptRequest {
     private List<String> tags;
     private BigDecimal paymentAmount;
 
+    // Liên kết với Phiếu yêu cầu mua (tùy chọn)
+    private Long purchaseRequestId;
+
     @NotEmpty(message = "Phiếu nhập phải có ít nhất 1 sản phẩm")
     @Valid
     private List<ItemRequest> items;
