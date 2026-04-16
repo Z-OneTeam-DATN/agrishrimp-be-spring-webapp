@@ -5,8 +5,8 @@ import com.zone.agri.entity.CartItem;
 import com.zone.agri.entity.Inventory;
 import com.zone.agri.entity.Product;
 import com.zone.agri.entity.ProductVariant;
-import com.zone.agri.entity.User;
 import com.zone.agri.entity.SKUAttributeValue;
+import com.zone.agri.entity.User;
 import com.zone.agri.exception.BadRequestException;
 import com.zone.agri.repository.CartItemRepository;
 import com.zone.agri.repository.InventoryRepository;
@@ -34,23 +34,20 @@ public class CartService {
     private final SKUAttributeValueRepository skuAttributeValueRepo;
     private final SettingService settingService;
 
-    // 1. Lấy danh sách giỏ hàng của User
     public List<CartItemResponse> getMyCart(Long userId) {
-        // TỐI ƯU: Sử dụng JOIN FETCH để tránh N+1 cho basic relations
         List<CartItem> items = cartItemRepo.findByUserIdWithDetails(userId);
-        if (items.isEmpty())
+        if (items.isEmpty()) {
             return List.of();
+        }
 
         List<Long> variantIds = items.stream()
                 .map(item -> item.getProductVariant().getId())
                 .distinct()
                 .toList();
 
-        // TỐI ƯU: Lấy hệ số lợi nhuận 1 lần duy nhất ở ngoài vòng lặp
         BigDecimal profitMultiplier = settingService.getProfitMultiplier();
         String roundingRule = settingService.getProfitRoundingRuleRaw();
 
-        // TỐI ƯU: Batch fetch Inventory và SKUAttributeValues
         List<Inventory> allInventories = inventoryRepository.rawFindByProductVariantIdIn(variantIds);
         Map<Long, List<Inventory>> inventoryMap = allInventories.stream()
                 .collect(Collectors.groupingBy(inv -> inv.getProductVariant().getId()));
@@ -63,7 +60,6 @@ public class CartService {
             ProductVariant variant = item.getProductVariant();
             Product product = variant.getProduct();
 
-            // Tạo tên phân loại đầy đủ từ các thuộc tính đã pre-fetch
             List<SKUAttributeValue> attributes = attributeMap.getOrDefault(variant.getId(), List.of());
             String variantName = !attributes.isEmpty()
                     ? attributes.stream()
@@ -71,7 +67,6 @@ public class CartService {
                             .collect(Collectors.joining(", "))
                     : variant.getSku();
 
-            // Lấy các lô hàng đang còn tồn từ map
             List<Inventory> batches = inventoryMap.getOrDefault(variant.getId(), List.of());
 
             int totalStock = batches.stream()
@@ -79,7 +74,6 @@ public class CartService {
                     .mapToInt(Inventory::getQuantity)
                     .sum();
 
-            // Lấy giá nhập của lô FIFO đầu tiên còn hàng để gần với giá chốt đơn hơn
             BigDecimal fifoImportPrice = batches.stream()
                     .filter(inv -> inv.getQuantity() != null && inv.getQuantity() > 0)
                     .sorted(Comparator.comparing(Inventory::getId, Comparator.nullsLast(Long::compareTo)))
@@ -87,8 +81,9 @@ public class CartService {
                     .findFirst()
                     .orElse(BigDecimal.ZERO);
 
-            // Tính giá bán động
-            BigDecimal sellingPrice = settingService.calculateSellingPrice(fifoImportPrice, profitMultiplier,
+            BigDecimal sellingPrice = settingService.calculateSellingPrice(
+                    fifoImportPrice,
+                    profitMultiplier,
                     roundingRule);
 
             return CartItemResponse.builder()
@@ -97,8 +92,7 @@ public class CartService {
                     .name(product != null ? product.getName() : "Sản phẩm")
                     .variant(variantName)
                     .variantName(variantName)
-                    .categoryName(
-                            product != null && product.getCategory() != null ? product.getCategory().getName() : "")
+                    .categoryName(product != null && product.getCategory() != null ? product.getCategory().getName() : "")
                     .brandName(product != null && product.getBrand() != null ? product.getBrand().getName() : "")
                     .price(sellingPrice)
                     .quantity(item.getQuantity())
@@ -108,10 +102,10 @@ public class CartService {
         }).toList();
     }
 
-    // 2. Thêm hoặc Cập nhật số lượng (+/-)
     @Transactional
     public void updateCartQuantity(Long userId, Long variantId, Integer delta) {
-        User user = userRepo.findById(userId).orElseThrow(() -> new BadRequestException("Không tìm thấy User"));
+        User user = userRepo.findById(userId)
+                .orElseThrow(() -> new BadRequestException("Không tìm thấy User"));
         ProductVariant variant = variantRepo.findById(variantId)
                 .orElseThrow(() -> new BadRequestException("Không tìm thấy sản phẩm"));
 
@@ -128,34 +122,19 @@ public class CartService {
             if (cartItem.getId() != null) {
                 cartItemRepo.delete(cartItem);
             }
-        } else {
-            // TỐI ƯU: Sử dụng query SUM tại DB thay vì load toàn bộ object Inventory
-
-//            Integer totalStock = inventoryRepository.sumQuantityByVariantId(variantId);
-//            if (totalStock == null)
-//                totalStock = 0;
-
-            Long totalStockLong = inventoryRepository.sumQuantityByVariantId(variantId);
-            int totalStock = totalStockLong != null ? totalStockLong.intValue() : 0;
-
-
-            if (newQuantity > totalStock) {
-                throw new BadRequestException(
-                        "Số lượng yêu cầu vượt quá tồn kho hiện tại (" + totalStock + " sản phẩm).");
-            }
-
-            cartItem.setQuantity(newQuantity);
-            cartItemRepo.save(cartItem);
+            return;
         }
+
+        // Cart no longer blocks by current stock. Shortage is handled later in prepare/confirm order flow.
+        cartItem.setQuantity(newQuantity);
+        cartItemRepo.save(cartItem);
     }
 
-    // 3. Xóa hẳn một món khỏi giỏ
     @Transactional
     public void removeCartItem(Long userId, Long cartItemId) {
         CartItem item = cartItemRepo.findById(cartItemId)
                 .orElseThrow(() -> new BadRequestException("Không tìm thấy sản phẩm trong giỏ"));
 
-        // Đảm bảo chỉ được xóa đồ trong giỏ của chính mình
         if (!item.getUser().getId().equals(userId)) {
             throw new BadRequestException("Không có quyền thực hiện!");
         }
