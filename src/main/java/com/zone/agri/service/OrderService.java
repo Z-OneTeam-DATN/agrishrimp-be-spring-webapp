@@ -68,6 +68,7 @@ public class OrderService {
     private final SettingService settingService;
     private final GeocodingService geocodingService;
     private final InventoryTransferService inventoryTransferService;
+    private final BackorderService backorderService;
 
     @Lazy
     private final CustomerService customerService;
@@ -1399,6 +1400,15 @@ public class OrderService {
                     .createdAt(LocalDateTime.now())
                     .inventory(inventory)
                     .build());
+
+            // Khi hủy đơn hoàn kho, tự động cấp lại cho các đơn đang thiếu hàng
+            // tại cùng chi nhánh nếu có thể.
+            if (inventory.getBranch() != null && inventory.getProductVariant() != null) {
+                backorderService.fulfillBackordersOnStockReceive(
+                        inventory.getBranch().getId(),
+                        inventory.getProductVariant().getId(),
+                        quantityToRelease);
+            }
         }
     }
 

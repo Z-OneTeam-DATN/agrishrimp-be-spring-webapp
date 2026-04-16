@@ -208,6 +208,15 @@ public class InventoryService {
                 
                 // Cập nhật tồn kho một lần duy nhất cho cả hàng tốt và hàng lỗi
                 updateStockWithQC(note, detail);
+
+                // Khi hàng tốt đã nhập về kho, tự động phân bổ cho các đơn đang thiếu hàng
+                // tại cùng chi nhánh giống luồng nhận phiếu điều chuyển.
+                if (acceptedQty > 0) {
+                    backorderService.fulfillBackordersOnStockReceive(
+                            note.getBranch().getId(),
+                            detail.getProductVariant().getId(),
+                            acceptedQty);
+                }
             }
             // Tổng tiền nợ NCC tính trên số lượng hàng tốt thực nhận (hoặc tùy nghiệp vụ có tính cả hàng lỗi không)
             // Ở đây tính trên số lượng thực tế nhập kho (Accepted)

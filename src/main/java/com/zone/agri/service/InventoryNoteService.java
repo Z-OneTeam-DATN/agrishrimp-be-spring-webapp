@@ -39,6 +39,7 @@ public class InventoryNoteService {
     private final UserRepository userRepository;
     private final InventoryRepository inventoryRepository;
     private final InventoryTransactionRepository transactionRepository;
+    private final BackorderService backorderService;
     private final com.zone.agri.common.WarehouseContext warehouseContext;
 
     private User getCurrentUser() {
@@ -325,6 +326,13 @@ public class InventoryNoteService {
                         .inventory(newBatch)
                         .inventoryNote(note)
                         .build());
+
+                if (actualQty > 0) {
+                    backorderService.fulfillBackordersOnStockReceive(
+                            branch.getId(),
+                            variant.getId(),
+                            actualQty);
+                }
             } else {
                 Inventory batch = batchOpt.get();
                 int systemQty = Objects.requireNonNullElse(batch.getQuantity(), 0);
@@ -348,6 +356,13 @@ public class InventoryNoteService {
                             .inventory(batch)
                             .inventoryNote(note)
                             .build());
+
+                    if (discrepancyNormal > 0) {
+                        backorderService.fulfillBackordersOnStockReceive(
+                                branch.getId(),
+                                variant.getId(),
+                                discrepancyNormal);
+                    }
                 }
             }
         }

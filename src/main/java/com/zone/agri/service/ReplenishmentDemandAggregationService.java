@@ -61,6 +61,7 @@ public class ReplenishmentDemandAggregationService {
     private final BranchRepository branchRepository;
     private final InventoryTransferRepository inventoryTransferRepository;
     private final InventoryTransferService inventoryTransferService;
+    private final BackorderService backorderService;
     private final TransactionTemplate transactionTemplate;
 
     private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
@@ -148,6 +149,42 @@ public class ReplenishmentDemandAggregationService {
                 .toList();
 
         if (subOrders.isEmpty()) {
+            return;
+        }
+
+        // Trước khi lập phiếu điều chuyển, kiểm tra lại xem chi nhánh nhận hiện đã có đủ hàng
+        // từ các nguồn khác (nhập kho, kiểm kho, hoàn kho...) để giao đơn trực tiếp chưa.
+        Map<Long, Integer> localAvailableByVariant = new LinkedHashMap<>();
+        for (SubOrder subOrder : subOrders) {
+            List<SubOrderItem> items = subOrderItemRepository.findBySubOrderId(subOrder.getId());
+            for (SubOrderItem item : items) {
+                if (item.getProductVariant() == null || item.getProductVariant().getId() == null) {
+                    continue;
+                }
+                Long variantId = item.getProductVariant().getId();
+                localAvailableByVariant.computeIfAbsent(
+                        variantId,
+                        key -> Math.toIntExact(Objects.requireNonNullElse(
+                                inventoryRepository.sumQuantityByBranchAndVariant(toBranchId, key),
+                                0L)));
+            }
+        }
+
+        localAvailableByVariant.forEach((variantId, availableQty) -> {
+            if (availableQty > 0) {
+                backorderService.fulfillBackordersOnStockReceive(toBranchId, variantId, availableQty);
+            }
+        });
+
+        // Reload lại sau khi đã thử cấp hàng trực tiếp tại chi nhánh nhận.
+        subOrders = subOrderRepository.findAllById(queuedSubOrderIds).stream()
+                .filter(subOrder -> subOrder.getStatus() == OrderStatus.AWAITING_REPLENISHMENT)
+                .filter(subOrder -> subOrder.getBranch() != null
+                        && Objects.equals(subOrder.getBranch().getId(), toBranchId))
+                .toList();
+
+        if (subOrders.isEmpty()) {
+            log.info("Branch {} has fulfilled queued backorders locally, no replenishment transfer needed", toBranchId);
             return;
         }
 
