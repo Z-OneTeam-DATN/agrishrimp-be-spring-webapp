@@ -47,6 +47,7 @@ import com.zone.agri.entity.Inventory;
 import com.zone.agri.entity.Product;
 import com.zone.agri.entity.ProductImage;
 import com.zone.agri.entity.ProductVariant;
+import com.zone.agri.entity.Role;
 import com.zone.agri.entity.SKUAttributeValue;
 import com.zone.agri.entity.User;
 import com.zone.agri.entity.enums.AttributeStatus;
@@ -664,10 +665,14 @@ public class ProductService {
         boolean hasExportPermission = auth != null && auth.getAuthorities().stream()
                 .anyMatch(a -> a.getAuthority().equals("EXPORT_CREATE") || a.getAuthority().equals("TRANSFER_CREATE"));
 
-        String roleSlug = (currentUser != null && currentUser.getRole() != null)
-                ? currentUser.getRole().getSlug().toUpperCase()
+        Role currentRole = currentUser != null ? currentUser.getRole() : null;
+        String roleSlug = (currentRole != null && currentRole.getSlug() != null)
+                ? currentRole.getSlug().toUpperCase()
                 : "";
-        boolean isAdmin = "ADMIN".equals(roleSlug);
+        boolean isAdmin = "ADMIN".equals(roleSlug)
+                || (currentRole != null && currentRole.getId() != null && currentRole.getId() == 1L)
+                || (currentRole != null && currentRole.getDisplayName() != null
+                        && "QUẢN TRỊ VIÊN".equalsIgnoreCase(currentRole.getDisplayName()));
         boolean isManager = "MANAGER".equals(roleSlug) || "BRANCH_MANAGER".equals(roleSlug);
 
         boolean canSeeImportPrice = isAdmin || isManager || hasExportPermission;
@@ -689,8 +694,8 @@ public class ProductService {
                 // Staff/Manager thông thường chỉ thấy chi nhánh của họ; Admin/Exporter thấy tất
                 // cả
                 .filter(inv -> currentUser == null || canSeeAllBranches
-                        || (currentBranch != null && inv.getBranch() != null
-                                && inv.getBranch().getId().equals(currentBranch.getId())))
+                        || currentBranch == null
+                        || (inv.getBranch() != null && inv.getBranch().getId().equals(currentBranch.getId())))
 
                 .collect(Collectors.toList());
 
