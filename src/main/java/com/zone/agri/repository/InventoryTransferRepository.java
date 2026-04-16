@@ -84,4 +84,12 @@ public interface InventoryTransferRepository extends JpaRepository<InventoryTran
                         @Param("fromBranchId") Long fromBranchId,
                         @Param("toBranchId") Long toBranchId,
                         @Param("cutoffTime") LocalDateTime cutoffTime);
+
+        // Tìm phiếu điều chuyển theo ID với eager load cho branches và details
+        @Query("SELECT t FROM InventoryTransfer t " +
+                        "JOIN FETCH t.fromBranch " +
+                        "JOIN FETCH t.toBranch " +
+                        "LEFT JOIN FETCH t.details " +
+                        "WHERE t.id = :id")
+        Optional<InventoryTransfer> findByIdWithDetails(@Param("id") Long id);
 }

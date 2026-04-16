@@ -266,7 +266,7 @@ public class InventoryTransferService {
 
     @Transactional
     public void approveAndShip(Long transferId) {
-        InventoryTransfer transfer = transferRepo.findById(transferId)
+        InventoryTransfer transfer = transferRepo.findByIdWithDetails(transferId)
                 .orElseThrow(() -> new RuntimeException("Không tìm thấy phiếu điều chuyển"));
 
         if (transfer.getStatus() != InventoryTransferStatus.APPROVED
@@ -283,7 +283,7 @@ public class InventoryTransferService {
     // ==========================================
     @Transactional
     public void receiveTransfer(Long id, List<TransferQCRequest> qcItems) {
-        InventoryTransfer transfer = transferRepo.findById(id)
+        InventoryTransfer transfer = transferRepo.findByIdWithDetails(id)
                 .orElseThrow(() -> new RuntimeException("Không tìm thấy phiếu điều chuyển"));
 
         if (transfer.getStatus() != InventoryTransferStatus.SHIPPING) {
@@ -411,7 +411,8 @@ public class InventoryTransferService {
     // HÀM LẤY CHI TIẾT
     // ==========================================
     public TransferDetailResponse getById(Long id) {
-        InventoryTransfer transfer = transferRepo.findById(id).orElseThrow();
+        InventoryTransfer transfer = transferRepo.findByIdWithDetails(id)
+                .orElseThrow(() -> new RuntimeException("Không tìm thấy phiếu điều chuyển ID: " + id));
         return convertToDetailResponse(transfer);
     }
 
@@ -453,7 +454,8 @@ public class InventoryTransferService {
 
     @Transactional
     public void changeDestination(Long id, Long newBranchId) {
-        InventoryTransfer transfer = transferRepo.findById(id).orElseThrow();
+        InventoryTransfer transfer = transferRepo.findByIdWithDetails(id)
+                .orElseThrow(() -> new RuntimeException("Không tìm thấy phiếu điều chuyển"));
         if (transfer.getStatus() == InventoryTransferStatus.COMPLETED
                 || transfer.getStatus() == InventoryTransferStatus.CANCELLED) {
             throw new RuntimeException("Không thể đổi chi nhánh cho phiếu đã chốt hoặc đã hủy!");
