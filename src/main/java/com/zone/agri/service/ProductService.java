@@ -674,7 +674,7 @@ public class ProductService {
 
         Branch currentBranch = currentUser != null ? currentUser.getBranch() : null;
 
-        List<Inventory> allInventories = inventoryRepository.findByProductVariantId(variant.getId());
+        List<Inventory> allInventories = inventoryRepository.findByProductVariantIdWithBranch(variant.getId());
 
         // Cho phép Admin HOẶC người có quyền Điều chuyển/Xuất kho thấy hết các chi
         // nhánh để chọn nguồn

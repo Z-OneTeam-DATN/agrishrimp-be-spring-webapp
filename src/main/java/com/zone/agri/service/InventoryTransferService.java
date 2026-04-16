@@ -52,9 +52,11 @@ public class InventoryTransferService {
         // Validate: INTERNAL_SALE bắt buộc mỗi dòng phải có unitTransferPrice > 0
         if (businessType == TransferBusinessType.INTERNAL_SALE) {
             for (TransferItemRequest itemReq : req.getItems()) {
-                if (itemReq.getUnitTransferPrice() == null || itemReq.getUnitTransferPrice().compareTo(BigDecimal.ZERO) <= 0) {
+                if (itemReq.getUnitTransferPrice() == null
+                        || itemReq.getUnitTransferPrice().compareTo(BigDecimal.ZERO) <= 0) {
                     throw new RuntimeException(
-                            "Phiếu bán nội bộ yêu cầu đơn giá điều chuyển > 0 cho từng mặt hàng (SKU: " + itemReq.getSku() + ")");
+                            "Phiếu bán nội bộ yêu cầu đơn giá điều chuyển > 0 cho từng mặt hàng (SKU: "
+                                    + itemReq.getSku() + ")");
                 }
             }
         }
@@ -78,12 +80,13 @@ public class InventoryTransferService {
                 .deadline(req.getDeadline())
                 .transferBusinessType(businessType)
                 // INTERNAL_SALE: khởi tạo trạng thái nợ nội bộ = UNPAID
-                .settlementStatus(businessType == TransferBusinessType.INTERNAL_SALE ? TransferSettlementStatus.UNPAID : null)
+                .settlementStatus(
+                        businessType == TransferBusinessType.INTERNAL_SALE ? TransferSettlementStatus.UNPAID : null)
                 .build();
 
         List<InventoryTransferDetail> details = new ArrayList<>();
         int totalQty = 0;
-        BigDecimal totalValue = BigDecimal.ZERO;     // Tổng theo giá vốn FIFO (quản trị kho)
+        BigDecimal totalValue = BigDecimal.ZERO; // Tổng theo giá vốn FIFO (quản trị kho)
         BigDecimal transferAmount = BigDecimal.ZERO; // Tổng theo giá bán nội bộ (chỉ INTERNAL_SALE)
 
         for (TransferItemRequest itemReq : req.getItems()) {
@@ -107,7 +110,8 @@ public class InventoryTransferService {
                     .quantityReal(0)
                     .note(itemReq.getItemNote())
                     .unitTransferPrice(businessType == TransferBusinessType.INTERNAL_SALE ? unitPrice : null)
-                    .totalTransferPrice(businessType == TransferBusinessType.INTERNAL_SALE ? lineTotalTransferPrice : null)
+                    .totalTransferPrice(
+                            businessType == TransferBusinessType.INTERNAL_SALE ? lineTotalTransferPrice : null)
                     .build();
 
             details.add(detail);
@@ -144,7 +148,7 @@ public class InventoryTransferService {
         if (businessType == TransferBusinessType.INTERNAL_SALE) {
             transfer.setTransferAmount(transferAmount);
             transfer.setSourceReceivableAmount(transferAmount); // Kho xuất: phải thu nội bộ
-            transfer.setDestPayableAmount(transferAmount);       // Kho nhận: phải trả nội bộ
+            transfer.setDestPayableAmount(transferAmount); // Kho nhận: phải trả nội bộ
         }
 
         return transferRepo.save(transfer);
@@ -485,14 +489,15 @@ public class InventoryTransferService {
      * <p>
      * Quy tắc:
      * - Nếu SKU đã có trong phiếu → cộng thêm quantity
-     * - Nếu SKU chưa có           → thêm dòng detail mới
+     * - Nếu SKU chưa có → thêm dòng detail mới
      * - Cập nhật lại totalQuantity và totalValue (tính theo giá vốn FIFO kho xuất)
      */
     @Transactional
     public void mergeItemsIntoTransfer(InventoryTransfer transfer,
-                                       Map<String, Integer> skuQuantities,
-                                       String itemNote) {
-        if (skuQuantities == null || skuQuantities.isEmpty()) return;
+            Map<String, Integer> skuQuantities,
+            String itemNote) {
+        if (skuQuantities == null || skuQuantities.isEmpty())
+            return;
 
         Long fromBranchId = transfer.getFromBranch().getId();
         BigDecimal addedValue = BigDecimal.ZERO;
@@ -500,15 +505,18 @@ public class InventoryTransferService {
         for (Map.Entry<String, Integer> entry : skuQuantities.entrySet()) {
             String sku = entry.getKey();
             int addQty = entry.getValue();
-            if (addQty <= 0) continue;
+            if (addQty <= 0)
+                continue;
 
             ProductVariant variant = variantRepo.findBySku(sku).orElse(null);
-            if (variant == null) continue;
+            if (variant == null)
+                continue;
 
             // Tìm dòng chi tiết hiện tại trong phiếu
-            com.zone.agri.entity.InventoryTransferDetail existing =
-                    transferDetailRepo.findByInventoryTransferIdAndProductVariantId(
-                            transfer.getId(), variant.getId()).orElse(null);
+            com.zone.agri.entity.InventoryTransferDetail existing = transferDetailRepo
+                    .findByInventoryTransferIdAndProductVariantId(
+                            transfer.getId(), variant.getId())
+                    .orElse(null);
 
             if (existing != null) {
                 existing.setQuantity(existing.getQuantity() + addQty);
@@ -516,15 +524,15 @@ public class InventoryTransferService {
                         Objects.requireNonNullElse(existing.getQuantityRequested(), existing.getQuantity()) + addQty);
                 transferDetailRepo.save(existing);
             } else {
-                com.zone.agri.entity.InventoryTransferDetail newDetail =
-                        com.zone.agri.entity.InventoryTransferDetail.builder()
-                                .inventoryTransfer(transfer)
-                                .productVariant(variant)
-                                .quantity(addQty)
-                                .quantityRequested(addQty)
-                                .quantityReal(0)
-                                .note(itemNote)
-                                .build();
+                com.zone.agri.entity.InventoryTransferDetail newDetail = com.zone.agri.entity.InventoryTransferDetail
+                        .builder()
+                        .inventoryTransfer(transfer)
+                        .productVariant(variant)
+                        .quantity(addQty)
+                        .quantityRequested(addQty)
+                        .quantityReal(0)
+                        .note(itemNote)
+                        .build();
                 transferDetailRepo.save(newDetail);
             }
 
@@ -554,7 +562,8 @@ public class InventoryTransferService {
         int remaining = qty;
         BigDecimal value = BigDecimal.ZERO;
         for (Inventory batch : batches) {
-            if (remaining <= 0) break;
+            if (remaining <= 0)
+                break;
             int take = Math.min(remaining, batch.getQuantity());
             BigDecimal price = batch.getImportPrice() != null ? batch.getImportPrice() : BigDecimal.ZERO;
             value = value.add(price.multiply(BigDecimal.valueOf(take)));
