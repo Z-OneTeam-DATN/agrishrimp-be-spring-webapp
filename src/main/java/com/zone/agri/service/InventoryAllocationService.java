@@ -63,17 +63,19 @@ public class InventoryAllocationService {
             return new AllocationResult(subOrders, outOfStockItems);
         }
 
-        BranchWithRealDistance selectedBranchWithDistance = null;
-        for (BranchWithRealDistance candidate : branchesSortedByDist) {
-            if (isBranchFullyStocked(candidate.branch().getId(), cart, inventoryMatrix)) {
-                selectedBranchWithDistance = candidate;
-                break;
-            }
-        }
-
-        if (selectedBranchWithDistance == null) {
-            selectedBranchWithDistance = branchesSortedByDist.get(0);
-        }
+        BranchWithRealDistance selectedBranchWithDistance = branchesSortedByDist.stream()
+                .sorted(Comparator
+                        .comparingInt((BranchWithRealDistance candidate) -> hasAllocatableStock(
+                                candidate.branch().getId(),
+                                cart,
+                                inventoryMatrix) ? 0 : 1)
+                        .thenComparingDouble(BranchWithRealDistance::distanceKm)
+                        .thenComparing(Comparator.comparingInt((BranchWithRealDistance candidate) ->
+                                calculateAllocatableQuantity(candidate.branch().getId(), cart, inventoryMatrix)).reversed())
+                        .thenComparing(Comparator.comparingInt((BranchWithRealDistance candidate) ->
+                                isWarehouse(candidate.branch()) ? 0 : 1)))
+                .findFirst()
+                .orElse(branchesSortedByDist.get(0));
 
         Long selectedBranchId = selectedBranchWithDistance.branch().getId();
         Map<Long, List<Inventory>> branchBatches = inventoryMatrix.getOrDefault(selectedBranchId, Collections.emptyMap());
@@ -201,6 +203,31 @@ public class InventoryAllocationService {
             }
         }
         return true;
+    }
+
+    private int calculateAllocatableQuantity(Long branchId, List<CartItemDto> cart,
+                                             Map<Long, Map<Long, List<Inventory>>> matrix) {
+        Map<Long, List<Inventory>> branchBatches = matrix.getOrDefault(branchId, Collections.emptyMap());
+        int totalAllocatable = 0;
+        for (CartItemDto item : cart) {
+            int totalAvailable = branchBatches.getOrDefault(item.getProductVariantId(), Collections.emptyList())
+                    .stream()
+                    .mapToInt(inv -> Objects.requireNonNullElse(inv.getQuantity(), 0))
+                    .sum();
+            totalAllocatable += Math.min(totalAvailable, Objects.requireNonNullElse(item.getQuantity(), 0));
+        }
+        return totalAllocatable;
+    }
+
+    private boolean hasAllocatableStock(Long branchId, List<CartItemDto> cart,
+                                        Map<Long, Map<Long, List<Inventory>>> matrix) {
+        return calculateAllocatableQuantity(branchId, cart, matrix) > 0;
+    }
+
+    private boolean isWarehouse(com.zone.agri.entity.Branch branch) {
+        return branch != null
+                && branch.getBranchType() != null
+                && "WAREHOUSE".equalsIgnoreCase(branch.getBranchType());
     }
 
     private int calculateTotalAvailable(Long variantId, Map<Long, Map<Long, List<Inventory>>> matrix) {
