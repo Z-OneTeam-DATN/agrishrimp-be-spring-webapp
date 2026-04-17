@@ -55,4 +55,32 @@ public class MiniAppDiagnosisController {
         MiniAppDiagnosisResponse response = diagnosisService.diagnose(image, userSymptoms, userDetail.getId());
         return ResponseEntity.ok(response);
     }
+
+    /**
+     * POST /api/miniapp/diagnosis/{id}/prescription
+     *
+     * User chủ động trigger Gemini để tạo phác đồ điều trị sau khi đã xem kết quả bệnh.
+     * Tách khỏi bước chẩn đoán để tránh timeout và cải thiện UX.
+     */
+    @Operation(
+            summary = "Tạo phác đồ điều trị",
+            description = "Gọi Gemini AI để tạo phác đồ điều trị cho ca chẩn đoán đã có. " +
+                    "Gọi sau khi POST /diagnosis trả về kết quả bệnh."
+    )
+    @SecurityRequirement(name = "bearerAuth")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Tạo phác đồ thành công"),
+            @ApiResponse(responseCode = "401", description = "Chưa đăng nhập hoặc token hết hạn"),
+            @ApiResponse(responseCode = "404", description = "Không tìm thấy ca chẩn đoán"),
+    })
+    @PostMapping("/diagnosis/{id}/prescription")
+    public ResponseEntity<MiniAppDiagnosisResponse> generatePrescription(@PathVariable Long id) {
+        UserDetail userDetail = AuthUtils.getUserDetail();
+        if (userDetail == null) {
+            throw new CustomAuthenticationException("Bạn cần đăng nhập để sử dụng tính năng này");
+        }
+
+        MiniAppDiagnosisResponse response = diagnosisService.generatePrescription(id, userDetail.getId());
+        return ResponseEntity.ok(response);
+    }
 }

@@ -5,8 +5,11 @@ import com.zone.agri.client.ai.AiDiagnosisClient;
 import com.zone.agri.client.ai.AiPrescriptionClient;
 import com.zone.agri.dto.miniapp.ai.*;
 import com.zone.agri.dto.miniapp.response.*;
+import com.zone.agri.entity.MiniAppDiagnosisHistory;
 import com.zone.agri.entity.Product;
 import com.zone.agri.exception.BadRequestException;
+import com.zone.agri.exception.NotFoundException;
+import com.zone.agri.repository.MiniAppDiagnosisHistoryRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -20,12 +23,8 @@ import java.util.stream.Collectors;
 
 /**
  * Orchestration chính cho luồng chẩn đoán Mini App:
- *  1. Validate image
- *  2. AI predict-image → disease_code
- *  3. Chọn candidate products đã xếp hạng (Phase BE-3)
- *  4. AI generate-prescription (graceful degradation nếu fail)
- *  5. Map + clamp AI product ids → SuggestedProductResponse
- *  6. Build response chuẩn cho FE
+ *  Bước 1 — POST /diagnosis:      Validate image → YOLO predict → lưu history → trả kết quả bệnh
+ *  Bước 2 — POST /diagnosis/{id}/prescription: Gemini generate-prescription → cập nhật history → trả phác đồ
  */
 @Service
 @RequiredArgsConstructor
@@ -37,6 +36,7 @@ public class MiniAppDiagnosisService {
     private final AiPrescriptionClient aiPrescriptionClient;
     private final MiniAppProductSuggestionService productSuggestionService;
     private final MiniAppDiagnosisHistoryService diagnosisHistoryService;
+    private final MiniAppDiagnosisHistoryRepository historyRepository;
 
     private static final long MAX_IMAGE_SIZE_BYTES = 5_000_000L;
     private static final int MAX_SYMPTOMS_LENGTH = 500;
@@ -99,47 +99,16 @@ public class MiniAppDiagnosisService {
         log.info("[MiniApp] traceId={} predict OK: diseaseCode={}, confidence={}%",
                 traceId, diseaseCode, finalPrediction.getConfidencePercent());
 
-        // 3. Phase BE-3: candidate products đã xếp hạng + price map (1 batch query)
-        List<Product> candidateProducts = productSuggestionService.getCandidateProductsForDisease(diseaseCode);
-        List<AiStockItem> availableStock = productSuggestionService.toAiStockItems(candidateProducts);
-        Map<Long, Product> productMap = productSuggestionService.toProductMap(candidateProducts);
-        Map<Long, Long> priceMap = productSuggestionService.getPriceMap(candidateProducts);
+        // 3. Build response chỉ với kết quả bệnh (không có prescription)
+        MiniAppDiagnosisResponse response = buildDiseaseOnlyResponse(
+                predictResponse, finalPrediction, diagnosisImageUrl);
 
-        log.debug("[MiniApp] traceId={} candidateProducts={}, stockItems={}",
-                traceId, candidateProducts.size(), availableStock.size());
-
-        // 4. Build AI prescription request
-        // idealProtocol không cần truyền — Python AI tự lookup từ Knowledge Base nội bộ
-        AiPrescriptionRequest prescriptionRequest = AiPrescriptionRequest.builder()
-                .diseaseCode(diseaseCode)
-                .diseaseName(finalPrediction.getVietnameseName())
-                .userSymptoms(normalizedSymptoms)
-                .availableStock(availableStock)
-                .build();
-
-        // 5. AI generate-prescription — graceful: fail không block diagnosis result
-        AiPrescriptionResponse prescriptionResponse = null;
-        try {
-            prescriptionResponse = aiPrescriptionClient.generatePrescription(prescriptionRequest);
-        } catch (Exception e) {
-            log.warn("[MiniApp] traceId={} prescription fail (graceful): diseaseCode={}, reason={}",
-                    traceId, diseaseCode, e.getMessage());
-        }
-
-        // 6. Build response (diagnosisId tạm — sẽ được thay bằng DB id ở bước sau)
-        MiniAppDiagnosisResponse response = buildResponse(
-                predictResponse, finalPrediction, prescriptionResponse, productMap, priceMap, diagnosisImageUrl);
-
-        // 7. Phase BE-4: lưu history + gắn real DB id vào diagnosisId
-        // Graceful: nếu save fail vẫn trả diagnosis cho FE, log lỗi để fix sau.
-        // diagnosisId giữ giá trị tạm nếu save fail (FE vẫn nhận đủ kết quả,
-        // chỉ mất khả năng reload từ history).
+        // 4. Lưu history ngay — prescription sẽ được cập nhật sau khi user chủ động gọi
         try {
             Long historyId = diagnosisHistoryService.saveDiagnosisHistory(response, userId, normalizedSymptoms);
             response.setDiagnosisId(String.valueOf(historyId));
         } catch (Exception e) {
-            log.error("[MiniApp] traceId={} History save fail (graceful — diagnosis vẫn trả về FE): {}",
-                    traceId, e.getMessage());
+            log.error("[MiniApp] traceId={} History save fail (graceful): {}", traceId, e.getMessage());
         }
 
         log.info("[MiniApp] traceId={} done: userId={}, diagnosisId={}", traceId, userId, response.getDiagnosisId());
@@ -147,15 +116,71 @@ public class MiniAppDiagnosisService {
     }
 
     // =========================================================
-    // PRIVATE: Build response từ AI results
+    // PUBLIC: Gọi Gemini tạo phác đồ (bước 2 — user chủ động trigger)
     // =========================================================
 
-    private MiniAppDiagnosisResponse buildResponse(
+    public MiniAppDiagnosisResponse generatePrescription(Long diagnosisId, Long userId) {
+        MiniAppDiagnosisHistory history = historyRepository.findByIdAndUserId(diagnosisId, userId)
+                .orElseThrow(() -> new NotFoundException("MINIAPP_DIAGNOSIS_NOT_FOUND"));
+
+        String diseaseCode = history.getFinalDiseaseCode();
+        if (diseaseCode == null) {
+            throw new BadRequestException("Không thể tạo phác đồ cho ca chẩn đoán này");
+        }
+
+        // Re-fetch candidate products theo diseaseCode
+        List<Product> candidateProducts = productSuggestionService.getCandidateProductsForDisease(diseaseCode);
+        List<AiStockItem> availableStock = productSuggestionService.toAiStockItems(candidateProducts);
+        Map<Long, Product> productMap = productSuggestionService.toProductMap(candidateProducts);
+        Map<Long, Long> priceMap = productSuggestionService.getPriceMap(candidateProducts);
+
+        AiPrescriptionRequest request = AiPrescriptionRequest.builder()
+                .diseaseCode(diseaseCode)
+                .diseaseName(history.getFinalDiseaseNameVi())
+                .userSymptoms(history.getUserSymptoms() != null ? history.getUserSymptoms() : "")
+                .availableStock(availableStock)
+                .build();
+
+        AiPrescriptionResponse prescriptionResponse = aiPrescriptionClient.generatePrescription(request);
+
+        // Build treatment stages với product mapping
+        List<String> causes = prescriptionResponse.getCauses() != null
+                ? prescriptionResponse.getCauses() : Collections.emptyList();
+        String signsSummary = prescriptionResponse.getSignsSummary();
+        List<TreatmentStageResponse> treatmentStages = Collections.emptyList();
+        if (prescriptionResponse.getTreatmentStages() != null) {
+            treatmentStages = prescriptionResponse.getTreatmentStages().stream()
+                    .map(stage -> TreatmentStageResponse.builder()
+                            .stageTitle(stage.getStageTitle())
+                            .instructions(stage.getInstructions() != null
+                                    ? stage.getInstructions() : Collections.emptyList())
+                            .products(productSuggestionService.mapRelatedProductIdsToSuggestedProducts(
+                                    stage.getRelatedProductIds(), productMap, priceMap))
+                            .build())
+                    .collect(Collectors.toList());
+        }
+
+        // Cập nhật history với prescription data
+        diagnosisHistoryService.updateWithPrescription(diagnosisId, causes, signsSummary, treatmentStages);
+
+        log.info("[MiniApp-Prescription] diagnosisId={}, diseaseCode={}, stages={}",
+                diagnosisId, diseaseCode, treatmentStages.size());
+
+        return MiniAppDiagnosisResponse.builder()
+                .diagnosisId(String.valueOf(diagnosisId))
+                .causes(causes)
+                .signsSummary(signsSummary)
+                .treatmentStages(treatmentStages)
+                .build();
+    }
+
+    // =========================================================
+    // PRIVATE: Build response chỉ với kết quả bệnh (không prescription)
+    // =========================================================
+
+    private MiniAppDiagnosisResponse buildDiseaseOnlyResponse(
             AiPredictResponse predict,
             AiPredictionItem finalPrediction,
-            AiPrescriptionResponse prescription,
-            Map<Long, Product> productMap,
-            Map<Long, Long> priceMap,
             String diagnosisImageUrl) {
 
         DiseaseResponse disease = DiseaseResponse.builder()
@@ -176,30 +201,6 @@ public class MiniAppDiagnosisService {
                         .collect(Collectors.toList())
                 : Collections.emptyList();
 
-        // Graceful defaults khi prescription null
-        List<String> causes = Collections.emptyList();
-        String signsSummary = null;
-        List<TreatmentStageResponse> treatmentStages = Collections.emptyList();
-
-        if (prescription != null) {
-            if (prescription.getCauses() != null) {
-                causes = prescription.getCauses();
-            }
-            signsSummary = prescription.getSignsSummary();
-            if (prescription.getTreatmentStages() != null) {
-                treatmentStages = prescription.getTreatmentStages().stream()
-                        .map(stage -> TreatmentStageResponse.builder()
-                                .stageTitle(stage.getStageTitle())
-                                .instructions(stage.getInstructions() != null
-                                        ? stage.getInstructions() : Collections.emptyList())
-                                // Phase BE-3: clamp + dedup AI product ids
-                                .products(productSuggestionService.mapRelatedProductIdsToSuggestedProducts(
-                                        stage.getRelatedProductIds(), productMap, priceMap))
-                                .build())
-                        .collect(Collectors.toList());
-            }
-        }
-
         String diagnosisId = "diag_" + UUID.randomUUID().toString().replace("-", "").substring(0, 12);
 
         return MiniAppDiagnosisResponse.builder()
@@ -208,10 +209,6 @@ public class MiniAppDiagnosisService {
                 .imageUrl(diagnosisImageUrl)
                 .disease(disease)
                 .topPredictions(topPredictions)
-                .causes(causes)
-                .signsSummary(signsSummary)
-                .treatmentStages(treatmentStages)
-                .purchaseUrl(null)       // Phase BE-4: purchase link
                 .build();
     }
 

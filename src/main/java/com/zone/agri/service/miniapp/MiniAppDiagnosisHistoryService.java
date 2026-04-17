@@ -73,6 +73,22 @@ public class MiniAppDiagnosisHistoryService {
     }
 
     // =========================================================
+    // UPDATE — cập nhật prescription sau khi user chủ động gọi Gemini
+    // =========================================================
+
+    @Transactional
+    public void updateWithPrescription(Long historyId, List<String> causes,
+                                       String signsSummary, List<TreatmentStageResponse> treatmentStages) {
+        MiniAppDiagnosisHistory history = historyRepository.findById(historyId)
+                .orElseThrow(() -> new com.zone.agri.exception.NotFoundException("MINIAPP_DIAGNOSIS_NOT_FOUND"));
+        history.setCausesJson(toJson(causes));
+        history.setSignsSummary(signsSummary);
+        history.setTreatmentStagesJson(toJson(treatmentStages));
+        historyRepository.save(history);
+        log.info("[MiniApp-History] updated prescription: historyId={}", historyId);
+    }
+
+    // =========================================================
     // LIST — GET /api/miniapp/history
     // =========================================================
 
