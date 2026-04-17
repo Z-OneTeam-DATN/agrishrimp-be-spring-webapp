@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: deploy-backend
+  group: deploy-agrishrimp
   cancel-in-progress: false
 
 env:
@@ -100,12 +100,11 @@ jobs:
           docker pull "$IMAGE:latest"
 
           echo "Ensuring required compose dependencies and network are up..."
-          if ! docker compose -f docker-compose.prod.yml up -d db redis ai-visual-search; then
+          if ! docker compose -f docker-compose.prod.yml up -d db redis; then
             echo "Dependency bootstrap failed. Cleaning stale dependency containers and retrying once..."
-            docker rm -f agrishrimp-db agrishrimp-redis agrishrimp-ai-visual-search 2>/dev/null || true
-            docker compose -f docker-compose.prod.yml up -d db redis ai-visual-search
+            docker rm -f agrishrimp-db agrishrimp-redis 2>/dev/null || true
+            docker compose -f docker-compose.prod.yml up -d db redis
           fi
-          echo "Skipping ai-diagnosis bootstrap because its GHCR image may be unavailable."
 
           echo "Waiting for MySQL container DNS/health..."
           DB_RETRIES=18
