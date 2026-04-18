@@ -22,7 +22,8 @@ public class ProductVariantService {
 
     private final ProductVariantRepository variantRepo;
     private final InventoryRepository inventoryRepo;
-    private final ProductService productService; // Dùng chung hàm map của ProductService để giữ nguyên phân quyền & tính giá
+    private final ProductService productService; // Dùng chung hàm map của ProductService để giữ nguyên phân quyền &
+                                                 // tính giá
 
     /**
      * BÁO CÁO SẢN PHẨM DƯỚI ĐỊNH MỨC (LOW STOCK REPORT)
@@ -32,13 +33,13 @@ public class ProductVariantService {
         int threshold = 10;
 
         // 1. Lấy TẤT CẢ các Variant đang kinh doanh (ACTIVE)
-        List<ProductVariant> allVariants = variantRepo.findAllActiveWithProduct(null);
+        List<ProductVariant> allVariants = variantRepo.findAllActiveWithProduct(null, null);
 
         // 2. Tính toán tồn kho cho từng biến thể tại chi nhánh yêu cầu
         return allVariants.stream().map(v -> {
             // Lấy TẤT CẢ các bản ghi kho của biến thể này
             List<Inventory> inventories = inventoryRepo.findByProductVariantId(v.getId());
-            
+
             // Lọc theo chi nhánh nếu có
             if (branchId != null) {
                 inventories = inventories.stream()
@@ -48,7 +49,7 @@ public class ProductVariantService {
 
             // Tổng tồn kho (nếu inventories rỗng -> totalStock = 0)
             int totalStock = inventories.stream()
-                    .mapToInt(i -> i.getQuantity() != null ? i.getQuantity() : 0)
+                    .mapToInt(i -> Objects.requireNonNullElse(i.getQuantity(), 0))
                     .sum();
 
             // Định mức (Threshold): 10 theo yêu cầu
@@ -65,7 +66,7 @@ public class ProductVariantService {
                     .variantId(v.getId())
                     .sku(v.getSku())
                     .productName(v.getProduct() != null ? v.getProduct().getName() : "Sản phẩm không xác định")
-                    .unit(null) 
+                    .unit(null)
                     .quantity(totalStock)
                     .minThreshold(currentThreshold)
                     .shortage(Math.max(0, currentThreshold - totalStock))
@@ -73,19 +74,21 @@ public class ProductVariantService {
                     .lastImportDate(lastImport)
                     .build();
         })
-        .filter(LowStockReportResponse::isLowStock) // Lọc những đứa tồn kho thấp (bao gồm cả 0)
-        .sorted(Comparator.comparing(LowStockReportResponse::getQuantity)) // Hết hàng (0) sẽ lên đầu bảng
-        .collect(Collectors.toList());
+                .filter(LowStockReportResponse::isLowStock) // Lọc những đứa tồn kho thấp (bao gồm cả 0)
+                .sorted(Comparator.comparing(LowStockReportResponse::getQuantity)) // Hết hàng (0) sẽ lên đầu bảng
+                .collect(Collectors.toList());
     }
 
-    // [CẬP NHẬT LÔ HÀNG ĐỘNG]: Nhận thêm branchId và trả về ProductVariantResponse có chứa danh sách Lô (Batches)
-    public List<ProductVariantResponse> searchVariants(String keyword, Long branchId) {
+    // [CẬP NHẬT LÔ HÀNG ĐỘNG]: Nhận thêm branchId và trả về ProductVariantResponse
+    // có chứa danh sách Lô (Batches)
+    public List<ProductVariantResponse> searchVariants(String keyword, Long branchId, String supplierCode) {
         String searchKey = (keyword == null) ? "" : keyword.trim();
 
         // Gọi hàm search mới trong Repo
-        return variantRepo.findAllActiveWithProduct(searchKey).stream().map(v -> {
+        return variantRepo.findAllActiveWithProduct(searchKey, supplierCode).stream().map(v -> {
 
-            // 1. Map sang DTO cơ bản (Hàm này đã tự tính giá bán = giá vốn * 1.3 và nạp danh sách Lô hàng)
+            // 1. Map sang DTO cơ bản (Hàm này đã tự tính giá bán = giá vốn * 1.3 và nạp
+            // danh sách Lô hàng)
             ProductVariantResponse resp = productService.mapVariantToResponse(v);
 
             // 2. Gán tên sản phẩm chuẩn xác (DTO mới đã có field productName)
@@ -93,7 +96,8 @@ public class ProductVariantService {
                 resp.setProductName(v.getProduct().getName());
             }
 
-            // 3. Tính toán tồn kho dựa trên branchId (nếu có) hoặc tổng hệ thống (nếu branchId == null - Admin)
+            // 3. Tính toán tồn kho dựa trên branchId (nếu có) hoặc tổng hệ thống (nếu
+            // branchId == null - Admin)
             List<Inventory> inventories = inventoryRepo.findByProductVariantId(v.getId());
             int totalStock;
 
@@ -103,9 +107,11 @@ public class ProductVariantService {
                         .filter(inv -> inv.getBranch() != null && inv.getBranch().getId().equals(branchId))
                         .collect(Collectors.toList());
 
-                // Tính tổng tồn kho của tất cả các lô tại chi nhánh này (bao gồm cả lô đã hết để biết lịch sử nếu cần, nhưng thường là > 0)
-                totalStock = branchInventories.stream().mapToInt(i -> i.getQuantity() != null ? i.getQuantity() : 0).sum();
-                
+                // Tính tổng tồn kho của tất cả các lô tại chi nhánh này (bao gồm cả lô đã hết
+                // để biết lịch sử nếu cần, nhưng thường là > 0)
+                totalStock = branchInventories.stream().mapToInt(i -> Objects.requireNonNullElse(i.getQuantity(), 0))
+                        .sum();
+
                 // Cập nhật lại danh sách Batch cho đúng chi nhánh
                 if (resp.getBatches() != null) {
                     List<Long> branchInvIds = branchInventories.stream()
@@ -120,19 +126,20 @@ public class ProductVariantService {
                 }
             } else {
                 // Admin search: Tính tổng tồn kho toàn hệ thống
-                totalStock = inventories.stream().mapToInt(i -> i.getQuantity() != null ? i.getQuantity() : 0).sum();
+                totalStock = inventories.stream().mapToInt(i -> Objects.requireNonNullElse(i.getQuantity(), 0)).sum();
             }
 
             resp.setQuantity(totalStock);
-            
+
             // 4. Cảnh báo tồn kho thấp (Dưới 10 sản phẩm)
             resp.setLowStock(totalStock < 10);
 
             return resp;
         })
-        // 5. Sắp xếp: Tồn kho thấp lên đầu (isLowStock = true trước), sau đó theo tên sản phẩm
-        .sorted(Comparator.comparing(ProductVariantResponse::isLowStock, Comparator.reverseOrder())
-                .thenComparing(ProductVariantResponse::getProductName, Comparator.nullsLast(String::compareTo)))
-        .collect(Collectors.toList());
+                // 5. Sắp xếp: Tồn kho thấp lên đầu (isLowStock = true trước), sau đó theo tên
+                // sản phẩm
+                .sorted(Comparator.comparing(ProductVariantResponse::isLowStock, Comparator.reverseOrder())
+                        .thenComparing(ProductVariantResponse::getProductName, Comparator.nullsLast(String::compareTo)))
+                .collect(Collectors.toList());
     }
 }

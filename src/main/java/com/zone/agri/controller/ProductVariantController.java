@@ -28,13 +28,15 @@ public class ProductVariantController {
 
         return ResponseEntity.ok(variantService.getLowStockReport(branchId));
     }
+
     @Operation(summary = "Tìm kiếm biến thể sản phẩm (Dùng cho tạo đơn/chuyển kho)")
     @GetMapping("/search")
     // [CẬP NHẬT QUAN TRỌNG]: Nhận thêm branchId (không bắt buộc) và đổi kiểu trả về
     public ResponseEntity<List<ProductVariantResponse>> searchVariants(
             @RequestParam(required = false) String keyword,
-            @RequestParam(required = false) Long branchId) {
+            @RequestParam(required = false) Long branchId,
+            @RequestParam(required = false) String supplierCode) {
 
-        return ResponseEntity.ok(variantService.searchVariants(keyword, branchId));
+        return ResponseEntity.ok(variantService.searchVariants(keyword, branchId, supplierCode));
     }
 }

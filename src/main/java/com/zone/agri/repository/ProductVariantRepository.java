@@ -25,6 +25,14 @@ public interface ProductVariantRepository extends JpaRepository<ProductVariant, 
             "OR LOWER(p.name) LIKE LOWER(CONCAT('%', :keyword, '%')) " +
             "OR LOWER(v.sku) LIKE LOWER(CONCAT('%', :keyword, '%')) " +
             "OR LOWER(v.barcode) LIKE LOWER(CONCAT('%', :keyword, '%')) " +
-            "OR LOWER(i.batchNumber) LIKE LOWER(CONCAT('%', :keyword, '%')))")
-    List<ProductVariant> findAllActiveWithProduct(@Param("keyword") String keyword);
+            "OR LOWER(i.batchNumber) LIKE LOWER(CONCAT('%', :keyword, '%'))) " +
+            "AND (:supplierCode IS NULL OR :supplierCode = '' OR EXISTS (" +
+            "   SELECT 1 FROM SupplierProductCatalog spc " +
+            "   JOIN spc.supplier s " +
+            "   WHERE spc.product.id = p.id " +
+            "     AND s.code = :supplierCode " +
+            "     AND spc.status = com.zone.agri.entity.enums.SupplierProductCatalogStatus.AVAILABLE" +
+            "))")
+    List<ProductVariant> findAllActiveWithProduct(@Param("keyword") String keyword,
+            @Param("supplierCode") String supplierCode);
 }

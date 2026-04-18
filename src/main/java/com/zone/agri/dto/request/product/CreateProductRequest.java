@@ -15,9 +15,11 @@ public class CreateProductRequest {
     @NotNull(message = "Danh mục không được để trống")
     private Long categoryId;
 
+    @NotBlank(message = "Thương hiệu không được để trống")
     @Size(max = 100, message = "Thương hiệu không được vượt quá 100 ký tự")
     private String brand;
 
+    @NotBlank(message = "Xuất xứ không được để trống")
     @Size(max = 100, message = "Xuất xứ không được vượt quá 100 ký tự")
     private String origin;
 
@@ -27,10 +29,7 @@ public class CreateProductRequest {
     /** HTML từ rich text editor – cho phép chứa tags */
     private String description;
 
-    @Pattern(
-        regexp = "DRAFT|ACTIVE|INACTIVE",
-        message = "Trạng thái phải là một trong: DRAFT, ACTIVE, INACTIVE"
-    )
+    @Pattern(regexp = "DRAFT|ACTIVE|INACTIVE", message = "Trạng thái phải là một trong: DRAFT, ACTIVE, INACTIVE")
     private String status;
 
     @NotEmpty(message = "Sản phẩm phải có ít nhất 1 biến thể")

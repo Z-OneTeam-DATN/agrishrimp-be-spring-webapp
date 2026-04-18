@@ -1,6 +1,7 @@
 package com.zone.agri.service;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.text.Normalizer;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -13,6 +14,7 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -85,6 +87,7 @@ import lombok.extern.slf4j.Slf4j;
 @Service
 @RequiredArgsConstructor
 @Slf4j
+@SuppressWarnings({ "boxing", "unboxing" })
 public class ProductService {
 
     private final UserRepository userRepository;
@@ -152,20 +155,28 @@ public class ProductService {
                 .orElseThrow(() -> new NotFoundException("Danh mục không tồn tại với ID: " + request.getCategoryId()));
 
         validateSkusInRequest(request.getVariants());
+        ProductStatus targetStatus = parseProductStatus(request.getStatus());
+
+        if (targetStatus == ProductStatus.ACTIVE
+                && (request.getBrand() == null || request.getBrand().isBlank()
+                        || request.getOrigin() == null || request.getOrigin().isBlank())) {
+            throw new BadRequestException(
+                    "Sản phẩm ở trạng thái ACTIVE bắt buộc phải có thương hiệu và xuất xứ để đảm bảo giao đúng hàng.");
+        }
 
         Product product = Product.builder()
                 .name(request.getName())
                 .slug(toSlug(request.getName()) + "-" + System.currentTimeMillis())
                 .description(request.getDescription())
-                .status(parseProductStatus(request.getStatus()))
-                .origin(request.getOrigin())
+                .status(targetStatus)
+                .origin(request.getOrigin() != null ? request.getOrigin().trim() : null)
                 .baseSku(request.getBaseSku())
                 .category(category)
                 .createdAt(LocalDateTime.now())
                 .build();
 
         if (request.getBrand() != null && !request.getBrand().isBlank()) {
-            product.setBrand(getOrCreateBrand(request.getBrand()));
+            product.setBrand(getOrCreateBrand(request.getBrand().trim()));
         }
 
         Product savedProduct = productRepository.save(product);
@@ -242,7 +253,7 @@ public class ProductService {
         // TỪ ĐÂY TRỞ XUỐNG LÀ LOGIC CẬP NHẬT BIẾN THỂ MỚI (KHÔNG DÙNG CLEAR NỮA)
 
         // Tạo một Map chứa các biến thể cũ để dễ bề tra cứu theo SKU
-        Map<String, ProductVariant> existingVariantsMap = new HashMap<>();
+        Map<String, ProductVariant> existingVariantsMap = new java.util.HashMap<>();
         if (product.getVariants() != null) {
             for (ProductVariant v : product.getVariants()) {
                 existingVariantsMap.put(v.getSku(), v);
@@ -554,26 +565,43 @@ public class ProductService {
         return imageUrls;
     }
 
+    @SuppressWarnings("all")
     private Map<Long, Long> buildSoldCountMap(List<Long> productIds) {
         if (productIds == null || productIds.isEmpty()) {
             return Collections.emptyMap();
         }
 
-        Map<Long, Long> soldCountMap = new LinkedHashMap<>();
+        Map<Long, AtomicLong> soldCountMap = new java.util.HashMap<>();
 
         productRepository.sumLegacySoldQuantityByProductIds(productIds)
-                .forEach(row -> soldCountMap.merge(
-                        ((Number) row[0]).longValue(),
-                        ((Number) row[1]).longValue(),
-                        Long::sum));
+                .forEach(row -> {
+                    Number productIdValue = (Number) row[0];
+                    Number soldQuantityValue = (Number) row[1];
+                    if (productIdValue == null || soldQuantityValue == null) {
+                        return;
+                    }
+
+                    long productId = productIdValue.longValue();
+                    long soldQuantity = soldQuantityValue.longValue();
+                    soldCountMap.computeIfAbsent(productId, key -> new AtomicLong()).addAndGet(soldQuantity);
+                });
 
         productRepository.sumSubOrderSoldQuantityByProductIds(productIds)
-                .forEach(row -> soldCountMap.merge(
-                        ((Number) row[0]).longValue(),
-                        ((Number) row[1]).longValue(),
-                        Long::sum));
+                .forEach(row -> {
+                    Number productIdValue = (Number) row[0];
+                    Number soldQuantityValue = (Number) row[1];
+                    if (productIdValue == null || soldQuantityValue == null) {
+                        return;
+                    }
 
-        return soldCountMap;
+                    long productId = productIdValue.longValue();
+                    long soldQuantity = soldQuantityValue.longValue();
+                    soldCountMap.computeIfAbsent(productId, key -> new AtomicLong()).addAndGet(soldQuantity);
+                });
+
+        Map<Long, Long> result = new LinkedHashMap<>();
+        soldCountMap.forEach((productId, totalSold) -> result.put(productId, totalSold.get()));
+        return result;
     }
 
     public ProductResponse convertToResponse(Product product) {
@@ -602,7 +630,9 @@ public class ProductService {
                 .collect(Collectors.toList()) : Collections.emptyList();
 
         int totalInventory = variantResponses.stream()
-                .mapToInt(v -> v.getQuantity() != null ? v.getQuantity() : 0)
+                .map(ProductVariantResponse::getQuantity)
+                .filter(Objects::nonNull)
+                .mapToInt(Integer::intValue)
                 .sum();
 
         // ... (Phần map Category và Brand giữ nguyên như code cũ của Huy)
@@ -681,17 +711,16 @@ public class ProductService {
 
         List<Inventory> allInventories = inventoryRepository.findByProductVariantIdWithBranch(variant.getId());
 
-        // Cho phép Admin HOẶC người có quyền Điều chuyển/Xuất kho thấy hết các chi
-        // nhánh để chọn nguồn
-        boolean canSeeAllBranches = isAdmin || hasExportPermission;
+        // Chỉ Admin mới được thấy tồn kho/lô hàng của tất cả chi nhánh.
+        boolean canSeeAllBranches = isAdmin;
 
         List<Inventory> validBatches = allInventories.stream()
                 .filter(inv -> inv.getQuantity() != null && inv.getQuantity() > 0)
 
-                // Chỉ lấy tồn kho từ chi nhánh ACTIVE (Admin/Exporter xem được tất cả)
+                // Chỉ lấy tồn kho từ chi nhánh ACTIVE (Admin xem được tất cả)
                 .filter(inv -> canSeeAllBranches
                         || (inv.getBranch() != null && inv.getBranch().getStatus() == BranchStatus.ACTIVE))
-                // Staff/Manager thông thường chỉ thấy chi nhánh của họ; Admin/Exporter thấy tất
+                // Staff/Manager thông thường chỉ thấy chi nhánh của họ; Admin thấy tất
                 // cả
                 .filter(inv -> currentUser == null || canSeeAllBranches
                         || currentBranch == null
@@ -699,7 +728,11 @@ public class ProductService {
 
                 .collect(Collectors.toList());
 
-        int displayQuantity = validBatches.stream().mapToInt(Inventory::getQuantity).sum();
+        int displayQuantity = validBatches.stream()
+                .map(Inventory::getQuantity)
+                .filter(Objects::nonNull)
+                .mapToInt(Integer::intValue)
+                .sum();
 
         List<ProductVariantResponse.BatchInfoDto> batchDtos = validBatches.stream().map(inv -> {
             BigDecimal importPrice = inv.getImportPrice() != null ? inv.getImportPrice() : BigDecimal.ZERO;
@@ -717,18 +750,15 @@ public class ProductService {
         }).collect(Collectors.toList());
 
         // null = chưa nhập hàng → FE ẩn giá, không hiển thị "0đ"
-        BigDecimal maxPrice = batchDtos.isEmpty() ? null
-                : batchDtos.stream()
-                        .map(ProductVariantResponse.BatchInfoDto::getSellingPrice)
-                        .max(BigDecimal::compareTo)
-                        .orElse(null);
+        BigDecimal averageImportPrice = validBatches.isEmpty() ? null
+                : validBatches.stream()
+                        .map(inv -> inv.getImportPrice() != null ? inv.getImportPrice() : BigDecimal.ZERO)
+                        .reduce(BigDecimal.ZERO, BigDecimal::add)
+                        .divide(BigDecimal.valueOf(validBatches.size()), 4, RoundingMode.HALF_UP);
 
-        BigDecimal maxImportPrice = batchDtos.isEmpty() ? null
-                : batchDtos.stream()
-                        .filter(b -> b.getImportPrice() != null)
-                        .map(ProductVariantResponse.BatchInfoDto::getImportPrice)
-                        .max(BigDecimal::compareTo)
-                        .orElse(null);
+        BigDecimal sellingPriceByAverageImport = averageImportPrice == null
+                ? null
+                : settingService.calculateSellingPrice(averageImportPrice, multiplier, roundingRule);
 
         List<AttributeValueResponse> attributeValues = variant.getAttributeValues() != null
                 ? variant.getAttributeValues().stream().map(sav -> AttributeValueResponse.builder()
@@ -746,8 +776,8 @@ public class ProductService {
                 .barcode(variant.getBarcode())
                 .productName(variant.getProduct() != null ? variant.getProduct().getName() : null)
                 .quantity(displayQuantity)
-                .price(maxPrice)
-                .importPrice(maxImportPrice)
+                .price(sellingPriceByAverageImport)
+                .importPrice(averageImportPrice)
                 .imageUrl(variant.getImageUrl())
                 .status(variant.getStatus())
                 .attributeValues(attributeValues)

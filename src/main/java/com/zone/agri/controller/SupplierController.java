@@ -2,6 +2,8 @@ package com.zone.agri.controller;
 
 import com.zone.agri.dto.response.common.MessageResponse;
 import com.zone.agri.dto.request.supplier.SupplierRequest;
+import com.zone.agri.dto.request.supplier.SupplierProductCatalogRequest;
+import com.zone.agri.dto.response.supplier.SupplierProductCatalogResponse;
 import com.zone.agri.dto.response.supplier.SupplierResponse;
 import com.zone.agri.security.annotation.RequirePermission;
 import com.zone.agri.service.SupplierService;
@@ -21,6 +23,8 @@ import org.springframework.data.domain.Sort;
 import org.springframework.data.web.PageableDefault;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
 
 @RestController
 @RequestMapping("/api/suppliers")
@@ -47,15 +51,11 @@ public class SupplierController {
     @RequirePermission("SUPPLIER_VIEW")
     @GetMapping
     public ResponseEntity<Page<SupplierResponse>> getAllSuppliers(
-            @Parameter(description = "Từ khóa tìm kiếm (Tên, MST, SĐT)", example = "Công ty TNHH A")
-            @RequestParam(required = false) String keyword,
+            @Parameter(description = "Từ khóa tìm kiếm (Tên, MST, SĐT)", example = "Công ty TNHH A") @RequestParam(required = false) String keyword,
 
-            @Parameter(description = "Trạng thái hoạt động", example = "ACTIVE")
-            @RequestParam(required = false) String status,
+            @Parameter(description = "Trạng thái hoạt động", example = "ACTIVE") @RequestParam(required = false) String status,
 
-            @Parameter(hidden = true)
-            @PageableDefault(size = 10, sort = "createdAt", direction = Sort.Direction.DESC) Pageable pageable
-    ) {
+            @Parameter(hidden = true) @PageableDefault(size = 10, sort = "createdAt", direction = Sort.Direction.DESC) Pageable pageable) {
         // Đã xóa tham số category ở đây
         return ResponseEntity.ok(supplierService.getAllSuppliers(keyword, status, pageable));
     }
@@ -69,8 +69,7 @@ public class SupplierController {
     })
     @GetMapping("/{id}")
     public ResponseEntity<SupplierResponse> getSupplierById(
-            @Parameter(description = "ID nhà cung cấp", example = "1", required = true)
-            @PathVariable Long id) {
+            @Parameter(description = "ID nhà cung cấp", example = "1", required = true) @PathVariable Long id) {
         return ResponseEntity.ok(supplierService.getSupplierById(id));
     }
 
@@ -79,10 +78,8 @@ public class SupplierController {
     @RequirePermission("SUPPLIER_UPDATE")
     @PutMapping("/{id}")
     public ResponseEntity<SupplierResponse> updateSupplier(
-            @Parameter(description = "ID nhà cung cấp cần sửa", example = "1", required = true)
-            @PathVariable Long id,
-            @Valid @RequestBody SupplierRequest request
-    ) {
+            @Parameter(description = "ID nhà cung cấp cần sửa", example = "1", required = true) @PathVariable Long id,
+            @Valid @RequestBody SupplierRequest request) {
         return ResponseEntity.ok(supplierService.updateSupplier(id, request));
     }
 
@@ -95,8 +92,7 @@ public class SupplierController {
     })
     @DeleteMapping("/{id}")
     public ResponseEntity<MessageResponse> deleteSupplier(
-            @Parameter(description = "ID nhà cung cấp cần xóa", example = "1", required = true)
-            @PathVariable Long id) {
+            @Parameter(description = "ID nhà cung cấp cần xóa", example = "1", required = true) @PathVariable Long id) {
         supplierService.deleteSupplier(id);
         return ResponseEntity.ok(new MessageResponse("Đã xóa nhà cung cấp thành công!"));
     }
@@ -106,5 +102,23 @@ public class SupplierController {
     @GetMapping("/{id}/imports")
     public ResponseEntity<?> getSupplierImports(@PathVariable Long id) {
         return ResponseEntity.ok(supplierService.getImportHistory(id));
+    }
+
+    @Operation(summary = "Catalog sản phẩm của nhà cung cấp", description = "Danh sách sản phẩm mà nhà cung cấp này có thể cung ứng kèm trạng thái.")
+    @SecurityRequirement(name = "bearerAuth")
+    @RequirePermission("SUPPLIER_VIEW")
+    @GetMapping("/{id}/product-catalog")
+    public ResponseEntity<List<SupplierProductCatalogResponse>> getSupplierProductCatalog(@PathVariable Long id) {
+        return ResponseEntity.ok(supplierService.getProductCatalog(id));
+    }
+
+    @Operation(summary = "Lưu catalog sản phẩm của nhà cung cấp", description = "Cập nhật danh sách sản phẩm mà nhà cung cấp có cung ứng.")
+    @SecurityRequirement(name = "bearerAuth")
+    @RequirePermission("SUPPLIER_UPDATE")
+    @PutMapping("/{id}/product-catalog")
+    public ResponseEntity<List<SupplierProductCatalogResponse>> saveSupplierProductCatalog(
+            @PathVariable Long id,
+            @Valid @RequestBody List<SupplierProductCatalogRequest> requests) {
+        return ResponseEntity.ok(supplierService.saveProductCatalog(id, requests));
     }
 }
