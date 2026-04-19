@@ -83,7 +83,15 @@ public class InventoryNoteService {
             throw new BadRequestException("Chỉ có thể duyệt lệnh xuất đang chờ xử lý.");
         }
         note.setStatus(InventoryNoteStatus.APPROVED);
-        return mapToResponse(inventoryNoteRepository.save(note));
+        note = inventoryNoteRepository.save(note);
+
+        boolean isReturn = note.getSupplier() != null ||
+                (note.getReason() != null && (note.getReason().contains("RETURN") || note.getReason().contains("Tráº£ NCC")));
+        if (isReturn) {
+            return completeExportCommand(id);
+        }
+
+        return mapToResponse(note);
     }
 
     // ==========================================
@@ -158,6 +166,19 @@ public class InventoryNoteService {
             }
 
             detail.setQuantityReal(detail.getQuantityRequested());
+        }
+
+        if (isReturn) {
+            BigDecimal totalReturnAmount = note.getDetails().stream()
+                    .map(detail -> Objects.requireNonNullElse(detail.getPrice(), BigDecimal.ZERO)
+                            .multiply(BigDecimal.valueOf(Objects.requireNonNullElse(detail.getQuantityRequested(), 0))))
+                    .reduce(BigDecimal.ZERO, BigDecimal::add);
+            note.setTotalAmount(totalReturnAmount);
+            note.setPaymentAmount(BigDecimal.ZERO);
+            note.setDebtAmount(totalReturnAmount.negate());
+        } else {
+            note.setPaymentAmount(BigDecimal.ZERO);
+            note.setDebtAmount(BigDecimal.ZERO);
         }
 
         note.setStatus(InventoryNoteStatus.COMPLETED);
@@ -619,6 +640,11 @@ public class InventoryNoteService {
                         variant.getSku(), (batchNum == null ? "TRỐNG" : batchNum), checkStock, availableBatches, reqDetail.getRequestedQuantity()));
             }
 
+            BigDecimal lockedPrice = reqDetail.getPrice() != null ? reqDetail.getPrice() : BigDecimal.ZERO;
+            if (isReturn && !originalImportDetails.isEmpty()) {
+                lockedPrice = Objects.requireNonNullElse(originalImportDetails.get(0).getPrice(), BigDecimal.ZERO);
+            }
+
             InventoryNoteDetail detail = InventoryNoteDetail.builder()
                     .inventoryNote(note)
                     .productVariant(variant)
@@ -627,7 +653,7 @@ public class InventoryNoteService {
                     .quantity(reqDetail.getPlannedQuantity()) // Lưu số lượng yêu cầu ban đầu vào trường quantity của detail
                     .quantityRejected(reqDetail.getDefectiveQuantity()) // Lưu số lượng lỗi hiện có
                     .batchNumber(reqDetail.getBatchNumber())
-                    .price(reqDetail.getPrice() != null ? reqDetail.getPrice() : BigDecimal.ZERO)
+                    .price(lockedPrice)
                     .note(reqDetail.getNote())
                     .build();
 

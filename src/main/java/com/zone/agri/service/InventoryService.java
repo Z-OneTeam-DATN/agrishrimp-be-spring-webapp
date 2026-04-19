@@ -94,7 +94,12 @@ public class InventoryService {
         validateReceiptItemsAgainstPurchaseRequest(linkedPurchaseRequest, request.getItems(), noteEntity.getId());
         processItemsAndStock(noteEntity, request.getItems(), request.getImportType());
 
-        return mapToResponse(noteRepository.save(noteEntity));
+        noteEntity = noteRepository.save(noteEntity);
+        if (noteEntity.getStatus() == InventoryNoteStatus.APPROVED && hasStoredQcDecision(noteEntity)) {
+            noteEntity = finalizeReceiptCompletion(noteEntity);
+        }
+
+        return mapToResponse(noteEntity);
     }
 
     // --- 2. CẬP NHẬT PHIẾU ---
@@ -140,7 +145,11 @@ public class InventoryService {
             throw new BadRequestException("Chỉ có thể duyệt phiếu đang ở trạng thái Chờ duyệt.");
         }
         note.setStatus(InventoryNoteStatus.APPROVED);
-        return mapToResponse(noteRepository.save(note));
+        note = noteRepository.save(note);
+        if (hasStoredQcDecision(note)) {
+            note = finalizeReceiptCompletion(note);
+        }
+        return mapToResponse(note);
     }
 
     @Transactional
@@ -167,8 +176,69 @@ public class InventoryService {
         }
 
         // Cập nhật thông tin kiểm đếm thực tế
+        if (false) {
+            Map<String, InventoryQCRequest.ItemQCRequest> qcMap = qcRequest.getItems().stream()
+                    .collect(Collectors.toMap(InventoryQCRequest.ItemQCRequest::getProductCode, i -> i));
+
+            for (InventoryNoteDetail detail : note.getDetails()) {
+                InventoryQCRequest.ItemQCRequest qcItem = qcMap.get(detail.getProductVariant().getSku());
+                if (qcItem == null) {
+                    continue;
+                }
+
+                int acceptedQty = Objects.requireNonNullElse(qcItem.getQuantityReal(), 0);
+                int defectiveQty = Objects.requireNonNullElse(qcItem.getQuantityRejected(), 0);
+                int deliveredQty = resolveDeliveredQty(qcItem, acceptedQty, defectiveQty);
+
+                detail.setQuantityReal(deliveredQty);
+                detail.setQuantityAccepted(acceptedQty);
+                detail.setQuantityRejected(defectiveQty);
+
+                if (qcItem.getLotNumber() != null && !qcItem.getLotNumber().isBlank()) {
+                    detail.setBatchNumber(qcItem.getLotNumber());
+                }
+                if (qcItem.getExpiryDate() != null && !qcItem.getExpiryDate().isBlank()) {
+                    detail.setExpiryDate(LocalDate.parse(qcItem.getExpiryDate()).atStartOfDay());
+                }
+                if (qcItem.getNote() != null) {
+                    detail.setNote(qcItem.getNote());
+                }
+            }
+
+            return mapToResponse(finalizeReceiptCompletion(note));
+        }
+
         Map<String, InventoryQCRequest.ItemQCRequest> qcMap = qcRequest.getItems().stream()
                 .collect(Collectors.toMap(InventoryQCRequest.ItemQCRequest::getProductCode, i -> i));
+
+        for (InventoryNoteDetail detail : note.getDetails()) {
+            InventoryQCRequest.ItemQCRequest qcItem = qcMap.get(detail.getProductVariant().getSku());
+            if (qcItem == null) {
+                continue;
+            }
+
+            int acceptedQty = Objects.requireNonNullElse(qcItem.getQuantityReal(), 0);
+            int defectiveQty = Objects.requireNonNullElse(qcItem.getQuantityRejected(), 0);
+            int deliveredQty = resolveDeliveredQty(qcItem, acceptedQty, defectiveQty);
+
+            detail.setQuantityReal(deliveredQty);
+            detail.setQuantityAccepted(acceptedQty);
+            detail.setQuantityRejected(defectiveQty);
+
+            if (qcItem.getLotNumber() != null && !qcItem.getLotNumber().isBlank()) {
+                detail.setBatchNumber(qcItem.getLotNumber());
+            }
+            if (qcItem.getExpiryDate() != null && !qcItem.getExpiryDate().isBlank()) {
+                detail.setExpiryDate(LocalDate.parse(qcItem.getExpiryDate()).atStartOfDay());
+            }
+            if (qcItem.getNote() != null) {
+                detail.setNote(qcItem.getNote());
+            }
+        }
+
+        if (note != null) {
+            return mapToResponse(finalizeReceiptCompletion(note));
+        }
 
         BigDecimal totalAmount = BigDecimal.ZERO;
         for (InventoryNoteDetail detail : note.getDetails()) {
@@ -239,6 +309,65 @@ public class InventoryService {
         }
 
         return mapToResponse(savedNote);
+    }
+
+    private boolean hasStoredQcDecision(InventoryNote note) {
+        return note.getDetails() != null && note.getDetails().stream().anyMatch(detail ->
+                Objects.requireNonNullElse(detail.getQuantityAccepted(), 0) > 0
+                        || Objects.requireNonNullElse(detail.getQuantityRejected(), 0) > 0
+                        || Objects.requireNonNullElse(detail.getQuantityReal(), 0) > 0
+        );
+    }
+
+    private InventoryNote finalizeReceiptCompletion(InventoryNote note) {
+        BigDecimal totalAmount = BigDecimal.ZERO;
+
+        for (InventoryNoteDetail detail : note.getDetails()) {
+            int plannedQty = Objects.requireNonNullElse(detail.getQuantityRequested(), 0);
+            int acceptedQty = Objects.requireNonNullElse(detail.getQuantityAccepted(), 0);
+            int defectiveQty = Objects.requireNonNullElse(detail.getQuantityRejected(), 0);
+            int deliveredQty = Objects.requireNonNullElse(detail.getQuantityReal(), acceptedQty + defectiveQty);
+
+            if (acceptedQty + defectiveQty > deliveredQty) {
+                throw new BadRequestException("SKU " + detail.getProductVariant().getSku() + ": accepted + defective khĂ´ng Ä‘Æ°á»£c lá»›n hÆ¡n sá»‘ NCC giao.");
+            }
+            if (deliveredQty > plannedQty) {
+                throw new BadRequestException("SKU " + detail.getProductVariant().getSku() + ": sá»‘ NCC giao khĂ´ng Ä‘Æ°á»£c vÆ°á»£t sá»‘ lÆ°á»£ng Ä‘Ă£ láº­p trĂªn phiáº¿u nháº­p.");
+            }
+            if (note.getPurchaseRequest() != null) {
+                validateCompletedQtyAgainstPurchaseRequest(
+                        note.getPurchaseRequest().getId(),
+                        detail.getProductVariant().getId(),
+                        acceptedQty,
+                        note.getId());
+            }
+
+            detail.setQuantityReal(deliveredQty);
+            updateStockWithQC(note, detail);
+
+            if (acceptedQty > 0) {
+                backorderService.fulfillBackordersOnStockReceive(
+                        note.getBranch().getId(),
+                        detail.getProductVariant().getId(),
+                        acceptedQty);
+            }
+
+            BigDecimal itemTotal = Objects.requireNonNullElse(detail.getPrice(), BigDecimal.ZERO)
+                    .multiply(BigDecimal.valueOf(deliveredQty));
+            totalAmount = totalAmount.add(itemTotal);
+        }
+
+        note.setTotalAmount(totalAmount);
+        note.setDebtAmount(totalAmount.subtract(Objects.requireNonNullElse(note.getPaymentAmount(), BigDecimal.ZERO)));
+        note.setStatus(InventoryNoteStatus.COMPLETED);
+
+        InventoryNote savedNote = noteRepository.save(note);
+        if (savedNote.getPurchaseRequest() != null) {
+            PurchaseRequestService prService = applicationContext.getBean(PurchaseRequestService.class);
+            prService.updateCumulativeQtyAfterReceipt(savedNote);
+        }
+
+        return savedNote;
     }
 
     private void updateStockWithQC(InventoryNote note, InventoryNoteDetail detail) {
@@ -654,6 +783,7 @@ public class InventoryService {
 
     private void ensurePurchaseRequestReceivable(PurchaseRequest pr) {
         Set<PurchaseRequestStatus> receivableStatuses = Set.of(
+                PurchaseRequestStatus.APPROVED,
                 PurchaseRequestStatus.SENT_TO_SUPPLIER,
                 PurchaseRequestStatus.PARTIALLY_RECEIVED
         );

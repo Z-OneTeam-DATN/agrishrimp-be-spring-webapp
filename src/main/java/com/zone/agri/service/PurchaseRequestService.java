@@ -86,7 +86,9 @@ public class PurchaseRequestService {
 
         PurchaseRequest pr = PurchaseRequest.builder()
                 .code(code)
-                .status(PurchaseRequestStatus.DRAFT)
+                .status(hasAuthority("PURCHASE_REQUEST_APPROVE")
+                        ? PurchaseRequestStatus.APPROVED
+                        : PurchaseRequestStatus.PENDING_APPROVAL)
                 .supplier(supplier)
                 .branch(branch)
                 .expectedDeliveryDate(expectedDate)
@@ -123,6 +125,10 @@ public class PurchaseRequestService {
         }
 
         pr.setTotalAmount(totalAmount);
+        if (pr.getStatus() == PurchaseRequestStatus.APPROVED) {
+            pr.setApprovedBy(getCurrentUser());
+            pr.setApprovedAt(LocalDateTime.now());
+        }
         pr = purchaseRequestRepository.save(pr);
 
         return mapToResponse(pr);
