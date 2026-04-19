@@ -1,5 +1,6 @@
 package com.zone.agri.service;
 
+import com.zone.agri.entity.PurchaseRequest;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.mail.javamail.MimeMessageHelper;
@@ -16,6 +17,8 @@ import com.sendgrid.helpers.mail.objects.Email;
 import jakarta.mail.internet.MimeMessage;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+
+import java.math.BigDecimal;
 
 @Service
 @RequiredArgsConstructor
@@ -97,6 +100,85 @@ public class EmailService {
                 .formatted(name, String.format("%.2f", reputationScore));
 
         sendEmail(toEmail, subject, htmlContent);
+    }
+
+    public void sendPurchaseRequestToSupplier(PurchaseRequest purchaseRequest) {
+        if (purchaseRequest == null || purchaseRequest.getSupplier() == null) {
+            throw new RuntimeException("KhĂ´ng cĂ³ thĂ´ng tin nhĂ  cung cáº¥p Ä‘á»ƒ gá»­i email.");
+        }
+
+        String supplierEmail = purchaseRequest.getSupplier().getEmail();
+        String supplierName = purchaseRequest.getSupplier().getName();
+        String branchName = purchaseRequest.getBranch() != null ? purchaseRequest.getBranch().getName() : "";
+        String requestedBy = purchaseRequest.getCreatedBy() != null ? purchaseRequest.getCreatedBy().getFullName() : "Hệ thống";
+
+        String rows = "";
+        if (purchaseRequest.getItems() != null) {
+            rows = purchaseRequest.getItems().stream()
+                    .map(item -> """
+                            <tr>
+                                <td style="padding:8px;border:1px solid #e5e7eb;">%s</td>
+                                <td style="padding:8px;border:1px solid #e5e7eb;">%s</td>
+                                <td style="padding:8px;border:1px solid #e5e7eb;text-align:right;">%s</td>
+                                <td style="padding:8px;border:1px solid #e5e7eb;text-align:right;">%s</td>
+                                <td style="padding:8px;border:1px solid #e5e7eb;">%s</td>
+                            </tr>
+                            """.formatted(
+                            item.getProductVariant() != null ? item.getProductVariant().getSku() : "",
+                            item.getProductVariant() != null && item.getProductVariant().getProduct() != null
+                                    ? item.getProductVariant().getProduct().getName()
+                                    : "",
+                            item.getRequestedQty() != null ? item.getRequestedQty() : 0,
+                            formatCurrency(item.getUnitPrice()),
+                            item.getNote() != null ? item.getNote() : ""
+                    ))
+                    .reduce("", String::concat);
+        }
+
+        String subject = "[AgriShrimp] Phiếu yêu cầu mua " + purchaseRequest.getCode();
+        String htmlContent = """
+                <div style="font-family:Arial,sans-serif;padding:20px;border:1px solid #e5e7eb;color:#0f172a;">
+                    <h2 style="color:#1d4ed8;margin-bottom:8px;">Phiếu yêu cầu mua gửi nhà cung cấp</h2>
+                    <p>Kính gửi <strong>%s</strong>,</p>
+                    <p>AgriShrimp gửi phiếu yêu cầu mua với thông tin như sau:</p>
+                    <ul style="padding-left:18px;line-height:1.7;">
+                        <li><strong>Mã phiếu:</strong> %s</li>
+                        <li><strong>Kho nhận:</strong> %s</li>
+                        <li><strong>Người lập:</strong> %s</li>
+                        <li><strong>Ngày dự kiến:</strong> %s</li>
+                    </ul>
+                    <table style="width:100%%;border-collapse:collapse;margin-top:16px;font-size:14px;">
+                        <thead>
+                            <tr style="background:#eff6ff;">
+                                <th style="padding:8px;border:1px solid #dbeafe;text-align:left;">SKU</th>
+                                <th style="padding:8px;border:1px solid #dbeafe;text-align:left;">Sản phẩm</th>
+                                <th style="padding:8px;border:1px solid #dbeafe;text-align:right;">Số lượng</th>
+                                <th style="padding:8px;border:1px solid #dbeafe;text-align:right;">Đơn giá dự kiến</th>
+                                <th style="padding:8px;border:1px solid #dbeafe;text-align:left;">Ghi chú</th>
+                            </tr>
+                        </thead>
+                        <tbody>%s</tbody>
+                    </table>
+                    <p style="margin-top:16px;"><strong>Tổng giá trị dự kiến:</strong> %s</p>
+                    <p style="margin-top:16px;">Vui lòng phản hồi lại email này để xác nhận tiến độ cung ứng hàng hóa.</p>
+                    <p>Trân trọng,<br/>Đội ngũ AgriShrimp</p>
+                </div>
+                """.formatted(
+                supplierName,
+                purchaseRequest.getCode(),
+                branchName,
+                requestedBy,
+                purchaseRequest.getExpectedDeliveryDate() != null ? purchaseRequest.getExpectedDeliveryDate() : "Chưa xác định",
+                rows,
+                formatCurrency(purchaseRequest.getTotalAmount())
+        );
+
+        sendEmail(supplierEmail, subject, htmlContent);
+    }
+
+    private String formatCurrency(BigDecimal amount) {
+        BigDecimal safeAmount = amount != null ? amount : BigDecimal.ZERO;
+        return safeAmount.toPlainString() + " VND";
     }
 
     private void sendEmail(String toEmail, String subject, String htmlContent) {

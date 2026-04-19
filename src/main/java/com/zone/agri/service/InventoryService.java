@@ -757,7 +757,7 @@ public class InventoryService {
 
     private PurchaseRequest resolveLinkedPurchaseRequestForCreate(InventoryReceiptRequest request) {
         if (request.getPurchaseRequestId() == null) {
-            return null;
+            throw new BadRequestException("Phiáº¿u nháº­p nhĂ  cung cáº¥p báº¯t buá»™c pháº£i liĂªn káº¿t vá»›i phiáº¿u yĂªu cáº§u mua.");
         }
         PurchaseRequest pr = purchaseRequestRepository.findByIdWithDetails(request.getPurchaseRequestId())
                 .orElseThrow(() -> new NotFoundException("Không tìm thấy phiếu yêu cầu mua ID: " + request.getPurchaseRequestId()));
@@ -783,7 +783,6 @@ public class InventoryService {
 
     private void ensurePurchaseRequestReceivable(PurchaseRequest pr) {
         Set<PurchaseRequestStatus> receivableStatuses = Set.of(
-                PurchaseRequestStatus.APPROVED,
                 PurchaseRequestStatus.SENT_TO_SUPPLIER,
                 PurchaseRequestStatus.PARTIALLY_RECEIVED
         );

@@ -35,6 +35,7 @@ public class PurchaseRequestService {
     private final ProductVariantRepository productVariantRepository;
     private final UserRepository userRepository;
     private final WarehouseContext warehouseContext;
+    private final EmailService emailService;
 
     // ─────────────────────────────────────────────────────────────────────────
     // HELPER
@@ -52,6 +53,12 @@ public class PurchaseRequestService {
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
         return auth != null && auth.getAuthorities().stream()
                 .anyMatch(a -> a.getAuthority().equals(authority));
+    }
+
+    private boolean hasRole(String role) {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        return auth != null && auth.getAuthorities().stream()
+                .anyMatch(a -> a.getAuthority().equals("ROLE_" + role));
     }
 
     private String generateCode() {
@@ -86,7 +93,7 @@ public class PurchaseRequestService {
 
         PurchaseRequest pr = PurchaseRequest.builder()
                 .code(code)
-                .status(hasAuthority("PURCHASE_REQUEST_APPROVE")
+                .status(hasAuthority("PURCHASE_REQUEST_APPROVE") || hasRole("ADMIN")
                         ? PurchaseRequestStatus.APPROVED
                         : PurchaseRequestStatus.PENDING_APPROVAL)
                 .supplier(supplier)
@@ -143,6 +150,14 @@ public class PurchaseRequestService {
         PurchaseRequest pr = purchaseRequestRepository.findByIdWithDetails(id)
                 .orElseThrow(() -> new NotFoundException("Không tìm thấy phiếu yêu cầu mua ID: " + id));
         warehouseContext.assertAccess(pr.getBranch().getId());
+        if (false && pr.getStatus() != PurchaseRequestStatus.SENT_TO_SUPPLIER &&
+                pr.getStatus() != PurchaseRequestStatus.PARTIALLY_RECEIVED) {
+            throw new BadRequestException("Phiáº¿u yĂªu cáº§u mua pháº£i Ä‘Æ°á»£c gá»­i nhĂ  cung cáº¥p trÆ°á»›c khi táº¡o phiáº¿u nháº­p.");
+        }
+        if (false && pr.getStatus() != PurchaseRequestStatus.SENT_TO_SUPPLIER &&
+                pr.getStatus() != PurchaseRequestStatus.PARTIALLY_RECEIVED) {
+            throw new BadRequestException("Phiáº¿u yĂªu cáº§u mua pháº£i Ä‘Æ°á»£c gá»­i nhĂ  cung cáº¥p trÆ°á»›c khi táº¡o phiáº¿u nháº­p.");
+        }
 
         if (pr.getStatus() != PurchaseRequestStatus.DRAFT &&
                 pr.getStatus() != PurchaseRequestStatus.PENDING_APPROVAL) {
@@ -236,6 +251,11 @@ public class PurchaseRequestService {
                 .orElseThrow(() -> new NotFoundException("Không tìm thấy phiếu yêu cầu mua ID: " + id));
         warehouseContext.assertAccess(pr.getBranch().getId());
 
+        if (pr.getStatus() != PurchaseRequestStatus.SENT_TO_SUPPLIER &&
+                pr.getStatus() != PurchaseRequestStatus.PARTIALLY_RECEIVED) {
+            throw new BadRequestException("Phiáº¿u yĂªu cáº§u mua pháº£i Ä‘Æ°á»£c gá»­i nhĂ  cung cáº¥p trÆ°á»›c khi táº¡o phiáº¿u nháº­p.");
+        }
+
         if (pr.getStatus() == PurchaseRequestStatus.COMPLETED ||
                 pr.getStatus() == PurchaseRequestStatus.CANCELLED ||
                 pr.getStatus() == PurchaseRequestStatus.CLOSED) {
@@ -294,6 +314,10 @@ public class PurchaseRequestService {
         if (pr.getStatus() != PurchaseRequestStatus.APPROVED) {
             throw new BadRequestException("Chỉ có thể gửi NCC phiếu đã được duyệt.");
         }
+        if (pr.getSupplier() == null || pr.getSupplier().getEmail() == null || pr.getSupplier().getEmail().isBlank()) {
+            throw new BadRequestException("NhĂ  cung cáº¥p chÆ°a cĂ³ email Ä‘á»ƒ gá»­i phiáº¿u yĂªu cáº§u.");
+        }
+        emailService.sendPurchaseRequestToSupplier(pr);
         pr.setStatus(PurchaseRequestStatus.SENT_TO_SUPPLIER);
         pr.setSentToSupplierAt(LocalDateTime.now());
         return mapToResponseShallow(purchaseRequestRepository.save(pr));
