@@ -30,6 +30,7 @@ public class PurchaseRequestService {
     private final PurchaseRequestItemRepository purchaseRequestItemRepository;
     private final InventoryNoteRepository inventoryNoteRepository;
     private final SupplierRepository supplierRepository;
+    private final SupplierProductCatalogRepository supplierProductCatalogRepository;
     private final BranchRepository branchRepository;
     private final ProductVariantRepository productVariantRepository;
     private final UserRepository userRepository;
@@ -102,6 +103,7 @@ public class PurchaseRequestService {
             ProductVariant variant = productVariantRepository.findBySku(itemReq.getProductCode())
                     .orElseThrow(() -> new NotFoundException("SKU không tồn tại: " + itemReq.getProductCode()));
 
+            validateSupplierCatalogContainsVariant(supplier, variant);
             BigDecimal unitPrice = Objects.requireNonNullElse(itemReq.getUnitPrice(), BigDecimal.ZERO);
 
             PurchaseRequestItem item = PurchaseRequestItem.builder()
@@ -165,6 +167,12 @@ public class PurchaseRequestService {
         // Xóa items cũ và tạo lại
         pr.getItems().clear();
         purchaseRequestRepository.flush();
+
+        for (PurchaseRequestCreateRequest.ItemRequest itemReq : request.getItems()) {
+            ProductVariant variant = productVariantRepository.findBySku(itemReq.getProductCode())
+                    .orElseThrow(() -> new NotFoundException("SKU khĂ´ng tá»“n táº¡i: " + itemReq.getProductCode()));
+            validateSupplierCatalogContainsVariant(supplier, variant);
+        }
 
         BigDecimal totalAmount = BigDecimal.ZERO;
         for (PurchaseRequestCreateRequest.ItemRequest itemReq : request.getItems()) {
@@ -408,6 +416,21 @@ public class PurchaseRequestService {
     }
 
     // Mapping đầy đủ (dùng cho getById - có details và goodsReceipts)
+    private void validateSupplierCatalogContainsVariant(Supplier supplier, ProductVariant variant) {
+        if (supplier == null || variant == null || variant.getProduct() == null) {
+            throw new BadRequestException("Invalid supplier or product data.");
+        }
+
+        boolean isAvailableForSupplier = supplierProductCatalogRepository.existsAvailableBySupplierIdAndProductId(
+                supplier.getId(),
+                variant.getProduct().getId());
+
+        if (!isAvailableForSupplier) {
+            throw new BadRequestException(
+                    "SKU " + variant.getSku() + " is not available in supplier catalog " + supplier.getCode());
+        }
+    }
+
     private PurchaseRequestResponse mapToResponse(PurchaseRequest pr) {
         List<PurchaseRequestResponse.ItemResponse> itemResponses = new ArrayList<>();
         if (pr.getItems() != null) {

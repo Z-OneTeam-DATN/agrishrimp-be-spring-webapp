@@ -24,6 +24,16 @@ public interface SupplierProductCatalogRepository extends JpaRepository<Supplier
     Optional<SupplierProductCatalog> findBySupplierIdAndProductId(@Param("supplierId") Long supplierId,
             @Param("productId") Long productId);
 
+    @Query("""
+            SELECT CASE WHEN COUNT(spc) > 0 THEN true ELSE false END
+            FROM SupplierProductCatalog spc
+            WHERE spc.supplier.id = :supplierId
+              AND spc.product.id = :productId
+              AND spc.status = com.zone.agri.entity.enums.SupplierProductCatalogStatus.AVAILABLE
+            """)
+    boolean existsAvailableBySupplierIdAndProductId(@Param("supplierId") Long supplierId,
+            @Param("productId") Long productId);
+
     @Modifying
     @Query("DELETE FROM SupplierProductCatalog spc WHERE spc.supplier.id = :supplierId AND spc.product.id NOT IN :productIds")
     void deleteBySupplierIdAndProductIdNotIn(@Param("supplierId") Long supplierId,
