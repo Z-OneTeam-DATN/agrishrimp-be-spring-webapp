@@ -582,6 +582,7 @@ public class InventoryNoteService {
             int checkStock;
             String errorPool;
             String batchNum = reqDetail.getBatchNumber();
+            List<InventoryNoteDetail> originalImportDetails = Collections.emptyList();
             
             if (isReturn) {
                 if (batchNum == null || batchNum.isBlank()) {
@@ -592,7 +593,7 @@ public class InventoryNoteService {
                     throw new BadRequestException("Phiếu xuất trả nhà cung cấp thiếu thông tin nhà cung cấp.");
                 }
 
-                List<InventoryNoteDetail> originalImportDetails = inventoryNoteDetailRepository.findOriginalImportDetail(
+                originalImportDetails = inventoryNoteDetailRepository.findOriginalImportDetail(
                         note.getSupplier().getId(),
                         variant.getSku(),
                         batchNum
