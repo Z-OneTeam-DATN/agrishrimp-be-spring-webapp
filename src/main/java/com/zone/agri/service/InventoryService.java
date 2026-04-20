@@ -97,7 +97,9 @@ public class InventoryService {
         // Quy trình 2: GR luôn bắt đầu ở PENDING_GR_APPROVAL (= PENDING).
         // Kể cả Admin tạo cũng phải PENDING để có bước kiểm tra trước khi duyệt.
         // Bước Duyệt (approveReceipt) mới là nơi cộng kho và ghi nợ NCC.
-        noteEntity.setStatus(InventoryNoteStatus.PENDING);
+        boolean autoApprovedOnCreate =
+                "IMPORTED".equalsIgnoreCase(request.getImportStatus()) || hasAuthority("IMPORT_APPROVE");
+        noteEntity.setStatus(autoApprovedOnCreate ? InventoryNoteStatus.APPROVED : InventoryNoteStatus.PENDING);
 
         noteEntity = noteRepository.save(noteEntity);
         validateReceiptItemsAgainstPurchaseRequest(linkedPurchaseRequest, request.getItems(), noteEntity.getId());
