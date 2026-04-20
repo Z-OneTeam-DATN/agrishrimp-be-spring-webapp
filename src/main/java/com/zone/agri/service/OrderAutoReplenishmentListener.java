@@ -20,7 +20,7 @@ import lombok.extern.slf4j.Slf4j;
 public class OrderAutoReplenishmentListener {
 
     private final SubOrderRepository subOrderRepository;
-    private final ReplenishmentDemandAggregationService replenishmentDemandAggregationService;
+    private final InventoryTransferService inventoryTransferService;
 
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     public void onOrderAwaitingReplenishmentCreated(OrderAwaitingReplenishmentCreatedEvent event) {
@@ -32,7 +32,17 @@ public class OrderAutoReplenishmentListener {
             return;
         }
 
-        replenishmentDemandAggregationService.enqueueSubOrders(awaitingSubOrders);
-        log.info("Queued {} sub-order(s) for aggregated replenishment demand window", awaitingSubOrders.size());
+        int createdTransferCount = 0;
+        for (SubOrder subOrder : awaitingSubOrders) {
+            try {
+                createdTransferCount += inventoryTransferService.createReplenishmentTransfersForSubOrder(subOrder).size();
+            } catch (Exception ex) {
+                log.warn("Failed to auto-create replenishment transfer for sub-order {}: {}",
+                        subOrder.getId(), ex.getMessage());
+            }
+        }
+
+        log.info("Created {} replenishment transfer(s) immediately for {} awaiting sub-order(s)",
+                createdTransferCount, awaitingSubOrders.size());
     }
 }
