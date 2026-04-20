@@ -23,8 +23,11 @@ public class Voucher {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     Long id;
 
-    @Column(name = "code", length = 20, unique = true)
+    @Column(name = "code", length = 50, unique = true)
     String code;
+
+    @Column(name = "title", length = 255)
+    String title;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "discount_type", columnDefinition = "ENUM('PERCENT', 'FIXED')")

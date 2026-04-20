@@ -17,8 +17,10 @@ import java.time.LocalDateTime;
 public class VoucherResponse {
     private Long id;
     private String code;
+    private String title;
     private VoucherDiscountType discountType;
     private BigDecimal value;
+    private BigDecimal maxDiscount;
     private Integer maxUsagePerUser;
     private BigDecimal minOrderValue;
     private LocalDateTime startDate;

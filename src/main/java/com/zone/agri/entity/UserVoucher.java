@@ -6,7 +6,9 @@ import lombok.experimental.FieldDefaults;
 import java.time.LocalDateTime;
 
 @Entity
-@Table(name = "user_vouchers")
+@Table(name = "user_vouchers", uniqueConstraints = {
+    @UniqueConstraint(columnNames = {"user_id", "voucher_id"})
+})
 @Getter
 @Setter
 @NoArgsConstructor

@@ -22,6 +22,9 @@ public class VoucherRequest {
     @NotBlank(message = "Mã voucher không được để trống")
     private String code;
 
+    @NotBlank(message = "Tên chương trình voucher không được để trống")
+    private String title;
+
     @NotNull(message = "Loại giảm giá không được để trống")
     private VoucherDiscountType discountType;
 

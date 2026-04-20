@@ -25,6 +25,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
@@ -1307,11 +1308,9 @@ public class OrderService {
             BigDecimal percentValue = voucher.getValue() != null ? voucher.getValue() : BigDecimal.ZERO;
             BigDecimal calculatedDiscount = orderSubtotal.multiply(percentValue).divide(BigDecimal.valueOf(100));
 
-            if (voucher.getMaxDiscount() != null && voucher.getMaxDiscount().compareTo(BigDecimal.ZERO) > 0) {
-                discountAmount = calculatedDiscount.min(voucher.getMaxDiscount());
-            } else {
-                discountAmount = calculatedDiscount;
-            }
+            discountAmount = voucher.getMaxDiscount() != null && voucher.getMaxDiscount().compareTo(BigDecimal.ZERO) > 0
+                    ? calculatedDiscount.min(voucher.getMaxDiscount())
+                    : calculatedDiscount;
         } else {
             discountAmount = voucher.getValue() != null ? voucher.getValue() : BigDecimal.ZERO;
         }
@@ -1324,7 +1323,11 @@ public class OrderService {
             voucher.setQuantity(Objects.requireNonNullElse(voucher.getQuantity(), 0) - 1);
             userVoucher.setUsageCount(Objects.requireNonNullElse(userVoucher.getUsageCount(), 0) + 1);
             voucherRepository.save(voucher);
-            userVoucherRepository.save(userVoucher);
+            try {
+                userVoucherRepository.saveAndFlush(userVoucher);
+            } catch (DataIntegrityViolationException ex) {
+                throw new ConflictException("Bạn đang thanh toán đồng thời với cùng voucher này. Vui lòng thử lại.");
+            }
         }
 
         return new VoucherValidation(voucher, userVoucher, discountAmount);
@@ -1336,7 +1339,7 @@ public class OrderService {
 
     private void restoreVoucherForOrder(Order order) {
         if (order.getVoucher() != null) {
-            Voucher voucher = voucherRepository.findById(order.getVoucher().getId()).orElse(null);
+            Voucher voucher = voucherRepository.findByIdForUpdate(order.getVoucher().getId()).orElse(null);
             if (voucher != null) {
                 voucher.setQuantity(Objects.requireNonNullElse(voucher.getQuantity(), 0) + 1);
                 voucherRepository.save(voucher);
@@ -1551,62 +1554,11 @@ public class OrderService {
             }
         }
 
-        BigDecimal discountAmount = BigDecimal.ZERO;
-
         // 👉 VOUCHER LOGIC
+        BigDecimal discountAmount = BigDecimal.ZERO;
         if (req.getVoucherCode() != null && !req.getVoucherCode().trim().isEmpty()) {
-            Voucher voucher = voucherRepository.findByCode(req.getVoucherCode().trim().toUpperCase())
-                    .orElseThrow(() -> new BadRequestException("Mã voucher không tồn tại"));
-
-            LocalDateTime now = LocalDateTime.now();
-
-            if (voucher.getStatus() != VoucherStatus.ACTIVE || now.isBefore(voucher.getStartDate())
-                    || now.isAfter(voucher.getEndDate())) {
-                throw new BadRequestException("Voucher không hợp lệ hoặc đã hết hạn");
-            }
-
-            if (subTotal
-                    .compareTo(voucher.getMinOrderValue() != null ? voucher.getMinOrderValue() : BigDecimal.ZERO) < 0) {
-                throw new BadRequestException("Đơn hàng chưa đạt giá trị tối thiểu để sử dụng voucher này");
-            }
-
-            if (voucher.getQuantity() <= 0) {
-                throw new BadRequestException("Voucher này đã hết lượt sử dụng trên hệ thống");
-            }
-
-            UserVoucher userVoucher = userVoucherRepository.findByUserAndVoucher(user, voucher)
-                    .orElse(new UserVoucher(user, voucher, 0, false));
-
-            if (userVoucher
-                    .getUsageCount() >= (voucher.getMaxUsagePerUser() != null ? voucher.getMaxUsagePerUser() : 1)) {
-                throw new BadRequestException("Bạn đã sử dụng tối đa số lượt cho phép của voucher này");
-            }
-
-            // ĐÃ CHỈNH SỬA: SỬA LỖI KIỂU DỮ LIỆU CỦA VALUE VÀ MAX_DISCOUNT
-            if (VoucherDiscountType.PERCENT.equals(voucher.getDiscountType())) {
-                BigDecimal percentValue = voucher.getValue() != null ? voucher.getValue() : BigDecimal.ZERO;
-                BigDecimal calculatedDiscount = subTotal.multiply(percentValue).divide(BigDecimal.valueOf(100));
-
-                if (voucher.getMaxDiscount() != null && voucher.getMaxDiscount().compareTo(BigDecimal.ZERO) > 0) {
-                    BigDecimal maxDiscountDecimal = voucher.getMaxDiscount();
-                    discountAmount = calculatedDiscount.compareTo(maxDiscountDecimal) > 0 ? maxDiscountDecimal
-                            : calculatedDiscount;
-                } else {
-                    discountAmount = calculatedDiscount;
-                }
-            } else {
-                discountAmount = voucher.getValue() != null ? voucher.getValue() : BigDecimal.ZERO;
-            }
-
-            if (discountAmount.compareTo(subTotal) > 0) {
-                discountAmount = subTotal;
-            }
-
-            voucher.setQuantity(voucher.getQuantity() - 1);
-            userVoucher.setUsageCount(userVoucher.getUsageCount() + 1);
-
-            voucherRepository.save(voucher);
-            userVoucherRepository.save(userVoucher);
+            VoucherValidation validation = validateVoucher(user, req.getVoucherCode(), subTotal, true, false);
+            discountAmount = validation.discountAmount();
         }
 
         // 👉 PHÍ VẬN CHUYỂN

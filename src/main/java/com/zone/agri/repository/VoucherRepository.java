@@ -9,6 +9,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
@@ -21,6 +22,10 @@ public interface VoucherRepository extends JpaRepository<Voucher, Long> {
     @Query("SELECT v FROM Voucher v WHERE v.code = :code")
     Optional<Voucher> findByCodeForUpdate(@Param("code") String code);
 
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT v FROM Voucher v WHERE v.id = :id")
+    Optional<Voucher> findByIdForUpdate(@Param("id") Long id);
+
     boolean existsByCode(String code);
 
     boolean existsByCodeAndIdNot(String code, Long id);
@@ -31,4 +36,6 @@ public interface VoucherRepository extends JpaRepository<Voucher, Long> {
     List<Voucher> searchVouchers(@Param("keyword") String keyword, @Param("status") VoucherStatus status);
 
     List<Voucher> findByStatus(VoucherStatus status);
+
+    List<Voucher> findByStatusAndEndDateBefore(VoucherStatus status, LocalDateTime endDate);
 }
