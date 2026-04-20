@@ -971,6 +971,7 @@ public class OrderService {
                 .discountAmount(discountAmount)
                 .totalShippingFee(totalShippingFee)
                 .totalAmount(totalAmount)
+                .canFulfill(!enrichedSubOrders.isEmpty())
                 .outOfStockItems(allocation.outOfStockItems())
                 .outOfStockItems(allocation.outOfStockItems())
                 .build();

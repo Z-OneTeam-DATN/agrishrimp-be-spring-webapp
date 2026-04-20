@@ -33,6 +33,17 @@ public interface SubOrderRepository extends JpaRepository<SubOrder, Long> {
             @Param("orderId") Long orderId,
             @Param("branchId") Long branchId);
 
+    @Query("""
+            SELECT DISTINCT s
+            FROM SubOrder s
+            LEFT JOIN FETCH s.order o
+            LEFT JOIN FETCH s.branch b
+            LEFT JOIN FETCH s.items i
+            LEFT JOIN FETCH i.productVariant pv
+            WHERE s.id = :id
+            """)
+    Optional<SubOrder> findByIdWithItems(@Param("id") Long id);
+
     @Query("SELECT COUNT(s) FROM SubOrder s WHERE s.status <> com.zone.agri.entity.enums.OrderStatus.CANCELLED " +
             "AND s.branch.id = :branchId")
     long countAllByBranchIdExceptCancelled(@Param("branchId") Long branchId);

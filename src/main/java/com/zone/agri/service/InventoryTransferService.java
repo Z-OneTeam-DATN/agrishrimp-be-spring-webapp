@@ -40,6 +40,7 @@ import com.zone.agri.repository.InventoryRepository;
 import com.zone.agri.repository.InventoryTransactionRepository;
 import com.zone.agri.repository.InventoryTransferRepository;
 import com.zone.agri.repository.ProductVariantRepository;
+import com.zone.agri.repository.SubOrderRepository;
 
 import lombok.RequiredArgsConstructor;
 
@@ -54,6 +55,7 @@ public class InventoryTransferService {
     private final ProductVariantRepository variantRepo;
     private final InventoryRepository inventoryRepo;
     private final InventoryTransactionRepository transactionRepo;
+    private final SubOrderRepository subOrderRepo;
     private final BackorderService backorderService;
     private final com.zone.agri.repository.InventoryTransferDetailRepository transferDetailRepo;
     private final com.zone.agri.common.WarehouseContext warehouseContext;
@@ -243,6 +245,8 @@ public class InventoryTransferService {
 
     @Transactional
     public List<InventoryTransfer> createReplenishmentTransfersForSubOrder(SubOrder subOrder) {
+        subOrder = subOrderRepo.findByIdWithItems(subOrder.getId())
+                .orElseThrow(() -> new RuntimeException("Khong tim thay phan don can dieu chuyen bo sung"));
         if (subOrder.getStatus() != OrderStatus.AWAITING_REPLENISHMENT) {
             throw new RuntimeException("Chỉ có thể tạo điều chuyển bổ sung cho phần đơn đang chờ điều chuyển");
         }
