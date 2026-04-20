@@ -37,7 +37,21 @@ public class InventoryTransferService {
     private final InventoryTransactionRepository transactionRepo;
     private final BackorderService backorderService;
     private final com.zone.agri.repository.InventoryTransferDetailRepository transferDetailRepo;
+    private final com.zone.agri.common.WarehouseContext warehouseContext;
     private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(InventoryTransferService.class);
+
+    private void assertTransferParticipantAccess(InventoryTransfer transfer) {
+        Long allowedBranchId = warehouseContext.resolveWarehouseId();
+        if (allowedBranchId == null) {
+            return;
+        }
+
+        Long fromBranchId = transfer.getFromBranch() != null ? transfer.getFromBranch().getId() : null;
+        Long toBranchId = transfer.getToBranch() != null ? transfer.getToBranch().getId() : null;
+        if (!Objects.equals(allowedBranchId, fromBranchId) && !Objects.equals(allowedBranchId, toBranchId)) {
+            throw new RuntimeException("Khong duoc phep xem phieu dieu chuyen khong lien quan toi chi nhanh cua ban.");
+        }
+    }
 
     private boolean isWarehouseBranch(Branch branch) {
         return branch != null
@@ -672,6 +686,7 @@ public class InventoryTransferService {
     public TransferDetailResponse getById(Long id) {
         InventoryTransfer transfer = transferRepo.findByIdWithDetails(id)
                 .orElseThrow(() -> new RuntimeException("Không tìm thấy phiếu điều chuyển ID: " + id));
+        assertTransferParticipantAccess(transfer);
         return convertToDetailResponse(transfer);
     }
 
@@ -686,7 +701,10 @@ public class InventoryTransferService {
             } catch (Exception e) {
             }
         }
-        return transferRepo.searchTransfers(keyword, status, pageable);
+        Long branchId = warehouseContext.resolveWarehouseId();
+        return branchId == null
+                ? transferRepo.searchTransfers(keyword, status, pageable)
+                : transferRepo.searchTransfersForBranch(keyword, status, branchId, pageable);
     }
 
     @Transactional

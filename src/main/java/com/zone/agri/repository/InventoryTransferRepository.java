@@ -49,6 +49,25 @@ public interface InventoryTransferRepository extends JpaRepository<InventoryTran
       @Param("status") InventoryTransferStatus status,
       Pageable pageable);
 
+  @Query("SELECT new com.zone.agri.dto.response.transfer.TransferResponse(" +
+      "t.id, t.transferCode, t.status, t.createdAt, " +
+      "t.transferDate, t.deadline, " +
+      "fb.name, tb.name, t.transporter, t.priority, " +
+      "t.totalQuantity, SIZE(t.details), t.totalValue, " +
+      "t.transferBusinessType, t.settlementStatus, t.transferAmount) " +
+      "FROM InventoryTransfer t " +
+      "LEFT JOIN t.fromBranch fb " +
+      "LEFT JOIN t.toBranch tb " +
+      "WHERE (:keyword IS NULL OR t.transferCode LIKE CONCAT('%', :keyword, '%') " +
+      "OR t.transporter LIKE CONCAT('%', :keyword, '%')) " +
+      "AND (:status IS NULL OR t.status = :status) " +
+      "AND (fb.id = :branchId OR tb.id = :branchId)")
+  Page<TransferResponse> searchTransfersForBranch(
+      @Param("keyword") String keyword,
+      @Param("status") InventoryTransferStatus status,
+      @Param("branchId") Long branchId,
+      Pageable pageable);
+
   // Đếm tổng số phiếu (generate mã)
   @Query("SELECT COUNT(t) FROM InventoryTransfer t")
   long countTotalTransfers();
