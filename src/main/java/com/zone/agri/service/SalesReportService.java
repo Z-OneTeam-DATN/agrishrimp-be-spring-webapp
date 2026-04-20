@@ -39,7 +39,10 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class SalesReportService {
 
-    private static final Set<OrderStatus> SUCCESS_STATUSES = Set.of(OrderStatus.COMPLETED, OrderStatus.SHIPPING);
+    private static final Set<OrderStatus> SUCCESS_STATUSES = Set.of(
+            OrderStatus.SHIPPING,
+            OrderStatus.RECEIVED,
+            OrderStatus.COMPLETED);
 
     private final SubOrderRepository subOrderRepository;
     private final OrderRepository orderRepository;
@@ -686,6 +689,7 @@ public class SalesReportService {
             case PROCESSING -> "Đang xử lý";
             case READY_FOR_PICKUP -> "Sẵn sàng lấy";
             case SHIPPING -> "Đang giao";
+            case RECEIVED -> "Đã nhận hàng";
             case COMPLETED -> "Hoàn thành";
             case CANCELLED -> "Đã hủy";
             case RETURNED -> "Đã trả hàng";

@@ -34,6 +34,7 @@ import org.springframework.context.annotation.Lazy;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.time.temporal.ChronoUnit;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
@@ -83,6 +84,7 @@ public class OrderService {
     private static final String PREPARE_CONFIRM_RESULT_PREFIX = "prepare:confirm:result:";
     private static final long PREPARE_TTL_MINUTES = 30;
     private static final long PREPARE_CONFIRM_LOCK_TTL_SECONDS = 120;
+    private static final long SHIPPING_RECEIVED_CONFIRM_AFTER_DAYS = 7;
 
     private record PreparedQuote(
             List<CartItemDto> cartItems,
@@ -155,8 +157,7 @@ public class OrderService {
             throw new BadRequestException("Chỉ có thể xác nhận khi đơn hàng đang giao.");
         }
 
-        completeOrderAfterDeliveryConfirmation(order);
-        customerService.evaluateAndHandleCustomerReputation(userId);
+        markOrderAsReceived(order, true);
     }
 
     // ══════════════════════════════════════════════════════════════════════
@@ -235,8 +236,14 @@ public class OrderService {
 
         validateStatusTransition(currentStatus, newStatus);
 
+        if (newStatus == OrderStatus.RECEIVED) {
+            markOrderAsReceived(order, false);
+            return;
+        }
         if (newStatus == OrderStatus.COMPLETED) {
-            order.setPaymentStatus(PaymentStatus.PAID);
+            completeReceivedOrder(order);
+            customerService.evaluateAndHandleCustomerReputation(order.getUser().getId());
+            return;
         }
         if (newStatus == OrderStatus.CANCELLED) {
             releaseAllocatedInventoryForOrder(order);
@@ -265,7 +272,7 @@ public class OrderService {
         if (next == OrderStatus.CANCELLED)
             return;
         if (current == OrderStatus.PENDING) {
-            if (next != OrderStatus.CONFIRMED && next != OrderStatus.PROCESSING) {
+            if (next != OrderStatus.CONFIRMED) {
                 throw new BadRequestException(
                         "Đơn hàng chờ xác nhận chỉ có thể chuyển sang 'Đã duyệt' hoặc 'Đang xử lý'.");
             }
@@ -293,7 +300,7 @@ public class OrderService {
             return;
         }
         if (current == OrderStatus.PROCESSING) {
-            if (next != OrderStatus.READY_FOR_PICKUP && next != OrderStatus.SHIPPING) {
+            if (next != OrderStatus.READY_FOR_PICKUP) {
                 throw new BadRequestException(
                         "Đơn hàng ở trạng thái 'Đang xử lý' chỉ có thể chuyển sang 'Sẵn sàng lấy' hoặc 'Đang giao'.");
             }
@@ -306,11 +313,14 @@ public class OrderService {
             return;
         }
         if (current == OrderStatus.SHIPPING) {
-            if (next != OrderStatus.COMPLETED && next != OrderStatus.RETURNED) {
+            if (next != OrderStatus.RECEIVED && next != OrderStatus.RETURNED) {
                 throw new BadRequestException(
                         "Đơn hàng đang giao chỉ có thể chuyển sang 'Hoàn thành' hoặc 'Đã trả hàng'.");
             }
             return;
+        }
+        if (current == OrderStatus.RECEIVED && next != OrderStatus.COMPLETED) {
+            throw new BadRequestException("ÄÆ¡n hÃ ng Ä‘Ã£ nháº­n chá»‰ cÃ³ thá»ƒ chuyá»ƒn sang 'HoÃ n thÃ nh'.");
         }
     }
 
@@ -426,6 +436,14 @@ public class OrderService {
         if (newStatus == OrderStatus.CANCELLED) {
             releaseAllocatedInventoryForSubOrder(subOrder);
         }
+        if (newStatus == OrderStatus.RECEIVED
+                && !canManuallyConfirmReceived(resolveStatusUpdatedAt(subOrder))) {
+            throw new BadRequestException("Chá»‰ Ä‘Æ°á»£c xÃ¡c nháº­n 'ÄÃ£ nháº­n hÃ ng' sau khi Ä‘Æ¡n Ä‘ang giao quÃ¡ 7 ngÃ y.");
+        }
+        if (newStatus == OrderStatus.RECEIVED && PaymentMethod.COD.equals(subOrder.getOrder().getPaymentMethod())) {
+            subOrder.getOrder().setPaymentStatus(PaymentStatus.PAID);
+            orderRepository.save(subOrder.getOrder());
+        }
 
         subOrder.setStatus(newStatus);
         subOrderRepository.saveAndFlush(subOrder);
@@ -450,6 +468,10 @@ public class OrderService {
             newMasterStatus = OrderStatus.CANCELLED;
         } else if (activeSubs.stream().allMatch(s -> s.getStatus() == OrderStatus.COMPLETED)) {
             newMasterStatus = OrderStatus.COMPLETED;
+            order.setPaymentStatus(PaymentStatus.PAID);
+        } else if (activeSubs.stream().allMatch(
+                s -> s.getStatus() == OrderStatus.RECEIVED || s.getStatus() == OrderStatus.COMPLETED)) {
+            newMasterStatus = OrderStatus.RECEIVED;
             order.setPaymentStatus(PaymentStatus.PAID);
         } else {
             newMasterStatus = activeSubs.stream()
@@ -483,33 +505,25 @@ public class OrderService {
 
         List<SubOrder> overdueSubOrders = subOrderRepository.findByStatusAndUpdatedAtBefore(OrderStatus.SHIPPING,
                 cutoff);
-        Set<Long> affectedOrderIds = new HashSet<>();
-
-        for (SubOrder subOrder : overdueSubOrders) {
-            if (subOrder.getOrder() == null || subOrder.getOrder().getStatus() != OrderStatus.SHIPPING) {
-                continue;
-            }
-
-            subOrder.setStatus(OrderStatus.COMPLETED);
-            subOrderRepository.save(subOrder);
-            affectedOrderIds.add(subOrder.getOrder().getId());
-        }
-
-        affectedOrderIds.forEach(this::syncMasterOrderStatus);
-
         List<Order> overdueLegacyOrders = orderRepository.findByStatusAndCreatedAtBefore(OrderStatus.SHIPPING, cutoff)
                 .stream()
                 .filter(order -> order.getSubOrders() == null || order.getSubOrders().isEmpty())
                 .toList();
 
-        for (Order order : overdueLegacyOrders) {
-            completeOrderAfterDeliveryConfirmation(order);
-            customerService.evaluateAndHandleCustomerReputation(order.getUser().getId());
+        if (!overdueSubOrders.isEmpty() || !overdueLegacyOrders.isEmpty()) {
+            log.warn("CÃ³ {} pháº§n Ä‘Æ¡n vÃ  {} Ä‘Æ¡n legacy Ä‘ang SHIPPING quÃ¡ {} ngÃ y, cáº§n xÃ¡c nháº­n RECEIVED thá»§ cÃ´ng.",
+                    overdueSubOrders.size(),
+                    overdueLegacyOrders.size(),
+                    SHIPPING_RECEIVED_CONFIRM_AFTER_DAYS);
         }
     }
 
-    private void completeOrderAfterDeliveryConfirmation(Order order) {
-        order.setStatus(OrderStatus.COMPLETED);
+    private void markOrderAsReceived(Order order, boolean force) {
+        if (!force && !canManuallyConfirmReceived(resolveStatusUpdatedAt(order))) {
+            throw new BadRequestException("Chá»‰ Ä‘Æ°á»£c xÃ¡c nháº­n 'ÄÃ£ nháº­n hÃ ng' sau khi Ä‘Æ¡n Ä‘ang giao quÃ¡ 7 ngÃ y.");
+        }
+
+        order.setStatus(OrderStatus.RECEIVED);
         if (PaymentMethod.COD.equals(order.getPaymentMethod())) {
             order.setPaymentStatus(PaymentStatus.PAID);
         }
@@ -518,10 +532,26 @@ public class OrderService {
         if (order.getSubOrders() != null) {
             List<SubOrder> shippingSubOrders = order.getSubOrders().stream()
                     .filter(subOrder -> subOrder.getStatus() == OrderStatus.SHIPPING)
-                    .peek(subOrder -> subOrder.setStatus(OrderStatus.COMPLETED))
+                    .peek(subOrder -> subOrder.setStatus(OrderStatus.RECEIVED))
                     .toList();
             if (!shippingSubOrders.isEmpty()) {
                 subOrderRepository.saveAll(shippingSubOrders);
+            }
+        }
+    }
+
+    private void completeReceivedOrder(Order order) {
+        order.setStatus(OrderStatus.COMPLETED);
+        order.setPaymentStatus(PaymentStatus.PAID);
+        orderRepository.save(order);
+
+        if (order.getSubOrders() != null) {
+            List<SubOrder> receivedSubOrders = order.getSubOrders().stream()
+                    .filter(subOrder -> subOrder.getStatus() == OrderStatus.RECEIVED)
+                    .peek(subOrder -> subOrder.setStatus(OrderStatus.COMPLETED))
+                    .toList();
+            if (!receivedSubOrders.isEmpty()) {
+                subOrderRepository.saveAll(receivedSubOrders);
             }
         }
     }
@@ -541,9 +571,37 @@ public class OrderService {
             case PROCESSING -> 4;
             case READY_FOR_PICKUP -> 5;
             case SHIPPING -> 6;
-            case COMPLETED -> 7;
-            default -> 8;
+            case RECEIVED -> 7;
+            case COMPLETED -> 8;
+            default -> 9;
         };
+    }
+
+    private boolean canManuallyConfirmReceived(LocalDateTime statusUpdatedAt) {
+        return statusUpdatedAt != null
+                && !statusUpdatedAt.isAfter(LocalDateTime.now().minusDays(SHIPPING_RECEIVED_CONFIRM_AFTER_DAYS));
+    }
+
+    private Long calculateOverdueShippingDays(LocalDateTime statusUpdatedAt) {
+        if (statusUpdatedAt == null) {
+            return 0L;
+        }
+        return Math.max(0, ChronoUnit.DAYS.between(statusUpdatedAt, LocalDateTime.now()));
+    }
+
+    private LocalDateTime resolveStatusUpdatedAt(Order order) {
+        if (order.getSubOrders() != null && !order.getSubOrders().isEmpty()) {
+            return order.getSubOrders().stream()
+                    .map(this::resolveStatusUpdatedAt)
+                    .filter(Objects::nonNull)
+                    .max(LocalDateTime::compareTo)
+                    .orElse(order.getCreatedAt());
+        }
+        return order.getCreatedAt();
+    }
+
+    private LocalDateTime resolveStatusUpdatedAt(SubOrder subOrder) {
+        return subOrder.getUpdatedAt() != null ? subOrder.getUpdatedAt() : subOrder.getCreatedAt();
     }
 
     private void syncPayOSPaymentStatuses(Collection<Order> orders) {
@@ -591,6 +649,12 @@ public class OrderService {
                 .shippingFee(subOrder.getShippingFee() != null ? subOrder.getShippingFee() : BigDecimal.ZERO)
                 .estimatedDays(subOrder.getEstimatedDays())
                 .carrier(subOrder.getCarrier())
+                .statusUpdatedAt(resolveStatusUpdatedAt(subOrder))
+                .shippingOverdue(subOrder.getStatus() == OrderStatus.SHIPPING
+                        && canManuallyConfirmReceived(resolveStatusUpdatedAt(subOrder)))
+                .canMarkReceived(subOrder.getStatus() == OrderStatus.SHIPPING
+                        && canManuallyConfirmReceived(resolveStatusUpdatedAt(subOrder)))
+                .overdueShippingDays(calculateOverdueShippingDays(resolveStatusUpdatedAt(subOrder)))
                 .items(items)
                 .build();
     }

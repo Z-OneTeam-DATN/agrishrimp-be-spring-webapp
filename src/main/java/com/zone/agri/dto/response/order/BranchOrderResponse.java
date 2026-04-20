@@ -39,6 +39,10 @@ public class BranchOrderResponse {
     private BigDecimal shippingFee;
     private String estimatedDays;
     private String carrier;
+    private LocalDateTime statusUpdatedAt;
+    private boolean shippingOverdue;
+    private boolean canMarkReceived;
+    private Long overdueShippingDays;
 
     /** Danh sách sản phẩm trong phần đơn của chi nhánh */
     private List<OrderItemResponse> items;

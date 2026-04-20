@@ -113,6 +113,7 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
       WHERE p.id IN :productIds
         AND o.status IN (
           com.zone.agri.entity.enums.OrderStatus.COMPLETED,
+          com.zone.agri.entity.enums.OrderStatus.RECEIVED,
           com.zone.agri.entity.enums.OrderStatus.SHIPPING
         )
       GROUP BY p.id
@@ -128,6 +129,7 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
       WHERE p.id IN :productIds
         AND s.status IN (
           com.zone.agri.entity.enums.OrderStatus.COMPLETED,
+          com.zone.agri.entity.enums.OrderStatus.RECEIVED,
           com.zone.agri.entity.enums.OrderStatus.SHIPPING
         )
       GROUP BY p.id
@@ -255,7 +257,7 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
       "JOIN pv.product p " +
       "JOIN p.category c " +
       "JOIN oi.order o " +
-      "WHERE o.status IN (com.zone.agri.entity.enums.OrderStatus.COMPLETED, com.zone.agri.entity.enums.OrderStatus.SHIPPING) "
+      "WHERE o.status IN (com.zone.agri.entity.enums.OrderStatus.COMPLETED, com.zone.agri.entity.enums.OrderStatus.RECEIVED, com.zone.agri.entity.enums.OrderStatus.SHIPPING) "
       +
       "GROUP BY c.id, c.name " +
       "ORDER BY totalRevenue DESC")
@@ -284,7 +286,7 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
       "JOIN si.subOrder s " +
       "JOIN si.productVariant pv " +
       "JOIN pv.product p " +
-      "WHERE s.status IN (com.zone.agri.entity.enums.OrderStatus.COMPLETED, com.zone.agri.entity.enums.OrderStatus.SHIPPING) "
+      "WHERE s.status IN (com.zone.agri.entity.enums.OrderStatus.COMPLETED, com.zone.agri.entity.enums.OrderStatus.RECEIVED, com.zone.agri.entity.enums.OrderStatus.SHIPPING) "
       +
       "AND (:branchId IS NULL OR s.branch.id = :branchId) " +
       "GROUP BY p.id, p.name " +

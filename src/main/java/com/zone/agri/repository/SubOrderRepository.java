@@ -37,14 +37,14 @@ public interface SubOrderRepository extends JpaRepository<SubOrder, Long> {
             "AND s.branch.id = :branchId")
     long countAllByBranchIdExceptCancelled(@Param("branchId") Long branchId);
 
-    @Query("SELECT COUNT(s) FROM SubOrder s WHERE s.status IN (com.zone.agri.entity.enums.OrderStatus.COMPLETED, com.zone.agri.entity.enums.OrderStatus.SHIPPING) " +
+    @Query("SELECT COUNT(s) FROM SubOrder s WHERE s.status IN (com.zone.agri.entity.enums.OrderStatus.COMPLETED, com.zone.agri.entity.enums.OrderStatus.RECEIVED, com.zone.agri.entity.enums.OrderStatus.SHIPPING) " +
             "AND s.createdAt BETWEEN :startDate AND :endDate " +
             "AND s.branch.id = :branchId")
     long countSuccessByBranchId(@Param("startDate") java.time.LocalDateTime startDate,
                                 @Param("endDate") java.time.LocalDateTime endDate,
                                 @Param("branchId") Long branchId);
 
-    @Query("SELECT SUM(s.subtotal + s.shippingFee) FROM SubOrder s WHERE s.status IN (com.zone.agri.entity.enums.OrderStatus.COMPLETED, com.zone.agri.entity.enums.OrderStatus.SHIPPING) " +
+    @Query("SELECT SUM(s.subtotal + s.shippingFee) FROM SubOrder s WHERE s.status IN (com.zone.agri.entity.enums.OrderStatus.COMPLETED, com.zone.agri.entity.enums.OrderStatus.RECEIVED, com.zone.agri.entity.enums.OrderStatus.SHIPPING) " +
             "AND s.createdAt BETWEEN :startDate AND :endDate " +
             "AND s.branch.id = :branchId")
     java.math.BigDecimal sumRevenueByBranchId(@Param("startDate") java.time.LocalDateTime startDate,
@@ -52,7 +52,7 @@ public interface SubOrderRepository extends JpaRepository<SubOrder, Long> {
                                               @Param("branchId") Long branchId);
 
     @Query("SELECT CAST(s.createdAt AS date) as date, SUM(s.subtotal + s.shippingFee) as revenue, COUNT(s) as orderCount " +
-            "FROM SubOrder s WHERE s.status IN (com.zone.agri.entity.enums.OrderStatus.COMPLETED, com.zone.agri.entity.enums.OrderStatus.SHIPPING) " +
+            "FROM SubOrder s WHERE s.status IN (com.zone.agri.entity.enums.OrderStatus.COMPLETED, com.zone.agri.entity.enums.OrderStatus.RECEIVED, com.zone.agri.entity.enums.OrderStatus.SHIPPING) " +
             "AND s.createdAt BETWEEN :startDate AND :endDate " +
             "AND s.branch.id = :branchId " +
             "GROUP BY CAST(s.createdAt AS date) " +
@@ -74,7 +74,7 @@ public interface SubOrderRepository extends JpaRepository<SubOrder, Long> {
             "JOIN SubOrder s ON s.order.id = o.id AND s.branch.id = i.branch.id " +
             "WHERE it.type = com.zone.agri.entity.enums.TransactionType.SALE " +
             "AND i.branch.id = :branchId " +
-            "AND s.status IN (com.zone.agri.entity.enums.OrderStatus.COMPLETED, com.zone.agri.entity.enums.OrderStatus.SHIPPING) " +
+            "AND s.status IN (com.zone.agri.entity.enums.OrderStatus.COMPLETED, com.zone.agri.entity.enums.OrderStatus.RECEIVED, com.zone.agri.entity.enums.OrderStatus.SHIPPING) " +
             "AND s.createdAt BETWEEN :startDate AND :endDate " +
             "GROUP BY CAST(s.createdAt AS date)")
     List<Object[]> getDailyCostsByBranchId(@Param("startDate") java.time.LocalDateTime startDate,
@@ -90,7 +90,7 @@ public interface SubOrderRepository extends JpaRepository<SubOrder, Long> {
             "JOIN pv.product p " +
             "JOIN p.category c " +
             "WHERE s.branch.id = :branchId " +
-            "AND s.status IN (com.zone.agri.entity.enums.OrderStatus.COMPLETED, com.zone.agri.entity.enums.OrderStatus.SHIPPING) " +
+            "AND s.status IN (com.zone.agri.entity.enums.OrderStatus.COMPLETED, com.zone.agri.entity.enums.OrderStatus.RECEIVED, com.zone.agri.entity.enums.OrderStatus.SHIPPING) " +
             "GROUP BY c.id, c.name " +
             "ORDER BY totalRevenue DESC")
     List<ProductRepository.CategorySalesProjection> getCategorySalesByBranch(@Param("branchId") Long branchId);

@@ -155,6 +155,10 @@ public class BackorderService {
         } else if (activeSubs.stream().allMatch(s -> s.getStatus() == OrderStatus.COMPLETED)) {
             newMasterStatus = OrderStatus.COMPLETED;
             order.setPaymentStatus(PaymentStatus.PAID);
+        } else if (activeSubs.stream().allMatch(
+                s -> s.getStatus() == OrderStatus.RECEIVED || s.getStatus() == OrderStatus.COMPLETED)) {
+            newMasterStatus = OrderStatus.RECEIVED;
+            order.setPaymentStatus(PaymentStatus.PAID);
         } else {
             newMasterStatus = activeSubs.stream()
                     .map(SubOrder::getStatus)
@@ -175,8 +179,9 @@ public class BackorderService {
             case PROCESSING -> 5;
             case READY_FOR_PICKUP -> 6;
             case SHIPPING -> 7;
-            case COMPLETED -> 8;
-            default -> 9;
+            case RECEIVED -> 8;
+            case COMPLETED -> 9;
+            default -> 10;
         };
     }
 }

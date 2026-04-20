@@ -220,7 +220,7 @@ public class OrderController {
     }
 
     @Operation(summary = "Cập nhật trạng thái phần đơn của chi nhánh", description = "Chi nhánh tự quản lý trạng thái phần đơn của mình theo quy trình: "
-            + "PENDING → CONFIRMED → PROCESSING → SHIPPING → COMPLETED. "
+            + "PENDING → CONFIRMED → PROCESSING → READY_FOR_PICKUP → SHIPPING → RECEIVED → COMPLETED. "
             + "Trạng thái tổng của đơn hàng sẽ được tự động đồng bộ theo chi nhánh chậm nhất.")
     @RequirePermission("ORDER_UPDATE")
     @PutMapping("/branch/orders/{orderId}/status")

@@ -29,8 +29,8 @@ public class SchemaUpdateConfig {
                     "ALTER TABLE orders MODIFY COLUMN payment_method ENUM('CASH','TRANSFER','COD','PAYOS')");
 
             applyPatch(
-                    "Patch orders.status ENUM thêm AWAITING_PAYMENT và READY_FOR_PICKUP",
-                    "ALTER TABLE orders MODIFY COLUMN status ENUM('PENDING','AWAITING_PAYMENT','AWAITING_REPLENISHMENT','CONFIRMED','PROCESSING','READY_FOR_PICKUP','SHIPPING','COMPLETED','CANCELLED','RETURNED')");
+                    "Patch orders.status ENUM thêm AWAITING_PAYMENT, READY_FOR_PICKUP và RECEIVED",
+                    "ALTER TABLE orders MODIFY COLUMN status ENUM('PENDING','AWAITING_PAYMENT','AWAITING_REPLENISHMENT','CONFIRMED','PROCESSING','READY_FOR_PICKUP','SHIPPING','RECEIVED','COMPLETED','CANCELLED','RETURNED')");
 
             applyPatch(
                     "Patch inventory_notes.type ENUM thêm CHECK",
