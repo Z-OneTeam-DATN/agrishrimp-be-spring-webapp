@@ -39,7 +39,8 @@ public class VoucherService {
     }
 
     private void validateBusinessRules(VoucherRequest request) {
-        if (request.getEndDate().isBefore(request.getStartDate())) {
+        if (request.getEndDate().isEqual(request.getStartDate())
+                || request.getEndDate().isBefore(request.getStartDate())) {
             throw new BadRequestException("Ngày kết thúc không được nhỏ hơn ngày bắt đầu.");
         }
 
@@ -48,6 +49,10 @@ public class VoucherService {
         }
 
         if (request.getDiscountType() == com.zone.agri.entity.enums.VoucherDiscountType.PERCENT) {
+            if (request.getValue() == null || request.getValue().compareTo(BigDecimal.ZERO) <= 0) {
+                throw new BadRequestException("Mức giảm phần trăm phải lớn hơn 0%");
+            }
+
             if (request.getMaxDiscount() == null || request.getMaxDiscount().compareTo(BigDecimal.ZERO) <= 0) {
                 throw new BadRequestException("Voucher theo phần trăm BẮT BUỘC phải có mức Giảm tối đa (VNĐ) để tránh lỗ!");
             }
@@ -56,10 +61,16 @@ public class VoucherService {
                 throw new BadRequestException("Mức giảm phần trăm không được vượt quá 50%");
             }
         } else if (request.getDiscountType() == com.zone.agri.entity.enums.VoucherDiscountType.FIXED) {
+            if (request.getValue() == null || request.getValue().compareTo(new BigDecimal("1000")) <= 0) {
+                throw new BadRequestException("Mức giảm (VNĐ) phải lớn hơn 1.000đ");
+            }
+
             BigDecimal minOrder = request.getMinOrderValue() != null ? request.getMinOrderValue() : BigDecimal.ZERO;
-            BigDecimal halfMinOrder = minOrder.divide(new BigDecimal("2"), 2, java.math.RoundingMode.HALF_UP);
-            if (request.getValue().compareTo(halfMinOrder) > 0) {
-                throw new BadRequestException("Mức giảm (VNĐ) không được vượt quá một nửa Đơn tối thiểu");
+            if (minOrder.compareTo(BigDecimal.ZERO) > 0) {
+                BigDecimal halfMinOrder = minOrder.divide(new BigDecimal("2"), 2, java.math.RoundingMode.HALF_UP);
+                if (request.getValue().compareTo(halfMinOrder) > 0) {
+                    throw new BadRequestException("Mức giảm (VNĐ) không được vượt quá một nửa Đơn tối thiểu");
+                }
             }
         }
     }
