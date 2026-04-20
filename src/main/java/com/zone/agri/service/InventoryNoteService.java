@@ -30,6 +30,8 @@ import java.util.stream.Collectors;
 @Service
 @RequiredArgsConstructor
 public class InventoryNoteService {
+    private static final String GENERAL_WAREHOUSE_CODE = "MAIN_WH";
+
 
     private final InventoryNoteRepository inventoryNoteRepository;
     private final InventoryNoteDetailRepository inventoryNoteDetailRepository;
@@ -639,7 +641,7 @@ public class InventoryNoteService {
         // XỬ LÝ ĐỐI TÁC: NHÀ CUNG CẤP HOẶC CHI NHÁNH NHẬN
         if (request.getSupplierId() != null || "RETURN".equals(request.getExportType())) {
             // RÀNG BUỘC: Chỉ Kho tổng mới được xuất trả NCC
-            if (!"WAREHOUSE".equalsIgnoreCase(sourceBranch.getBranchType())) {
+            if (!GENERAL_WAREHOUSE_CODE.equalsIgnoreCase(sourceBranch.getBranchCode())) {
                 throw new BadRequestException("Chỉ có Kho tổng mới được phép thực hiện nghiệp vụ xuất trả nhà cung cấp.");
             }
             

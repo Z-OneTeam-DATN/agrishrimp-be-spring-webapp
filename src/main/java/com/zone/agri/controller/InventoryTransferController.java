@@ -1,8 +1,8 @@
 package com.zone.agri.controller;
 
 import com.zone.agri.dto.request.transfer.TransferQCRequest;
-import com.zone.agri.dto.response.transfer.TransferDetailResponse;
 import com.zone.agri.dto.request.transfer.TransferRequest;
+import com.zone.agri.dto.response.transfer.TransferDetailResponse;
 import com.zone.agri.dto.response.transfer.TransferResponse;
 import com.zone.agri.entity.InventoryTransfer;
 import com.zone.agri.security.annotation.RequirePermission;
@@ -22,8 +22,6 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.http.ResponseEntity;
-import org.springframework.security.core.Authentication;
-import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -35,12 +33,6 @@ import java.util.List;
 public class InventoryTransferController {
 
     private final InventoryTransferService transferService;
-
-    private boolean hasAuthority(String authority) {
-        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-        return auth != null && auth.getAuthorities().stream()
-                .anyMatch(a -> a.getAuthority().equals(authority));
-    }
 
     @Operation(summary = "Lấy danh sách phiếu điều chuyển", description = "Trả về danh sách phiếu điều chuyển có hỗ trợ phân trang, tìm kiếm và lọc theo trạng thái.")
     @SecurityRequirement(name = "bearerAuth")
@@ -65,9 +57,7 @@ public class InventoryTransferController {
 
     @Operation(
         summary = "Lập phiếu điều chuyển mới",
-        description = "Tạo phiếu điều chuyển. "
-                    + "Flow 4 (STOCK_TRANSFER): Admin tạo → tự động APPROVED + SHIPPING. "
-                    + "Flow 5 (INTERNAL_SALE): tạo ở PENDING, chờ chi nhánh nguồn xác nhận (/source-confirm)."
+        description = "Tạo phiếu điều chuyển ở trạng thái chờ xử lý để đi đúng quy trình duyệt, xuất kho, vận chuyển và kiểm hàng."
     )
     @SecurityRequirement(name = "bearerAuth")
     @RequirePermission("TRANSFER_CREATE")
@@ -77,17 +67,7 @@ public class InventoryTransferController {
     })
     @PostMapping
     public ResponseEntity<InventoryTransfer> createTransfer(@Valid @RequestBody TransferRequest request) {
-        InventoryTransfer transfer = transferService.createTransfer(request);
-
-        // Flow 4 (STOCK_TRANSFER): Admin có quyền → Reserve + xuất kho ngay
-        // Flow 5 (INTERNAL_SALE): không auto-approve, cần chi nhánh nguồn xác nhận trước
-        boolean isInternalSale = "INTERNAL_SALE".equalsIgnoreCase(request.getTransferBusinessType());
-        if (!isInternalSale && hasAuthority("TRANSFER_APPROVE")) {
-            transferService.approveTransfer(transfer.getId());  // PENDING → APPROVED (+ reserve)
-            transferService.approveAndShip(transfer.getId());   // APPROVED → SHIPPING (- stock)
-        }
-
-        return ResponseEntity.ok(transfer);
+        return ResponseEntity.ok(transferService.createTransfer(request));
     }
 
     @Operation(summary = "Lấy chi tiết phiếu điều chuyển", description = "Trả về thông tin chi tiết và danh sách sản phẩm của một phiếu.")
@@ -98,11 +78,9 @@ public class InventoryTransferController {
         return ResponseEntity.ok(transferService.getById(id));
     }
 
-    // ─── Flow 5: Chi nhánh nguồn xác nhận có hàng ─────────────────────────────
     @Operation(
         summary = "Chi nhánh nguồn xác nhận (Flow 5)",
-        description = "Áp dụng cho phiếu INTERNAL_SALE: Chi nhánh A xác nhận có đủ hàng và đồng ý chuyển. "
-                    + "Hệ thống Reserve kho A và chuyển trạng thái PENDING → SOURCE_CONFIRMED."
+        description = "Áp dụng cho phiếu INTERNAL_SALE: Chi nhánh A xác nhận có đủ hàng và đồng ý chuyển. Hệ thống reserve kho A và chuyển trạng thái PENDING -> SOURCE_CONFIRMED."
     )
     @SecurityRequirement(name = "bearerAuth")
     @RequirePermission("TRANSFER_CREATE")
@@ -112,11 +90,9 @@ public class InventoryTransferController {
         return ResponseEntity.ok("Chi nhánh nguồn đã xác nhận. Phiếu chờ Admin duyệt.");
     }
 
-    // ─── Admin duyệt ──────────────────────────────────────────────────────────
     @Operation(
         summary = "Admin duyệt phiếu điều chuyển",
-        description = "Flow 4: PENDING → APPROVED (Reserve kho tổng). "
-                    + "Flow 5: SOURCE_CONFIRMED → APPROVED (kiểm tra giá nội bộ)."
+        description = "Flow 4: PENDING -> APPROVED (reserve kho tổng). Flow 5: SOURCE_CONFIRMED -> APPROVED (kiểm tra giá nội bộ)."
     )
     @SecurityRequirement(name = "bearerAuth")
     @RequirePermission("TRANSFER_APPROVE")
@@ -126,9 +102,8 @@ public class InventoryTransferController {
         return ResponseEntity.ok("Đã duyệt phiếu điều chuyển.");
     }
 
-    // ─── Xuất kho ─────────────────────────────────────────────────────────────
     @Operation(
-        summary = "Xuất kho – hàng lên đường (APPROVED → SHIPPING)",
+        summary = "Xuất kho - hàng lên đường (APPROVED -> SHIPPING)",
         description = "Trừ thực tế khỏi kho nguồn, giải phóng reservation. Yêu cầu phiếu ở trạng thái APPROVED."
     )
     @SecurityRequirement(name = "bearerAuth")
@@ -143,28 +118,24 @@ public class InventoryTransferController {
         return ResponseEntity.ok("Đã xuất kho. Hàng đang trên đường vận chuyển.");
     }
 
-    // ─── Bắt đầu kiểm hàng ────────────────────────────────────────────────────
     @Operation(
-        summary = "Bắt đầu kiểm hàng (SHIPPING → INSPECTING)",
+        summary = "Bắt đầu kiểm hàng (SHIPPING -> INSPECTING)",
         description = "Chi nhánh nhận mở phiếu, nhấn 'Bắt đầu kiểm hàng'. Không có biến động kho ở bước này."
     )
     @SecurityRequirement(name = "bearerAuth")
-    @RequirePermission("TRANSFER_VIEW")
+    @RequirePermission("TRANSFER_CREATE")
     @PostMapping("/{id}/start-inspection")
     public ResponseEntity<String> startInspection(@PathVariable Long id) {
         transferService.startInspection(id);
         return ResponseEntity.ok("Đã bắt đầu kiểm hàng.");
     }
 
-    // ─── Hoàn thành nhận hàng (QC) ────────────────────────────────────────────
     @Operation(
-        summary = "Hoàn thành nhận hàng – QC (INSPECTING/SHIPPING → COMPLETED)",
-        description = "Nhập số lượng nhận tốt và số lượng lỗi/thiếu. "
-                    + "Hệ thống cộng hàng tốt vào kho nhận, cộng hàng lỗi vào kho lỗi hệ thống. "
-                    + "Với INTERNAL_SALE còn ghi nhận công nợ nội bộ (B nợ A)."
+        summary = "Hoàn thành nhận hàng - QC (INSPECTING -> COMPLETED)",
+        description = "Nhập số lượng nhận tốt và số lượng lỗi/thiếu. Hệ thống cộng hàng tốt vào kho nhận, cộng hàng lỗi vào kho lỗi hệ thống. Với INTERNAL_SALE còn ghi nhận công nợ nội bộ (B nợ A)."
     )
     @SecurityRequirement(name = "bearerAuth")
-    @RequirePermission("TRANSFER_APPROVE")
+    @RequirePermission("TRANSFER_CREATE")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Nhận hàng thành công"),
             @ApiResponse(responseCode = "400", description = "Lỗi nhận hàng")
@@ -175,7 +146,6 @@ public class InventoryTransferController {
         return ResponseEntity.ok("Đã xác nhận nhận hàng và kiểm đếm QC thành công.");
     }
 
-    // ─── Từ chối ──────────────────────────────────────────────────────────────
     @Operation(
         summary = "Từ chối phiếu điều chuyển",
         description = "Áp dụng khi phiếu ở PENDING hoặc SOURCE_CONFIRMED. Giải phóng reservation nếu có."
@@ -188,7 +158,7 @@ public class InventoryTransferController {
         return ResponseEntity.ok("Đã từ chối phiếu điều chuyển.");
     }
 
-    @Operation(summary = "Hủy phiếu điều chuyển", description = "Hủy phiếu và hoàn tồn kho nếu đang ở trạng thái SHIPPING.")
+    @Operation(summary = "Hủy phiếu điều chuyển", description = "Hủy phiếu và hoàn tồn kho nếu đang ở trạng thái reserve.")
     @SecurityRequirement(name = "bearerAuth")
     @RequirePermission("TRANSFER_CANCEL")
     @PutMapping("/{id}/cancel")

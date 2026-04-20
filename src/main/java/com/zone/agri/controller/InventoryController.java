@@ -67,13 +67,15 @@ public class InventoryController {
         return ResponseEntity.ok(inventoryService.approveReceipt(id));
     }
 
+    @SecurityRequirement(name = "bearerAuth")
+    @RequirePermission("IMPORT_APPROVE")
     @PostMapping("/receipts/{id}/reject")
     public ResponseEntity<InventoryReceiptResponse> rejectReceipt(@PathVariable Long id) {
         return ResponseEntity.ok(inventoryService.rejectReceipt(id));
     }
 
     @SecurityRequirement(name = "bearerAuth")
-    @RequirePermission("IMPORT_CREATE")
+    @RequirePermission("IMPORT_APPROVE")
     @PostMapping("/receipts/{id}/complete")
     public ResponseEntity<InventoryReceiptResponse> completeReceipt(
             @PathVariable Long id,
@@ -144,6 +146,7 @@ public class InventoryController {
     }
 
     @SecurityRequirement(name = "bearerAuth")
+    @RequirePermission("EXPORT_CREATE")
     @GetMapping("/defective-items")
     public ResponseEntity<List<com.zone.agri.dto.response.inventory.InventorySearchResponse>> getDefectiveItemsBySupplier(
             @RequestParam Long supplierId,
