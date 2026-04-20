@@ -50,6 +50,13 @@ public class InventoryNoteService {
                 .orElseThrow(() -> new SignInRequiredException("Tài khoản không tồn tại"));
     }
 
+    private boolean hasAuthority(String authority) {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        return auth != null
+                && auth.getAuthorities() != null
+                && auth.getAuthorities().stream().anyMatch(a -> authority.equals(a.getAuthority()));
+    }
+
     private boolean isWarehouseBranch(Branch branch) {
         return branch != null
                 && branch.getBranchType() != null
@@ -76,8 +83,13 @@ public class InventoryNoteService {
         note.setDebtAmount(BigDecimal.ZERO);
         note.setPaymentAmount(BigDecimal.ZERO);
 
-        // Save note (cascade will save details)
-        return mapToResponse(inventoryNoteRepository.save(note));
+        InventoryNote savedNote = inventoryNoteRepository.save(note);
+
+        if (hasAuthority("EXPORT_APPROVE")) {
+            return approveExportCommand(savedNote.getId());
+        }
+
+        return mapToResponse(savedNote);
     }
 
     @Transactional
