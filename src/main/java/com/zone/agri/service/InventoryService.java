@@ -249,8 +249,8 @@ public class InventoryService {
                 int defectiveQty = Objects.requireNonNullElse(qcItem.getQuantityRejected(), 0);
                 int deliveredQty = resolveDeliveredQty(qcItem, acceptedQty, defectiveQty);
 
-                if (acceptedQty + defectiveQty > deliveredQty) {
-                    throw new BadRequestException("SKU " + detail.getProductVariant().getSku() + ": accepted + defective không được lớn hơn số NCC giao.");
+                if (acceptedQty + defectiveQty != deliveredQty) {
+                    throw new BadRequestException("SKU " + detail.getProductVariant().getSku() + ": số lượng đạt và lỗi phải cộng lại đúng bằng số NCC giao.");
                 }
                 if (deliveredQty > plannedQty) {
                     throw new BadRequestException("SKU " + detail.getProductVariant().getSku() + ": số NCC giao không được vượt số lượng đã lập trên phiếu nhập.");
@@ -328,8 +328,8 @@ public class InventoryService {
             int defectiveQty = Objects.requireNonNullElse(detail.getQuantityRejected(), 0);
             int deliveredQty = Objects.requireNonNullElse(detail.getQuantityReal(), acceptedQty + defectiveQty);
 
-            if (acceptedQty + defectiveQty > deliveredQty) {
-                throw new BadRequestException("SKU " + detail.getProductVariant().getSku() + ": accepted + defective khĂ´ng Ä‘Æ°á»£c lá»›n hÆ¡n sá»‘ NCC giao.");
+            if (acceptedQty + defectiveQty != deliveredQty) {
+                throw new BadRequestException("SKU " + detail.getProductVariant().getSku() + ": sá»‘ lÆ°á»£ng Ä‘áº¡t vĂ  lá»—i pháº£i cá»™ng láº¡i Ä‘Ăºng báº±ng sá»‘ NCC giao.");
             }
             if (deliveredQty > plannedQty) {
                 throw new BadRequestException("SKU " + detail.getProductVariant().getSku() + ": sá»‘ NCC giao khĂ´ng Ä‘Æ°á»£c vÆ°á»£t sá»‘ lÆ°á»£ng Ä‘Ă£ láº­p trĂªn phiáº¿u nháº­p.");
