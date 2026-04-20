@@ -13,7 +13,7 @@ services:
     volumes:
       - mysql_data:/var/lib/mysql
     healthcheck:
-      test: [ "CMD", "mysqladmin", "ping", "-h", "localhost" ]
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -26,7 +26,7 @@ services:
     ports:
       - "${REDIS_PORT:-6379}:6379"
     healthcheck:
-      test: [ "CMD", "redis-cli", "ping" ]
+      test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -45,7 +45,13 @@ services:
     environment:
       PORT: 8000
     healthcheck:
-      test: [ "CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/ai/')" ]
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/ai/')",
+        ]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -76,7 +82,13 @@ services:
       # Cache CLIP model (~300MB) — tránh download lại mỗi lần restart
       - clip_model_cache:/root/.cache/clip
     healthcheck:
-      test: [ "CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5001/health')" ]
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:5001/health')",
+        ]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -98,7 +110,7 @@ services:
     ports:
       - "${APP_PORT:-8004}:8004"
     environment:
-      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-dev}
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-prod}
       SERVER_PORT: ${SERVER_PORT:-8004}
       # Database connection for container network
       SPRING_DATASOURCE_URL: jdbc:mysql://db:3306/${MYSQL_DATABASE:-agri_shrimp_db}?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
@@ -154,7 +166,6 @@ services:
       GHN_SHOP_ID: ${GHN_SHOP_ID:-}
       # OCR/Google Vision
       GOOGLE_VISION_API_KEY: ${GOOGLE_VISION_API_KEY}
-      
 
 volumes:
   mysql_data:
