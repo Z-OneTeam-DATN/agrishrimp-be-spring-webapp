@@ -1,9 +1,9 @@
 package com.zone.agri.service;
 
 import com.zone.agri.dto.response.product.ProductVariantResponse;
+import com.zone.agri.dto.response.inventory.InventorySearchResponse;
 import com.zone.agri.entity.Inventory;
 import com.zone.agri.entity.ProductVariant;
-import com.zone.agri.entity.enums.BranchStatus;
 import com.zone.agri.repository.InventoryRepository;
 import com.zone.agri.repository.ProductVariantRepository;
 import lombok.RequiredArgsConstructor;
@@ -15,7 +15,9 @@ import java.time.LocalDateTime;
 import java.math.BigDecimal;
 import java.util.Comparator;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.stream.Collectors;
 
@@ -84,57 +86,58 @@ public class ProductVariantService {
     public List<ProductVariantResponse> searchVariants(String keyword, Long branchId, String supplierCode) {
         String searchKey = (keyword == null) ? "" : keyword.trim();
 
-        return variantRepo.findAllActiveWithProduct(searchKey, supplierCode).stream().map(v -> {
-            List<Inventory> inventories = inventoryRepo.findByProductVariantId(v.getId()).stream()
-                    .filter(inv -> inv.getBranch() != null)
-                    .filter(inv -> inv.getBranch().getStatus() == null
-                            || inv.getBranch().getStatus() == BranchStatus.ACTIVE)
-                    .collect(Collectors.toList());
+        List<InventorySearchResponse> inventoryRows = inventoryRepo.searchInventoryForCheck(searchKey, branchId);
+        Map<Long, List<InventorySearchResponse>> rowsByVariantId = inventoryRows.stream()
+                .filter(row -> row.getVariantId() != null)
+                .collect(Collectors.groupingBy(
+                        InventorySearchResponse::getVariantId,
+                        LinkedHashMap::new,
+                        Collectors.toList()));
 
-            List<Inventory> scopedInventories = branchId != null
-                    ? inventories.stream()
-                            .filter(inv -> inv.getBranch() != null && inv.getBranch().getId().equals(branchId))
-                            .collect(Collectors.toList())
-                    : inventories;
+        return rowsByVariantId.values().stream()
+                .map(rows -> {
+                    InventorySearchResponse firstRow = rows.get(0);
 
-            int totalStock = scopedInventories.stream()
-                    .mapToInt(i -> Objects.requireNonNullElse(i.getQuantity(), 0))
-                    .sum();
+                    int totalStock = rows.stream()
+                            .map(InventorySearchResponse::getQuantity)
+                            .filter(Objects::nonNull)
+                            .mapToInt(Integer::intValue)
+                            .sum();
 
-            List<ProductVariantResponse.BatchInfoDto> batches = scopedInventories.stream()
-                    .filter(inv -> Objects.requireNonNullElse(inv.getQuantity(), 0) > 0)
-                    .map(inv -> ProductVariantResponse.BatchInfoDto.builder()
-                            .inventoryId(inv.getId())
-                            .branchName(inv.getBranch() != null ? inv.getBranch().getName() : null)
-                            .batchNumber(inv.getBatchNumber())
-                            .quantity(inv.getQuantity())
-                            .importPrice(inv.getImportPrice() != null ? inv.getImportPrice() : BigDecimal.ZERO)
-                            .sellingPrice(null)
-                            .expiryDate(inv.getExpiryDate() != null ? inv.getExpiryDate().toLocalDate().toString() : null)
-                            .build())
-                    .collect(Collectors.toList());
+                    List<ProductVariantResponse.BatchInfoDto> batches = rows.stream()
+                            .filter(row -> Objects.requireNonNullElse(row.getQuantity(), 0) > 0)
+                            .map(row -> ProductVariantResponse.BatchInfoDto.builder()
+                                    .inventoryId(null)
+                                    .branchName(row.getBranchName())
+                                    .batchNumber(row.getBatchNumber())
+                                    .quantity(row.getQuantity())
+                                    .importPrice(row.getImportPrice() != null ? row.getImportPrice() : BigDecimal.ZERO)
+                                    .sellingPrice(null)
+                                    .expiryDate(row.getExpiryDate() != null ? row.getExpiryDate().toLocalDate().toString() : null)
+                                    .build())
+                            .collect(Collectors.toList());
 
-            BigDecimal firstImportPrice = batches.stream()
-                    .map(ProductVariantResponse.BatchInfoDto::getImportPrice)
-                    .filter(Objects::nonNull)
-                    .findFirst()
-                    .orElse(BigDecimal.ZERO);
+                    BigDecimal firstImportPrice = batches.stream()
+                            .map(ProductVariantResponse.BatchInfoDto::getImportPrice)
+                            .filter(Objects::nonNull)
+                            .findFirst()
+                            .orElse(BigDecimal.ZERO);
 
-            return ProductVariantResponse.builder()
-                    .id(v.getId())
-                    .sku(v.getSku())
-                    .barcode(v.getBarcode())
-                    .productName(v.getProduct() != null ? v.getProduct().getName() : "Sản phẩm không xác định")
-                    .price(null)
-                    .importPrice(firstImportPrice)
-                    .imageUrl(v.getImageUrl())
-                    .status(v.getStatus())
-                    .quantity(totalStock)
-                    .lowStock(totalStock < 10)
-                    .batches(batches)
-                    .attributeValues(Collections.emptyList())
-                    .build();
-        })
+                    return ProductVariantResponse.builder()
+                            .id(firstRow.getVariantId())
+                            .sku(firstRow.getSku())
+                            .barcode(firstRow.getBarcode())
+                            .productName(firstRow.getProductName() != null ? firstRow.getProductName() : "Sản phẩm không xác định")
+                            .price(null)
+                            .importPrice(firstImportPrice)
+                            .imageUrl(firstRow.getImageUrl())
+                            .status(null)
+                            .quantity(totalStock)
+                            .lowStock(totalStock < 10)
+                            .batches(batches)
+                            .attributeValues(Collections.emptyList())
+                            .build();
+                })
                 .sorted(Comparator.comparing(ProductVariantResponse::isLowStock, Comparator.reverseOrder())
                         .thenComparing(ProductVariantResponse::getProductName, Comparator.nullsLast(String::compareTo)))
                 .collect(Collectors.toList());
