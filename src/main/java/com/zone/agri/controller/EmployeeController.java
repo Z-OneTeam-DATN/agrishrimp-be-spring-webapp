@@ -5,6 +5,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.web.PageableDefault;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -12,10 +13,10 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.multipart.MultipartFile;
 
 import com.zone.agri.dto.request.employee.EmployeeCreateRequest;
 import com.zone.agri.dto.response.employee.EmployeeResponse;
@@ -35,7 +36,6 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.web.multipart.MultipartFile;
 
 /**
  * REST Controller for Employee management
@@ -154,6 +154,24 @@ public class EmployeeController {
                 log.info("Deleting employee ID: {}", id);
                 employeeService.deleteEmployee(id);
                 return ResponseEntity.noContent().build();
+        }
+
+        /**
+         * Resend employee account credentials
+         * Endpoint: POST /api/employees/{id}/resend-credentials
+         */
+        @PostMapping("/{id}/resend-credentials")
+        @SecurityRequirement(name = "bearerAuth")
+        @RequirePermission("STAFF_UPDATE")
+        @Operation(summary = "Gửi lại thông tin tài khoản nhân viên", description = "Sinh mật khẩu mới, cập nhật tài khoản và gửi lại email thông tin đăng nhập cho nhân viên.", responses = {
+                        @ApiResponse(responseCode = "200", description = "Gửi lại email thành công"),
+                        @ApiResponse(responseCode = "404", description = "Không tìm thấy nhân viên"),
+                        @ApiResponse(responseCode = "400", description = "Nhân viên chưa có email")
+        })
+        public ResponseEntity<Void> resendCredentials(@PathVariable Long id) {
+                log.info("Resending employee credentials for ID: {}", id);
+                employeeService.resendEmployeeCredentials(id);
+                return ResponseEntity.ok().build();
         }
 
         /**

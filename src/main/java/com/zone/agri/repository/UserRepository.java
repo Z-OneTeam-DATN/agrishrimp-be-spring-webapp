@@ -44,6 +44,20 @@ public interface UserRepository extends JpaRepository<User, Long> {
                         @Param("status") com.zone.agri.entity.enums.UserStatus status,
                         Pageable pageable);
 
+        @Query("SELECT u FROM User u WHERE " +
+                        "u.role.slug NOT IN ('CUSTOMER', 'USER') AND " +
+                        "(:keyword IS NULL OR LOWER(u.fullName) LIKE LOWER(CONCAT('%', :keyword, '%')) OR u.email LIKE LOWER(CONCAT('%', :keyword, '%')) OR u.phoneNumber LIKE CONCAT('%', :keyword, '%') OR u.citizenId LIKE CONCAT('%', :keyword, '%')) AND "
+                        +
+                        "(:roleId IS NULL OR u.role.id = :roleId) AND " +
+                        "(:branchId IS NULL OR u.branch.id = :branchId) AND " +
+                        "(:status IS NULL OR u.status = :status)")
+        Page<User> findAllEmployeesWithFilter(
+                        @Param("keyword") String keyword,
+                        @Param("roleId") Long roleId,
+                        @Param("branchId") Long branchId,
+                        @Param("status") com.zone.agri.entity.enums.UserStatus status,
+                        Pageable pageable);
+
         @Query("SELECT u FROM User u WHERE u.role.slug IN ('CUSTOMER', 'USER') " +
                         "AND (:branchId IS NULL OR u.branch.id = :branchId) " +
                         "ORDER BY u.createdAt DESC")
