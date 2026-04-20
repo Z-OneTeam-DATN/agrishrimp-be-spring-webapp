@@ -69,6 +69,17 @@ public class PurchaseRequestService {
         }
     }
 
+    private Branch resolveRequestBranch(PurchaseRequestCreateRequest request) {
+        if (request.getBranchId() != null) {
+            return branchRepository.findById(request.getBranchId())
+                    .orElseThrow(() -> new NotFoundException("Khong tim thay chi nhanh ID: " + request.getBranchId()));
+        }
+
+        String branchName = request.getBranchName() != null ? request.getBranchName().trim() : "";
+        return branchRepository.findByName(branchName)
+                .orElseThrow(() -> new NotFoundException("Chi nhanh khong ton tai: " + branchName));
+    }
+
     private String generateCode() {
         String prefix = "YCM-";
         String ts = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyMMddHHmmss"));
@@ -84,8 +95,7 @@ public class PurchaseRequestService {
         Supplier supplier = supplierRepository.findByCode(request.getSupplierCode())
                 .orElseThrow(() -> new NotFoundException("Nhà cung cấp không tồn tại: " + request.getSupplierCode()));
 
-        Branch branch = branchRepository.findByName(request.getBranchName())
-                .orElseThrow(() -> new NotFoundException("Chi nhánh không tồn tại: " + request.getBranchName()));
+        Branch branch = resolveRequestBranch(request);
         validateMainWarehouseBranch(branch);
         warehouseContext.assertAccess(branch.getId());
 
@@ -189,8 +199,7 @@ public class PurchaseRequestService {
 
         Supplier supplier = supplierRepository.findByCode(request.getSupplierCode())
                 .orElseThrow(() -> new NotFoundException("Nhà cung cấp không tồn tại"));
-        Branch branch = branchRepository.findByName(request.getBranchName())
-                .orElseThrow(() -> new NotFoundException("Chi nhánh không tồn tại"));
+        Branch branch = resolveRequestBranch(request);
         validateMainWarehouseBranch(branch);
         warehouseContext.assertAccess(branch.getId());
 
@@ -587,3 +596,4 @@ public class PurchaseRequestService {
                 .build();
     }
 }
+

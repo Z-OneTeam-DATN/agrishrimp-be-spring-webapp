@@ -5,13 +5,12 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Positive;
+import java.math.BigDecimal;
+import java.util.List;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
-
-import java.math.BigDecimal;
-import java.util.List;
 
 @Data
 @Builder
@@ -19,17 +18,19 @@ import java.util.List;
 @AllArgsConstructor
 public class PurchaseRequestCreateRequest {
 
-    @NotBlank(message = "Mã nhà cung cấp không được để trống")
+    @NotBlank(message = "Ma nha cung cap khong duoc de trong")
     private String supplierCode;
 
-    @NotBlank(message = "Vui lòng chọn chi nhánh nhận hàng")
+    @NotBlank(message = "Vui long chon chi nhanh nhan hang")
     private String branchName;
 
-    private String expectedDeliveryDate; // ISO date string (yyyy-MM-dd)
+    private Long branchId;
+
+    private String expectedDeliveryDate;
 
     private String note;
 
-    @NotEmpty(message = "Phiếu yêu cầu phải có ít nhất 1 sản phẩm")
+    @NotEmpty(message = "Phieu yeu cau phai co it nhat 1 san pham")
     @Valid
     private List<ItemRequest> items;
 
@@ -39,11 +40,11 @@ public class PurchaseRequestCreateRequest {
     @AllArgsConstructor
     public static class ItemRequest {
 
-        @NotBlank(message = "Mã sản phẩm không được để trống")
-        private String productCode; // SKU của variant
+        @NotBlank(message = "Ma san pham khong duoc de trong")
+        private String productCode;
 
-        @NotNull(message = "Số lượng yêu cầu không được để trống")
-        @Positive(message = "Số lượng yêu cầu phải lớn hơn 0")
+        @NotNull(message = "So luong yeu cau khong duoc de trong")
+        @Positive(message = "So luong yeu cau phai lon hon 0")
         private Integer requestedQty;
 
         private BigDecimal unitPrice;
