@@ -83,12 +83,10 @@ public class InventoryService {
         updateMetadata(noteEntity, request, destBranch, supplier);
         noteEntity.setPurchaseRequest(linkedPurchaseRequest);
 
-        // LUỒNG MỚI: Nếu là Admin (có quyền IMPORT_APPROVE) tạo thì APPROVED luôn, ngược lại PENDING
-        if (hasAuthority("IMPORT_APPROVE")) {
-            noteEntity.setStatus(InventoryNoteStatus.APPROVED);
-        } else {
-            noteEntity.setStatus(InventoryNoteStatus.PENDING);
-        }
+        // Quy trình 2: GR luôn bắt đầu ở PENDING_GR_APPROVAL (= PENDING).
+        // Kể cả Admin tạo cũng phải PENDING để có bước kiểm tra trước khi duyệt.
+        // Bước Duyệt (approveReceipt) mới là nơi cộng kho và ghi nợ NCC.
+        noteEntity.setStatus(InventoryNoteStatus.PENDING);
 
         noteEntity = noteRepository.save(noteEntity);
         validateReceiptItemsAgainstPurchaseRequest(linkedPurchaseRequest, request.getItems(), noteEntity.getId());
@@ -135,21 +133,78 @@ public class InventoryService {
         return mapToResponse(noteRepository.save(existingNote));
     }
 
-    // --- 2.1. DUYỆT PHIẾU (Cho Admin) ---
+    // ──────────────────────────────────────────────────────────────────────────
+    // DUYỆT PHIẾU NHẬP (Admin) – Quy trình 2
+    // Trong một Transaction duy nhất:
+    //   1. Cộng Số lượng Đạt vào Kho chính (quantity)
+    //   2. Cộng Số lượng Lỗi vào Kho chờ xử lý (defectiveQuantity)
+    //   3. Ghi nhận Công nợ NCC = (Đạt + Lỗi) × Đơn giá
+    //   4. Cập nhật trạng thái PO gốc (PARTIALLY_RECEIVED / COMPLETED)
+    //   5. Đặt status GR = COMPLETED
+    // ──────────────────────────────────────────────────────────────────────────
     @Transactional
     public InventoryReceiptResponse approveReceipt(Long id) {
-        InventoryNote note = noteRepository.findById(id)
+        InventoryNote note = noteRepository.findByIdWithDetails(id)
                 .orElseThrow(() -> new NotFoundException("Không tìm thấy phiếu ID: " + id));
         warehouseContext.assertAccess(note.getBranch().getId());
+
         if (note.getStatus() != InventoryNoteStatus.PENDING) {
-            throw new BadRequestException("Chỉ có thể duyệt phiếu đang ở trạng thái Chờ duyệt.");
+            throw new BadRequestException("Chỉ có thể duyệt phiếu đang ở trạng thái Chờ duyệt (PENDING).");
         }
-        note.setStatus(InventoryNoteStatus.APPROVED);
-        note = noteRepository.save(note);
-        if (hasStoredQcDecision(note)) {
-            note = finalizeReceiptCompletion(note);
+        if (note.getType() != InventoryNoteType.IMPORT) {
+            throw new BadRequestException("Endpoint này chỉ dùng để duyệt Phiếu nhập kho (IMPORT).");
         }
-        return mapToResponse(note);
+
+        BigDecimal totalDebt = BigDecimal.ZERO;
+
+        for (InventoryNoteDetail detail : note.getDetails()) {
+            int accepted  = Objects.requireNonNullElse(detail.getQuantityAccepted(), 0);
+            int defective = Objects.requireNonNullElse(detail.getQuantityRejected(), 0);
+
+            // Nếu GR được tạo mà không có QC data (quantityAccepted chưa set), lấy từ plannedQuantity
+            if (accepted == 0 && defective == 0) {
+                int planned = Objects.requireNonNullElse(detail.getQuantityRequested(), 0);
+                accepted = planned;
+                detail.setQuantityAccepted(planned);
+                detail.setQuantityReal(planned);
+            }
+
+            // Cập nhật tồn kho: Đạt → quantity, Lỗi → defectiveQuantity
+            if (accepted > 0 || defective > 0) {
+                updateStockWithQC(note, detail);
+            }
+
+            // Công nợ NCC = (Đạt + Lỗi) × Đơn giá
+            // Lý do: NCC đã giao đến cửa, hóa đơn tính cả lô hàng.
+            // Phần lỗi sẽ được trừ ngược lại khi hoàn trả qua Phiếu xuất trả.
+            BigDecimal price = Objects.requireNonNullElse(detail.getPrice(), BigDecimal.ZERO);
+            totalDebt = totalDebt.add(price.multiply(BigDecimal.valueOf(accepted + defective)));
+        }
+
+        note.setTotalAmount(totalDebt);
+        note.setDebtAmount(totalDebt.subtract(Objects.requireNonNullElse(note.getPaymentAmount(), BigDecimal.ZERO)));
+        note.setStatus(InventoryNoteStatus.COMPLETED);
+
+        InventoryNote savedNote = noteRepository.save(note);
+
+        // Cập nhật lũy kế trên Phiếu yêu cầu mua (PO)
+        if (savedNote.getPurchaseRequest() != null) {
+            PurchaseRequestService prService = applicationContext.getBean(PurchaseRequestService.class);
+            prService.updateCumulativeQtyAfterReceipt(savedNote);
+        }
+
+        // Kích hoạt xử lý backorder (hàng đạt được nhập vào kho)
+        for (InventoryNoteDetail detail : savedNote.getDetails()) {
+            int accepted = Objects.requireNonNullElse(detail.getQuantityAccepted(), 0);
+            if (accepted > 0) {
+                backorderService.fulfillBackordersOnStockReceive(
+                        savedNote.getBranch().getId(),
+                        detail.getProductVariant().getId(),
+                        accepted);
+            }
+        }
+
+        return mapToResponse(savedNote);
     }
 
     @Transactional

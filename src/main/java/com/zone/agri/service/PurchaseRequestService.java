@@ -91,16 +91,25 @@ public class PurchaseRequestService {
             expectedDate = LocalDate.parse(request.getExpectedDeliveryDate()).atStartOfDay();
         }
 
+        // Quy trình 1: Admin tạo → APPROVED ngay (không cần chờ duyệt).
+        //              Quản lý kho tổng tạo → PENDING_APPROVAL (chờ Admin duyệt).
+        User creator = getCurrentUser();
+        PurchaseRequestStatus initialStatus = hasAuthority("PURCHASE_REQUEST_APPROVE")
+                ? PurchaseRequestStatus.APPROVED
+                : PurchaseRequestStatus.PENDING_APPROVAL;
+
+        LocalDateTime approvedAt = initialStatus == PurchaseRequestStatus.APPROVED ? LocalDateTime.now() : null;
+
         PurchaseRequest pr = PurchaseRequest.builder()
                 .code(code)
-                .status(hasAuthority("PURCHASE_REQUEST_APPROVE") || hasRole("ADMIN")
-                        ? PurchaseRequestStatus.APPROVED
-                        : PurchaseRequestStatus.PENDING_APPROVAL)
+                .status(initialStatus)
                 .supplier(supplier)
                 .branch(branch)
                 .expectedDeliveryDate(expectedDate)
                 .note(request.getNote())
-                .createdBy(getCurrentUser())
+                .createdBy(creator)
+                .approvedBy(initialStatus == PurchaseRequestStatus.APPROVED ? creator : null)
+                .approvedAt(approvedAt)
                 .items(new ArrayList<>())
                 .build();
 
@@ -276,8 +285,10 @@ public class PurchaseRequestService {
     public PurchaseRequestResponse submit(Long id) {
         PurchaseRequest pr = findOrThrow(id);
         warehouseContext.assertAccess(pr.getBranch().getId());
-        if (pr.getStatus() != PurchaseRequestStatus.DRAFT) {
-            throw new BadRequestException("Chỉ có thể gửi duyệt phiếu ở trạng thái Nháp.");
+        // Hỗ trợ cả DRAFT (flow cũ) lẫn PENDING_APPROVAL (nếu FE gọi lại submit)
+        if (pr.getStatus() != PurchaseRequestStatus.DRAFT
+                && pr.getStatus() != PurchaseRequestStatus.PENDING_APPROVAL) {
+            throw new BadRequestException("Chỉ có thể gửi duyệt phiếu ở trạng thái Nháp hoặc Chờ duyệt.");
         }
         pr.setStatus(PurchaseRequestStatus.PENDING_APPROVAL);
         return mapToResponseShallow(purchaseRequestRepository.save(pr));

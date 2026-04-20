@@ -131,6 +131,18 @@ public class InventoryController {
         return ResponseEntity.ok(inventoryReceiptPaymentService.createReceiptPayment(id, request));
     }
 
+    /**
+     * Quy trình 3 – Hướng 1 (Nhanh):
+     * Tạo Phiếu xuất trả NCC trực tiếp từ Phiếu nhập kho đã duyệt (COMPLETED).
+     * Hệ thống tự điền NCC + danh sách hàng lỗi, khóa cứng đơn giá = đơn giá nhập.
+     */
+    @SecurityRequirement(name = "bearerAuth")
+    @RequirePermission("EXPORT_CREATE")
+    @PostMapping("/receipts/{id}/create-return")
+    public ResponseEntity<InventoryNoteResponse> createReturnFromGR(@PathVariable Long id) {
+        return ResponseEntity.ok(inventoryNoteService.createReturnFromGR(id));
+    }
+
     @SecurityRequirement(name = "bearerAuth")
     @GetMapping("/defective-items")
     public ResponseEntity<List<com.zone.agri.dto.response.inventory.InventorySearchResponse>> getDefectiveItemsBySupplier(

@@ -255,27 +255,122 @@ public class InventoryTransferService {
         return transfers;
     }
 
+    // ==========================================
+    // LUỒNG 4 & 5 – BƯỚC 2: DUYỆT (Admin duyệt)
+    // - Flow 4 (STOCK_TRANSFER): PENDING → APPROVED  + Reserve kho nguồn
+    // - Flow 5 (INTERNAL_SALE) : SOURCE_CONFIRMED → APPROVED + Validate giá điều chuyển
+    // ==========================================
     @Transactional
     public void approveTransfer(Long transferId) {
         InventoryTransfer transfer = transferRepo.findById(transferId)
                 .orElseThrow(() -> new RuntimeException("Không tìm thấy phiếu điều chuyển"));
 
-        if (transfer.getStatus() != InventoryTransferStatus.PENDING) {
-            throw new RuntimeException("Chỉ có thể duyệt phiếu đang ở trạng thái Chờ duyệt!");
+        boolean isFlow5 = transfer.getTransferBusinessType() == TransferBusinessType.INTERNAL_SALE;
+
+        if (isFlow5) {
+            // Flow 5: phải qua SOURCE_CONFIRMED trước
+            if (transfer.getStatus() != InventoryTransferStatus.SOURCE_CONFIRMED) {
+                throw new RuntimeException("Phiếu bán nội bộ phải được chi nhánh nguồn xác nhận trước khi Admin duyệt!");
+            }
+        } else {
+            // Flow 4: từ PENDING
+            if (transfer.getStatus() != InventoryTransferStatus.PENDING) {
+                throw new RuntimeException("Chỉ có thể duyệt phiếu đang ở trạng thái Chờ duyệt!");
+            }
+            // Reserve kho tổng khi Admin duyệt (Flow 4)
+            reserveSourceStock(transfer);
         }
 
         transfer.setStatus(InventoryTransferStatus.APPROVED);
         transferRepo.save(transfer);
     }
 
+    // ==========================================
+    // LUỒNG 5 – BƯỚC 2a: CHI NHÁNH NGUỒN XÁC NHẬN
+    // PENDING → SOURCE_CONFIRMED + Reserve kho chi nhánh A
+    // ==========================================
+    @Transactional
+    public void sourceConfirm(Long transferId) {
+        InventoryTransfer transfer = transferRepo.findById(transferId)
+                .orElseThrow(() -> new RuntimeException("Không tìm thấy phiếu điều chuyển"));
+
+        if (transfer.getTransferBusinessType() != TransferBusinessType.INTERNAL_SALE) {
+            throw new RuntimeException("Chỉ phiếu bán nội bộ (INTERNAL_SALE) mới cần bước xác nhận của chi nhánh nguồn!");
+        }
+        if (transfer.getStatus() != InventoryTransferStatus.PENDING) {
+            throw new RuntimeException("Chỉ có thể xác nhận phiếu đang ở trạng thái Chờ xác nhận (PENDING)!");
+        }
+
+        // Validate giá nội bộ (mỗi dòng phải có unitTransferPrice > 0)
+        for (InventoryTransferDetail detail : transfer.getDetails()) {
+            if (detail.getUnitTransferPrice() == null || detail.getUnitTransferPrice().compareTo(BigDecimal.ZERO) <= 0) {
+                throw new RuntimeException("Phiếu bán nội bộ yêu cầu đơn giá điều chuyển > 0 (SKU: "
+                        + detail.getProductVariant().getSku() + ")");
+            }
+        }
+
+        // Kiểm tra và Reserve kho chi nhánh A
+        reserveSourceStock(transfer);
+
+        transfer.setStatus(InventoryTransferStatus.SOURCE_CONFIRMED);
+        transferRepo.save(transfer);
+    }
+
+    // ==========================================
+    // LUỒNG 4 & 5 – BƯỚC 3: XUẤT KHO (Đang vận chuyển)
+    // APPROVED → SHIPPING: Trừ thực tế khỏi kho nguồn, giải phóng Reserve
+    // ==========================================
     @Transactional
     public void approveAndShip(Long transferId) {
         InventoryTransfer transfer = transferRepo.findByIdWithDetails(transferId)
                 .orElseThrow(() -> new RuntimeException("Không tìm thấy phiếu điều chuyển"));
 
-        if (transfer.getStatus() != InventoryTransferStatus.APPROVED
-                && transfer.getStatus() != InventoryTransferStatus.PENDING) {
-            throw new RuntimeException("Chỉ có thể xuất kho phiếu đang ở trạng thái Chờ duyệt hoặc Đã duyệt!");
+        if (transfer.getStatus() != InventoryTransferStatus.APPROVED) {
+            throw new RuntimeException("Chỉ có thể xuất kho phiếu đã được duyệt (APPROVED)!");
+        }
+
+        Long fromBranchId = transfer.getFromBranch().getId();
+
+        for (InventoryTransferDetail detail : transfer.getDetails()) {
+            Long variantId = detail.getProductVariant().getId();
+            int qtyToShip = Objects.requireNonNullElse(detail.getQuantity(), 0);
+            if (qtyToShip <= 0) continue;
+
+            // Trừ quantity thực tế theo FIFO + Giải phóng reservedQuantity
+            int remaining = qtyToShip;
+            List<Inventory> batches = inventoryRepo.findForUpdateFIFO(fromBranchId, variantId);
+            for (Inventory batch : batches) {
+                if (remaining <= 0) break;
+                int available = Objects.requireNonNullElse(batch.getQuantity(), 0);
+                if (available <= 0) continue;
+
+                int deduct = Math.min(available, remaining);
+                batch.setQuantity(available - deduct);
+
+                // Giải phóng reservation tương ứng
+                int reserved = Objects.requireNonNullElse(batch.getReservedQuantity(), 0);
+                batch.setReservedQuantity(Math.max(0, reserved - deduct));
+
+                inventoryRepo.save(batch);
+
+                transactionRepo.save(InventoryTransaction.builder()
+                        .type(TransactionType.TRANSFER_OUT)
+                        .quantityChange(-deduct)
+                        .newBalance(Objects.requireNonNullElse(batch.getQuantity(), 0)
+                                + Objects.requireNonNullElse(batch.getDefectiveQuantity(), 0))
+                        .referenceCode(transfer.getTransferCode())
+                        .reason("Xuất điều chuyển (Phiếu: " + transfer.getTransferCode() + ")")
+                        .createdAt(LocalDateTime.now())
+                        .inventory(batch)
+                        .build());
+
+                remaining -= deduct;
+            }
+
+            if (remaining > 0) {
+                throw new RuntimeException("Kho nguồn không đủ hàng để xuất cho SKU: "
+                        + detail.getProductVariant().getSku());
+            }
         }
 
         transfer.setStatus(InventoryTransferStatus.SHIPPING);
@@ -283,15 +378,36 @@ public class InventoryTransferService {
     }
 
     // ==========================================
-    // BƯỚC 3: NHẬN HÀNG (TRỪ KHO XUẤT & CỘNG KHO NHẬP THEO QC)
+    // LUỒNG 4 & 5 – BƯỚC 4: BẮT ĐẦU KIỂM HÀNG
+    // SHIPPING → INSPECTING
+    // ==========================================
+    @Transactional
+    public void startInspection(Long transferId) {
+        InventoryTransfer transfer = transferRepo.findById(transferId)
+                .orElseThrow(() -> new RuntimeException("Không tìm thấy phiếu điều chuyển"));
+
+        if (transfer.getStatus() != InventoryTransferStatus.SHIPPING) {
+            throw new RuntimeException("Phiếu phải đang ở trạng thái Đang vận chuyển (SHIPPING) mới có thể bắt đầu kiểm hàng!");
+        }
+
+        transfer.setStatus(InventoryTransferStatus.INSPECTING);
+        transferRepo.save(transfer);
+    }
+
+    // ==========================================
+    // LUỒNG 4 & 5 – BƯỚC 5: HOÀN THÀNH NHẬN HÀNG (QC + Cập nhật tồn kho đích)
+    // INSPECTING → COMPLETED
+    // Flow 5 bổ sung: Ghi nhận công nợ nội bộ (B nợ A theo số lượng đã gửi đi × giá)
     // ==========================================
     @Transactional
     public void receiveTransfer(Long id, List<TransferQCRequest> qcItems) {
         InventoryTransfer transfer = transferRepo.findByIdWithDetails(id)
                 .orElseThrow(() -> new RuntimeException("Không tìm thấy phiếu điều chuyển"));
 
-        if (transfer.getStatus() != InventoryTransferStatus.SHIPPING) {
-            throw new RuntimeException("Phiếu phải ở trạng thái Đang vận chuyển mới có thể nhận hàng!");
+        // Hỗ trợ cả SHIPPING (skip bước INSPECTING) lẫn INSPECTING (đúng flow mới)
+        if (transfer.getStatus() != InventoryTransferStatus.INSPECTING
+                && transfer.getStatus() != InventoryTransferStatus.SHIPPING) {
+            throw new RuntimeException("Phiếu phải ở trạng thái Đang kiểm hàng (INSPECTING) hoặc Đang vận chuyển (SHIPPING) mới có thể xác nhận nhận hàng!");
         }
 
         Map<Long, InventoryTransferDetail> detailMap = transfer.getDetails().stream()
@@ -300,44 +416,122 @@ public class InventoryTransferService {
                         d -> d,
                         (existing, replacement) -> existing));
 
+        Branch toBranch = transfer.getToBranch();
+
         for (TransferQCRequest qcItemReq : qcItems) {
             Long variantId = qcItemReq.getVariantId();
-            Integer qtyReal = qcItemReq.getQuantityReal();
-            Integer qtyAccepted = qcItemReq.getQuantityAccepted();
-            Integer qtyRejected = qcItemReq.getQuantityRejected();
+            int qtyReal     = Objects.requireNonNullElse(qcItemReq.getQuantityReal(), 0);
+            int qtyAccepted = Objects.requireNonNullElse(qcItemReq.getQuantityAccepted(), 0);
+            int qtyRejected = Objects.requireNonNullElse(qcItemReq.getQuantityRejected(), 0);
             String itemNote = qcItemReq.getNote();
 
             InventoryTransferDetail detail = detailMap.get(variantId);
-            if (detail == null)
-                continue;
+            if (detail == null) continue;
 
             detail.setQuantityReal(qtyReal);
             detail.setQuantityAccepted(qtyAccepted);
             detail.setQuantityRejected(qtyRejected);
-            // Ghi nhận lý do hàng lỗi vào note (Ví dụ: "5 hộp móp méo")
             detail.setNote(itemNote);
 
-            // Xử lý tồn kho: Thực tế bên kia xuất bao nhiêu thì trừ bấy nhiêu, còn bên này
-            // nhận bao nhiêu thì cộng bấy nhiêu
-            if (qtyReal > 0) {
-                Long fromBranchId = transfer.getFromBranch().getId();
-                Branch toBranch = transfer.getToBranch();
-
-                // 1. Trừ kho xuất (Trừ theo tổng thực tế đi đường)
-                deductSourceStock(transfer, fromBranchId, variantId, qtyReal);
-
-                // 2. Cộng kho nhận (Chỉ cộng hàng Đạt vào Available, hàng Lỗi vào Defective)
+            // Cộng kho nhận: hàng đạt vào quantity, hàng lỗi vào defectiveQuantity
+            if (qtyAccepted > 0 || qtyRejected > 0) {
                 addDestinationStock(transfer, toBranch, detail.getProductVariant(), qtyAccepted, qtyRejected);
-
-                // 👉 KÍCH HOẠT XỬ LÝ BACKORDER: Tự động trừ kho và đẩy đơn
-                // AWAITING_REPLENISHMENT -> PROCESSING
-                // Dùng qtyAccepted (hàng đạt chất lượng) để trả nợ đơn hàng
-                backorderService.fulfillBackordersOnStockReceive(toBranch.getId(), variantId, qtyAccepted);
+                // Kích hoạt xử lý backorder cho hàng đạt
+                if (qtyAccepted > 0) {
+                    backorderService.fulfillBackordersOnStockReceive(toBranch.getId(), variantId, qtyAccepted);
+                }
             }
+        }
+
+        // ── Flow 5 (INTERNAL_SALE): Ghi nhận công nợ nội bộ ─────────────────
+        // B nợ A = Σ(quantityRequested × unitTransferPrice) cho mỗi dòng hàng.
+        // Lưu ý: tính theo quantityRequested (số lượng A gửi đi), KHÔNG phải
+        // quantityAccepted, vì A không chịu trách nhiệm về hàng hỏng trong vận chuyển.
+        if (transfer.getTransferBusinessType() == TransferBusinessType.INTERNAL_SALE) {
+            BigDecimal actualDebt = transfer.getDetails().stream()
+                    .map(d -> {
+                        BigDecimal unitPrice = d.getUnitTransferPrice() != null ? d.getUnitTransferPrice() : BigDecimal.ZERO;
+                        int qty = Objects.requireNonNullElse(d.getQuantity(), 0); // quantityRequested (số lượng gửi đi)
+                        return unitPrice.multiply(BigDecimal.valueOf(qty));
+                    })
+                    .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+            transfer.setTransferAmount(actualDebt);
+            transfer.setSourceReceivableAmount(actualDebt); // A phải thu
+            transfer.setDestPayableAmount(actualDebt);       // B phải trả
+            transfer.setSettlementStatus(TransferSettlementStatus.UNPAID);
         }
 
         transfer.setStatus(InventoryTransferStatus.COMPLETED);
         transferRepo.save(transfer);
+    }
+
+    // ==========================================
+    // HELPER: KIỂM TRA & RESERVE KHO NGUỒN
+    // Được gọi tại bước APPROVED (Flow 4) hoặc SOURCE_CONFIRMED (Flow 5)
+    // ==========================================
+    private void reserveSourceStock(InventoryTransfer transfer) {
+        Long fromBranchId = transfer.getFromBranch().getId();
+
+        for (InventoryTransferDetail detail : transfer.getDetails()) {
+            Long variantId = detail.getProductVariant().getId();
+            int qtyNeeded  = Objects.requireNonNullElse(detail.getQuantity(), 0);
+            if (qtyNeeded <= 0) continue;
+
+            List<Inventory> batches = inventoryRepo.findForUpdateFIFO(fromBranchId, variantId);
+
+            // Tổng khả dụng = quantity - reservedQuantity
+            int totalAvailable = batches.stream()
+                    .mapToInt(b -> Math.max(0,
+                            Objects.requireNonNullElse(b.getQuantity(), 0)
+                            - Objects.requireNonNullElse(b.getReservedQuantity(), 0)))
+                    .sum();
+
+            if (totalAvailable < qtyNeeded) {
+                throw new RuntimeException(String.format(
+                        "Kho nguồn không đủ tồn kho khả dụng để Reserve cho SKU %s. Cần: %d, Khả dụng: %d",
+                        detail.getProductVariant().getSku(), qtyNeeded, totalAvailable));
+            }
+
+            // Reserve theo thứ tự FIFO
+            int toReserve = qtyNeeded;
+            for (Inventory batch : batches) {
+                if (toReserve <= 0) break;
+                int avail = Math.max(0,
+                        Objects.requireNonNullElse(batch.getQuantity(), 0)
+                        - Objects.requireNonNullElse(batch.getReservedQuantity(), 0));
+                if (avail <= 0) continue;
+
+                int take = Math.min(avail, toReserve);
+                batch.setReservedQuantity(Objects.requireNonNullElse(batch.getReservedQuantity(), 0) + take);
+                inventoryRepo.save(batch);
+                toReserve -= take;
+            }
+        }
+    }
+
+    // ==========================================
+    // HELPER: GIẢI PHÓNG RESERVE (dùng khi hủy phiếu đã được APPROVED/SOURCE_CONFIRMED)
+    // ==========================================
+    private void releaseReservedStock(InventoryTransfer transfer) {
+        Long fromBranchId = transfer.getFromBranch().getId();
+        for (InventoryTransferDetail detail : transfer.getDetails()) {
+            Long variantId = detail.getProductVariant().getId();
+            int qtyToRelease = Objects.requireNonNullElse(detail.getQuantity(), 0);
+            if (qtyToRelease <= 0) continue;
+
+            List<Inventory> batches = inventoryRepo.findForUpdateFIFO(fromBranchId, variantId);
+            int toRelease = qtyToRelease;
+            for (Inventory batch : batches) {
+                if (toRelease <= 0) break;
+                int reserved = Objects.requireNonNullElse(batch.getReservedQuantity(), 0);
+                if (reserved <= 0) continue;
+                int release = Math.min(reserved, toRelease);
+                batch.setReservedQuantity(reserved - release);
+                inventoryRepo.save(batch);
+                toRelease -= release;
+            }
+        }
     }
 
     private void deductSourceStock(InventoryTransfer transfer, Long fromBranchId, Long variantId, int totalToDeduct) {
@@ -438,8 +632,15 @@ public class InventoryTransferService {
     public void rejectTransfer(Long id) {
         InventoryTransfer transfer = transferRepo.findById(id)
                 .orElseThrow(() -> new RuntimeException("Không tìm thấy phiếu điều chuyển"));
-        if (transfer.getStatus() != InventoryTransferStatus.PENDING) {
-            throw new RuntimeException("Chỉ có thể từ chối phiếu đang ở trạng thái Chờ duyệt!");
+
+        // Cho phép từ chối ở cả PENDING và SOURCE_CONFIRMED
+        if (transfer.getStatus() != InventoryTransferStatus.PENDING
+                && transfer.getStatus() != InventoryTransferStatus.SOURCE_CONFIRMED) {
+            throw new RuntimeException("Chỉ có thể từ chối phiếu đang ở trạng thái Chờ duyệt hoặc Chờ xác nhận nguồn!");
+        }
+        // Giải phóng reservation nếu Branch A đã confirm
+        if (transfer.getStatus() == InventoryTransferStatus.SOURCE_CONFIRMED) {
+            releaseReservedStock(transfer);
         }
         transfer.setStatus(InventoryTransferStatus.REJECTED);
         transferRepo.save(transfer);
@@ -450,7 +651,16 @@ public class InventoryTransferService {
         InventoryTransfer transfer = transferRepo.findById(id).orElseThrow();
         if (transfer.getStatus() == InventoryTransferStatus.COMPLETED
                 || transfer.getStatus() == InventoryTransferStatus.CANCELLED) {
-            throw new RuntimeException("Chỉ có thể hủy phiếu đang ở trạng thái Chờ xuất hoặc Đang vận chuyển!");
+            throw new RuntimeException("Không thể hủy phiếu đã hoàn thành hoặc đã hủy!");
+        }
+        if (transfer.getStatus() == InventoryTransferStatus.SHIPPING
+                || transfer.getStatus() == InventoryTransferStatus.INSPECTING) {
+            throw new RuntimeException("Không thể hủy phiếu đang vận chuyển hoặc đang kiểm hàng. Vui lòng liên hệ Admin.");
+        }
+        // Nếu đã Reserve kho (APPROVED hoặc SOURCE_CONFIRMED) thì phải giải phóng
+        if (transfer.getStatus() == InventoryTransferStatus.APPROVED
+                || transfer.getStatus() == InventoryTransferStatus.SOURCE_CONFIRMED) {
+            releaseReservedStock(transfer);
         }
         transfer.setStatus(InventoryTransferStatus.CANCELLED);
         transferRepo.save(transfer);

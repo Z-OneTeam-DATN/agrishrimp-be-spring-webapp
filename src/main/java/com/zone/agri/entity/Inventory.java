@@ -29,6 +29,16 @@ public class Inventory {
     @Column(name = "defective_quantity")
     Integer defectiveQuantity = 0; // Tồn kho hàng lỗi (Rejected) - Chờ xuất trả
 
+    /**
+     * Số lượng đã được "tạm giữ" (Reserved) cho các phiếu điều chuyển đang xử lý.
+     * Tồn kho khả dụng thực tế = quantity - reservedQuantity.
+     * Được tăng khi Admin duyệt phiếu điều chuyển (APPROVED) hoặc Branch A xác nhận (SOURCE_CONFIRMED).
+     * Được giải phóng khi phiếu chuyển sang SHIPPING (hàng thực sự xuất khỏi kho).
+     */
+    @Builder.Default
+    @Column(name = "reserved_quantity")
+    Integer reservedQuantity = 0;
+
     // --- QUẢN LÝ THEO LÔ VÀ GIÁ ---
     @Column(name = "batch_number", length = 50)
     String batchNumber;

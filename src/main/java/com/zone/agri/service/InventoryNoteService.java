@@ -242,6 +242,111 @@ public class InventoryNoteService {
     }
 
     // ==========================================
+    // 2b. TẠO PHIẾU XUẤT TRẢ NCC TỪ PHIẾU NHẬP (Quy trình 3 – Hướng 1)
+    // ==========================================
+
+    /**
+     * Tạo Phiếu xuất trả NCC trực tiếp từ một Phiếu nhập đã COMPLETED.
+     * <p>
+     * Quy tắc:
+     * - Chỉ hoạt động khi GR ở trạng thái COMPLETED và có ít nhất 1 dòng hàng lỗi (quantityRejected > 0).
+     * - Tự động điền NCC và danh sách hàng lỗi từ GR.
+     * - Đơn giá trả bị khóa bằng đúng đơn giá nhập của GR (chống gian lận).
+     * - Số lượng trả mặc định = số lượng lỗi trên GR, có thể giảm xuống nhưng không tăng quá.
+     */
+    @Transactional
+    public InventoryNoteResponse createReturnFromGR(Long grId) {
+        InventoryNote gr = inventoryNoteRepository.findByIdWithDetails(grId)
+                .orElseThrow(() -> new NotFoundException("Không tìm thấy Phiếu nhập ID: " + grId));
+
+        if (gr.getType() != InventoryNoteType.IMPORT) {
+            throw new BadRequestException("Chỉ có thể tạo phiếu xuất trả từ Phiếu nhập kho (IMPORT).");
+        }
+        if (gr.getStatus() != InventoryNoteStatus.COMPLETED) {
+            throw new BadRequestException("Phiếu nhập phải ở trạng thái COMPLETED mới có thể tạo phiếu xuất trả.");
+        }
+        if (gr.getSupplier() == null) {
+            throw new BadRequestException("Phiếu nhập không có thông tin nhà cung cấp.");
+        }
+
+        // Lấy các dòng có hàng lỗi
+        List<InventoryNoteDetail> defectiveDetails = gr.getDetails().stream()
+                .filter(d -> d.getQuantityRejected() != null && d.getQuantityRejected() > 0)
+                .collect(java.util.stream.Collectors.toList());
+
+        if (defectiveDetails.isEmpty()) {
+            throw new BadRequestException("Phiếu nhập không có hàng lỗi nào để tạo phiếu xuất trả.");
+        }
+
+        // Kiểm tra tồn kho lỗi thực tế (đề phòng đã xuất trả trước đó)
+        for (InventoryNoteDetail d : defectiveDetails) {
+            Long defectiveStock = inventoryRepository.sumDefectiveQuantityByBranchAndVariant(
+                    gr.getBranch().getId(), d.getProductVariant().getId());
+            if (defectiveStock == null || defectiveStock < d.getQuantityRejected()) {
+                // Không throw, chỉ cảnh báo bằng cách điều chỉnh số lượng còn lại
+                d.setQuantityRejected(defectiveStock != null ? defectiveStock.intValue() : 0);
+            }
+        }
+
+        // Lọc lại sau khi điều chỉnh
+        defectiveDetails = defectiveDetails.stream()
+                .filter(d -> d.getQuantityRejected() != null && d.getQuantityRejected() > 0)
+                .collect(java.util.stream.Collectors.toList());
+
+        if (defectiveDetails.isEmpty()) {
+            throw new BadRequestException("Tồn kho lỗi của NCC này đã hết hoặc đã xuất trả hết trước đó.");
+        }
+
+        // Tạo phiếu xuất trả
+        String returnCode = "PXT-" + System.currentTimeMillis();
+        InventoryNote returnNote = new InventoryNote();
+        returnNote.setCode(returnCode);
+        returnNote.setType(InventoryNoteType.EXPORT);
+        returnNote.setStatus(InventoryNoteStatus.PENDING);
+        returnNote.setCreatedAt(LocalDateTime.now());
+        returnNote.setCreatedBy(getCurrentUser());
+        returnNote.setBranch(gr.getBranch());
+        returnNote.setSupplier(gr.getSupplier());
+        returnNote.setPartnerBranch(null);
+        // Đánh dấu là phiếu RETURN để logic xuất kho biết dùng kho lỗi
+        returnNote.setReason("RETURN | Tạo từ Phiếu nhập: " + gr.getCode() + " | NCC: " + gr.getSupplier().getName());
+        returnNote.setNote("Xuất trả hàng lỗi từ phiếu nhập " + gr.getCode());
+
+        BigDecimal totalReturn = BigDecimal.ZERO;
+        List<InventoryNoteDetail> returnDetails = new ArrayList<>();
+
+        for (InventoryNoteDetail grDetail : defectiveDetails) {
+            // ĐƠN GIÁ KHÓA CỨNG = đơn giá nhập của GR (không cho người dùng sửa)
+            BigDecimal lockedPrice = Objects.requireNonNullElse(grDetail.getPrice(), BigDecimal.ZERO);
+            int returnQty = grDetail.getQuantityRejected();
+
+            InventoryNoteDetail returnDetail = InventoryNoteDetail.builder()
+                    .inventoryNote(returnNote)
+                    .productVariant(grDetail.getProductVariant())
+                    .quantityRequested(returnQty)
+                    .quantityReal(returnQty)
+                    .quantity(returnQty)
+                    .price(lockedPrice)
+                    .batchNumber(grDetail.getBatchNumber())
+                    .expiryDate(grDetail.getExpiryDate())
+                    .note("Lô hàng lỗi từ GR " + gr.getCode())
+                    .build();
+
+            returnDetails.add(returnDetail);
+            totalReturn = totalReturn.add(lockedPrice.multiply(BigDecimal.valueOf(returnQty)));
+        }
+
+        returnNote.setDetails(returnDetails);
+        returnNote.setTotalAmount(totalReturn);
+        // Phiếu xuất trả tạo ra một khoản ghi nhận âm (credit) với NCC
+        // debtAmount âm = giảm nợ NCC
+        returnNote.setDebtAmount(totalReturn.negate());
+        returnNote.setPaymentAmount(BigDecimal.ZERO);
+
+        return mapToResponse(inventoryNoteRepository.save(returnNote));
+    }
+
+    // ==========================================
     // 3. KIỂM KHO (INVENTORY CHECK)
     // ==========================================
 
