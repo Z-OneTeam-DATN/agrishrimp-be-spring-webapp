@@ -27,7 +27,6 @@ import java.util.stream.Collectors;
 @Service
 @RequiredArgsConstructor
 public class InventoryTransferService {
-    private static final String GENERAL_WAREHOUSE_CODE = "MAIN_WH";
     private static final String SYSTEM_DEFECT_BRANCH_CODE = "SYSTEM_DEFECT";
     private static final String SYSTEM_DEFECT_BRANCH_PHONE = "SYS-DEFECT-01";
 
@@ -39,6 +38,12 @@ public class InventoryTransferService {
     private final BackorderService backorderService;
     private final com.zone.agri.repository.InventoryTransferDetailRepository transferDetailRepo;
     private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(InventoryTransferService.class);
+
+    private boolean isWarehouseBranch(Branch branch) {
+        return branch != null
+                && branch.getBranchType() != null
+                && "WAREHOUSE".equalsIgnoreCase(branch.getBranchType());
+    }
 
     private Branch resolveSystemDefectBranch() {
         return branchRepo.findByBranchCode(SYSTEM_DEFECT_BRANCH_CODE)
@@ -66,17 +71,19 @@ public class InventoryTransferService {
             businessType = TransferBusinessType.INTERNAL_SALE;
         }
 
+        boolean fromWarehouse = isWarehouseBranch(fromBranch);
+        boolean toWarehouse = isWarehouseBranch(toBranch);
+
         if (businessType == TransferBusinessType.STOCK_TRANSFER) {
-            if (!GENERAL_WAREHOUSE_CODE.equalsIgnoreCase(fromBranch.getBranchCode())) {
-                throw new RuntimeException("Luồng cấp phát nội bộ chỉ được xuất từ Kho tổng.");
+            if (!fromWarehouse) {
+                throw new RuntimeException("Luồng cấp phát nội bộ chỉ được xuất từ chi nhánh loại kho.");
             }
-            if (GENERAL_WAREHOUSE_CODE.equalsIgnoreCase(toBranch.getBranchCode())) {
-                throw new RuntimeException("Luồng cấp phát nội bộ phải chuyển tới chi nhánh nhận, không phải Kho tổng.");
+            if (toWarehouse) {
+                throw new RuntimeException("Luồng cấp phát nội bộ phải chuyển tới chi nhánh nhận, không phải chi nhánh loại kho.");
             }
         } else {
-            if (GENERAL_WAREHOUSE_CODE.equalsIgnoreCase(fromBranch.getBranchCode())
-                    || GENERAL_WAREHOUSE_CODE.equalsIgnoreCase(toBranch.getBranchCode())) {
-                throw new RuntimeException("Luồng thương mại nội bộ chỉ áp dụng giữa các chi nhánh với nhau.");
+            if (fromWarehouse || toWarehouse) {
+                throw new RuntimeException("Luồng thương mại nội bộ chỉ áp dụng giữa các chi nhánh bán hàng với nhau.");
             }
         }
 

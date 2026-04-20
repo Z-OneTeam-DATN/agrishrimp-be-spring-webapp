@@ -30,9 +30,6 @@ import org.springframework.context.ApplicationContext;
 @Service
 @RequiredArgsConstructor
 public class InventoryService {
-    private static final String GENERAL_WAREHOUSE_CODE = "MAIN_WH";
-
-
     private final InventoryNoteRepository noteRepository;
     private final InventoryNoteDetailRepository noteDetailRepository; // Bổ sung
     private final InventoryRepository inventoryRepository;
@@ -64,8 +61,14 @@ public class InventoryService {
                 .anyMatch(a -> a.getAuthority().equals(authority));
     }
 
-    private void validateGeneralWarehouse(Branch branch, String message) {
-        if (branch == null || !GENERAL_WAREHOUSE_CODE.equalsIgnoreCase(branch.getBranchCode())) {
+    private boolean isWarehouseBranch(Branch branch) {
+        return branch != null
+                && branch.getBranchType() != null
+                && "WAREHOUSE".equalsIgnoreCase(branch.getBranchType());
+    }
+
+    private void validateWarehouseBranch(Branch branch, String message) {
+        if (!isWarehouseBranch(branch)) {
             throw new BadRequestException(message);
         }
     }
@@ -94,7 +97,9 @@ public class InventoryService {
         // Quy trình 2: GR luôn bắt đầu ở PENDING_GR_APPROVAL (= PENDING).
         // Kể cả Admin tạo cũng phải PENDING để có bước kiểm tra trước khi duyệt.
         // Bước Duyệt (approveReceipt) mới là nơi cộng kho và ghi nợ NCC.
-        noteEntity.setStatus(InventoryNoteStatus.PENDING);
+        boolean autoApprovedOnCreate =
+                "IMPORTED".equalsIgnoreCase(request.getImportStatus()) || hasAuthority("IMPORT_APPROVE");
+        noteEntity.setStatus(autoApprovedOnCreate ? InventoryNoteStatus.APPROVED : InventoryNoteStatus.PENDING);
 
         noteEntity = noteRepository.save(noteEntity);
         validateReceiptItemsAgainstPurchaseRequest(linkedPurchaseRequest, request.getItems(), noteEntity.getId());
@@ -492,10 +497,9 @@ public class InventoryService {
     }
 
     private void updateMetadata(InventoryNote note, InventoryReceiptRequest request, Branch destBranch, Supplier supplier) {
-        // RÀNG BUỘC: Chỉ Kho tổng mới được nhập hàng từ NCC
-        if ("SUPPLIER".equals(request.getImportType())
-                && !GENERAL_WAREHOUSE_CODE.equalsIgnoreCase(destBranch.getBranchCode())) {
-            throw new BadRequestException("Chỉ có Kho tổng mới được phép thực hiện nghiệp vụ nhập hàng từ nhà cung cấp.");
+        if ("SUPPLIER".equals(request.getImportType())) {
+            validateWarehouseBranch(destBranch,
+                    "Chỉ các chi nhánh loại kho mới được phép thực hiện nghiệp vụ nhập hàng từ nhà cung cấp.");
         }
 
         note.setBranch(destBranch);

@@ -1,5 +1,19 @@
 package com.zone.agri.service;
 
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
+
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
 import com.zone.agri.dto.request.user.RoleRequest;
 import com.zone.agri.dto.response.user.RoleResponse;
 import com.zone.agri.entity.Permission;
@@ -10,21 +24,9 @@ import com.zone.agri.exception.Forbidden;
 import com.zone.agri.exception.NotFoundException;
 import com.zone.agri.repository.PermissionRepository;
 import com.zone.agri.repository.RoleRepository;
+
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.data.domain.Page;
-import org.springframework.data.domain.Pageable;
-import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
-
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.LinkedHashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
-import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -55,8 +57,10 @@ public class RoleService {
 
     public Page<RoleResponse> getAllRoles(String keyword, String type, String status, Pageable pageable) {
         Boolean isSystem = null;
-        if ("system".equalsIgnoreCase(type)) isSystem = true;
-        else if ("custom".equalsIgnoreCase(type)) isSystem = false;
+        if ("system".equalsIgnoreCase(type))
+            isSystem = true;
+        else if ("custom".equalsIgnoreCase(type))
+            isSystem = false;
 
         Boolean isActive = null;
         if ("active".equalsIgnoreCase(status)) {
@@ -116,22 +120,27 @@ public class RoleService {
             throw new BadRequestException("Tên vai trò không được để trống");
         }
 
-        String slug = request.getRoleName().trim().toUpperCase().replace(" ", "_");
-        
-        boolean isConflict;
-        if (role.getId() == null) {
-            isConflict = roleRepository.existsBySlug(slug);
-        } else {
-            isConflict = roleRepository.existsBySlugAndIdNot(slug, role.getId());
-        }
+        String normalizedRoleName = request.getRoleName().trim();
+        String requestedSlug = normalizedRoleName.toUpperCase().replace(" ", "_");
+        String currentRoleName = role.getDisplayName() == null ? "" : role.getDisplayName().trim();
+        boolean isCreate = role.getId() == null;
+        boolean isNameChanged = isCreate || !normalizedRoleName.equalsIgnoreCase(currentRoleName);
 
-        if (isConflict) {
-            throw new ConflictException("Tên vai trò này đã tồn tại trong hệ thống");
+        if (isNameChanged) {
+            boolean isConflict = isCreate
+                    ? roleRepository.existsBySlug(requestedSlug)
+                    : roleRepository.existsBySlugAndIdNot(requestedSlug, role.getId());
+
+            if (isConflict) {
+                throw new ConflictException("Tên vai trò này đã tồn tại trong hệ thống");
+            }
         }
 
         List<String> allCodes = new ArrayList<>();
-        if (request.getEnabledScreens() != null) allCodes.addAll(request.getEnabledScreens());
-        if (request.getAdvancedPerms() != null) allCodes.addAll(request.getAdvancedPerms());
+        if (request.getEnabledScreens() != null)
+            allCodes.addAll(request.getEnabledScreens());
+        if (request.getAdvancedPerms() != null)
+            allCodes.addAll(request.getAdvancedPerms());
 
         if (allCodes.isEmpty()) {
             throw new BadRequestException("Vai trò phải có ít nhất một quyền được gán");
@@ -161,13 +170,15 @@ public class RoleService {
             throw new BadRequestException("Mã quyền không tồn tại: " + String.join(", ", invalidCodes));
         }
 
-        role.setSlug(slug);
-        role.setDisplayName(request.getRoleName());
+        if (isCreate || isNameChanged) {
+            role.setSlug(requestedSlug);
+        }
+        role.setDisplayName(normalizedRoleName);
         role.setDescription(request.getDescription());
         role.setIsActive("active".equalsIgnoreCase(request.getStatus()));
-        role.setIsSystem(role.getIsSystem() != null ? role.getIsSystem() : false);
+        role.setIsSystem(Boolean.TRUE.equals(role.getIsSystem()));
         role.setPermissions(permissions);
-        
+
         return role;
     }
 

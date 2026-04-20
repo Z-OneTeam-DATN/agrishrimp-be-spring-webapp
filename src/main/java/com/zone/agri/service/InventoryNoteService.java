@@ -30,9 +30,6 @@ import java.util.stream.Collectors;
 @Service
 @RequiredArgsConstructor
 public class InventoryNoteService {
-    private static final String GENERAL_WAREHOUSE_CODE = "MAIN_WH";
-
-
     private final InventoryNoteRepository inventoryNoteRepository;
     private final InventoryNoteDetailRepository inventoryNoteDetailRepository;
     private final BranchRepository branchRepository;
@@ -51,6 +48,12 @@ public class InventoryNoteService {
         }
         return userRepository.findByEmail(auth.getName())
                 .orElseThrow(() -> new SignInRequiredException("Tài khoản không tồn tại"));
+    }
+
+    private boolean isWarehouseBranch(Branch branch) {
+        return branch != null
+                && branch.getBranchType() != null
+                && "WAREHOUSE".equalsIgnoreCase(branch.getBranchType());
     }
 
     // ==========================================
@@ -640,9 +643,9 @@ public class InventoryNoteService {
 
         // XỬ LÝ ĐỐI TÁC: NHÀ CUNG CẤP HOẶC CHI NHÁNH NHẬN
         if (request.getSupplierId() != null || "RETURN".equals(request.getExportType())) {
-            // RÀNG BUỘC: Chỉ Kho tổng mới được xuất trả NCC
-            if (!GENERAL_WAREHOUSE_CODE.equalsIgnoreCase(sourceBranch.getBranchCode())) {
-                throw new BadRequestException("Chỉ có Kho tổng mới được phép thực hiện nghiệp vụ xuất trả nhà cung cấp.");
+            if (!isWarehouseBranch(sourceBranch)) {
+                throw new BadRequestException(
+                        "Chỉ các chi nhánh loại kho mới được phép thực hiện nghiệp vụ xuất trả nhà cung cấp.");
             }
             
             if (request.getSupplierId() != null) {
