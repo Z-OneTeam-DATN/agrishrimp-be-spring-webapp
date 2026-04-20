@@ -734,8 +734,10 @@ public class ProductService {
                 .mapToInt(Integer::intValue)
                 .sum();
 
+        Map<Long, BigDecimal> transferImportPriceCache = new HashMap<>();
+
         List<ProductVariantResponse.BatchInfoDto> batchDtos = validBatches.stream().map(inv -> {
-            BigDecimal importPrice = inv.getImportPrice() != null ? inv.getImportPrice() : BigDecimal.ZERO;
+            BigDecimal importPrice = resolveDisplayImportPrice(inv, variant.getId(), transferImportPriceCache);
             BigDecimal sellingPrice = settingService.calculateSellingPrice(importPrice, multiplier, roundingRule);
 
             return ProductVariantResponse.BatchInfoDto.builder()
@@ -752,7 +754,7 @@ public class ProductService {
         // null = chưa nhập hàng → FE ẩn giá, không hiển thị "0đ"
         BigDecimal averageImportPrice = validBatches.isEmpty() ? null
                 : validBatches.stream()
-                        .map(inv -> inv.getImportPrice() != null ? inv.getImportPrice() : BigDecimal.ZERO)
+                        .map(inv -> resolveDisplayImportPrice(inv, variant.getId(), transferImportPriceCache))
                         .reduce(BigDecimal.ZERO, BigDecimal::add)
                         .divide(BigDecimal.valueOf(validBatches.size()), 4, RoundingMode.HALF_UP);
 
@@ -783,6 +785,48 @@ public class ProductService {
                 .attributeValues(attributeValues)
                 .batches(batchDtos)
                 .build();
+    }
+
+    private BigDecimal resolveDisplayImportPrice(Inventory inventory, Long variantId, Map<Long, BigDecimal> transferImportPriceCache) {
+        BigDecimal importPrice = inventory.getImportPrice();
+        if (!isTransferBatchWithoutCost(inventory)) {
+            return importPrice != null ? importPrice : BigDecimal.ZERO;
+        }
+
+        Long branchId = inventory.getBranch() != null ? inventory.getBranch().getId() : null;
+        if (branchId == null || variantId == null) {
+            return BigDecimal.ZERO;
+        }
+
+        return transferImportPriceCache.computeIfAbsent(branchId,
+                ignored -> resolveInboundTransferAverageImportPrice(branchId, variantId));
+    }
+
+    private boolean isTransferBatchWithoutCost(Inventory inventory) {
+        if (inventory == null) {
+            return false;
+        }
+
+        String batchNumber = inventory.getBatchNumber();
+        BigDecimal importPrice = inventory.getImportPrice();
+        boolean isTransferBatch = batchNumber != null && batchNumber.toUpperCase(Locale.ROOT).startsWith("TRANSFER");
+        boolean missingCost = importPrice == null || BigDecimal.ZERO.compareTo(importPrice) == 0;
+        return isTransferBatch && missingCost;
+    }
+
+    private BigDecimal resolveInboundTransferAverageImportPrice(Long branchId, Long variantId) {
+        Object[] summary = inventoryTransactionRepository.summarizeCompletedInboundTransferCost(branchId, variantId);
+        if (summary == null || summary.length < 2 || summary[0] == null || summary[1] == null) {
+            return BigDecimal.ZERO;
+        }
+
+        BigDecimal totalCost = (BigDecimal) summary[0];
+        Number totalQty = (Number) summary[1];
+        if (totalQty.longValue() <= 0) {
+            return BigDecimal.ZERO;
+        }
+
+        return totalCost.divide(BigDecimal.valueOf(totalQty.longValue()), 4, RoundingMode.HALF_UP);
     }
 
     private boolean hasOnlyActiveAttributes(ProductVariant variant) {

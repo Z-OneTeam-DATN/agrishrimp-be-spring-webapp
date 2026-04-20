@@ -525,7 +525,7 @@ public class InventoryTransferService {
 
             // Cộng kho nhận: hàng đạt vào quantity, hàng lỗi vào defectiveQuantity
             if (qtyAccepted > 0 || qtyRejected > 0) {
-                addDestinationStock(transfer, toBranch, detail.getProductVariant(), qtyAccepted, qtyRejected);
+                addDestinationStock(transfer, detail, toBranch, qtyAccepted, qtyRejected);
                 // Kích hoạt xử lý backorder cho hàng đạt
                 if (qtyAccepted > 0) {
                     backorderService.fulfillBackordersOnStockReceive(toBranch.getId(), variantId, qtyAccepted);
@@ -664,31 +664,68 @@ public class InventoryTransferService {
 
     private void addDestinationStock(InventoryTransfer transfer, Branch toBranch, ProductVariant variant, int accepted,
             int rejected) {
-        // Vì điều chuyển thường đi theo lô gốc từ kho xuất, nhưng ở đây để đơn giản ta
-        // gộp vào lô DEFAULT của kho nhận
-        // hoặc logic phức tạp hơn là phải mapping từng lô. Ở đây ta giả định nhập vào
-        // lô của kho xuất chuyển sang.
-        // Tuy nhiên hàm deductSourceStock ở trên chưa trả về info lô.
-        // Để đúng yêu cầu QC: Ta sẽ tìm lô phù hợp ở kho nhận để cộng vào.
+        throw new UnsupportedOperationException("Use addDestinationStock with transfer detail to preserve batch cost.");
+    }
 
-        if (accepted > 0) {
-            updateSingleDestinationBatch(transfer, toBranch, variant, accepted, 0);
+    private void addDestinationStock(InventoryTransfer transfer, InventoryTransferDetail detail, Branch toBranch,
+            int accepted, int rejected) {
+        int totalReceived = accepted + rejected;
+        if (totalReceived <= 0) {
+            return;
         }
-        if (rejected > 0) {
-            updateSingleDestinationBatch(transfer, resolveSystemDefectBranch(), variant, 0, rejected);
+
+        List<TransferInboundAllocation> allocations = resolveInboundAllocations(transfer, detail, totalReceived);
+        Branch defectBranch = rejected > 0 ? resolveSystemDefectBranch() : null;
+        int remainingAccepted = accepted;
+        int remainingRejected = rejected;
+
+        for (TransferInboundAllocation allocation : allocations) {
+            int availableInAllocation = allocation.quantity();
+
+            if (remainingAccepted > 0) {
+                int acceptedQty = Math.min(remainingAccepted, availableInAllocation);
+                if (acceptedQty > 0) {
+                    updateSingleDestinationBatch(transfer, toBranch, detail.getProductVariant(), acceptedQty, 0, allocation);
+                    remainingAccepted -= acceptedQty;
+                    availableInAllocation -= acceptedQty;
+                }
+            }
+
+            if (remainingRejected > 0 && availableInAllocation > 0 && defectBranch != null) {
+                int rejectedQty = Math.min(remainingRejected, availableInAllocation);
+                if (rejectedQty > 0) {
+                    updateSingleDestinationBatch(transfer, defectBranch, detail.getProductVariant(), 0, rejectedQty, allocation);
+                    remainingRejected -= rejectedQty;
+                }
+            }
         }
     }
 
     private void updateSingleDestinationBatch(InventoryTransfer transfer, Branch branch, ProductVariant variant,
-            int accepted, int rejected) {
-        // Tìm hoặc tạo lô DEFAULT tại kho nhận để nhận hàng điều chuyển
-        Inventory inv = inventoryRepo.findExactBatchWithLock(branch, variant, "TRANSFER", BigDecimal.ZERO)
+            int accepted, int rejected, TransferInboundAllocation allocation) {
+        String batchNumber = allocation.batchNumber() != null && !allocation.batchNumber().isBlank()
+                ? allocation.batchNumber()
+                : "TRANSFER-" + transfer.getTransferCode();
+        BigDecimal importPrice = allocation.importPrice() != null ? allocation.importPrice() : BigDecimal.ZERO;
+
+        Inventory inv = inventoryRepo.findExactBatchWithLock(branch, variant, batchNumber, importPrice)
                 .orElseGet(() -> inventoryRepo.save(Inventory.builder()
-                        .branch(branch).productVariant(variant).batchNumber("TRANSFER")
-                        .importPrice(BigDecimal.ZERO).quantity(0).defectiveQuantity(0).build()));
+                        .branch(branch)
+                        .productVariant(variant)
+                        .batchNumber(batchNumber)
+                        .importPrice(importPrice)
+                        .expiryDate(allocation.expiryDate())
+                        .lastReceiptDate(LocalDateTime.now())
+                        .quantity(0)
+                        .defectiveQuantity(0)
+                        .build()));
 
         inv.setQuantity(Objects.requireNonNullElse(inv.getQuantity(), 0) + accepted);
         inv.setDefectiveQuantity(Objects.requireNonNullElse(inv.getDefectiveQuantity(), 0) + rejected);
+        if (inv.getExpiryDate() == null && allocation.expiryDate() != null) {
+            inv.setExpiryDate(allocation.expiryDate());
+        }
+        inv.setLastReceiptDate(LocalDateTime.now());
         inventoryRepo.save(inv);
 
         transactionRepo.save(InventoryTransaction.builder()
@@ -701,6 +738,76 @@ public class InventoryTransferService {
                 .createdAt(LocalDateTime.now())
                 .inventory(inv)
                 .build());
+    }
+
+    private List<TransferInboundAllocation> resolveInboundAllocations(InventoryTransfer transfer, InventoryTransferDetail detail,
+            int totalReceived) {
+        List<InventoryTransaction> sourceTransactions = transactionRepo
+                .findByReferenceCodeAndType(transfer.getTransferCode(), TransactionType.TRANSFER_OUT)
+                .stream()
+                .filter(tx -> tx.getInventory() != null
+                        && tx.getInventory().getProductVariant() != null
+                        && Objects.equals(tx.getInventory().getProductVariant().getId(), detail.getProductVariant().getId()))
+                .sorted(Comparator
+                        .comparing(InventoryTransaction::getCreatedAt, Comparator.nullsLast(LocalDateTime::compareTo))
+                        .thenComparing(InventoryTransaction::getId, Comparator.nullsLast(Long::compareTo)))
+                .toList();
+
+        List<TransferInboundAllocation> allocations = new ArrayList<>();
+        int remaining = totalReceived;
+
+        for (InventoryTransaction transaction : sourceTransactions) {
+            if (remaining <= 0) {
+                break;
+            }
+
+            int movedQuantity = Math.abs(Objects.requireNonNullElse(transaction.getQuantityChange(), 0));
+            if (movedQuantity <= 0 || transaction.getInventory() == null) {
+                continue;
+            }
+
+            Inventory sourceBatch = transaction.getInventory();
+            int allocatedQuantity = Math.min(remaining, movedQuantity);
+            BigDecimal inboundImportPrice = resolveInboundImportPrice(transfer, detail, sourceBatch);
+
+            allocations.add(new TransferInboundAllocation(
+                    sourceBatch.getBatchNumber(),
+                    inboundImportPrice,
+                    sourceBatch.getExpiryDate(),
+                    allocatedQuantity));
+            remaining -= allocatedQuantity;
+        }
+
+        if (remaining > 0) {
+            allocations.add(new TransferInboundAllocation(
+                    "TRANSFER-" + transfer.getTransferCode(),
+                    resolveFallbackInboundImportPrice(transfer, detail),
+                    null,
+                    remaining));
+        }
+
+        return allocations;
+    }
+
+    private BigDecimal resolveInboundImportPrice(InventoryTransfer transfer, InventoryTransferDetail detail, Inventory sourceBatch) {
+        if (transfer.getTransferBusinessType() == TransferBusinessType.INTERNAL_SALE) {
+            return detail.getUnitTransferPrice() != null
+                    ? detail.getUnitTransferPrice()
+                    : Objects.requireNonNullElse(sourceBatch.getImportPrice(), BigDecimal.ZERO);
+        }
+        return Objects.requireNonNullElse(sourceBatch.getImportPrice(), BigDecimal.ZERO);
+    }
+
+    private BigDecimal resolveFallbackInboundImportPrice(InventoryTransfer transfer, InventoryTransferDetail detail) {
+        if (transfer.getTransferBusinessType() == TransferBusinessType.INTERNAL_SALE
+                && detail.getUnitTransferPrice() != null) {
+            return detail.getUnitTransferPrice();
+        }
+        return BigDecimal.ZERO;
+    }
+
+    private record TransferInboundAllocation(String batchNumber, BigDecimal importPrice, LocalDateTime expiryDate,
+            int quantity) {
     }
 
     // ==========================================
