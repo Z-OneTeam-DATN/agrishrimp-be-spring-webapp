@@ -1,5 +1,7 @@
 package com.zone.agri.service;
 
+import java.util.UUID;
+
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -17,6 +19,7 @@ import com.zone.agri.entity.Role;
 import com.zone.agri.entity.User;
 import com.zone.agri.entity.enums.AuthProvider;
 import com.zone.agri.entity.enums.UserStatus;
+import com.zone.agri.exception.BadRequestException;
 import com.zone.agri.exception.ConflictException;
 import com.zone.agri.exception.Forbidden;
 import com.zone.agri.exception.NotFoundException;
@@ -146,8 +149,24 @@ public class EmployeeService {
             }
         }
         String searchKeyword = (keyword == null || keyword.isBlank()) ? null : keyword.trim();
-        return userRepository.findAllWithFilter(searchKeyword, roleId, branchId, userStatus, pageable)
+        return userRepository.findAllEmployeesWithFilter(searchKeyword, roleId, branchId, userStatus, pageable)
                 .map(this::mapToResponse);
+    }
+
+    @Transactional
+    public void resendEmployeeCredentials(Long employeeId) {
+        User employee = userRepository.findById(employeeId)
+                .orElseThrow(() -> new NotFoundException("Không tìm thấy nhân viên với ID: " + employeeId));
+
+        if (employee.getEmail() == null || employee.getEmail().isBlank()) {
+            throw new BadRequestException("Nhân viên này chưa có email để gửi lại thông tin tài khoản");
+        }
+
+        String newPassword = UUID.randomUUID().toString().replace("-", "").substring(0, 8);
+        employee.setPasswordHash(passwordEncoder.encode(newPassword));
+        userRepository.save(employee);
+
+        emailService.sendAccountInfo(employee.getEmail(), employee.getFullName(), newPassword);
     }
 
     public EmployeeResponse getEmployeeById(Long employeeId) {

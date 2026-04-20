@@ -6,6 +6,7 @@ import com.zone.agri.dto.request.transfer.TransferRequest;
 import com.zone.agri.dto.request.transfer.TransferItemRequest;
 import com.zone.agri.dto.response.transfer.TransferResponse;
 import com.zone.agri.entity.*;
+import com.zone.agri.entity.enums.BranchStatus;
 import com.zone.agri.entity.enums.InventoryTransferStatus;
 import com.zone.agri.entity.enums.TransactionType;
 import com.zone.agri.entity.enums.OrderStatus;
@@ -26,6 +27,9 @@ import java.util.stream.Collectors;
 @Service
 @RequiredArgsConstructor
 public class InventoryTransferService {
+    private static final String GENERAL_WAREHOUSE_CODE = "MAIN_WH";
+    private static final String SYSTEM_DEFECT_BRANCH_CODE = "SYSTEM_DEFECT";
+    private static final String SYSTEM_DEFECT_BRANCH_PHONE = "SYS-DEFECT-01";
 
     private final InventoryTransferRepository transferRepo;
     private final BranchRepository branchRepo;
@@ -35,6 +39,19 @@ public class InventoryTransferService {
     private final BackorderService backorderService;
     private final com.zone.agri.repository.InventoryTransferDetailRepository transferDetailRepo;
     private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(InventoryTransferService.class);
+
+    private Branch resolveSystemDefectBranch() {
+        return branchRepo.findByBranchCode(SYSTEM_DEFECT_BRANCH_CODE)
+                .orElseGet(() -> branchRepo.save(Branch.builder()
+                        .branchCode(SYSTEM_DEFECT_BRANCH_CODE)
+                        .branchType("WAREHOUSE")
+                        .name("Kho lỗi hệ thống")
+                        .phone(SYSTEM_DEFECT_BRANCH_PHONE)
+                        .email("system-defect@agrishrimp.vn")
+                        .addressDetail("Kho ảo dùng để gom hàng lỗi hoặc thiếu phát sinh từ điều chuyển nội bộ")
+                        .status(BranchStatus.ACTIVE)
+                        .build()));
+    }
 
     @Transactional
     public InventoryTransfer createTransfer(TransferRequest req) {
@@ -47,6 +64,20 @@ public class InventoryTransferService {
         TransferBusinessType businessType = TransferBusinessType.STOCK_TRANSFER;
         if ("INTERNAL_SALE".equalsIgnoreCase(req.getTransferBusinessType())) {
             businessType = TransferBusinessType.INTERNAL_SALE;
+        }
+
+        if (businessType == TransferBusinessType.STOCK_TRANSFER) {
+            if (!GENERAL_WAREHOUSE_CODE.equalsIgnoreCase(fromBranch.getBranchCode())) {
+                throw new RuntimeException("Luồng cấp phát nội bộ chỉ được xuất từ Kho tổng.");
+            }
+            if (GENERAL_WAREHOUSE_CODE.equalsIgnoreCase(toBranch.getBranchCode())) {
+                throw new RuntimeException("Luồng cấp phát nội bộ phải chuyển tới chi nhánh nhận, không phải Kho tổng.");
+            }
+        } else {
+            if (GENERAL_WAREHOUSE_CODE.equalsIgnoreCase(fromBranch.getBranchCode())
+                    || GENERAL_WAREHOUSE_CODE.equalsIgnoreCase(toBranch.getBranchCode())) {
+                throw new RuntimeException("Luồng thương mại nội bộ chỉ áp dụng giữa các chi nhánh với nhau.");
+            }
         }
 
         // Validate: INTERNAL_SALE bắt buộc mỗi dòng phải có unitTransferPrice > 0
@@ -410,6 +441,13 @@ public class InventoryTransferService {
             throw new RuntimeException("Phiếu phải ở trạng thái Đang kiểm hàng (INSPECTING) hoặc Đang vận chuyển (SHIPPING) mới có thể xác nhận nhận hàng!");
         }
 
+        if (transfer.getStatus() == InventoryTransferStatus.SHIPPING) {
+            throw new RuntimeException("Vui lĂ²ng báº¯t Ä‘áº§u kiá»ƒm hĂ ng trÆ°á»›c khi xĂ¡c nháº­n nháº­n hĂ ng.");
+        }
+        if (qcItems == null || qcItems.isEmpty()) {
+            throw new RuntimeException("Vui lĂ²ng nháº­p dá»¯ liá»‡u kiá»ƒm hĂ ng cho tá»«ng sáº£n pháº©m.");
+        }
+
         Map<Long, InventoryTransferDetail> detailMap = transfer.getDetails().stream()
                 .collect(Collectors.toMap(
                         d -> d.getProductVariant().getId(),
@@ -426,7 +464,23 @@ public class InventoryTransferService {
             String itemNote = qcItemReq.getNote();
 
             InventoryTransferDetail detail = detailMap.get(variantId);
-            if (detail == null) continue;
+            if (detail == null) {
+                throw new RuntimeException("Sáº£n pháº©m QC khĂ´ng thuá»™c phiáº¿u Ä‘iá»u chuyá»ƒn: " + variantId);
+            }
+
+            int requestedQty = Objects.requireNonNullElse(detail.getQuantity(), 0);
+            if (qtyReal > requestedQty) {
+                throw new RuntimeException("Sá»‘ lÆ°á»£ng kiá»ƒm hĂ ng khĂ´ng Ä‘Æ°á»£c vÆ°á»£t quĂ¡ sá»‘ lÆ°á»£ng Ä‘iá»u chuyá»ƒn cho SKU: "
+                        + detail.getProductVariant().getSku());
+            }
+            if (qtyAccepted + qtyRejected != qtyReal) {
+                throw new RuntimeException("Sá»‘ lÆ°á»£ng Ä‘áº¡t + lá»—i/thiáº¿u pháº£i Ä‘Ăºng báº±ng tá»•ng thá»±c nháº­n cho SKU: "
+                        + detail.getProductVariant().getSku());
+            }
+            if ((qtyRejected > 0 || qtyReal < requestedQty) && (itemNote == null || itemNote.isBlank())) {
+                throw new RuntimeException("Vui lĂ²ng ghi chĂº lĂ½ do hĂ ng lá»—i/thiáº¿u cho SKU: "
+                        + detail.getProductVariant().getSku());
+            }
 
             detail.setQuantityReal(qtyReal);
             detail.setQuantityAccepted(qtyAccepted);
@@ -577,7 +631,7 @@ public class InventoryTransferService {
             updateSingleDestinationBatch(transfer, toBranch, variant, accepted, 0);
         }
         if (rejected > 0) {
-            updateSingleDestinationBatch(transfer, toBranch, variant, 0, rejected);
+            updateSingleDestinationBatch(transfer, resolveSystemDefectBranch(), variant, 0, rejected);
         }
     }
 

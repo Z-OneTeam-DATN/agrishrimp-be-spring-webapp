@@ -30,6 +30,8 @@ import org.springframework.context.ApplicationContext;
 @Service
 @RequiredArgsConstructor
 public class InventoryService {
+    private static final String GENERAL_WAREHOUSE_CODE = "MAIN_WH";
+
 
     private final InventoryNoteRepository noteRepository;
     private final InventoryNoteDetailRepository noteDetailRepository; // Bổ sung
@@ -60,6 +62,12 @@ public class InventoryService {
         org.springframework.security.core.Authentication auth = org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication();
         return auth != null && auth.getAuthorities().stream()
                 .anyMatch(a -> a.getAuthority().equals(authority));
+    }
+
+    private void validateGeneralWarehouse(Branch branch, String message) {
+        if (branch == null || !GENERAL_WAREHOUSE_CODE.equalsIgnoreCase(branch.getBranchCode())) {
+            throw new BadRequestException(message);
+        }
     }
 
     // --- 1. TẠO PHIẾU MỚI ---
@@ -485,7 +493,8 @@ public class InventoryService {
 
     private void updateMetadata(InventoryNote note, InventoryReceiptRequest request, Branch destBranch, Supplier supplier) {
         // RÀNG BUỘC: Chỉ Kho tổng mới được nhập hàng từ NCC
-        if ("SUPPLIER".equals(request.getImportType()) && !"WAREHOUSE".equalsIgnoreCase(destBranch.getBranchType())) {
+        if ("SUPPLIER".equals(request.getImportType())
+                && !GENERAL_WAREHOUSE_CODE.equalsIgnoreCase(destBranch.getBranchCode())) {
             throw new BadRequestException("Chỉ có Kho tổng mới được phép thực hiện nghiệp vụ nhập hàng từ nhà cung cấp.");
         }
 
