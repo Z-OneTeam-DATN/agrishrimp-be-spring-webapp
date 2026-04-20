@@ -25,9 +25,6 @@ import java.util.stream.Collectors;
 @Service
 @RequiredArgsConstructor
 public class PurchaseRequestService {
-    private static final String GENERAL_WAREHOUSE_CODE = "MAIN_WH";
-
-
     private final PurchaseRequestRepository purchaseRequestRepository;
     private final PurchaseRequestItemRepository purchaseRequestItemRepository;
     private final InventoryNoteRepository inventoryNoteRepository;
@@ -63,12 +60,6 @@ public class PurchaseRequestService {
                 .anyMatch(a -> a.getAuthority().equals("ROLE_" + role));
     }
 
-    private void validateMainWarehouseBranch(Branch branch) {
-        if (branch == null || !GENERAL_WAREHOUSE_CODE.equalsIgnoreCase(branch.getBranchCode())) {
-            throw new BadRequestException("Phiếu yêu cầu mua NCC chỉ được tạo cho Kho tổng.");
-        }
-    }
-
     private Branch resolveRequestBranch(PurchaseRequestCreateRequest request) {
         if (request.getBranchId() != null) {
             return branchRepository.findById(request.getBranchId())
@@ -96,7 +87,7 @@ public class PurchaseRequestService {
                 .orElseThrow(() -> new NotFoundException("Nhà cung cấp không tồn tại: " + request.getSupplierCode()));
 
         Branch branch = resolveRequestBranch(request);
-        validateMainWarehouseBranch(branch);
+        validatePurchaseRequestBranch(branch);
         warehouseContext.assertAccess(branch.getId());
 
         String code = generateCode();
@@ -200,7 +191,7 @@ public class PurchaseRequestService {
         Supplier supplier = supplierRepository.findByCode(request.getSupplierCode())
                 .orElseThrow(() -> new NotFoundException("Nhà cung cấp không tồn tại"));
         Branch branch = resolveRequestBranch(request);
-        validateMainWarehouseBranch(branch);
+        validatePurchaseRequestBranch(branch);
         warehouseContext.assertAccess(branch.getId());
 
         pr.setSupplier(supplier);
