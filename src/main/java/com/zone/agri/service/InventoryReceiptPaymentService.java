@@ -1,7 +1,19 @@
 package com.zone.agri.service;
 
+import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.util.List;
+import java.util.Objects;
+
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import com.zone.agri.common.AuthUtils;
 import com.zone.agri.dto.request.inventory.ReceiptPaymentRequest;
 import com.zone.agri.dto.response.inventory.ReceiptPaymentResponse;
+import com.zone.agri.dto.response.user.UserDetail;
 import com.zone.agri.entity.InventoryNote;
 import com.zone.agri.entity.InventoryReceiptPayment;
 import com.zone.agri.entity.User;
@@ -12,15 +24,8 @@ import com.zone.agri.exception.NotFoundException;
 import com.zone.agri.repository.InventoryNoteRepository;
 import com.zone.agri.repository.InventoryReceiptPaymentRepository;
 import com.zone.agri.repository.UserRepository;
-import lombok.RequiredArgsConstructor;
-import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
-import java.math.BigDecimal;
-import java.time.LocalDate;
-import java.time.LocalDateTime;
-import java.util.List;
-import java.util.Objects;
+import lombok.RequiredArgsConstructor;
 
 @Service
 @RequiredArgsConstructor
@@ -32,7 +37,8 @@ public class InventoryReceiptPaymentService {
     private final com.zone.agri.common.WarehouseContext warehouseContext;
 
     private User getCurrentUser() {
-        org.springframework.security.core.Authentication auth = org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication();
+        org.springframework.security.core.Authentication auth = org.springframework.security.core.context.SecurityContextHolder
+                .getContext().getAuthentication();
         if (auth == null || !auth.isAuthenticated() || "anonymousUser".equals(auth.getPrincipal())) {
             return null;
         }
@@ -66,8 +72,7 @@ public class InventoryReceiptPaymentService {
         BigDecimal totalAmount = Objects.requireNonNullElse(note.getTotalAmount(), BigDecimal.ZERO);
         BigDecimal totalPaidBefore = Objects.requireNonNullElse(
                 inventoryReceiptPaymentRepository.sumAmountByReceiptId(receiptId),
-                BigDecimal.ZERO
-        );
+                BigDecimal.ZERO);
         BigDecimal remainingDebt = totalAmount.subtract(totalPaidBefore);
 
         if (remainingDebt.compareTo(BigDecimal.ZERO) <= 0) {
@@ -113,12 +118,40 @@ public class InventoryReceiptPaymentService {
 
     @Transactional(readOnly = true)
     public List<ReceiptPaymentResponse> getAllPayments(LocalDate startDate, LocalDate endDate, Long branchId) {
+        Long finalBranchId = resolveBranchId(branchId);
         LocalDateTime start = startDate != null ? startDate.atStartOfDay() : null;
         LocalDateTime end = endDate != null ? endDate.atTime(23, 59, 59) : null;
 
-        return inventoryReceiptPaymentRepository.findAllWithFilters(start, end, branchId).stream()
+        return inventoryReceiptPaymentRepository.findAllWithFilters(start, end, finalBranchId).stream()
                 .map(this::mapToResponse)
                 .toList();
+    }
+
+    private Long resolveBranchId(Long requestBranchId) {
+        UserDetail currentUser = AuthUtils.getUserDetail();
+        if (currentUser == null) {
+            throw new AccessDeniedException("Người dùng chưa đăng nhập.");
+        }
+
+        String roleSlug = normalizeRoleSlug(currentUser);
+        if ("ADMIN".equals(roleSlug) || "SUPER_ADMIN".equals(roleSlug)) {
+            return requestBranchId;
+        }
+
+        Long userBranchId = currentUser.getBranchId();
+        if (userBranchId == null) {
+            throw new AccessDeniedException("Người dùng không thuộc chi nhánh nào.");
+        }
+
+        return userBranchId;
+    }
+
+    private String normalizeRoleSlug(UserDetail userDetail) {
+        if (userDetail.getRole() == null || userDetail.getRole().getSlug() == null) {
+            return "";
+        }
+        String slug = userDetail.getRole().getSlug().trim().toUpperCase();
+        return slug.startsWith("ROLE_") ? slug.substring(5) : slug;
     }
 
     private ReceiptPaymentResponse mapToResponse(InventoryReceiptPayment payment) {
