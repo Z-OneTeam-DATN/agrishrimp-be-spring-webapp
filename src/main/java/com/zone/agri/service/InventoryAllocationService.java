@@ -63,7 +63,19 @@ public class InventoryAllocationService {
             return new AllocationResult(subOrders, outOfStockItems);
         }
 
-        BranchWithRealDistance selectedBranchWithDistance = branchesSortedByDist.stream()
+        List<BranchWithRealDistance> sellableBranches = branchesSortedByDist.stream()
+                .filter(candidate -> !isWarehouse(candidate.branch()))
+                .toList();
+
+        if (sellableBranches.isEmpty()) {
+            return new AllocationResult(subOrders, outOfStockItems);
+        }
+
+        Set<Long> sellableBranchIds = sellableBranches.stream()
+                .map(candidate -> candidate.branch().getId())
+                .collect(java.util.stream.Collectors.toSet());
+
+        BranchWithRealDistance selectedBranchWithDistance = sellableBranches.stream()
                 .sorted(Comparator
                         .comparingInt((BranchWithRealDistance candidate) -> hasAllocatableStock(
                                 candidate.branch().getId(),
@@ -71,11 +83,9 @@ public class InventoryAllocationService {
                                 inventoryMatrix) ? 0 : 1)
                         .thenComparingDouble(BranchWithRealDistance::distanceKm)
                         .thenComparing(Comparator.comparingInt((BranchWithRealDistance candidate) ->
-                                calculateAllocatableQuantity(candidate.branch().getId(), cart, inventoryMatrix)).reversed())
-                        .thenComparing(Comparator.comparingInt((BranchWithRealDistance candidate) ->
-                                isWarehouse(candidate.branch()) ? 0 : 1)))
+                                calculateAllocatableQuantity(candidate.branch().getId(), cart, inventoryMatrix)).reversed()))
                 .findFirst()
-                .orElse(branchesSortedByDist.get(0));
+                .orElse(sellableBranches.get(0));
 
         Long selectedBranchId = selectedBranchWithDistance.branch().getId();
         Map<Long, List<Inventory>> branchBatches = inventoryMatrix.getOrDefault(selectedBranchId, Collections.emptyMap());
@@ -128,15 +138,15 @@ public class InventoryAllocationService {
                     .build());
 
             if (requested > 0) {
-                int totalAvailableSystemWide = calculateTotalAvailable(variantId, inventoryMatrix);
                 outOfStockItems.add(OutOfStockItemDto.builder()
                         .productVariantId(variantId)
                         .variantName(variantName)
                         .variantSku(variantSku)
                         .requestedQty(originalRequested)
-                        .availableQty(totalAvailableSystemWide)
+                        .availableQty(calculateTotalAvailable(variantId, inventoryMatrix, sellableBranchIds))
                         .build());
             }
+
         }
 
         if (!allocatedItems.isEmpty()) {
@@ -230,9 +240,12 @@ public class InventoryAllocationService {
                 && "WAREHOUSE".equalsIgnoreCase(branch.getBranchType());
     }
 
-    private int calculateTotalAvailable(Long variantId, Map<Long, Map<Long, List<Inventory>>> matrix) {
-        return matrix.values().stream()
-                .flatMap(branchMap -> branchMap.getOrDefault(variantId, Collections.emptyList()).stream())
+    private int calculateTotalAvailable(Long variantId,
+                                        Map<Long, Map<Long, List<Inventory>>> matrix,
+                                        Set<Long> allowedBranchIds) {
+        return matrix.entrySet().stream()
+                .filter(entry -> allowedBranchIds.contains(entry.getKey()))
+                .flatMap(entry -> entry.getValue().getOrDefault(variantId, Collections.emptyList()).stream())
                 .mapToInt(inv -> Objects.requireNonNullElse(inv.getQuantity(), 0))
                 .sum();
     }

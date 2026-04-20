@@ -892,6 +892,25 @@ public class OrderService {
         if (nearestBranches.isEmpty())
             throw new NotFoundException("Không có chi nhánh hoạt động");
 
+        nearestBranches = filterCustomerFulfillmentBranches(nearestBranches);
+        if (nearestBranches.isEmpty())
+            throw new NotFoundException("KhÃ´ng cÃ³ chi nhÃ¡nh bÃ¡n hÃ ng phÃ¹ há»£p");
+
+        nearestBranches = filterCustomerFulfillmentBranches(nearestBranches);
+        if (nearestBranches.isEmpty()) {
+            throw new NotFoundException("KhÃ´ng cÃ³ chi nhÃ¡nh bÃ¡n hÃ ng phÃ¹ há»£p");
+        }
+
+        nearestBranches = filterCustomerFulfillmentBranches(nearestBranches);
+        if (nearestBranches.isEmpty()) {
+            throw new NotFoundException("Không có chi nhánh bán hàng phù hợp");
+        }
+
+        nearestBranches = filterCustomerFulfillmentBranches(nearestBranches);
+        if (nearestBranches.isEmpty()) {
+            throw new NotFoundException("KhÃ´ng cÃ³ chi nhÃ¡nh bÃ¡n hÃ ng phÃ¹ há»£p");
+        }
+
         List<Long> branchIds = nearestBranches.stream().map(bwr -> bwr.branch().getId()).toList();
 
         Map<Long, Map<Long, List<Inventory>>> inventoryMatrix = allocationService.buildInventoryMatrix(branchIds,
@@ -946,12 +965,14 @@ public class OrderService {
                 .prepareToken(token)
                 .canFulfill(true) // Đánh lừa Frontend để luôn cho phép bấm nút Thanh toán
                 .voucherCode(voucherCode)
+                .canFulfill(allocation.outOfStockItems().isEmpty() && !enrichedSubOrders.isEmpty())
                 .subOrders(enrichedSubOrders)
                 .totalSubtotal(totalSubtotal)
                 .discountAmount(discountAmount)
                 .totalShippingFee(totalShippingFee)
                 .totalAmount(totalAmount)
-                .outOfStockItems(Collections.emptyList()) // Làm rỗng danh sách để Frontend ẩn thông báo vàng đi
+                .outOfStockItems(allocation.outOfStockItems())
+                .outOfStockItems(allocation.outOfStockItems())
                 .build();
     }
 
@@ -1002,6 +1023,11 @@ public class OrderService {
                     draft.getDeliveryDistrictId(),
                     draft.getDeliveryWardCode(),
                     draft.getVoucherCode());
+            if (false && (!liveQuote.outOfStockItems().isEmpty() || liveQuote.subOrders().isEmpty())) {
+                throw new ConflictException(
+                        "Một hoặc nhiều sản phẩm không còn đủ hàng tại chi nhánh bán hàng gần nhất, vui lòng tải lại giỏ hàng",
+                        true);
+            }
             ensurePreparedQuoteStillValid(draft, liveQuote);
             VoucherValidation committedVoucher = validateVoucher(
                     user,
@@ -1218,6 +1244,17 @@ public class OrderService {
         AllocationResult allocation = allocationService.allocate(normalizedCart, variantMap, nearestBranches,
                 inventoryMatrix);
 
+        if (!allocation.outOfStockItems().isEmpty() && allocation.subOrders().isEmpty()) {
+            return new PreparedQuote(
+                    normalizedCart,
+                    Collections.emptyList(),
+                    allocation.outOfStockItems(),
+                    BigDecimal.ZERO,
+                    BigDecimal.ZERO,
+                    BigDecimal.ZERO,
+                    BigDecimal.ZERO);
+        }
+
         DeliveryInfo deliveryInfo = DeliveryInfo.builder()
                 .toDistrictId(deliveryDistrictId)
                 .toWardCode(deliveryWardCode)
@@ -1276,6 +1313,22 @@ public class OrderService {
     private boolean hasSameMoney(BigDecimal left, BigDecimal right) {
         return Objects.requireNonNullElse(left, BigDecimal.ZERO)
                 .compareTo(Objects.requireNonNullElse(right, BigDecimal.ZERO)) == 0;
+    }
+
+    private List<BranchWithRealDistance> filterCustomerFulfillmentBranches(List<BranchWithRealDistance> branches) {
+        if (branches == null || branches.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        return branches.stream()
+                .filter(branchWithDistance -> isCustomerFulfillmentBranch(branchWithDistance.branch()))
+                .toList();
+    }
+
+    private boolean isCustomerFulfillmentBranch(Branch branch) {
+        return branch != null
+                && (branch.getBranchType() == null
+                        || !"WAREHOUSE".equalsIgnoreCase(branch.getBranchType()));
     }
 
     private String buildSubOrderSignature(List<SubOrderDraftDto> subOrders) {
