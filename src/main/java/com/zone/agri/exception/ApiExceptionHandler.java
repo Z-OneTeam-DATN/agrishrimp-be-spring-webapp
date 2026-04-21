@@ -46,7 +46,7 @@ public class ApiExceptionHandler {
       WebRequest request) {
     String message = ex.getMessage();
     ErrorDetail errorVm = new ErrorDetail(HttpStatus.CONFLICT.toString(), "Conflict", message);
-    return ResponseEntity.badRequest().body(errorVm);
+    return ResponseEntity.status(HttpStatus.CONFLICT).body(errorVm);
   }
 
   @ExceptionHandler(RateLimitException.class)
@@ -135,7 +135,10 @@ public class ApiExceptionHandler {
   @ExceptionHandler(org.springframework.web.server.ResponseStatusException.class)
   public ResponseEntity<ErrorDetail> handleResponseStatusException(
       org.springframework.web.server.ResponseStatusException ex, WebRequest request) {
-    ErrorDetail errorVm = new ErrorDetail(ex.getStatusCode().toString(), ex.getReason(), null);
+    String detail = ex.getReason() != null && !ex.getReason().isBlank()
+        ? ex.getReason()
+        : "Yêu cầu không thể được xử lý.";
+    ErrorDetail errorVm = new ErrorDetail(ex.getStatusCode().toString(), ex.getReason(), detail);
     log.warn(ERROR_LOG_FORMAT, this.getServletPath(request), ex.getStatusCode().value(), ex.getReason());
     return new ResponseEntity<>(errorVm, ex.getStatusCode());
   }
@@ -143,8 +146,11 @@ public class ApiExceptionHandler {
   @ExceptionHandler(Exception.class)
   protected ResponseEntity<ErrorDetail> handleOtherException(Exception ex, WebRequest request) {
     String message = ex.getMessage();
+    String detail = message != null && !message.isBlank()
+        ? message
+        : "Có lỗi hệ thống xảy ra, vui lòng thử lại sau.";
     ErrorDetail errorVm = new ErrorDetail(HttpStatus.INTERNAL_SERVER_ERROR.toString(),
-        HttpStatus.INTERNAL_SERVER_ERROR.getReasonPhrase(), null);
+        HttpStatus.INTERNAL_SERVER_ERROR.getReasonPhrase(), detail);
     log.warn(ERROR_LOG_FORMAT, this.getServletPath(request), 500, message);
     log.debug(ex.toString());
     return new ResponseEntity<>(errorVm, HttpStatus.INTERNAL_SERVER_ERROR);
