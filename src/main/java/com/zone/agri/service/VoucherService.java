@@ -169,29 +169,35 @@ public class VoucherService {
 
     public List<VoucherResponse> getPublicVouchers() {
         LocalDateTime now = LocalDateTime.now();
+        // Thêm buffer 5 phút để tránh lệch múi giờ nhỏ giữa server và client
+        LocalDateTime nowWithBuffer = now.plusMinutes(5);
+        LocalDateTime nowMinusBuffer = now.minusMinutes(5);
+
         List<Voucher> vouchers = voucherRepository.findByStatus(VoucherStatus.ACTIVE);
-        log.info("Found {} ACTIVE vouchers in database", vouchers.size());
+        log.info("Checking {} ACTIVE vouchers from database. Current Server Time: {}", vouchers.size(), now);
         
         List<VoucherResponse> result = vouchers.stream()
                 .filter(v -> {
                     boolean ok = v.getQuantity() == null || v.getQuantity() > 0;
-                    if (!ok) log.debug("Voucher {} filtered out: quantity <= 0", v.getCode());
+                    if (!ok) log.warn("Voucher {} filtered out: quantity = {}", v.getCode(), v.getQuantity());
                     return ok;
                 })
                 .filter(v -> {
-                    boolean ok = v.getStartDate() == null || !v.getStartDate().isAfter(now);
-                    if (!ok) log.debug("Voucher {} filtered out: startDate {} is after now {}", v.getCode(), v.getStartDate(), now);
+                    // Cho phép bắt đầu sớm hơn 5 phút
+                    boolean ok = v.getStartDate() == null || !v.getStartDate().isAfter(nowWithBuffer);
+                    if (!ok) log.warn("Voucher {} filtered out: startDate {} is in the future (Now: {})", v.getCode(), v.getStartDate(), now);
                     return ok;
                 })
                 .filter(v -> {
-                    boolean ok = v.getEndDate() == null || !v.getEndDate().isBefore(now);
-                    if (!ok) log.debug("Voucher {} filtered out: endDate {} is before now {}", v.getCode(), v.getEndDate(), now);
+                    // Cho phép kết thúc muộn hơn 5 phút
+                    boolean ok = v.getEndDate() == null || !v.getEndDate().isBefore(nowMinusBuffer);
+                    if (!ok) log.warn("Voucher {} filtered out: endDate {} is in the past (Now: {})", v.getCode(), v.getEndDate(), now);
                     return ok;
                 })
                 .map(this::convertToResponseWithDerivedStatus)
                 .collect(Collectors.toList());
         
-        log.info("Returning {} public vouchers after filtering", result.size());
+        log.info("Returning {} public vouchers to client", result.size());
         return result;
     }
 
