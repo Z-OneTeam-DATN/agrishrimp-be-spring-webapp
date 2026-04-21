@@ -1,11 +1,13 @@
 package com.zone.agri.service;
 
 import java.math.BigDecimal;
+import java.text.Normalizer;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -50,6 +52,7 @@ public class InventoryTransferService {
     private static final String SYSTEM_DEFECT_BRANCH_CODE = "SYSTEM_DEFECT";
     private static final String SYSTEM_DEFECT_BRANCH_PHONE = "SYS-DEFECT-01";
     private static final String AUTO_REPLENISHMENT_TRANSFER_TYPE = "ORDER_REPLENISHMENT";
+    private static final boolean ENFORCE_SOURCE_STOCK_CHECK_ON_CREATE = false;
 
     private final InventoryTransferRepository transferRepo;
     private final BranchRepository branchRepo;
@@ -77,8 +80,9 @@ public class InventoryTransferService {
 
     private boolean isWarehouseBranch(Branch branch) {
         return branch != null
-                && branch.getBranchType() != null
-                && "WAREHOUSE".equalsIgnoreCase(branch.getBranchType());
+                && ((branch.getBranchType() != null
+                        && normalizeText(branch.getBranchType()).contains("warehouse"))
+                        || normalizeText(branch.getName()).contains("kho tong"));
     }
 
     private Branch resolveMainWarehouse() {
@@ -87,6 +91,13 @@ public class InventoryTransferService {
                 .findFirst();
         if (warehouseByType.isPresent()) {
             return warehouseByType.get();
+        }
+
+        Optional<Branch> warehouseByNormalizedName = branchRepo.findAll().stream()
+                .filter(branch -> normalizeText(branch.getName()).contains("kho tong"))
+                .findFirst();
+        if (warehouseByNormalizedName.isPresent()) {
+            return warehouseByNormalizedName.get();
         }
 
         return branchRepo.findAll().stream()
@@ -279,7 +290,7 @@ public class InventoryTransferService {
                             && Objects.requireNonNullElse(inv.getQuantity(), 0) > 0)
                     .mapToInt(inv -> Objects.requireNonNullElse(inv.getQuantity(), 0))
                     .sum();
-            if (warehouseQty < missingQty) {
+            if (ENFORCE_SOURCE_STOCK_CHECK_ON_CREATE && warehouseQty < missingQty) {
                 throw new RuntimeException(
                         "Kho tổng không đủ hàng để điều chuyển bổ sung cho SKU: " + item.getProductVariant().getSku());
             }
@@ -1029,6 +1040,18 @@ public class InventoryTransferService {
         String orderCode = subOrder.getOrder() != null ? subOrder.getOrder().getCode() : "N/A";
         String branchName = subOrder.getBranch() != null ? subOrder.getBranch().getName() : "chi nhanh nhan";
         return "Tu dong tao tu don thieu hang " + orderCode + " cho " + branchName;
+    }
+
+    private String normalizeText(String value) {
+        if (value == null) {
+            return "";
+        }
+
+        String normalized = Normalizer.normalize(value, Normalizer.Form.NFD)
+                .replaceAll("\\p{M}+", "")
+                .replace('đ', 'd')
+                .replace('Đ', 'D');
+        return normalized.toLowerCase(Locale.ROOT).trim();
     }
 
     private TransferDetailResponse convertToDetailResponse(InventoryTransfer t) {
