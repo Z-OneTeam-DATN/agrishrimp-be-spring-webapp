@@ -13,7 +13,6 @@ import com.zone.agri.entity.enums.PaymentStatus;
 import com.zone.agri.entity.enums.TransactionType;
 import com.zone.agri.entity.enums.VoucherStatus;
 import com.zone.agri.entity.enums.VoucherDiscountType; // Thêm Enum này để kiểm tra loại Voucher
-import com.zone.agri.event.OrderAwaitingReplenishmentCreatedEvent;
 import com.zone.agri.exception.BadRequestException;
 import com.zone.agri.exception.ConflictException;
 import com.zone.agri.exception.Forbidden;
@@ -27,7 +26,6 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.redis.core.StringRedisTemplate;
-import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.context.annotation.Lazy;
@@ -77,8 +75,6 @@ public class OrderService {
 
     private final StringRedisTemplate redisTemplate;
     private final ObjectMapper objectMapper;
-    private final ApplicationEventPublisher applicationEventPublisher;
-
     private static final String PREPARE_KEY_PREFIX = "prepare:";
     private static final String PREPARE_CONFIRM_LOCK_PREFIX = "prepare:confirm:lock:";
     private static final String PREPARE_CONFIRM_RESULT_PREFIX = "prepare:confirm:result:";
@@ -1059,6 +1055,7 @@ public class OrderService {
 
             List<SubOrderSummaryDto> subOrderSummaries = new ArrayList<>();
             boolean anySubOrderMissing = hasMissingItems;
+            List<SubOrder> awaitingReplenishmentSubOrders = new ArrayList<>();
 
             for (SubOrderDraftDto subDraft : liveQuote.subOrders()) {
                 Branch branch = branchRepository.findById(subDraft.getBranchId())
@@ -1133,6 +1130,9 @@ public class OrderService {
                     subOrderRepository.save(savedSubOrder);
                     anySubOrderMissing = true;
                 }
+                if (subOrderStatus == OrderStatus.AWAITING_REPLENISHMENT) {
+                    awaitingReplenishmentSubOrders.add(savedSubOrder);
+                }
 
                 subOrderSummaries.add(SubOrderSummaryDto.builder()
                         .subOrderId(savedSubOrder.getId()).branchId(branch.getId()).branchName(branch.getName())
@@ -1145,6 +1145,12 @@ public class OrderService {
                 initialStatus = OrderStatus.AWAITING_REPLENISHMENT;
                 savedOrder.setStatus(initialStatus);
                 orderRepository.save(savedOrder);
+            }
+
+            if (!awaitingReplenishmentSubOrders.isEmpty()) {
+                subOrderRepository.flush();
+                subOrderItemRepository.flush();
+                tryCreateReplenishmentTransfers(awaitingReplenishmentSubOrders, savedOrder.getCode());
             }
 
             String checkoutUrl = null;
@@ -1172,10 +1178,6 @@ public class OrderService {
                     .totalAmount(liveQuote.totalAmount())
                     .discountAmount(committedVoucher.discountAmount()).totalShippingFee(liveQuote.totalShippingFee())
                     .checkoutUrl(checkoutUrl).build();
-
-            if (anySubOrderMissing) {
-                applicationEventPublisher.publishEvent(new OrderAwaitingReplenishmentCreatedEvent(savedOrder.getId()));
-            }
 
             saveConfirmResultToRedis(request.getPrepareToken(), response);
             return response;
@@ -1365,6 +1367,24 @@ public class OrderService {
                             itemSignature);
                 })
                 .collect(Collectors.joining("||"));
+    }
+
+    private void tryCreateReplenishmentTransfers(List<SubOrder> awaitingSubOrders, String orderCode) {
+        int createdTransferCount = 0;
+        for (SubOrder subOrder : awaitingSubOrders) {
+            try {
+                createdTransferCount += inventoryTransferService.createReplenishmentTransfersForSubOrder(subOrder).size();
+            } catch (Exception ex) {
+                log.warn(
+                        "Failed to auto-create replenishment transfer during confirm for order {} sub-order {}: {}",
+                        orderCode,
+                        subOrder.getId(),
+                        ex.getMessage());
+            }
+        }
+
+        log.info("Created {} replenishment transfer(s) during confirm for order {} across {} awaiting sub-order(s)",
+                createdTransferCount, orderCode, awaitingSubOrders.size());
     }
 
     private String safeBigDecimal(BigDecimal value) {
