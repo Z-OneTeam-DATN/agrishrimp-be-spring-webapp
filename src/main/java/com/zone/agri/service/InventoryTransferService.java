@@ -49,6 +49,7 @@ import lombok.RequiredArgsConstructor;
 public class InventoryTransferService {
     private static final String SYSTEM_DEFECT_BRANCH_CODE = "SYSTEM_DEFECT";
     private static final String SYSTEM_DEFECT_BRANCH_PHONE = "SYS-DEFECT-01";
+    private static final String AUTO_REPLENISHMENT_TRANSFER_TYPE = "ORDER_REPLENISHMENT";
 
     private final InventoryTransferRepository transferRepo;
     private final BranchRepository branchRepo;
@@ -294,8 +295,8 @@ public class InventoryTransferService {
         TransferRequest request = new TransferRequest();
         request.setFromBranchId(warehouse.getId());
         request.setToBranchId(toBranch.getId());
-        request.setTransferType("ORDER_REPLENISHMENT");
-        request.setDescription("Điều chuyển hàng cho đơn " + subOrder.getOrder().getCode());
+        request.setTransferType(AUTO_REPLENISHMENT_TRANSFER_TYPE);
+        request.setDescription(buildAutoReplenishmentDescription(subOrder));
         request.setReferenceCode(referenceCode);
         request.setPriority("HIGH");
         request.setTransferDate(now);
@@ -306,7 +307,7 @@ public class InventoryTransferService {
                     TransferItemRequest itemRequest = new TransferItemRequest();
                     itemRequest.setSku(itemEntry.getKey());
                     itemRequest.setQuantity(itemEntry.getValue());
-                    itemRequest.setItemNote("Bổ sung cho phần đơn " + referenceCode);
+                    itemRequest.setItemNote("Tu dong bo sung cho phan don " + referenceCode);
                     return itemRequest;
                 })
                 .toList();
@@ -1005,6 +1006,7 @@ public class InventoryTransferService {
         return new TransferResponse(
                 t.getId(),
                 t.getTransferCode(),
+                t.getTransferType(),
                 t.getStatus(),
                 t.getCreatedAt(),
                 t.getTransferDate(),
@@ -1012,6 +1014,8 @@ public class InventoryTransferService {
                 t.getFromBranch() != null ? t.getFromBranch().getName() : "N/A",
                 t.getToBranch() != null ? t.getToBranch().getName() : "N/A",
                 t.getTransporter(),
+                t.getReferenceCode(),
+                t.getDescription(),
                 t.getPriority(),
                 t.getTotalQuantity(),
                 t.getDetails() != null ? t.getDetails().size() : 0,
@@ -1019,6 +1023,12 @@ public class InventoryTransferService {
                 t.getTransferBusinessType(),
                 t.getSettlementStatus(),
                 t.getTransferAmount());
+    }
+
+    private String buildAutoReplenishmentDescription(SubOrder subOrder) {
+        String orderCode = subOrder.getOrder() != null ? subOrder.getOrder().getCode() : "N/A";
+        String branchName = subOrder.getBranch() != null ? subOrder.getBranch().getName() : "chi nhanh nhan";
+        return "Tu dong tao tu don thieu hang " + orderCode + " cho " + branchName;
     }
 
     private TransferDetailResponse convertToDetailResponse(InventoryTransfer t) {

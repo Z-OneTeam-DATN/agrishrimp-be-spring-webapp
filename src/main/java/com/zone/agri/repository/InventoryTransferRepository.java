@@ -37,9 +37,9 @@ public interface InventoryTransferRepository extends JpaRepository<InventoryTran
 
   // Search + phân trang
   @Query("SELECT new com.zone.agri.dto.response.transfer.TransferResponse(" +
-      "t.id, t.transferCode, t.status, t.createdAt, " +
+      "t.id, t.transferCode, t.transferType, t.status, t.createdAt, " +
       "t.transferDate, t.deadline, " +
-      "fb.name, tb.name, t.transporter, t.priority, " +
+      "fb.name, tb.name, t.transporter, t.referenceCode, t.description, t.priority, " +
       "t.totalQuantity, SIZE(t.details), t.totalValue, " +
       "t.transferBusinessType, t.settlementStatus, t.transferAmount) " +
       "FROM InventoryTransfer t " +
@@ -54,9 +54,9 @@ public interface InventoryTransferRepository extends JpaRepository<InventoryTran
       Pageable pageable);
 
   @Query("SELECT new com.zone.agri.dto.response.transfer.TransferResponse(" +
-      "t.id, t.transferCode, t.status, t.createdAt, " +
+      "t.id, t.transferCode, t.transferType, t.status, t.createdAt, " +
       "t.transferDate, t.deadline, " +
-      "fb.name, tb.name, t.transporter, t.priority, " +
+      "fb.name, tb.name, t.transporter, t.referenceCode, t.description, t.priority, " +
       "t.totalQuantity, SIZE(t.details), t.totalValue, " +
       "t.transferBusinessType, t.settlementStatus, t.transferAmount) " +
       "FROM InventoryTransfer t " +
