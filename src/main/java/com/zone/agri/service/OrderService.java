@@ -29,6 +29,8 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.context.annotation.Lazy;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -1055,7 +1057,7 @@ public class OrderService {
 
             List<SubOrderSummaryDto> subOrderSummaries = new ArrayList<>();
             boolean anySubOrderMissing = hasMissingItems;
-            List<SubOrder> awaitingReplenishmentSubOrders = new ArrayList<>();
+            List<Long> awaitingReplenishmentSubOrderIds = new ArrayList<>();
 
             for (SubOrderDraftDto subDraft : liveQuote.subOrders()) {
                 Branch branch = branchRepository.findById(subDraft.getBranchId())
@@ -1131,7 +1133,7 @@ public class OrderService {
                     anySubOrderMissing = true;
                 }
                 if (subOrderStatus == OrderStatus.AWAITING_REPLENISHMENT) {
-                    awaitingReplenishmentSubOrders.add(savedSubOrder);
+                    awaitingReplenishmentSubOrderIds.add(savedSubOrder.getId());
                 }
 
                 subOrderSummaries.add(SubOrderSummaryDto.builder()
@@ -1147,10 +1149,10 @@ public class OrderService {
                 orderRepository.save(savedOrder);
             }
 
-            if (!awaitingReplenishmentSubOrders.isEmpty()) {
-                subOrderRepository.flush();
-                subOrderItemRepository.flush();
-                tryCreateReplenishmentTransfers(awaitingReplenishmentSubOrders, savedOrder.getCode());
+            if (!awaitingReplenishmentSubOrderIds.isEmpty()) {
+                scheduleReplenishmentTransferCreationAfterCommit(
+                        awaitingReplenishmentSubOrderIds,
+                        savedOrder.getCode());
             }
 
             String checkoutUrl = null;
@@ -1369,22 +1371,39 @@ public class OrderService {
                 .collect(Collectors.joining("||"));
     }
 
-    private void tryCreateReplenishmentTransfers(List<SubOrder> awaitingSubOrders, String orderCode) {
+    private void scheduleReplenishmentTransferCreationAfterCommit(List<Long> awaitingSubOrderIds, String orderCode) {
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            tryCreateReplenishmentTransfers(awaitingSubOrderIds, orderCode);
+            return;
+        }
+
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                tryCreateReplenishmentTransfers(awaitingSubOrderIds, orderCode);
+            }
+        });
+    }
+
+    private void tryCreateReplenishmentTransfers(List<Long> awaitingSubOrderIds, String orderCode) {
         int createdTransferCount = 0;
-        for (SubOrder subOrder : awaitingSubOrders) {
+        for (Long subOrderId : awaitingSubOrderIds) {
             try {
+                SubOrder subOrder = subOrderRepository.findById(subOrderId)
+                        .orElseThrow(() -> new NotFoundException(
+                                "Không tìm thấy phần đơn cần tạo điều chuyển bổ sung: " + subOrderId));
                 createdTransferCount += inventoryTransferService.createReplenishmentTransfersForSubOrder(subOrder).size();
             } catch (Exception ex) {
                 log.warn(
                         "Failed to auto-create replenishment transfer during confirm for order {} sub-order {}: {}",
                         orderCode,
-                        subOrder.getId(),
+                        subOrderId,
                         ex.getMessage());
             }
         }
 
         log.info("Created {} replenishment transfer(s) during confirm for order {} across {} awaiting sub-order(s)",
-                createdTransferCount, orderCode, awaitingSubOrders.size());
+                createdTransferCount, orderCode, awaitingSubOrderIds.size());
     }
 
     private String safeBigDecimal(BigDecimal value) {
