@@ -1,6 +1,9 @@
 package com.zone.agri.controller.miniapp;
 
+import com.zone.agri.client.ai.AiChatClient;
 import com.zone.agri.common.AuthUtils;
+import com.zone.agri.dto.miniapp.ai.AiChatRequest;
+import com.zone.agri.dto.miniapp.ai.AiChatResponse;
 import com.zone.agri.dto.miniapp.response.MiniAppDiagnosisResponse;
 import com.zone.agri.dto.response.user.UserDetail;
 import com.zone.agri.exception.CustomAuthenticationException;
@@ -23,6 +26,7 @@ import org.springframework.web.multipart.MultipartFile;
 public class MiniAppDiagnosisController {
 
     private final MiniAppDiagnosisService diagnosisService;
+    private final AiChatClient aiChatClient;
 
     /**
      * POST /api/miniapp/diagnosis
@@ -82,5 +86,15 @@ public class MiniAppDiagnosisController {
 
         MiniAppDiagnosisResponse response = diagnosisService.generatePrescription(id, userDetail.getId());
         return ResponseEntity.ok(response);
+    }
+
+    @Operation(summary = "Chat tư vấn bệnh tôm", description = "Gửi tin nhắn văn bản để AI tư vấn triệu chứng hoặc hỏi về bệnh đã chẩn đoán.")
+    @SecurityRequirement(name = "bearerAuth")
+    @PostMapping("/chat")
+    public ResponseEntity<AiChatResponse> chat(@RequestBody AiChatRequest request) {
+        if (AuthUtils.getUserDetail() == null) {
+            throw new CustomAuthenticationException("Bạn cần đăng nhập để sử dụng tính năng này");
+        }
+        return ResponseEntity.ok(aiChatClient.chat(request));
     }
 }
