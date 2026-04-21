@@ -1356,6 +1356,7 @@ public class OrderService {
                 .collect(Collectors.joining("||"));
     }
 
+    private String normalizeVoucherCode(String voucherCode) {
         if (voucherCode == null || voucherCode.isBlank()) {
             return null;
         }
