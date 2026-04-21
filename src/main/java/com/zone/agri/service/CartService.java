@@ -10,6 +10,7 @@ import com.zone.agri.entity.User;
 import com.zone.agri.exception.BadRequestException;
 import com.zone.agri.repository.CartItemRepository;
 import com.zone.agri.repository.InventoryRepository;
+import com.zone.agri.repository.InventoryTransactionRepository;
 import com.zone.agri.repository.ProductVariantRepository;
 import com.zone.agri.repository.SKUAttributeValueRepository;
 import com.zone.agri.repository.UserRepository;
@@ -18,8 +19,11 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.stream.Collectors;
 
@@ -31,6 +35,7 @@ public class CartService {
     private final ProductVariantRepository variantRepo;
     private final UserRepository userRepo;
     private final InventoryRepository inventoryRepository;
+    private final InventoryTransactionRepository inventoryTransactionRepository;
     private final SKUAttributeValueRepository skuAttributeValueRepo;
     private final SettingService settingService;
 
@@ -51,6 +56,7 @@ public class CartService {
         List<Inventory> allInventories = inventoryRepository.rawFindByProductVariantIdIn(variantIds);
         Map<Long, List<Inventory>> inventoryMap = allInventories.stream()
                 .collect(Collectors.groupingBy(inv -> inv.getProductVariant().getId()));
+        Map<String, BigDecimal> transferImportPriceCache = new HashMap<>();
 
         List<SKUAttributeValue> allAttributes = skuAttributeValueRepo.findBySkuIdIn(variantIds);
         Map<Long, List<SKUAttributeValue>> attributeMap = allAttributes.stream()
@@ -77,7 +83,7 @@ public class CartService {
             BigDecimal fifoImportPrice = batches.stream()
                     .filter(inv -> inv.getQuantity() != null && inv.getQuantity() > 0)
                     .sorted(Comparator.comparing(Inventory::getId, Comparator.nullsLast(Long::compareTo)))
-                    .map(inv -> inv.getImportPrice() != null ? inv.getImportPrice() : BigDecimal.ZERO)
+                    .map(inv -> resolveDisplayImportPrice(inv, variant.getId(), transferImportPriceCache))
                     .findFirst()
                     .orElse(BigDecimal.ZERO);
 
@@ -100,6 +106,51 @@ public class CartService {
                     .image(variant.getImageUrl())
                     .build();
         }).toList();
+    }
+
+    private BigDecimal resolveDisplayImportPrice(Inventory inventory, Long variantId,
+                                                 Map<String, BigDecimal> transferImportPriceCache) {
+        BigDecimal importPrice = inventory.getImportPrice();
+        if (!isTransferBatchWithoutCost(inventory)) {
+            return importPrice != null ? importPrice : BigDecimal.ZERO;
+        }
+
+        Long branchId = inventory.getBranch() != null ? inventory.getBranch().getId() : null;
+        if (branchId == null || variantId == null) {
+            return BigDecimal.ZERO;
+        }
+
+        String cacheKey = branchId + ":" + variantId;
+        return transferImportPriceCache.computeIfAbsent(
+                cacheKey,
+                ignored -> resolveInboundTransferAverageImportPrice(branchId, variantId));
+    }
+
+    private boolean isTransferBatchWithoutCost(Inventory inventory) {
+        if (inventory == null) {
+            return false;
+        }
+
+        String batchNumber = inventory.getBatchNumber();
+        BigDecimal importPrice = inventory.getImportPrice();
+        boolean isTransferBatch = batchNumber != null && batchNumber.toUpperCase(Locale.ROOT).startsWith("TRANSFER");
+        boolean missingCost = importPrice == null || BigDecimal.ZERO.compareTo(importPrice) == 0;
+        return isTransferBatch && missingCost;
+    }
+
+    private BigDecimal resolveInboundTransferAverageImportPrice(Long branchId, Long variantId) {
+        Object[] summary = inventoryTransactionRepository.summarizeCompletedInboundTransferCost(branchId, variantId);
+        if (summary == null || summary.length < 2 || summary[0] == null || summary[1] == null) {
+            return BigDecimal.ZERO;
+        }
+
+        BigDecimal totalCost = (BigDecimal) summary[0];
+        Number totalQty = (Number) summary[1];
+        if (totalQty.longValue() <= 0) {
+            return BigDecimal.ZERO;
+        }
+
+        return totalCost.divide(BigDecimal.valueOf(totalQty.longValue()), 4, RoundingMode.HALF_UP);
     }
 
     @Transactional

@@ -7,13 +7,16 @@ import com.zone.agri.dto.response.order.SubOrderDraftDto;
 import com.zone.agri.entity.Inventory;
 import com.zone.agri.entity.ProductVariant;
 import com.zone.agri.repository.InventoryRepository;
+import com.zone.agri.repository.InventoryTransactionRepository;
 import com.zone.agri.service.BranchSearchService.BranchWithRealDistance;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.*;
+import java.util.Locale;
 
 /**
  * Thuật toán Greedy kết hợp lô hàng (FIFO).
@@ -25,6 +28,7 @@ import java.util.*;
 public class InventoryAllocationService {
 
     private final InventoryRepository inventoryRepository;
+    private final InventoryTransactionRepository inventoryTransactionRepository;
     private final SettingService settingService;
 
     public record AllocationResult(
@@ -89,6 +93,7 @@ public class InventoryAllocationService {
 
         Long selectedBranchId = selectedBranchWithDistance.branch().getId();
         Map<Long, List<Inventory>> branchBatches = inventoryMatrix.getOrDefault(selectedBranchId, Collections.emptyMap());
+        Map<Long, BigDecimal> transferImportPriceCache = new HashMap<>();
 
         List<OrderItemDto> allocatedItems = new ArrayList<>();
 
@@ -114,7 +119,7 @@ public class InventoryAllocationService {
                 }
 
                 int quantityToTake = Math.min(requested, availableInBatch);
-                BigDecimal importPrice = batch.getImportPrice() != null ? batch.getImportPrice() : BigDecimal.ZERO;
+                BigDecimal importPrice = resolveDisplayImportPrice(batch, variantId, transferImportPriceCache);
                 lastUnitPrice = settingService.calculateSellingPrice(importPrice, profitMultiplier, roundingRule);
 
                 totalAllocatedForItem += quantityToTake;
@@ -123,7 +128,12 @@ public class InventoryAllocationService {
             }
 
             if (lastUnitPrice.compareTo(BigDecimal.ZERO) == 0) {
-                lastUnitPrice = resolveFallbackUnitPrice(variantId, inventoryMatrix, profitMultiplier, roundingRule);
+                lastUnitPrice = resolveFallbackUnitPrice(
+                        variantId,
+                        inventoryMatrix,
+                        profitMultiplier,
+                        roundingRule,
+                        transferImportPriceCache);
             }
 
             allocatedItems.add(OrderItemDto.builder()
@@ -188,16 +198,62 @@ public class InventoryAllocationService {
     }
 
     private BigDecimal resolveFallbackUnitPrice(Long variantId, Map<Long, Map<Long, List<Inventory>>> matrix,
-                                                BigDecimal multiplier, String roundingRule) {
+                                                BigDecimal multiplier, String roundingRule,
+                                                Map<Long, BigDecimal> transferImportPriceCache) {
         for (Map<Long, List<Inventory>> branchMap : matrix.values()) {
             List<Inventory> batches = branchMap.getOrDefault(variantId, Collections.emptyList());
             for (Inventory batch : batches) {
-                if (batch.getImportPrice() != null && batch.getImportPrice().compareTo(BigDecimal.ZERO) > 0) {
-                    return settingService.calculateSellingPrice(batch.getImportPrice(), multiplier, roundingRule);
+                BigDecimal importPrice = resolveDisplayImportPrice(batch, variantId, transferImportPriceCache);
+                if (importPrice.compareTo(BigDecimal.ZERO) > 0) {
+                    return settingService.calculateSellingPrice(importPrice, multiplier, roundingRule);
                 }
             }
         }
         return BigDecimal.ZERO;
+    }
+
+    private BigDecimal resolveDisplayImportPrice(Inventory inventory, Long variantId,
+                                                 Map<Long, BigDecimal> transferImportPriceCache) {
+        BigDecimal importPrice = inventory.getImportPrice();
+        if (!isTransferBatchWithoutCost(inventory)) {
+            return importPrice != null ? importPrice : BigDecimal.ZERO;
+        }
+
+        Long branchId = inventory.getBranch() != null ? inventory.getBranch().getId() : null;
+        if (branchId == null || variantId == null) {
+            return BigDecimal.ZERO;
+        }
+
+        return transferImportPriceCache.computeIfAbsent(
+                branchId,
+                ignored -> resolveInboundTransferAverageImportPrice(branchId, variantId));
+    }
+
+    private boolean isTransferBatchWithoutCost(Inventory inventory) {
+        if (inventory == null) {
+            return false;
+        }
+
+        String batchNumber = inventory.getBatchNumber();
+        BigDecimal importPrice = inventory.getImportPrice();
+        boolean isTransferBatch = batchNumber != null && batchNumber.toUpperCase(Locale.ROOT).startsWith("TRANSFER");
+        boolean missingCost = importPrice == null || BigDecimal.ZERO.compareTo(importPrice) == 0;
+        return isTransferBatch && missingCost;
+    }
+
+    private BigDecimal resolveInboundTransferAverageImportPrice(Long branchId, Long variantId) {
+        Object[] summary = inventoryTransactionRepository.summarizeCompletedInboundTransferCost(branchId, variantId);
+        if (summary == null || summary.length < 2 || summary[0] == null || summary[1] == null) {
+            return BigDecimal.ZERO;
+        }
+
+        BigDecimal totalCost = (BigDecimal) summary[0];
+        Number totalQty = (Number) summary[1];
+        if (totalQty.longValue() <= 0) {
+            return BigDecimal.ZERO;
+        }
+
+        return totalCost.divide(BigDecimal.valueOf(totalQty.longValue()), 4, RoundingMode.HALF_UP);
     }
 
     private boolean isBranchFullyStocked(Long branchId, List<CartItemDto> cart,
