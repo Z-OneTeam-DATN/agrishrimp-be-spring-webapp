@@ -21,6 +21,10 @@ public interface InventoryTransferRepository extends JpaRepository<InventoryTran
 
   boolean existsByReferenceCodeAndStatusIn(String referenceCode, Collection<InventoryTransferStatus> statuses);
 
+  List<InventoryTransfer> findByReferenceCodeAndStatusInOrderByCreatedAtDesc(
+      String referenceCode,
+      Collection<InventoryTransferStatus> statuses);
+
   // Kiểm tra sản phẩm có đang nằm trong các phiếu chuyển trạng thái nhất định
   // không
   @Query("SELECT COUNT(it) > 0 FROM InventoryTransfer it " +

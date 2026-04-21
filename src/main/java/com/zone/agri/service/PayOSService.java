@@ -26,6 +26,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.InvalidKeyException;
 import java.security.NoSuchAlgorithmException;
 import java.net.URLEncoder;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -41,6 +42,7 @@ public class PayOSService {
     private final RestTemplate restTemplate;
     private final OrderRepository orderRepository;
     private final SubOrderRepository subOrderRepository;
+    private final ImmediateReplenishmentService immediateReplenishmentService;
     private final ObjectMapper objectMapper;
 
     @Value("${payos.client-id}")
@@ -229,12 +231,16 @@ public class PayOSService {
 
         List<SubOrder> subOrders = subOrderRepository.findByOrderId(order.getId());
         boolean hasAnyMissingItems = false;
+        List<Long> awaitingReplenishmentSubOrderIds = new ArrayList<>();
         for (SubOrder subOrder : subOrders) {
             if (subOrder.getStatus() == OrderStatus.AWAITING_PAYMENT) {
                 boolean hasMissingItems = subOrder.getItems() != null
                         && subOrder.getItems().stream().anyMatch(item -> (item.getMissingQuantity() != null ? item.getMissingQuantity() : 0) > 0);
                 subOrder.setStatus(hasMissingItems ? OrderStatus.AWAITING_REPLENISHMENT : OrderStatus.PROCESSING);
                 hasAnyMissingItems = hasAnyMissingItems || hasMissingItems;
+                if (hasMissingItems) {
+                    awaitingReplenishmentSubOrderIds.add(subOrder.getId());
+                }
             }
         }
 
@@ -244,6 +250,7 @@ public class PayOSService {
 
         orderRepository.save(order);
         subOrderRepository.saveAll(subOrders);
+        immediateReplenishmentService.scheduleAfterCommit(awaitingReplenishmentSubOrderIds, order.getCode());
     }
 
     private String withOrderParams(String baseUrl, Order order, String status) {

@@ -252,9 +252,11 @@ public class InventoryTransferService {
         }
 
         String referenceCode = subOrder.getOrder().getCode() + "-SUB-" + subOrder.getId();
-        if (transferRepo.existsByReferenceCodeAndStatusIn(referenceCode,
-                List.of(InventoryTransferStatus.PENDING, InventoryTransferStatus.SHIPPING))) {
-            throw new RuntimeException("Phần đơn này đã có lệnh điều chuyển đang xử lý");
+        List<InventoryTransfer> existingTransfers = transferRepo.findByReferenceCodeAndStatusInOrderByCreatedAtDesc(
+                referenceCode,
+                List.of(InventoryTransferStatus.PENDING, InventoryTransferStatus.SHIPPING));
+        if (!existingTransfers.isEmpty()) {
+            return existingTransfers;
         }
 
         Branch warehouse = resolveMainWarehouse();
