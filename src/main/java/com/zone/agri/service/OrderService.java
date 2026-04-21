@@ -1303,21 +1303,12 @@ public class OrderService {
     }
 
     private void ensurePreparedQuoteStillValid(PrepareOrderDraft draft, PreparedQuote liveQuote) {
-        boolean totalsChanged = !hasSameMoney(draft.getTotalSubtotal(), liveQuote.totalSubtotal())
-                || !hasSameMoney(draft.getDiscountAmount(), liveQuote.discountAmount())
-                || !hasSameMoney(draft.getTotalShippingFee(), liveQuote.totalShippingFee())
-                || !hasSameMoney(draft.getTotalAmount(), liveQuote.totalAmount());
-
-        if (totalsChanged || !Objects.equals(buildSubOrderSignature(draft.getSubOrders()),
+        if (!Objects.equals(buildSubOrderSignature(draft.getSubOrders()),
                 buildSubOrderSignature(liveQuote.subOrders()))) {
-            throw new ConflictException("Đơn hàng vừa thay đổi, vui lòng tải lại giỏ hàng trước khi đặt", true);
+            throw new ConflictException("Don hang vua thay doi, vui long tai lai gio hang truoc khi dat", true);
         }
     }
 
-    private boolean hasSameMoney(BigDecimal left, BigDecimal right) {
-        return Objects.requireNonNullElse(left, BigDecimal.ZERO)
-                .compareTo(Objects.requireNonNullElse(right, BigDecimal.ZERO)) == 0;
-    }
 
     private List<BranchWithRealDistance> filterCustomerFulfillmentBranches(List<BranchWithRealDistance> branches) {
         if (branches == null || branches.isEmpty()) {
@@ -1348,21 +1339,16 @@ public class OrderService {
                                     .sorted(Comparator
                                             .comparing(OrderItemDto::getProductVariantId,
                                                     Comparator.nullsLast(Long::compareTo))
-                                            .thenComparing(item -> safeBigDecimal(item.getUnitPrice()))
                                             .thenComparing(item -> Objects.requireNonNullElse(item.getQuantity(), 0)))
                                     .map(item -> String.join(":",
                                             String.valueOf(item.getProductVariantId()),
                                             String.valueOf(Objects.requireNonNullElse(item.getQuantity(), 0)),
                                             String.valueOf(Objects.requireNonNullElse(item.getAllocatedQuantity(), 0)),
-                                            String.valueOf(Objects.requireNonNullElse(item.getMissingQuantity(), 0)),
-                                            safeBigDecimal(item.getUnitPrice()),
-                                            safeBigDecimal(item.getSubtotal())))
+                                            String.valueOf(Objects.requireNonNullElse(item.getMissingQuantity(), 0))))
                                     .collect(Collectors.joining(","));
 
                     return String.join("|",
                             String.valueOf(subOrder.getBranchId()),
-                            safeBigDecimal(subOrder.getSubtotal()),
-                            safeBigDecimal(subOrder.getShippingFee()),
                             Objects.toString(subOrder.getEstimatedDays(), ""),
                             Objects.toString(subOrder.getCarrier(), ""),
                             itemSignature);
@@ -1370,12 +1356,6 @@ public class OrderService {
                 .collect(Collectors.joining("||"));
     }
 
-    private String safeBigDecimal(BigDecimal value) {
-        BigDecimal normalized = Objects.requireNonNullElse(value, BigDecimal.ZERO);
-        return normalized.stripTrailingZeros().toPlainString();
-    }
-
-    private String normalizeVoucherCode(String voucherCode) {
         if (voucherCode == null || voucherCode.isBlank()) {
             return null;
         }
