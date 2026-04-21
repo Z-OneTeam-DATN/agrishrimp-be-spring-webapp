@@ -1,5 +1,6 @@
 package com.zone.agri.entity;
 
+import com.zone.agri.entity.enums.InventoryCheckWorkflowStatus;
 import com.zone.agri.entity.enums.InventoryNoteStatus;
 import com.zone.agri.entity.enums.InventoryNoteType;
 import jakarta.persistence.*;
@@ -72,6 +73,22 @@ public class InventoryNote {
 
     @Column(name = "checked_by", length = 255)
     String checkedBy;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "check_workflow_status", length = 50)
+    InventoryCheckWorkflowStatus checkWorkflowStatus;
+
+    @Column(name = "check_submitted_at")
+    LocalDateTime checkSubmittedAt;
+
+    @Column(name = "check_approved_at")
+    LocalDateTime checkApprovedAt;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "check_approved_by")
+    @ToString.Exclude
+    @EqualsAndHashCode.Exclude
+    User checkApprovedBy;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "branch_id")

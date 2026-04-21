@@ -11,8 +11,6 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
-import org.springframework.security.core.Authentication;
-import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -26,12 +24,6 @@ public class InventoryCheckController {
     private final InventoryNoteService inventoryNoteService;
     private final InventoryService inventoryService;
 
-    private boolean hasAuthority(String authority) {
-        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-        return auth != null && auth.getAuthorities().stream()
-                .anyMatch(a -> a.getAuthority().equals(authority));
-    }
-
     /**
      * A. API Tạo/Cập nhật phiếu (POST /api/inventory-checks)
      * Nếu có ID trong request thì cập nhật, ngược lại tạo mới.
@@ -40,17 +32,10 @@ public class InventoryCheckController {
     @RequirePermission("INVENTORY_CHECK_CREATE")
     @PostMapping
     public ResponseEntity<InventoryNoteResponse> saveOrUpdate(@Valid @RequestBody CheckNoteRequest request) {
-        InventoryNoteResponse response;
         if (request.getId() != null) {
-            response = inventoryNoteService.updateCheckCommand(request.getId(), request);
-        } else {
-            response = inventoryNoteService.createCheckCommand(request);
+            return ResponseEntity.ok(inventoryNoteService.updateCheckCommand(request.getId(), request));
         }
-        
-        if (hasAuthority("INVENTORY_CHECK_APPROVE")) {
-            response = inventoryNoteService.completeCheckCommand(response.getId());
-        }
-        return ResponseEntity.ok(response);
+        return ResponseEntity.ok(inventoryNoteService.createCheckCommand(request));
     }
 
     /**
@@ -88,13 +73,23 @@ public class InventoryCheckController {
     }
 
     /**
-     * Chốt phiếu kiểm kê
+     * Gửi phiếu kiểm kê sang bước chờ duyệt cân bằng
+     */
+    @SecurityRequirement(name = "bearerAuth")
+    @RequirePermission("INVENTORY_CHECK_UPDATE")
+    @PostMapping("/{id}/submit-for-approval")
+    public ResponseEntity<InventoryNoteResponse> submitForApproval(@PathVariable Long id) {
+        return ResponseEntity.ok(inventoryNoteService.submitCheckForApproval(id));
+    }
+
+    /**
+     * Admin duyệt cân bằng tồn kho theo số thực tế
      */
     @SecurityRequirement(name = "bearerAuth")
     @RequirePermission("INVENTORY_CHECK_APPROVE")
-    @PostMapping("/{id}/complete")
-    public ResponseEntity<InventoryNoteResponse> complete(@PathVariable Long id) {
-        return ResponseEntity.ok(inventoryNoteService.completeCheckCommand(id));
+    @PostMapping("/{id}/approve-adjustment")
+    public ResponseEntity<InventoryNoteResponse> approveAdjustment(@PathVariable Long id) {
+        return ResponseEntity.ok(inventoryNoteService.approveCheckAdjustment(id));
     }
 
     /**
@@ -114,7 +109,9 @@ public class InventoryCheckController {
     @SecurityRequirement(name = "bearerAuth")
     @RequirePermission("INVENTORY_CHECK_CREATE")
     @GetMapping("/search-products")
-    public ResponseEntity<List<InventorySearchResponse>> searchProducts(@RequestParam(required = false) String keyword) {
-        return ResponseEntity.ok(inventoryService.searchInventoryForCheck(keyword));
+    public ResponseEntity<List<InventorySearchResponse>> searchProducts(
+            @RequestParam(required = false) String keyword,
+            @RequestParam(required = false) Long branchId) {
+        return ResponseEntity.ok(inventoryService.searchInventoryForCheck(keyword, branchId));
     }
 }

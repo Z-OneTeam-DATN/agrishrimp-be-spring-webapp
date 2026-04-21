@@ -28,6 +28,10 @@ public class InventoryNoteResponse {
     private String type; // Đây là check type (PERIODIC/UNEXPECTED/YEAR_END)
     private LocalDateTime checkDate;
     private String checkedBy;
+    private String checkWorkflowStatus;
+    private LocalDateTime checkSubmittedAt;
+    private LocalDateTime checkApprovedAt;
+    private String checkApprovedByName;
     private String entryDate;
     private LocalDateTime createdAt;
 

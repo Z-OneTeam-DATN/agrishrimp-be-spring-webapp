@@ -1,6 +1,7 @@
 package com.zone.agri.repository;
 
 import com.zone.agri.entity.InventoryNote;
+import com.zone.agri.entity.enums.InventoryCheckWorkflowStatus;
 import com.zone.agri.entity.enums.InventoryNoteStatus;
 import com.zone.agri.entity.enums.InventoryNoteType;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -143,6 +144,37 @@ public interface InventoryNoteRepository extends JpaRepository<InventoryNote, Lo
         WHERE in.id = :id
     """)
     Optional<InventoryNote> findByIdWithDetails(@Param("id") Long id);
+
+    @Query("""
+        SELECT COUNT(inote) > 0
+        FROM InventoryNote inote
+        WHERE inote.type = com.zone.agri.entity.enums.InventoryNoteType.CHECK
+          AND inote.branch.id = :branchId
+          AND inote.checkWorkflowStatus IN :workflowStatuses
+          AND (:excludeId IS NULL OR inote.id <> :excludeId)
+    """)
+    boolean existsActiveCheckByBranchId(
+            @Param("branchId") Long branchId,
+            @Param("workflowStatuses") Collection<InventoryCheckWorkflowStatus> workflowStatuses,
+            @Param("excludeId") Long excludeId
+    );
+
+    @Query("""
+        SELECT inote
+        FROM InventoryNote inote
+        LEFT JOIN FETCH inote.createdBy
+        LEFT JOIN FETCH inote.checkApprovedBy
+        WHERE inote.type = com.zone.agri.entity.enums.InventoryNoteType.CHECK
+          AND inote.branch.id = :branchId
+          AND inote.checkWorkflowStatus IN :workflowStatuses
+          AND (:excludeId IS NULL OR inote.id <> :excludeId)
+        ORDER BY inote.createdAt DESC
+    """)
+    List<InventoryNote> findActiveChecksByBranchId(
+            @Param("branchId") Long branchId,
+            @Param("workflowStatuses") Collection<InventoryCheckWorkflowStatus> workflowStatuses,
+            @Param("excludeId") Long excludeId
+    );
 
     @Query("SELECT in FROM InventoryNote in " +
             "LEFT JOIN FETCH in.createdBy " +

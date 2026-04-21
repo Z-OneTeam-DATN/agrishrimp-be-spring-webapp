@@ -63,6 +63,7 @@ public class InventoryTransferService {
     private final BackorderService backorderService;
     private final com.zone.agri.repository.InventoryTransferDetailRepository transferDetailRepo;
     private final com.zone.agri.common.WarehouseContext warehouseContext;
+    private final InventoryCheckGuardService inventoryCheckGuardService;
     private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(InventoryTransferService.class);
 
     private void assertTransferParticipantAccess(InventoryTransfer transfer) {
@@ -122,6 +123,10 @@ public class InventoryTransferService {
 
     @Transactional
     public InventoryTransfer createTransfer(TransferRequest req) {
+        Long fromBranchId = req.getFromBranchId();
+        Long toBranchId = req.getToBranchId();
+        inventoryCheckGuardService.assertNoOpenCheckForBranch(fromBranchId, "tạo phiếu điều chuyển");
+        inventoryCheckGuardService.assertNoOpenCheckForBranch(toBranchId, "tạo phiếu điều chuyển");
         Branch fromBranch = branchRepo.findById(req.getFromBranchId())
                 .orElseThrow(() -> new RuntimeException("Không tìm thấy Kho xuất"));
         Branch toBranch = branchRepo.findById(req.getToBranchId())
@@ -338,6 +343,8 @@ public class InventoryTransferService {
     public void approveTransfer(Long transferId) {
         InventoryTransfer transfer = transferRepo.findById(transferId)
                 .orElseThrow(() -> new RuntimeException("Không tìm thấy phiếu điều chuyển"));
+        inventoryCheckGuardService.assertNoOpenCheckForBranch(transfer.getFromBranch().getId(), "duyet phieu dieu chuyen");
+        inventoryCheckGuardService.assertNoOpenCheckForBranch(transfer.getToBranch().getId(), "duyet phieu dieu chuyen");
 
         boolean isFlow5 = transfer.getTransferBusinessType() == TransferBusinessType.INTERNAL_SALE;
 
@@ -368,6 +375,8 @@ public class InventoryTransferService {
     public void sourceConfirm(Long transferId) {
         InventoryTransfer transfer = transferRepo.findById(transferId)
                 .orElseThrow(() -> new RuntimeException("Không tìm thấy phiếu điều chuyển"));
+        inventoryCheckGuardService.assertNoOpenCheckForBranch(transfer.getFromBranch().getId(), "xac nhan dieu chuyen");
+        inventoryCheckGuardService.assertNoOpenCheckForBranch(transfer.getToBranch().getId(), "xac nhan dieu chuyen");
 
         if (transfer.getTransferBusinessType() != TransferBusinessType.INTERNAL_SALE) {
             throw new RuntimeException(
@@ -401,6 +410,8 @@ public class InventoryTransferService {
     public void approveAndShip(Long transferId) {
         InventoryTransfer transfer = transferRepo.findByIdWithDetails(transferId)
                 .orElseThrow(() -> new RuntimeException("Không tìm thấy phiếu điều chuyển"));
+        inventoryCheckGuardService.assertNoOpenCheckForBranch(transfer.getFromBranch().getId(), "xuat dieu chuyen");
+        inventoryCheckGuardService.assertNoOpenCheckForBranch(transfer.getToBranch().getId(), "xuat dieu chuyen");
 
         if (transfer.getStatus() != InventoryTransferStatus.APPROVED) {
             throw new RuntimeException("Chỉ có thể xuất kho phiếu đã được duyệt (APPROVED)!");
@@ -465,6 +476,8 @@ public class InventoryTransferService {
     public void startInspection(Long transferId) {
         InventoryTransfer transfer = transferRepo.findById(transferId)
                 .orElseThrow(() -> new RuntimeException("Không tìm thấy phiếu điều chuyển"));
+        inventoryCheckGuardService.assertNoOpenCheckForBranch(transfer.getFromBranch().getId(), "kiem tra dieu chuyen");
+        inventoryCheckGuardService.assertNoOpenCheckForBranch(transfer.getToBranch().getId(), "kiem tra dieu chuyen");
 
         if (transfer.getStatus() != InventoryTransferStatus.SHIPPING) {
             throw new RuntimeException(
@@ -485,6 +498,8 @@ public class InventoryTransferService {
     public void receiveTransfer(Long id, List<TransferQCRequest> qcItems) {
         InventoryTransfer transfer = transferRepo.findByIdWithDetails(id)
                 .orElseThrow(() -> new RuntimeException("Không tìm thấy phiếu điều chuyển"));
+        inventoryCheckGuardService.assertNoOpenCheckForBranch(transfer.getFromBranch().getId(), "nhan dieu chuyen");
+        inventoryCheckGuardService.assertNoOpenCheckForBranch(transfer.getToBranch().getId(), "nhan dieu chuyen");
 
         // Hỗ trợ cả SHIPPING (skip bước INSPECTING) lẫn INSPECTING (đúng flow mới)
         if (transfer.getStatus() != InventoryTransferStatus.INSPECTING
@@ -1114,3 +1129,4 @@ public class InventoryTransferService {
         return EARTH_RADIUS * c;
     }
 }
+

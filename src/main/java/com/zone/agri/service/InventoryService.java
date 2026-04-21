@@ -41,6 +41,7 @@ public class InventoryService {
     private final BackorderService backorderService;
     private final com.zone.agri.common.WarehouseContext warehouseContext;
     private final PurchaseRequestRepository purchaseRequestRepository;
+    private final InventoryCheckGuardService inventoryCheckGuardService;
     private final ApplicationContext applicationContext; // Dùng để lazy-get PurchaseRequestService tránh circular dep
     private static final Set<InventoryNoteStatus> OPEN_RECEIPT_STATUSES = Set.of(
             InventoryNoteStatus.PENDING,
@@ -79,6 +80,7 @@ public class InventoryService {
         PurchaseRequest linkedPurchaseRequest = resolveLinkedPurchaseRequestForCreate(request);
         Branch destBranch = resolveDestinationBranch(request, linkedPurchaseRequest);
         warehouseContext.assertAccess(destBranch.getId());
+        inventoryCheckGuardService.assertNoOpenCheckForBranch(destBranch.getId(), "tạo phiếu nhập kho");
 
         if ("SUPPLIER".equals(request.getImportType()) && resolveSupplierCode(request, linkedPurchaseRequest) == null) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Lỗi: Nhập từ NCC phải có mã nhà cung cấp.");
@@ -119,6 +121,7 @@ public class InventoryService {
         InventoryNote existingNote = noteRepository.findById(id)
                 .orElseThrow(() -> new NotFoundException("Không tìm thấy phiếu ID: " + id));
         warehouseContext.assertAccess(existingNote.getBranch().getId());
+        inventoryCheckGuardService.assertNoOpenCheckForBranch(existingNote.getBranch().getId(), "cập nhật phiếu nhập kho");
 
         if (existingNote.getStatus() == InventoryNoteStatus.COMPLETED) {
             throw new BadRequestException("Phiếu đã nhập kho thành công, không thể sửa đổi.");
@@ -160,6 +163,7 @@ public class InventoryService {
         InventoryNote note = noteRepository.findByIdWithDetails(id)
                 .orElseThrow(() -> new NotFoundException("Không tìm thấy phiếu ID: " + id));
         warehouseContext.assertAccess(note.getBranch().getId());
+        inventoryCheckGuardService.assertNoOpenCheckForBranch(note.getBranch().getId(), "duyệt phiếu nhập kho");
 
         if (note.getStatus() != InventoryNoteStatus.PENDING) {
             throw new BadRequestException("Chỉ có thể duyệt phiếu đang ở trạng thái Chờ duyệt (PENDING).");
@@ -239,6 +243,7 @@ public class InventoryService {
                 .orElseThrow(() -> new NotFoundException("Không tìm thấy phiếu ID: " + id));
         warehouseContext.assertAccess(note.getBranch().getId());
 
+        inventoryCheckGuardService.assertNoOpenCheckForBranch(note.getBranch().getId(), "chot phieu nhap kho");
         if (note.getStatus() != InventoryNoteStatus.APPROVED && note.getStatus() != InventoryNoteStatus.PENDING) {
             throw new BadRequestException("Phiếu phải ở trạng thái Đã duyệt hoặc Chờ duyệt mới có thể nhập kho.");
         }
@@ -753,8 +758,9 @@ public class InventoryService {
     }
 
     @Transactional(readOnly = true)
-    public List<com.zone.agri.dto.response.inventory.InventorySearchResponse> searchInventoryForCheck(String keyword) {
-        Long branchId = warehouseContext.resolveWarehouseId();
+    public List<com.zone.agri.dto.response.inventory.InventorySearchResponse> searchInventoryForCheck(String keyword, Long explicitBranchId) {
+        Long branchId = explicitBranchId != null ? explicitBranchId : warehouseContext.resolveWarehouseId();
+        warehouseContext.assertAccess(branchId);
         return inventoryRepository.searchInventoryForCheck(keyword, branchId);
     }
 
