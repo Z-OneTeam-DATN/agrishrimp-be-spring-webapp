@@ -26,25 +26,34 @@ public class AiChatClient {
     public AiChatClient(RestTemplateBuilder builder) {
         this.restTemplate = builder
                 .connectTimeout(Duration.ofSeconds(10))
-                .readTimeout(Duration.ofSeconds(30))
+                .readTimeout(Duration.ofSeconds(60))
                 .build();
     }
 
     public AiChatResponse chat(AiChatRequest request) {
+        try {
+            return callChat(request);
+        } catch (Exception e) {
+            log.warn("[AI-Chat] lần 1 thất bại, retry: {}", e.getMessage());
+            try {
+                return callChat(request);
+            } catch (Exception e2) {
+                log.error("[AI-Chat] lần 2 thất bại: {}", e2.getMessage());
+                throw new RuntimeException("AI service lỗi khi xử lý chat: " + e2.getMessage());
+            }
+        }
+    }
+
+    private AiChatResponse callChat(AiChatRequest request) {
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
         HttpEntity<AiChatRequest> entity = new HttpEntity<>(request, headers);
-        try {
-            ResponseEntity<AiChatResponse> response = restTemplate.exchange(
-                    baseUrl + chatPath,
-                    HttpMethod.POST,
-                    entity,
-                    AiChatResponse.class
-            );
-            return response.getBody();
-        } catch (Exception e) {
-            log.error("[AI-Chat] Lỗi gọi AI chat: {}", e.getMessage());
-            throw new RuntimeException("AI service lỗi khi xử lý chat: " + e.getMessage());
-        }
+        ResponseEntity<AiChatResponse> response = restTemplate.exchange(
+                baseUrl + chatPath,
+                HttpMethod.POST,
+                entity,
+                AiChatResponse.class
+        );
+        return response.getBody();
     }
 }
