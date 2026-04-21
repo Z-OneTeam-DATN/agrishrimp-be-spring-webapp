@@ -11,7 +11,7 @@ spring:
 
   # 1. CẤU HÌNH DATABASE (MYSQL)
   datasource:
-    url: ${SPRING_DATASOURCE_URL:jdbc:mysql://localhost:3307/agri_shrimp_db?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true}
+    url: ${SPRING_DATASOURCE_URL:jdbc:mysql://localhost:3307/agri_shrimp_db?useSSL=false&serverTimezone=Asia/Ho_Chi_Minh&allowPublicKeyRetrieval=true}
     username: ${SPRING_DATASOURCE_USERNAME:agri_user}
     password: ${SPRING_DATASOURCE_PASSWORD:change_me_local_mysql_user_password}
     driver-class-name: com.mysql.cj.jdbc.Driver
