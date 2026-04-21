@@ -170,12 +170,29 @@ public class VoucherService {
     public List<VoucherResponse> getPublicVouchers() {
         LocalDateTime now = LocalDateTime.now();
         List<Voucher> vouchers = voucherRepository.findByStatus(VoucherStatus.ACTIVE);
-        return vouchers.stream()
-                .filter(v -> v.getQuantity() == null || v.getQuantity() > 0)
-                .filter(v -> v.getStartDate() == null || !v.getStartDate().isAfter(now))
-                .filter(v -> v.getEndDate() == null || !v.getEndDate().isBefore(now))
+        log.info("Found {} ACTIVE vouchers in database", vouchers.size());
+        
+        List<VoucherResponse> result = vouchers.stream()
+                .filter(v -> {
+                    boolean ok = v.getQuantity() == null || v.getQuantity() > 0;
+                    if (!ok) log.debug("Voucher {} filtered out: quantity <= 0", v.getCode());
+                    return ok;
+                })
+                .filter(v -> {
+                    boolean ok = v.getStartDate() == null || !v.getStartDate().isAfter(now);
+                    if (!ok) log.debug("Voucher {} filtered out: startDate {} is after now {}", v.getCode(), v.getStartDate(), now);
+                    return ok;
+                })
+                .filter(v -> {
+                    boolean ok = v.getEndDate() == null || !v.getEndDate().isBefore(now);
+                    if (!ok) log.debug("Voucher {} filtered out: endDate {} is before now {}", v.getCode(), v.getEndDate(), now);
+                    return ok;
+                })
                 .map(this::convertToResponseWithDerivedStatus)
                 .collect(Collectors.toList());
+        
+        log.info("Returning {} public vouchers after filtering", result.size());
+        return result;
     }
 
     public VoucherResponse getVoucherByCode(String code) {
