@@ -39,7 +39,7 @@ public class MiniAppProductSuggestionService {
     private String webBaseUrl;
 
     /** Số sản phẩm tối đa gửi sang AI — kiểm soát prompt noise */
-    private static final int MAX_CANDIDATE_PRODUCTS = 10;
+    private static final int MAX_CANDIDATE_PRODUCTS = 20;
 
     // =========================================================
     // 1. CANDIDATE PRODUCTS — chọn lọc + xếp hạng

@@ -24,24 +24,30 @@ public class MiniAppDiseaseProductMapping {
 
     static {
         // Hội chứng chết sớm / Hoại tử gan tụy cấp (EMS / AHPND)
-        DISEASE_CATEGORY_KEYWORDS.put("EMS",    List.of("kháng sinh", "vi sinh", "gan", "đường ruột", "hóa chất"));
-        DISEASE_CATEGORY_KEYWORDS.put("AHPND",  List.of("kháng sinh", "vi sinh", "gan", "hóa chất", "diệt khuẩn"));
+        DISEASE_CATEGORY_KEYWORDS.put("EMS",            List.of("kháng sinh", "kháng khuẩn", "vi sinh", "probiotic", "gan", "đường ruột", "hóa chất", "diệt khuẩn"));
+        DISEASE_CATEGORY_KEYWORDS.put("AHPND",          List.of("kháng sinh", "kháng khuẩn", "vi sinh", "probiotic", "gan", "hóa chất", "diệt khuẩn"));
         // Bệnh đốm trắng (WSSV)
-        DISEASE_CATEGORY_KEYWORDS.put("WSSV",   List.of("miễn dịch", "vi sinh", "khoáng", "vitamin", "diệt khuẩn"));
-        // Hội chứng phân trắng (WFS)
-        DISEASE_CATEGORY_KEYWORDS.put("WFS",    List.of("vi sinh", "đường ruột", "gan", "vitamin", "khoáng"));
+        DISEASE_CATEGORY_KEYWORDS.put("WSSV",           List.of("vi sinh", "probiotic", "khoáng", "vitamin", "hóa chất", "diệt khuẩn", "vôi"));
+        // Hội chứng phân trắng / WFS (WSSV_BG trong YOLO)
+        DISEASE_CATEGORY_KEYWORDS.put("WSSV_BG",        List.of("vi sinh", "probiotic", "đường ruột", "gan", "vitamin", "khoáng", "hóa chất"));
+        // Viêm mang vi khuẩn (BG)
+        DISEASE_CATEGORY_KEYWORDS.put("BG",             List.of("kháng sinh", "kháng khuẩn", "hóa chất", "diệt khuẩn", "vi sinh", "probiotic", "vitamin", "khoáng"));
+        // Nhóm bệnh vi khuẩn tổng hợp
+        DISEASE_CATEGORY_KEYWORDS.put("BACTERIAL_GROUP",List.of("kháng sinh", "kháng khuẩn", "vi sinh", "probiotic", "gan", "hóa chất", "diệt khuẩn", "vitamin", "khoáng"));
+        // Bệnh đầu vàng (Yellowhead / YHV)
+        DISEASE_CATEGORY_KEYWORDS.put("YELLOWHEAD",     List.of("vitamin", "khoáng", "hóa chất", "diệt khuẩn", "vôi", "vi sinh"));
         // Hoại tử gan tụy thể hoại tử (NHP)
-        DISEASE_CATEGORY_KEYWORDS.put("NHP",    List.of("kháng sinh", "vi sinh", "gan", "hóa chất"));
+        DISEASE_CATEGORY_KEYWORDS.put("NHP",            List.of("kháng sinh", "vi sinh", "gan", "hóa chất", "diệt khuẩn"));
         // Hoại tử cơ truyền nhiễm (IMNV)
-        DISEASE_CATEGORY_KEYWORDS.put("IMNV",   List.of("miễn dịch", "vi sinh", "khoáng", "vitamin"));
+        DISEASE_CATEGORY_KEYWORDS.put("IMNV",           List.of("vi sinh", "probiotic", "khoáng", "vitamin", "hóa chất"));
         // Taura Syndrome Virus
-        DISEASE_CATEGORY_KEYWORDS.put("TSV",    List.of("miễn dịch", "vi sinh", "khoáng", "vitamin"));
+        DISEASE_CATEGORY_KEYWORDS.put("TSV",            List.of("vi sinh", "probiotic", "khoáng", "vitamin"));
         // Bệnh còi / chậm lớn
-        DISEASE_CATEGORY_KEYWORDS.put("STUNTED", List.of("vitamin", "khoáng", "tăng trưởng", "men vi sinh"));
-        // Tôm khỏe mạnh / không phát hiện bệnh
-        DISEASE_CATEGORY_KEYWORDS.put("NORMAL", List.of("vitamin", "khoáng", "men vi sinh", "tăng trưởng"));
-        // Fallback mặc định
-        DISEASE_CATEGORY_KEYWORDS.put("DEFAULT", List.of("thuốc", "vi sinh", "khoáng", "vitamin"));
+        DISEASE_CATEGORY_KEYWORDS.put("STUNTED",        List.of("vitamin", "khoáng", "tăng trưởng", "men vi sinh", "probiotic"));
+        // Tôm khỏe mạnh
+        DISEASE_CATEGORY_KEYWORDS.put("NORMAL",         List.of("vitamin", "khoáng", "men vi sinh", "probiotic", "tăng trưởng"));
+        // Fallback mặc định — bao phủ rộng nhất có thể
+        DISEASE_CATEGORY_KEYWORDS.put("DEFAULT",        List.of("thuốc", "kháng sinh", "hóa chất", "diệt khuẩn", "vi sinh", "probiotic", "khoáng", "vitamin", "gan", "đường ruột"));
     }
 
     /**
@@ -56,7 +62,7 @@ public class MiniAppDiseaseProductMapping {
         if (DISEASE_CATEGORY_KEYWORDS.containsKey(upper)) {
             return DISEASE_CATEGORY_KEYWORDS.get(upper);
         }
-        // Prefix match: "EMS_STAGE2" → "EMS"
+        // Prefix match: "EMS_STAGE2" → "EMS", "Yellowhead" → "YELLOWHEAD"
         return DISEASE_CATEGORY_KEYWORDS.entrySet().stream()
                 .filter(e -> !"DEFAULT".equals(e.getKey()) && upper.startsWith(e.getKey()))
                 .findFirst()
