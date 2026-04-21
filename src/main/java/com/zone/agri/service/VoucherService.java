@@ -168,11 +168,12 @@ public class VoucherService {
     }
 
     public List<VoucherResponse> getPublicVouchers() {
+        LocalDateTime now = LocalDateTime.now();
         List<Voucher> vouchers = voucherRepository.findByStatus(VoucherStatus.ACTIVE);
         return vouchers.stream()
-                .filter(v -> v.getQuantity() != null && v.getQuantity() > 0)
-                .filter(v -> v.getStartDate() != null && !v.getStartDate().isAfter(LocalDateTime.now()))
-                .filter(v -> v.getEndDate() != null && !v.getEndDate().isBefore(LocalDateTime.now()))
+                .filter(v -> v.getQuantity() == null || v.getQuantity() > 0)
+                .filter(v -> v.getStartDate() == null || !v.getStartDate().isAfter(now))
+                .filter(v -> v.getEndDate() == null || !v.getEndDate().isBefore(now))
                 .map(this::convertToResponseWithDerivedStatus)
                 .collect(Collectors.toList());
     }
