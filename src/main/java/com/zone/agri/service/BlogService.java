@@ -289,11 +289,7 @@ public class BlogService {
                 String imageUrl = prod.getProductImages() == null || prod.getProductImages().isEmpty()
                         ? null
                         : prod.getProductImages().iterator().next().getImageUrl();
-                Double basePrice = prod.getVariants() == null || prod.getVariants().isEmpty()
-                        ? null
-                        : prod.getVariants().iterator().next().getPrice() == null
-                          ? null
-                          : prod.getVariants().iterator().next().getPrice().doubleValue();
+                Double basePrice = null;
                 relatedList.add(BlogPostResponse.RelatedProductInfo.builder()
                         .id(prod.getId()).name(prod.getName()).slug(prod.getSlug())
                         .imageUrl(imageUrl).basePrice(basePrice)
