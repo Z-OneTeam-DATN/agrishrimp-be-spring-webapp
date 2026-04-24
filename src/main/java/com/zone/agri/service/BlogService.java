@@ -92,6 +92,7 @@ public class BlogService {
         ).map(p -> toResponse(p, false));
     }
 
+    @Transactional
     public BlogPostResponse getBySlug(String slug, boolean incrementView) {
         BlogPost post = postRepo.findBySlug(slug)
                 .orElseThrow(() -> new RuntimeException("Bài viết không tồn tại: " + slug));
