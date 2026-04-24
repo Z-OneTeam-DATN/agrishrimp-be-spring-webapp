@@ -114,12 +114,6 @@ public class User extends BaseEntity {
     @JsonIgnore
     private List<UserAddress> addresses;
 
-    @OneToMany(mappedBy = "user", fetch = FetchType.LAZY)
-    @ToString.Exclude
-    @EqualsAndHashCode.Exclude
-    @JsonIgnore
-    private List<Pond> ponds;
-
     // 1. Danh sách phiếu do User này TẠO/GỬI
     @OneToMany(mappedBy = "sender", fetch = FetchType.LAZY)
     @ToString.Exclude

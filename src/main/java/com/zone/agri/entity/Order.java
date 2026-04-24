@@ -109,13 +109,6 @@ public class Order {
     Voucher voucher;
 
 
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "pond_id")
-    @ToString.Exclude
-    @EqualsAndHashCode.Exclude
-    Pond pond; // Nếu chưa có class Pond, bạn có thể comment dòng này hoặc tạo class Pond placeholder.
-
-
     @OneToMany(mappedBy = "order", fetch = FetchType.LAZY, cascade = CascadeType.ALL)
     @ToString.Exclude
     @EqualsAndHashCode.Exclude
