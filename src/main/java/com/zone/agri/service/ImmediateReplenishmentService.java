@@ -9,6 +9,7 @@ import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import com.zone.agri.entity.SubOrder;
+import com.zone.agri.entity.enums.OrderStatus;
 import com.zone.agri.repository.SubOrderRepository;
 
 import lombok.RequiredArgsConstructor;
@@ -61,5 +62,16 @@ public class ImmediateReplenishmentService {
 
         log.info("Ensured {} replenishment transfer(s) for order {} across {} awaiting sub-order(s)",
                 ensuredTransferCount, orderCode, awaitingSubOrderIds.size());
+    }
+
+    public void ensureTransfersForAwaitingSubOrders() {
+        List<Long> awaitingSubOrderIds = subOrderRepository.findByStatus(OrderStatus.AWAITING_REPLENISHMENT).stream()
+                .map(SubOrder::getId)
+                .toList();
+        if (awaitingSubOrderIds.isEmpty()) {
+            return;
+        }
+
+        createTransfers(awaitingSubOrderIds, "awaiting-replenishment-reconcile");
     }
 }
