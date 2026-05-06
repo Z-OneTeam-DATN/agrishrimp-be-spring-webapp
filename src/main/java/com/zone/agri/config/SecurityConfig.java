@@ -59,6 +59,7 @@ public class SecurityConfig {
             "/api/webhooks/**",
             "/api/orders/admin/**",
             "/api/vouchers/public",
+            "/ws/**",
 
     };
 

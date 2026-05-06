@@ -162,3 +162,9 @@ ocr:
     data-path: ${OCR_TESSERACT_DATA_PATH:/usr/share/tesseract-ocr/5/tessdata}
   max-file-size-bytes: ${OCR_MAX_FILE_SIZE_BYTES:5242880}
   max-image-width: ${OCR_MAX_IMAGE_WIDTH:1800}
+
+# 17. WEB PUSH (VAPID)
+vapid:
+  public-key: ${VAPID_PUBLIC_KEY:}
+  private-key: ${VAPID_PRIVATE_KEY:}
+  subject: ${VAPID_SUBJECT:mailto:admin@agrishrimp.vn}

@@ -184,6 +184,11 @@ public class DataSeeder implements CommandLineRunner {
                 Permission aSetV = pAct("Xem cài đặt", "SETTING_VIEW", PermissionGroup.SETTING, mSet);
                 Permission aSetU = pAct("Cập nhật cài đặt", "SETTING_UPDATE", PermissionGroup.SETTING, mSet);
 
+                // GROUP COMMUNICATION
+                Permission mChat = pMod("Chat với khách hàng", "CHAT", PermissionGroup.COMMUNICATION);
+                Permission aChatV = pAct("Xem hội thoại chat", "CHAT_VIEW", PermissionGroup.COMMUNICATION, mChat);
+                Permission aChatM = pAct("Quản lý chat (ghim, phân công)", "CHAT_MANAGE", PermissionGroup.COMMUNICATION, mChat);
+
                 // ── 2. VAI TRÒ ──────────────────────────────────────────────────
                 Role adminRole = saveRole("ADMIN", "Quản trị viên", true, Set.of(
                                 aDashV, aWspaceV,
@@ -202,7 +207,8 @@ public class DataSeeder implements CommandLineRunner {
                                 aVouV, aVouC, aVouU, aVouD,
                                 aSupV, aSupC, aSupU, aSupD,
                                 aOrdV, aOrdC, aOrdU, aOrdD, aOrdCnf, aOrdShip, aOrdX, aOrdDone, aOrdRefund, aOrdExport,
-                                aSetV, aSetU));
+                                aSetV, aSetU,
+                                aChatV, aChatM));
 
                 saveRole("MANAGER", "Quản lý chi nhánh & kho", false, Set.of(
                                 aDashV, aWspaceV,
@@ -216,10 +222,12 @@ public class DataSeeder implements CommandLineRunner {
                                 aChkV, aChkC, aChkU, aChkX, aChkD,
                                 aCusV, aCusC, aCusU, aCusD,
                                 aVouV, aVouC, aVouU,
-                                aOrdV, aOrdC, aOrdU, aOrdCnf, aOrdShip, aOrdX, aOrdDone, aOrdExport));
+                                aOrdV, aOrdC, aOrdU, aOrdCnf, aOrdShip, aOrdX, aOrdDone, aOrdExport,
+                                aChatV, aChatM));
 
                 saveRole("STAFF", "Nhân viên", false, Set.of(
-                                aDashV, aWspaceV, aRptInv, aProdV, aCatV, aOrdV, aOrdC));
+                                aDashV, aWspaceV, aRptInv, aProdV, aCatV, aOrdV, aOrdC,
+                                aChatV));
 
                 saveRole("USER", "Khách hàng", false, Set.of(aOrdV, aOrdC, aOrdX));
 
@@ -234,6 +242,20 @@ public class DataSeeder implements CommandLineRunner {
                                         .role(adminRole)
                                         .gender(Gender.MALE)
                                         .dateOfBirth(LocalDate.of(1985, 3, 15))
+                                        .provider(AuthProvider.LOCAL)
+                                        .build());
+                }
+
+                if (!userRepository.existsByEmail("bot@agrishrimp.vn")) {
+                        userRepository.save(User.builder()
+                                        .fullName("AgriShrimp Bot")
+                                        .email("bot@agrishrimp.vn")
+                                        .phoneNumber("0900000000")
+                                        .passwordHash(passwordEncoder.encode("bot_disabled_" + System.currentTimeMillis()))
+                                        .status(UserStatus.INACTIVE)
+                                        .role(adminRole)
+                                        .gender(Gender.OTHER)
+                                        .dateOfBirth(LocalDate.of(2000, 1, 1))
                                         .provider(AuthProvider.LOCAL)
                                         .build());
                 }

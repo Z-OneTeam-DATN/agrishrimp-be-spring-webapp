@@ -10,5 +10,6 @@ public enum PermissionGroup {
     INVENTORY_TRANSACTION,
     PARTNER,
     SHIPPING,
-    SETTING
+    SETTING,
+    COMMUNICATION
 }
