@@ -169,4 +169,6 @@ services:
 
 volumes:
   mysql_data:
+    external: true
+    name: agrishrimp_mysql_data
   clip_model_cache:
