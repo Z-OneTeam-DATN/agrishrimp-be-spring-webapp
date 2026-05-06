@@ -25,10 +25,10 @@ public class WebPushService {
     private final UserRepository userRepository;
     private final ObjectMapper objectMapper;
 
-    @Value("${vapid.public-key}")
+    @Value("${vapid.public-key:}")
     private String vapidPublicKey;
 
-    @Value("${vapid.private-key}")
+    @Value("${vapid.private-key:}")
     private String vapidPrivateKey;
 
     @Value("${vapid.subject:mailto:admin@agrishrimp.vn}")
