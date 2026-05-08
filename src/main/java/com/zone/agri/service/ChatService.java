@@ -104,9 +104,13 @@ public class ChatService {
 
         ChatMessageResponse response = toMessageResponse(msg);
 
+        String customerPrincipal = conv.getCustomer().getEmail() != null
+                ? conv.getCustomer().getEmail()
+                : conv.getCustomer().getPhoneNumber();
+
         // Push message via WebSocket to both parties
         messagingTemplate.convertAndSendToUser(
-                customerId.toString(),
+                customerPrincipal,
                 "/queue/messages",
                 response
         );
@@ -165,7 +169,10 @@ public class ChatService {
         ChatMessageResponse response = toMessageResponse(msg);
 
         Long customerId = conv.getCustomer().getId();
-        messagingTemplate.convertAndSendToUser(customerId.toString(), "/queue/messages", response);
+        String customerPrincipalPin = conv.getCustomer().getEmail() != null
+                ? conv.getCustomer().getEmail()
+                : conv.getCustomer().getPhoneNumber();
+        messagingTemplate.convertAndSendToUser(customerPrincipalPin, "/queue/messages", response);
 
         notificationService.sendNotification(
                 customerId,
@@ -211,7 +218,10 @@ public class ChatService {
 
         ChatMessageResponse response = toMessageResponse(msg);
 
-        messagingTemplate.convertAndSendToUser(customerId.toString(), "/queue/messages", response);
+        String customerPrincipalImg = conv.getCustomer().getEmail() != null
+                ? conv.getCustomer().getEmail()
+                : conv.getCustomer().getPhoneNumber();
+        messagingTemplate.convertAndSendToUser(customerPrincipalImg, "/queue/messages", response);
         if (senderIsCustomer) {
             messagingTemplate.convertAndSend("/topic/shop-messages", response);
         } else {
@@ -267,8 +277,10 @@ public class ChatService {
             conversationRepository.save(conv);
 
             ChatMessageResponse botResponse = toMessageResponse(botMsg);
-            Long customerId = conv.getCustomer().getId();
-            messagingTemplate.convertAndSendToUser(customerId.toString(), "/queue/messages", botResponse);
+            String customerPrincipalBot = conv.getCustomer().getEmail() != null
+                    ? conv.getCustomer().getEmail()
+                    : conv.getCustomer().getPhoneNumber();
+            messagingTemplate.convertAndSendToUser(customerPrincipalBot, "/queue/messages", botResponse);
             messagingTemplate.convertAndSend("/topic/shop-messages", botResponse);
         } catch (Exception e) {
             log.warn("[ChatBot] Auto-reply failed for conv {}: {}", convId, e.getMessage());
@@ -282,7 +294,10 @@ public class ChatService {
             if (senderId.equals(customerId)) {
                 messagingTemplate.convertAndSend("/topic/shop-typing", event);
             } else {
-                messagingTemplate.convertAndSendToUser(customerId.toString(), "/queue/typing", event);
+                String customerPrincipalTyping = conv.getCustomer().getEmail() != null
+                        ? conv.getCustomer().getEmail()
+                        : conv.getCustomer().getPhoneNumber();
+                messagingTemplate.convertAndSendToUser(customerPrincipalTyping, "/queue/typing", event);
             }
         });
     }

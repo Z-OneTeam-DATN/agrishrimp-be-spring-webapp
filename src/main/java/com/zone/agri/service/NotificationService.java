@@ -42,8 +42,9 @@ public class NotificationService {
         Notification saved = notificationRepository.save(notification);
         NotificationResponse response = toResponse(saved);
 
+        String userPrincipal = user.getEmail() != null ? user.getEmail() : user.getPhoneNumber();
         messagingTemplate.convertAndSendToUser(
-                userId.toString(),
+                userPrincipal,
                 "/queue/notifications",
                 response
         );
