@@ -60,6 +60,8 @@ public class SecurityConfig {
             "/api/orders/admin/**",
             "/api/vouchers/public",
             "/ws/**",
+            "/ws-native",
+            "/ws-native/**",
 
     };
 
