@@ -8,10 +8,8 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 /**
- * Áp dụng các ALTER TABLE cần thiết khi Hibernate ddl-auto:update
- * không tự sửa được định nghĩa ENUM column trong MySQL.
- *
- * Mỗi patch phải idempotent (chạy nhiều lần vẫn an toàn).
+ * Applies idempotent schema patches that Hibernate update mode cannot handle
+ * reliably in MySQL.
  */
 @Configuration
 @RequiredArgsConstructor
@@ -25,28 +23,52 @@ public class SchemaUpdateConfig {
     ApplicationRunner applySchemaPatches() {
         return args -> {
             applyPatch(
-                    "Patch orders.payment_method ENUM thêm PAYOS",
+                    "Patch orders.payment_method enum adds PAYOS",
                     "ALTER TABLE orders MODIFY COLUMN payment_method ENUM('CASH','TRANSFER','COD','PAYOS')");
 
             applyPatch(
-                    "Patch orders.status ENUM thêm AWAITING_PAYMENT, READY_FOR_PICKUP và RECEIVED",
+                    "Patch orders.status enum adds newer workflow states",
                     "ALTER TABLE orders MODIFY COLUMN status ENUM('PENDING','AWAITING_PAYMENT','AWAITING_REPLENISHMENT','CONFIRMED','PROCESSING','READY_FOR_PICKUP','SHIPPING','RECEIVED','COMPLETED','CANCELLED','RETURNED')");
 
             applyPatch(
-                    "Patch inventory_notes.type ENUM thêm CHECK",
+                    "Patch inventory_notes.type enum adds CHECK",
                     "ALTER TABLE inventory_notes MODIFY COLUMN type ENUM('IMPORT','EXPORT','CHECK')");
 
             applyPatch(
                     "Patch sub_orders.status length to 40",
                     "ALTER TABLE sub_orders MODIFY COLUMN status VARCHAR(40)");
             applyPatch(
-                    "Patch sub_order_items them allocated_quantity",
+                    "Patch sub_order_items adds allocated_quantity",
                     "ALTER TABLE sub_order_items ADD COLUMN allocated_quantity INT NULL");
             applyPatch(
-                    "Patch sub_order_items them missing_quantity",
+                    "Patch sub_order_items adds missing_quantity",
                     "ALTER TABLE sub_order_items ADD COLUMN missing_quantity INT NULL");
             applyPatch(
-                    "Tạo bảng inventory_receipt_payments nếu chưa có",
+                    "Patch orders adds financial lifecycle timestamps",
+                    "ALTER TABLE orders ADD COLUMN received_at DATETIME NULL, ADD COLUMN completed_at DATETIME NULL, ADD COLUMN returned_at DATETIME NULL, ADD COLUMN cancelled_at DATETIME NULL");
+            applyPatch(
+                    "Patch sub_orders adds financial lifecycle timestamps",
+                    "ALTER TABLE sub_orders ADD COLUMN received_at DATETIME NULL, ADD COLUMN completed_at DATETIME NULL, ADD COLUMN returned_at DATETIME NULL, ADD COLUMN cancelled_at DATETIME NULL");
+            applyPatch(
+                    "Backfill lifecycle timestamps for existing orders",
+                    """
+                            UPDATE orders
+                            SET received_at = COALESCE(received_at, CASE WHEN status IN ('RECEIVED', 'COMPLETED') THEN created_at END),
+                                completed_at = COALESCE(completed_at, CASE WHEN status = 'COMPLETED' THEN created_at END),
+                                returned_at = COALESCE(returned_at, CASE WHEN status = 'RETURNED' THEN created_at END),
+                                cancelled_at = COALESCE(cancelled_at, CASE WHEN status = 'CANCELLED' THEN created_at END)
+                            """);
+            applyPatch(
+                    "Backfill lifecycle timestamps for existing sub orders",
+                    """
+                            UPDATE sub_orders
+                            SET received_at = COALESCE(received_at, CASE WHEN status IN ('RECEIVED', 'COMPLETED') THEN COALESCE(updated_at, created_at) END),
+                                completed_at = COALESCE(completed_at, CASE WHEN status = 'COMPLETED' THEN COALESCE(updated_at, created_at) END),
+                                returned_at = COALESCE(returned_at, CASE WHEN status = 'RETURNED' THEN COALESCE(updated_at, created_at) END),
+                                cancelled_at = COALESCE(cancelled_at, CASE WHEN status = 'CANCELLED' THEN COALESCE(updated_at, created_at) END)
+                            """);
+            applyPatch(
+                    "Create inventory_receipt_payments when missing",
                     """
                             CREATE TABLE IF NOT EXISTS inventory_receipt_payments (
                                 id BIGINT PRIMARY KEY AUTO_INCREMENT,
@@ -68,7 +90,7 @@ public class SchemaUpdateConfig {
                             """);
 
             applyPatch(
-                    "Tạo bảng supplier_product_catalogs nếu chưa có",
+                    "Create supplier_product_catalogs when missing",
                     """
                             CREATE TABLE IF NOT EXISTS supplier_product_catalogs (
                                 id BIGINT PRIMARY KEY AUTO_INCREMENT,
@@ -89,10 +111,9 @@ public class SchemaUpdateConfig {
     private void applyPatch(String description, String sql) {
         try {
             jdbcTemplate.execute(sql);
-            log.info("Schema patch OK — {}", description);
+            log.info("Schema patch OK - {}", description);
         } catch (Exception e) {
-            // Nếu lỗi "Duplicate column" hoặc "already exists" → bỏ qua
-            log.debug("Schema patch skipped/warn — {}: {}", description, e.getMessage());
+            log.debug("Schema patch skipped/warn - {}: {}", description, e.getMessage());
         }
     }
 }

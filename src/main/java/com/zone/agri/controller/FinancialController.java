@@ -10,6 +10,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.zone.agri.dto.response.financial.CashbookReportResponse;
 import com.zone.agri.dto.response.financial.ProfitLossResponse;
 import com.zone.agri.dto.response.inventory.ReceiptPaymentResponse;
 import com.zone.agri.dto.response.supplier.SupplierDebtResponse;
@@ -46,6 +47,14 @@ public class FinancialController {
             @RequestParam(required = false, defaultValue = "not_zero") String debtFilter) {
         return ResponseEntity
                 .ok(financialService.getSupplierDebts(search, startDate, endDate, branchId, staffId, debtFilter));
+    }
+
+    @GetMapping("/cashbook")
+    public ResponseEntity<CashbookReportResponse> getCashbook(
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
+            @RequestParam(required = false) Long branchId) {
+        return ResponseEntity.ok(financialService.getCashbookReport(startDate, endDate, branchId));
     }
 
     @GetMapping("/supplier-payments")

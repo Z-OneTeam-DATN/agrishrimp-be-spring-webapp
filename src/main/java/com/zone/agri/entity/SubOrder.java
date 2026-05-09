@@ -72,4 +72,16 @@ public class SubOrder extends BaseEntity {
 
     @Column(name = "tracking_code", length = 100)
     String trackingCode;
+
+    @Column(name = "received_at")
+    java.time.LocalDateTime receivedAt;
+
+    @Column(name = "completed_at")
+    java.time.LocalDateTime completedAt;
+
+    @Column(name = "returned_at")
+    java.time.LocalDateTime returnedAt;
+
+    @Column(name = "cancelled_at")
+    java.time.LocalDateTime cancelledAt;
 }

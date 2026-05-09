@@ -200,9 +200,15 @@ public class OrderService {
 
         releaseAllocatedInventoryForOrder(order);
         restoreVoucherForOrder(order);
-        order.setStatus(OrderStatus.CANCELLED);
+        LocalDateTime cancelledAt = LocalDateTime.now();
+        applyOrderStatus(order, OrderStatus.CANCELLED, cancelledAt);
         if (order.getSubOrders() != null) {
-            order.getSubOrders().forEach(subOrder -> subOrder.setStatus(OrderStatus.CANCELLED));
+            List<SubOrder> cancelledSubOrders = order.getSubOrders().stream()
+                    .peek(subOrder -> applySubOrderStatus(subOrder, OrderStatus.CANCELLED, cancelledAt))
+                    .toList();
+            if (!cancelledSubOrders.isEmpty()) {
+                subOrderRepository.saveAll(cancelledSubOrders);
+            }
         }
         if (PaymentMethod.PAYOS.equals(order.getPaymentMethod())
                 && PaymentStatus.UNPAID.equals(order.getPaymentStatus())) {
@@ -242,13 +248,18 @@ public class OrderService {
             customerService.evaluateAndHandleCustomerReputation(order.getUser().getId());
             return;
         }
+        LocalDateTime statusChangedAt = LocalDateTime.now();
         if (newStatus == OrderStatus.CANCELLED) {
             releaseAllocatedInventoryForOrder(order);
             restoreVoucherForOrder(order);
             if (order.getSubOrders() != null) {
-                order.getSubOrders().stream()
+                List<SubOrder> cancelledSubOrders = order.getSubOrders().stream()
                         .filter(subOrder -> subOrder.getStatus() != OrderStatus.CANCELLED)
-                        .forEach(subOrder -> subOrder.setStatus(OrderStatus.CANCELLED));
+                        .peek(subOrder -> applySubOrderStatus(subOrder, OrderStatus.CANCELLED, statusChangedAt))
+                        .toList();
+                if (!cancelledSubOrders.isEmpty()) {
+                    subOrderRepository.saveAll(cancelledSubOrders);
+                }
             }
             if (PaymentMethod.PAYOS.equals(order.getPaymentMethod())
                     && PaymentStatus.UNPAID.equals(order.getPaymentStatus())) {
@@ -256,7 +267,7 @@ public class OrderService {
             }
         }
 
-        order.setStatus(newStatus);
+        applyOrderStatus(order, newStatus, statusChangedAt);
         orderRepository.save(order);
 
         if (newStatus == OrderStatus.COMPLETED || newStatus == OrderStatus.CANCELLED
@@ -442,7 +453,7 @@ public class OrderService {
             orderRepository.save(subOrder.getOrder());
         }
 
-        subOrder.setStatus(newStatus);
+        applySubOrderStatus(subOrder, newStatus, LocalDateTime.now());
         subOrderRepository.saveAndFlush(subOrder);
 
         syncMasterOrderStatus(subOrder.getOrder().getId());
@@ -459,9 +470,14 @@ public class OrderService {
         List<SubOrder> activeSubs = allSubs.stream()
                 .filter(s -> s.getStatus() != OrderStatus.CANCELLED && s.getStatus() != OrderStatus.RETURNED)
                 .collect(Collectors.toList());
+        List<SubOrder> nonCancelledSubs = allSubs.stream()
+                .filter(s -> s.getStatus() != OrderStatus.CANCELLED)
+                .toList();
 
         OrderStatus newMasterStatus;
-        if (activeSubs.isEmpty()) {
+        if (!nonCancelledSubs.isEmpty() && nonCancelledSubs.stream().allMatch(s -> s.getStatus() == OrderStatus.RETURNED)) {
+            newMasterStatus = OrderStatus.RETURNED;
+        } else if (activeSubs.isEmpty()) {
             newMasterStatus = OrderStatus.CANCELLED;
         } else if (activeSubs.stream().allMatch(s -> s.getStatus() == OrderStatus.COMPLETED)) {
             newMasterStatus = OrderStatus.COMPLETED;
@@ -487,7 +503,7 @@ public class OrderService {
             }
         }
 
-        order.setStatus(newMasterStatus);
+        applyOrderStatus(order, newMasterStatus, LocalDateTime.now());
         orderRepository.saveAndFlush(order);
 
         if (newMasterStatus == OrderStatus.COMPLETED || newMasterStatus == OrderStatus.CANCELLED
@@ -520,7 +536,8 @@ public class OrderService {
             throw new BadRequestException("Chá»‰ Ä‘Æ°á»£c xÃ¡c nháº­n 'ÄÃ£ nháº­n hÃ ng' sau khi Ä‘Æ¡n Ä‘ang giao quÃ¡ 7 ngÃ y.");
         }
 
-        order.setStatus(OrderStatus.RECEIVED);
+        LocalDateTime receivedAt = LocalDateTime.now();
+        applyOrderStatus(order, OrderStatus.RECEIVED, receivedAt);
         if (PaymentMethod.COD.equals(order.getPaymentMethod())) {
             order.setPaymentStatus(PaymentStatus.PAID);
         }
@@ -529,7 +546,7 @@ public class OrderService {
         if (order.getSubOrders() != null) {
             List<SubOrder> shippingSubOrders = order.getSubOrders().stream()
                     .filter(subOrder -> subOrder.getStatus() == OrderStatus.SHIPPING)
-                    .peek(subOrder -> subOrder.setStatus(OrderStatus.RECEIVED))
+                    .peek(subOrder -> applySubOrderStatus(subOrder, OrderStatus.RECEIVED, receivedAt))
                     .toList();
             if (!shippingSubOrders.isEmpty()) {
                 subOrderRepository.saveAll(shippingSubOrders);
@@ -538,14 +555,15 @@ public class OrderService {
     }
 
     private void completeReceivedOrder(Order order) {
-        order.setStatus(OrderStatus.COMPLETED);
+        LocalDateTime completedAt = LocalDateTime.now();
+        applyOrderStatus(order, OrderStatus.COMPLETED, completedAt);
         order.setPaymentStatus(PaymentStatus.PAID);
         orderRepository.save(order);
 
         if (order.getSubOrders() != null) {
             List<SubOrder> receivedSubOrders = order.getSubOrders().stream()
                     .filter(subOrder -> subOrder.getStatus() == OrderStatus.RECEIVED)
-                    .peek(subOrder -> subOrder.setStatus(OrderStatus.COMPLETED))
+                    .peek(subOrder -> applySubOrderStatus(subOrder, OrderStatus.COMPLETED, completedAt))
                     .toList();
             if (!receivedSubOrders.isEmpty()) {
                 subOrderRepository.saveAll(receivedSubOrders);
@@ -599,6 +617,48 @@ public class OrderService {
 
     private LocalDateTime resolveStatusUpdatedAt(SubOrder subOrder) {
         return subOrder.getUpdatedAt() != null ? subOrder.getUpdatedAt() : subOrder.getCreatedAt();
+    }
+
+    private void applyOrderStatus(Order order, OrderStatus status, LocalDateTime changedAt) {
+        order.setStatus(status);
+        if (status == OrderStatus.RECEIVED && order.getReceivedAt() == null) {
+            order.setReceivedAt(changedAt);
+        }
+        if (status == OrderStatus.COMPLETED) {
+            if (order.getReceivedAt() == null) {
+                order.setReceivedAt(changedAt);
+            }
+            if (order.getCompletedAt() == null) {
+                order.setCompletedAt(changedAt);
+            }
+        }
+        if (status == OrderStatus.RETURNED && order.getReturnedAt() == null) {
+            order.setReturnedAt(changedAt);
+        }
+        if (status == OrderStatus.CANCELLED && order.getCancelledAt() == null) {
+            order.setCancelledAt(changedAt);
+        }
+    }
+
+    private void applySubOrderStatus(SubOrder subOrder, OrderStatus status, LocalDateTime changedAt) {
+        subOrder.setStatus(status);
+        if (status == OrderStatus.RECEIVED && subOrder.getReceivedAt() == null) {
+            subOrder.setReceivedAt(changedAt);
+        }
+        if (status == OrderStatus.COMPLETED) {
+            if (subOrder.getReceivedAt() == null) {
+                subOrder.setReceivedAt(changedAt);
+            }
+            if (subOrder.getCompletedAt() == null) {
+                subOrder.setCompletedAt(changedAt);
+            }
+        }
+        if (status == OrderStatus.RETURNED && subOrder.getReturnedAt() == null) {
+            subOrder.setReturnedAt(changedAt);
+        }
+        if (status == OrderStatus.CANCELLED && subOrder.getCancelledAt() == null) {
+            subOrder.setCancelledAt(changedAt);
+        }
     }
 
     private void syncPayOSPaymentStatuses(Collection<Order> orders) {

@@ -108,12 +108,10 @@ public class InventoryReceiptPaymentService {
                 .build();
 
         InventoryReceiptPayment savedPayment = inventoryReceiptPaymentRepository.save(payment);
-
-        note.setPaymentAmount(totalPaidAfter);
-        note.setDebtAmount(remainingDebtAfter);
-        inventoryNoteRepository.save(note);
-
-        return mapToResponse(savedPayment);
+        rebuildPaymentLedger(note);
+        InventoryReceiptPayment refreshedPayment = inventoryReceiptPaymentRepository.findById(savedPayment.getId())
+                .orElse(savedPayment);
+        return mapToResponse(refreshedPayment);
     }
 
     @Transactional(readOnly = true)
@@ -173,5 +171,24 @@ public class InventoryReceiptPaymentService {
                 .createdAt(payment.getCreatedAt())
                 .createdByName(payment.getCreatedBy() != null ? payment.getCreatedBy().getFullName() : "")
                 .build();
+    }
+
+    private void rebuildPaymentLedger(InventoryNote note) {
+        BigDecimal totalAmount = Objects.requireNonNullElse(note.getTotalAmount(), BigDecimal.ZERO);
+        BigDecimal runningPaid = BigDecimal.ZERO;
+        List<InventoryReceiptPayment> payments = inventoryReceiptPaymentRepository
+                .findByReceiptIdOrderByPaymentDateAscIdAsc(note.getId());
+
+        for (InventoryReceiptPayment item : payments) {
+            BigDecimal amount = Objects.requireNonNullElse(item.getAmount(), BigDecimal.ZERO);
+            runningPaid = runningPaid.add(amount);
+            BigDecimal remaining = totalAmount.subtract(runningPaid).max(BigDecimal.ZERO);
+            item.setRemainingDebtAfter(remaining);
+        }
+
+        inventoryReceiptPaymentRepository.saveAll(payments);
+        note.setPaymentAmount(runningPaid);
+        note.setDebtAmount(totalAmount.subtract(runningPaid).max(BigDecimal.ZERO));
+        inventoryNoteRepository.save(note);
     }
 }
