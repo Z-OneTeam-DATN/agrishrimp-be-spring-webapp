@@ -1,7 +1,10 @@
 package com.zone.agri.repository;
 
-import com.zone.agri.entity.Order;
-import com.zone.agri.entity.enums.OrderStatus;
+import java.math.BigDecimal;
+import java.time.LocalDateTime;
+import java.util.Collection;
+import java.util.List;
+
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -9,13 +12,29 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
-import java.math.BigDecimal;
-import java.time.LocalDateTime;
-import java.util.Collection;
-import java.util.List;
+import com.zone.agri.entity.Order;
+import com.zone.agri.entity.enums.OrderStatus;
 
 @Repository
 public interface OrderRepository extends JpaRepository<Order, Long> {
+
+       interface LegacyFinancialOrderProjection {
+              Long getId();
+
+              String getOrderCode();
+
+              BigDecimal getProductAmount();
+
+              BigDecimal getShippingAmount();
+
+              BigDecimal getDiscountAmount();
+
+              LocalDateTime getReceivedAt();
+
+              LocalDateTime getCompletedAt();
+
+              LocalDateTime getReturnedAt();
+       }
 
        java.util.Optional<Order> findByCode(String code);
 
@@ -25,19 +44,15 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
        boolean existsByStatusInAndProductId(@Param("statuses") Collection<OrderStatus> statuses,
                      @Param("productId") Long productId);
 
-       // 1. Đếm tổng số đơn hàng của khách
        @Query("SELECT COUNT(o) FROM Order o WHERE o.user.id = :userId")
        Long countTotalOrdersByUserId(@Param("userId") Long userId);
 
-       // 1b. Đếm số đơn đã ngã ngũ, dùng để tính uy tín
        @Query("SELECT COUNT(o) FROM Order o WHERE o.user.id = :userId AND o.status IN (com.zone.agri.entity.enums.OrderStatus.COMPLETED, com.zone.agri.entity.enums.OrderStatus.CANCELLED, com.zone.agri.entity.enums.OrderStatus.RETURNED)")
        Long countSettledOrdersByUserId(@Param("userId") Long userId);
 
-       // 2. Đếm số đơn hàng giao THÀNH CÔNG
        @Query("SELECT COUNT(o) FROM Order o WHERE o.user.id = :userId AND o.status = 'COMPLETED'")
        Long countCompletedOrdersByUserId(@Param("userId") Long userId);
 
-       // 3. Tính tổng tiền khách đã chi (Chỉ cộng đơn THÀNH CÔNG)
        @Query("SELECT SUM(o.totalAmount) FROM Order o WHERE o.user.id = :userId AND o.status = 'COMPLETED'")
        BigDecimal sumTotalSpentByUserId(@Param("userId") Long userId);
 
@@ -47,7 +62,6 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
        @Query("SELECT AVG(o.finalAmount) FROM Order o WHERE o.user.id = :userId AND o.status = 'COMPLETED'")
        Double findAverageOrderValueByUserId(@Param("userId") Long userId);
 
-       // Thêm hàm này để lấy lịch sử đơn hàng của 1 khách hàng cụ thể
        @Query("SELECT COUNT(o) > 0 FROM Order o " +
                      "WHERE o.id = :orderId AND o.user.id = :userId " +
                      "AND (" +
@@ -103,15 +117,26 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
                      @Param("endDate") LocalDateTime endDate,
                      @Param("branchId") Long branchId);
 
+       @Query("SELECT SUM(o.totalAmount) FROM Order o WHERE o.status IN (com.zone.agri.entity.enums.OrderStatus.COMPLETED, com.zone.agri.entity.enums.OrderStatus.RECEIVED, com.zone.agri.entity.enums.OrderStatus.SHIPPING) "
+                     +
+                     "AND o.createdAt BETWEEN :startDate AND :endDate " +
+                     "AND (:branchId IS NULL OR o.branch.id = :branchId)")
+       BigDecimal sumGrossRevenue(@Param("startDate") LocalDateTime startDate,
+                     @Param("endDate") LocalDateTime endDate,
+                     @Param("branchId") Long branchId);
+
        @Query("SELECT SUM(o.finalAmount) FROM Order o WHERE o.status IN (com.zone.agri.entity.enums.OrderStatus.COMPLETED, com.zone.agri.entity.enums.OrderStatus.RECEIVED, com.zone.agri.entity.enums.OrderStatus.SHIPPING) "
                      +
                      "AND o.createdAt BETWEEN :startDate AND :endDate " +
                      "AND (:branchId IS NULL OR o.branch.id = :branchId)")
-       BigDecimal sumTotalRevenue(@Param("startDate") LocalDateTime startDate,
+       BigDecimal sumRecognizedFinalAmount(@Param("startDate") LocalDateTime startDate,
                      @Param("endDate") LocalDateTime endDate,
                      @Param("branchId") Long branchId);
 
-       // Tính tổng giá vốn (COGS) cho cả COMPLETED và SHIPPING
+       default BigDecimal sumTotalRevenue(LocalDateTime startDate, LocalDateTime endDate, Long branchId) {
+              return sumRecognizedFinalAmount(startDate, endDate, branchId);
+       }
+
        @Query("SELECT SUM(ABS(it.quantityChange) * i.importPrice) " +
                      "FROM Order o " +
                      "JOIN InventoryTransaction it ON it.referenceCode = o.code " +
@@ -150,7 +175,6 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
                      @Param("endDate") LocalDateTime endDate,
                      @Param("branchId") Long branchId);
 
-       // Tính tổng tiền hàng bị trả lại (Đơn hàng bị RETURNED)
        @Query("SELECT SUM(o.totalAmount) FROM Order o WHERE o.status = 'RETURNED' " +
                      "AND o.createdAt BETWEEN :startDate AND :endDate " +
                      "AND (:branchId IS NULL OR o.branch.id = :branchId)")
@@ -158,19 +182,53 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
                      @Param("endDate") LocalDateTime endDate,
                      @Param("branchId") Long branchId);
 
-       // Tính tổng phí ship thu của khách
-       @Query("SELECT SUM(o.totalShippingFee) FROM Order o WHERE o.status = 'COMPLETED' " +
+       @Query("SELECT SUM(o.totalShippingFee) FROM Order o WHERE o.status = 'RETURNED' " +
+                     "AND o.createdAt BETWEEN :startDate AND :endDate " +
+                     "AND (:branchId IS NULL OR o.branch.id = :branchId)")
+       BigDecimal sumReturnedShippingFee(@Param("startDate") LocalDateTime startDate,
+                     @Param("endDate") LocalDateTime endDate,
+                     @Param("branchId") Long branchId);
+
+       @Query("SELECT SUM(o.discountAmount) FROM Order o WHERE o.status = 'RETURNED' " +
+                     "AND o.createdAt BETWEEN :startDate AND :endDate " +
+                     "AND (:branchId IS NULL OR o.branch.id = :branchId)")
+       BigDecimal sumReturnedDiscount(@Param("startDate") LocalDateTime startDate,
+                     @Param("endDate") LocalDateTime endDate,
+                     @Param("branchId") Long branchId);
+
+       @Query("SELECT SUM(o.totalShippingFee) FROM Order o WHERE o.status IN (com.zone.agri.entity.enums.OrderStatus.COMPLETED, com.zone.agri.entity.enums.OrderStatus.RECEIVED, com.zone.agri.entity.enums.OrderStatus.SHIPPING) " +
                      "AND o.createdAt BETWEEN :startDate AND :endDate " +
                      "AND (:branchId IS NULL OR o.branch.id = :branchId)")
        BigDecimal sumShippingFee(@Param("startDate") LocalDateTime startDate,
                      @Param("endDate") LocalDateTime endDate,
                      @Param("branchId") Long branchId);
 
-       // Tính tổng chiết khấu cho khách
-       @Query("SELECT SUM(o.discountAmount) FROM Order o WHERE o.status = 'COMPLETED' " +
+       @Query("SELECT SUM(o.discountAmount) FROM Order o WHERE o.status IN (com.zone.agri.entity.enums.OrderStatus.COMPLETED, com.zone.agri.entity.enums.OrderStatus.RECEIVED, com.zone.agri.entity.enums.OrderStatus.SHIPPING) " +
                      "AND o.createdAt BETWEEN :startDate AND :endDate " +
                      "AND (:branchId IS NULL OR o.branch.id = :branchId)")
        BigDecimal sumDiscount(@Param("startDate") LocalDateTime startDate,
+                     @Param("endDate") LocalDateTime endDate,
+                     @Param("branchId") Long branchId);
+
+       @Query("""
+                     SELECT o.id AS id,
+                            o.code AS orderCode,
+                            COALESCE(o.totalAmount, 0) AS productAmount,
+                            COALESCE(o.totalShippingFee, 0) AS shippingAmount,
+                            COALESCE(o.discountAmount, 0) AS discountAmount,
+                            o.receivedAt AS receivedAt,
+                            o.completedAt AS completedAt,
+                            o.returnedAt AS returnedAt
+                     FROM Order o
+                     WHERE o.subOrders IS EMPTY
+                       AND (:branchId IS NULL OR o.branch.id = :branchId)
+                       AND (
+                            (o.receivedAt IS NOT NULL AND o.receivedAt <= :endDate)
+                            OR (o.completedAt IS NOT NULL AND o.completedAt <= :endDate)
+                            OR (o.returnedAt IS NOT NULL AND o.returnedAt <= :endDate)
+                       )
+                     """)
+       List<LegacyFinancialOrderProjection> findLegacyFinancialOrders(
                      @Param("endDate") LocalDateTime endDate,
                      @Param("branchId") Long branchId);
 }

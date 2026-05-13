@@ -13,6 +13,7 @@ import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import com.zone.agri.entity.Supplier;
+import com.zone.agri.entity.enums.InventoryNoteType;
 import com.zone.agri.entity.enums.SupplierStatus;
 
 @Repository
@@ -35,8 +36,7 @@ public interface SupplierRepository extends JpaRepository<Supplier, Long> {
         @Query("SELECT s FROM Supplier s WHERE s.code = :code")
         Optional<Supplier> findByCode(@Param("code") String code);
 
-        // Interface dùng để hứng dữ liệu từ câu Query
-        interface SupplierDebtProjection {
+        interface SupplierDebtSupplierProjection {
                 Long getId();
 
                 String getSupplierCode();
@@ -44,26 +44,46 @@ public interface SupplierRepository extends JpaRepository<Supplier, Long> {
                 String getSupplierName();
 
                 String getPhone();
-
-                BigDecimal getTotalDebt();
         }
 
-        @Query("SELECT s.id AS id, s.code AS supplierCode, s.name AS supplierName, s.phone AS phone, " +
-                        "COALESCE(SUM(CASE " +
-                        "WHEN ((i.type = 'IMPORT' AND i.status = 'COMPLETED') " +
-                        "OR (i.type = 'EXPORT' AND i.status = 'COMPLETED' AND i.supplier IS NOT NULL)) " +
-                        "AND (:startDate IS NULL OR i.createdAt >= :startDate) " +
-                        "AND (:endDate IS NULL OR i.createdAt <= :endDate) " +
+        interface SupplierDebtLedgerProjection {
+                Long getSupplierId();
+
+                String getSupplierCode();
+
+                String getSupplierName();
+
+                String getPhone();
+
+                Long getNoteId();
+
+                InventoryNoteType getNoteType();
+
+                BigDecimal getTotalAmount();
+
+                BigDecimal getPaidAmount();
+        }
+
+        @Query("SELECT s.id AS id, s.code AS supplierCode, s.name AS supplierName, s.phone AS phone " +
+                        "FROM Supplier s " +
+                        "WHERE (:search IS NULL OR LOWER(s.name) LIKE LOWER(CONCAT('%', :search, '%')) " +
+                        "OR s.code LIKE CONCAT('%', :search, '%') OR s.phone LIKE CONCAT('%', :search, '%'))")
+        List<SupplierDebtSupplierProjection> findSuppliersForDebtReport(@Param("search") String search);
+
+        @Query("SELECT i.supplier.id AS supplierId, i.supplier.code AS supplierCode, i.supplier.name AS supplierName, i.supplier.phone AS phone, i.id AS noteId, i.type AS noteType, " +
+                        "COALESCE(i.totalAmount, 0) AS totalAmount, " +
+                        "COALESCE((SELECT SUM(p.amount) FROM InventoryReceiptPayment p WHERE p.inventoryNote.id = i.id AND p.paymentDate <= :endDate), 0) AS paidAmount " +
+                        "FROM InventoryNote i " +
+                        "WHERE i.supplier IS NOT NULL " +
+                        "AND i.status = com.zone.agri.entity.enums.InventoryNoteStatus.COMPLETED " +
+                        "AND i.createdAt <= :endDate " +
+                        "AND i.type IN (com.zone.agri.entity.enums.InventoryNoteType.IMPORT, com.zone.agri.entity.enums.InventoryNoteType.EXPORT) " +
                         "AND (:branchId IS NULL OR i.branch.id = :branchId) " +
                         "AND (:staffId IS NULL OR i.createdBy.id = :staffId) " +
-                        "THEN COALESCE(i.debtAmount, 0) ELSE 0 END), 0) AS totalDebt " +
-                        "FROM Supplier s LEFT JOIN s.inventoryNotes i " +
-                        "WHERE (:search IS NULL OR LOWER(s.name) LIKE LOWER(CONCAT('%', :search, '%')) " +
-                        "OR s.code LIKE CONCAT('%', :search, '%') OR s.phone LIKE CONCAT('%', :search, '%')) " +
-                        "GROUP BY s.id, s.code, s.name, s.phone")
-        List<SupplierDebtProjection> findSuppliersWithDebt(
+                        "AND (:search IS NULL OR LOWER(i.supplier.name) LIKE LOWER(CONCAT('%', :search, '%')) " +
+                        "OR i.supplier.code LIKE CONCAT('%', :search, '%') OR i.supplier.phone LIKE CONCAT('%', :search, '%'))")
+        List<SupplierDebtLedgerProjection> findSupplierDebtLedger(
                         @Param("search") String search,
-                        @Param("startDate") LocalDateTime startDate,
                         @Param("endDate") LocalDateTime endDate,
                         @Param("branchId") Long branchId,
                         @Param("staffId") Long staffId);

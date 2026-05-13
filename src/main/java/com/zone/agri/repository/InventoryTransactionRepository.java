@@ -14,6 +14,12 @@ import java.util.Optional;
 
 @Repository
 public interface InventoryTransactionRepository extends JpaRepository<InventoryTransaction, Long> {
+    interface ReferenceCostProjection {
+        String getReferenceCode();
+
+        java.math.BigDecimal getCost();
+    }
+
     boolean existsByInventoryProductVariantProductId(Long productId);
 
     List<InventoryTransaction> findByReferenceCodeAndType(String referenceCode, TransactionType type);
@@ -42,5 +48,18 @@ public interface InventoryTransactionRepository extends JpaRepository<InventoryT
                                                    @org.springframework.data.repository.query.Param("variantId") Long variantId);
 
     Optional<InventoryTransaction> findFirstByInventoryAndTypeOrderByCreatedAtAsc(Inventory inventory, TransactionType type);
+
+    @org.springframework.data.jpa.repository.Query("""
+            SELECT tx.referenceCode AS referenceCode,
+                   COALESCE(SUM(ABS(tx.quantityChange) * COALESCE(tx.inventory.importPrice, 0)), 0) AS cost
+            FROM InventoryTransaction tx
+            WHERE tx.type = com.zone.agri.entity.enums.TransactionType.SALE
+              AND tx.referenceCode IN :referenceCodes
+              AND (:branchId IS NULL OR tx.inventory.branch.id = :branchId)
+            GROUP BY tx.referenceCode
+            """)
+    List<ReferenceCostProjection> sumSaleCostByReferenceCodes(
+            @org.springframework.data.repository.query.Param("referenceCodes") java.util.Collection<String> referenceCodes,
+            @org.springframework.data.repository.query.Param("branchId") Long branchId);
 
 }

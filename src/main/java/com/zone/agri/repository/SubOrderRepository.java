@@ -14,6 +14,28 @@ import java.time.LocalDateTime;
 @Repository
 public interface SubOrderRepository extends JpaRepository<SubOrder, Long> {
 
+    interface FinancialSubOrderProjection {
+        Long getSubOrderId();
+
+        Long getOrderId();
+
+        String getOrderCode();
+
+        java.math.BigDecimal getSubtotal();
+
+        java.math.BigDecimal getShippingFee();
+
+        java.math.BigDecimal getOrderSubtotal();
+
+        java.math.BigDecimal getOrderDiscountAmount();
+
+        java.time.LocalDateTime getReceivedAt();
+
+        java.time.LocalDateTime getCompletedAt();
+
+        java.time.LocalDateTime getReturnedAt();
+    }
+
     List<SubOrder> findByOrderId(Long orderId);
 
     List<SubOrder> findByStatus(OrderStatus status);
@@ -124,4 +146,27 @@ public interface SubOrderRepository extends JpaRepository<SubOrder, Long> {
     List<SubOrder> findReportData(@Param("startDate") LocalDateTime startDate,
                                   @Param("endDate") LocalDateTime endDate,
                                   @Param("branchId") Long branchId);
+
+    @Query("""
+            SELECT s.id AS subOrderId,
+                   o.id AS orderId,
+                   o.code AS orderCode,
+                   COALESCE(s.subtotal, 0) AS subtotal,
+                   COALESCE(s.shippingFee, 0) AS shippingFee,
+                   COALESCE(o.totalAmount, 0) AS orderSubtotal,
+                   COALESCE(o.discountAmount, 0) AS orderDiscountAmount,
+                   s.receivedAt AS receivedAt,
+                   s.completedAt AS completedAt,
+                   s.returnedAt AS returnedAt
+            FROM SubOrder s
+            JOIN s.order o
+            WHERE (:branchId IS NULL OR s.branch.id = :branchId)
+              AND (
+                   (s.receivedAt IS NOT NULL AND s.receivedAt <= :endDate)
+                   OR (s.completedAt IS NOT NULL AND s.completedAt <= :endDate)
+                   OR (s.returnedAt IS NOT NULL AND s.returnedAt <= :endDate)
+              )
+            """)
+    List<FinancialSubOrderProjection> findFinancialSubOrders(@Param("endDate") LocalDateTime endDate,
+                                                             @Param("branchId") Long branchId);
 }

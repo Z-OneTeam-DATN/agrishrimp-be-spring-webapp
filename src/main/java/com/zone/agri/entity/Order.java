@@ -54,6 +54,18 @@ public class Order {
     @Column(name = "created_at")
     LocalDateTime createdAt;
 
+    @Column(name = "received_at")
+    LocalDateTime receivedAt;
+
+    @Column(name = "completed_at")
+    LocalDateTime completedAt;
+
+    @Column(name = "returned_at")
+    LocalDateTime returnedAt;
+
+    @Column(name = "cancelled_at")
+    LocalDateTime cancelledAt;
+
     @Column(name = "shipping_address", columnDefinition = "TEXT")
     String shippingAddress;
 
