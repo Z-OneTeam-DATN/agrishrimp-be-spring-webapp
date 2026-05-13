@@ -1,17 +1,40 @@
 package com.zone.agri.entity;
 
 import com.zone.agri.entity.enums.SupplierProductCatalogStatus;
-import jakarta.persistence.*;
-import lombok.*;
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.EntityListeners;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
+import jakarta.persistence.FetchType;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.ManyToOne;
+import jakarta.persistence.Table;
+import jakarta.persistence.UniqueConstraint;
+import lombok.AccessLevel;
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.EqualsAndHashCode;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+import lombok.Setter;
+import lombok.ToString;
 import lombok.experimental.FieldDefaults;
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
+import org.springframework.data.annotation.CreatedBy;
+import org.springframework.data.annotation.LastModifiedBy;
+import org.springframework.data.jpa.domain.support.AuditingEntityListener;
 
 import java.time.LocalDateTime;
 
 @Entity
 @Table(name = "supplier_product_catalogs", uniqueConstraints = @UniqueConstraint(name = "uq_supplier_product_catalog", columnNames = {
         "supplier_id", "product_id" }))
+@EntityListeners(AuditingEntityListener.class)
 @Getter
 @Setter
 @NoArgsConstructor
@@ -50,4 +73,12 @@ public class SupplierProductCatalog {
     @UpdateTimestamp
     @Column(name = "updated_at")
     LocalDateTime updatedAt;
+
+    @CreatedBy
+    @Column(name = "created_by_user_id", updatable = false)
+    Long createdByUserId;
+
+    @LastModifiedBy
+    @Column(name = "updated_by_user_id")
+    Long updatedByUserId;
 }
