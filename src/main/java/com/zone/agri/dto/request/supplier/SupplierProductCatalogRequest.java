@@ -2,6 +2,7 @@ package com.zone.agri.dto.request.supplier;
 
 import com.zone.agri.entity.enums.SupplierProductCatalogStatus;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Size;
 
 public class SupplierProductCatalogRequest {
     @NotNull(message = "productId không được để trống")
@@ -10,6 +11,7 @@ public class SupplierProductCatalogRequest {
     @NotNull(message = "Trạng thái không được để trống")
     private SupplierProductCatalogStatus status;
 
+    @Size(max = 255, message = "Ghi chú tối đa 255 ký tự")
     private String note;
 
     public Long getProductId() {

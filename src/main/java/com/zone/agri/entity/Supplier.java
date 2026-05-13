@@ -1,17 +1,41 @@
 package com.zone.agri.entity;
 
 import com.zone.agri.entity.enums.SupplierStatus;
-import jakarta.persistence.*;
-import lombok.*;
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.EntityListeners;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
+import jakarta.persistence.FetchType;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.ManyToMany;
+import jakarta.persistence.OneToMany;
+import jakarta.persistence.Table;
+import lombok.AccessLevel;
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.EqualsAndHashCode;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+import lombok.Setter;
+import lombok.ToString;
 import lombok.experimental.FieldDefaults;
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
+import org.springframework.data.annotation.CreatedBy;
+import org.springframework.data.annotation.LastModifiedBy;
+import org.springframework.data.jpa.domain.support.AuditingEntityListener;
 
 import java.time.LocalDateTime;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 @Entity
 @Table(name = "suppliers")
+@EntityListeners(AuditingEntityListener.class)
 @Getter
 @Setter
 @NoArgsConstructor
@@ -24,41 +48,30 @@ public class Supplier {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     Long id;
 
-    // FE: Mã NCC (tự sinh hoặc nhập) - FE hiển thị #NCC-001
     @Column(name = "code", length = 20, unique = true, nullable = false)
     String code;
 
-    // FE: Tên công ty / Pháp nhân
     @Column(name = "name", length = 255, nullable = false)
     String name;
 
-    // FE: Mã số thuế
     @Column(name = "tax_code", length = 50, unique = true)
     String taxCode;
 
-    // --- THÔNG TIN LIÊN HỆ ---
-    // FE: Họ và tên người đại diện
     @Column(name = "contact_name", length = 100)
     String contactName;
 
-    // FE: Số điện thoại di động
     @Column(name = "phone", length = 20)
     String phone;
 
-    // FE: Email liên hệ
     @Column(name = "email", length = 100)
     String email;
 
-    // --- ĐỊA CHỈ ---
-    // FE: Tỉnh / Thành phố (Lưu ID hoặc tên)
     @Column(name = "province_id", length = 50)
     String provinceId;
 
-    // FE: Địa chỉ chi tiết
     @Column(name = "address_detail", columnDefinition = "TEXT")
     String addressDetail;
 
-    // --- TRẠNG THÁI ---
     @Enumerated(EnumType.STRING)
     @Column(length = 20)
     SupplierStatus status;
@@ -71,16 +84,22 @@ public class Supplier {
     @Column(name = "updated_at")
     LocalDateTime updatedAt;
 
-    // Quan hệ với đơn nhập hàng (InventoryNote)
+    @CreatedBy
+    @Column(name = "created_by_user_id", updatable = false)
+    Long createdByUserId;
+
+    @LastModifiedBy
+    @Column(name = "updated_by_user_id")
+    Long updatedByUserId;
+
     @OneToMany(mappedBy = "supplier", fetch = FetchType.LAZY)
     @ToString.Exclude
     @EqualsAndHashCode.Exclude
     List<InventoryNote> inventoryNotes;
 
-    // --- QUAN HỆ VỚI SẢN PHẨM ---
     @ManyToMany(mappedBy = "suppliers", fetch = FetchType.LAZY)
     @Builder.Default
     @ToString.Exclude
     @EqualsAndHashCode.Exclude
-    java.util.Set<Product> products = new java.util.HashSet<>();
+    Set<Product> products = new HashSet<>();
 }

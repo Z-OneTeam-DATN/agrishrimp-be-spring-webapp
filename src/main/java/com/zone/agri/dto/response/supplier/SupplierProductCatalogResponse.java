@@ -27,6 +27,12 @@ public class SupplierProductCatalogResponse {
     private String note;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
+    private Long createdByUserId;
+    private Long updatedByUserId;
+    private String createdByName;
+    private String updatedByName;
+    private Long checkingAgeDays;
+    private Boolean checkingTooLong;
 
     public static SupplierProductCatalogResponse fromEntity(SupplierProductCatalog catalog) {
         return SupplierProductCatalogResponse.builder()
@@ -47,6 +53,8 @@ public class SupplierProductCatalogResponse {
                 .note(catalog.getNote())
                 .createdAt(catalog.getCreatedAt())
                 .updatedAt(catalog.getUpdatedAt())
+                .createdByUserId(catalog.getCreatedByUserId())
+                .updatedByUserId(catalog.getUpdatedByUserId())
                 .build();
     }
 }

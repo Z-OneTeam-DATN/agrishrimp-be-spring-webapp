@@ -21,12 +21,24 @@ public interface SupplierRepository extends JpaRepository<Supplier, Long> {
 
         boolean existsByTaxCode(String taxCode);
 
+        boolean existsByTaxCodeAndIdNot(String taxCode, Long id);
+
         Optional<Supplier> findByTaxCode(String taxCode);
+
+        Optional<Supplier> findFirstByPhone(String phone);
+
+        Optional<Supplier> findFirstByPhoneAndIdNot(String phone, Long id);
+
+        Optional<Supplier> findFirstByEmailIgnoreCase(String email);
+
+        Optional<Supplier> findFirstByEmailIgnoreCaseAndIdNot(String email, Long id);
 
         @Query("SELECT s FROM Supplier s WHERE " +
                         "(:keyword IS NULL OR LOWER(s.name) LIKE LOWER(CONCAT('%', :keyword, '%')) " +
+                        "OR LOWER(s.code) LIKE LOWER(CONCAT('%', :keyword, '%')) " +
                         "OR s.taxCode LIKE CONCAT('%', :keyword, '%') " +
-                        "OR s.phone LIKE CONCAT('%', :keyword, '%')) " +
+                        "OR s.phone LIKE CONCAT('%', :keyword, '%') " +
+                        "OR LOWER(COALESCE(s.email, '')) LIKE LOWER(CONCAT('%', :keyword, '%'))) " +
                         "AND (:status IS NULL OR s.status = :status)")
         Page<Supplier> searchSuppliers(
                         @Param("keyword") String keyword,
