@@ -142,7 +142,7 @@ public class SupplierService {
     @Transactional(readOnly = true)
     public List<SupplierProductCatalogResponse> getProductCatalog(Long supplierId) {
         List<SupplierProductCatalog> catalogItems = supplierProductCatalogRepository.findAllBySupplierId(supplierId);
-        Map<Long, String> userNames = resolveUserNames(catalogItems.stream()
+        Map<Long, String> userNames = resolveUserNamesSafely(catalogItems.stream()
                 .flatMap(item -> java.util.stream.Stream.of(item.getCreatedByUserId(), item.getUpdatedByUserId()))
                 .filter(Objects::nonNull)
                 .toList());
@@ -235,14 +235,14 @@ public class SupplierService {
 
     private SupplierResponse buildSupplierResponse(Supplier supplier, List<SupplierProductCatalog> catalogItems, boolean catalogLoaded) {
         SupplierResponse response = SupplierResponse.fromEntity(supplier);
-        Map<Long, String> userNames = resolveUserNames(java.util.stream.Stream.of(
+        Map<Long, String> userNames = resolveUserNamesSafely(java.util.stream.Stream.of(
                         supplier.getCreatedByUserId(),
                         supplier.getUpdatedByUserId())
                 .filter(Objects::nonNull)
                 .toList());
 
-        response.setCreatedByName(userNames.get(supplier.getCreatedByUserId()));
-        response.setUpdatedByName(userNames.get(supplier.getUpdatedByUserId()));
+        response.setCreatedByName(getMapValueOrNull(userNames, supplier.getCreatedByUserId()));
+        response.setUpdatedByName(getMapValueOrNull(userNames, supplier.getUpdatedByUserId()));
         response.setCatalogProductCount(catalogItems.size());
         response.setAvailableProductCount((int) catalogItems.stream()
                 .filter(item -> item.getStatus() == SupplierProductCatalogStatus.AVAILABLE)
@@ -253,14 +253,14 @@ public class SupplierService {
         response.setCheckingProductCount((int) catalogItems.stream()
                 .filter(item -> item.getStatus() == SupplierProductCatalogStatus.CHECKING)
                 .count());
-        response.setWarnings(buildWarnings(supplier, catalogItems, catalogLoaded));
+        response.setWarnings(buildWarningsSafely(supplier, catalogItems, catalogLoaded));
         return response;
     }
 
     private SupplierProductCatalogResponse toCatalogResponse(SupplierProductCatalog catalog, Map<Long, String> userNames) {
         SupplierProductCatalogResponse response = SupplierProductCatalogResponse.fromEntity(catalog);
-        response.setCreatedByName(userNames.get(catalog.getCreatedByUserId()));
-        response.setUpdatedByName(userNames.get(catalog.getUpdatedByUserId()));
+        response.setCreatedByName(getMapValueOrNull(userNames, catalog.getCreatedByUserId()));
+        response.setUpdatedByName(getMapValueOrNull(userNames, catalog.getUpdatedByUserId()));
 
         Long checkingAgeDays = calculateCheckingAgeDays(catalog.getStatus(), catalog.getUpdatedAt());
         response.setCheckingAgeDays(checkingAgeDays);
@@ -302,19 +302,32 @@ public class SupplierService {
             }
         }
 
-        findDuplicatePhone(supplier).ifPresent(duplicate -> warnings.add(SupplierWarningResponse.builder()
+        findDuplicatePhoneSafely(supplier).ifPresent(duplicate -> warnings.add(SupplierWarningResponse.builder()
                 .code("DUPLICATE_PHONE")
                 .severity("WARNING")
                 .message("Số điện thoại đang trùng với NCC " + duplicate.getCode() + " - " + duplicate.getName() + ".")
                 .build()));
 
-        findDuplicateEmail(supplier).ifPresent(duplicate -> warnings.add(SupplierWarningResponse.builder()
+        findDuplicateEmailSafely(supplier).ifPresent(duplicate -> warnings.add(SupplierWarningResponse.builder()
                 .code("DUPLICATE_EMAIL")
                 .severity("WARNING")
                 .message("Email đang trùng với NCC " + duplicate.getCode() + " - " + duplicate.getName() + ".")
                 .build()));
 
         return warnings;
+    }
+
+    private List<SupplierWarningResponse> buildWarningsSafely(Supplier supplier, List<SupplierProductCatalog> catalogItems, boolean catalogLoaded) {
+        try {
+            return buildWarnings(supplier, catalogItems, catalogLoaded);
+        } catch (Exception exception) {
+            log.warn("Unable to build supplier warnings for supplierId={}. Returning detail without warning insights.", supplier.getId(), exception);
+            return List.of(SupplierWarningResponse.builder()
+                    .code("SUPPLIER_WARNING_DATA_UNAVAILABLE")
+                    .severity("WARNING")
+                    .message("Khong the tai day du canh bao du lieu cua nha cung cap luc nay. Ban van co the xem va cap nhat ho so.")
+                    .build());
+        }
     }
 
     private CatalogLoadResult loadCatalogItemsSafely(Long supplierId) {
@@ -347,6 +360,24 @@ public class SupplierService {
                 : supplierRepository.findFirstByEmailIgnoreCaseAndIdNot(supplier.getEmail(), supplier.getId());
     }
 
+    private Optional<Supplier> findDuplicatePhoneSafely(Supplier supplier) {
+        try {
+            return findDuplicatePhone(supplier);
+        } catch (Exception exception) {
+            log.warn("Unable to resolve duplicate phone warning for supplierId={}.", supplier.getId(), exception);
+            return Optional.empty();
+        }
+    }
+
+    private Optional<Supplier> findDuplicateEmailSafely(Supplier supplier) {
+        try {
+            return findDuplicateEmail(supplier);
+        } catch (Exception exception) {
+            log.warn("Unable to resolve duplicate email warning for supplierId={}.", supplier.getId(), exception);
+            return Optional.empty();
+        }
+    }
+
     private Map<Long, String> resolveUserNames(Collection<Long> userIds) {
         List<Long> ids = userIds.stream()
                 .filter(Objects::nonNull)
@@ -364,6 +395,15 @@ public class SupplierService {
                         LinkedHashMap::new));
     }
 
+    private Map<Long, String> resolveUserNamesSafely(Collection<Long> userIds) {
+        try {
+            return resolveUserNames(userIds);
+        } catch (Exception exception) {
+            log.warn("Unable to resolve supplier audit usernames for userIds={}.", userIds, exception);
+            return Map.of();
+        }
+    }
+
     private String resolveDisplayName(User user) {
         if (user == null) {
             return null;
@@ -375,6 +415,13 @@ public class SupplierService {
             return user.getEmail();
         }
         return "User #" + user.getId();
+    }
+
+    private String getMapValueOrNull(Map<Long, String> values, Long key) {
+        if (key == null || values == null || values.isEmpty()) {
+            return null;
+        }
+        return values.get(key);
     }
 
     private Long calculateCheckingAgeDays(SupplierProductCatalogStatus status, LocalDateTime updatedAt) {
