@@ -20,6 +20,7 @@ import com.zone.agri.repository.SupplierProductCatalogRepository;
 import com.zone.agri.repository.SupplierRepository;
 import com.zone.agri.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
@@ -40,6 +41,7 @@ import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class SupplierService {
     private static final long CHECKING_TOO_LONG_DAYS = 14L;
 
@@ -80,15 +82,16 @@ public class SupplierService {
 
         mapRequestToEntity(request, supplier);
         Supplier updated = supplierRepository.save(supplier);
-        return buildSupplierResponse(updated, supplierProductCatalogRepository.findAllBySupplierId(id));
+        CatalogLoadResult catalogLoadResult = loadCatalogItemsSafely(id);
+        return buildSupplierResponse(updated, catalogLoadResult.items(), catalogLoadResult.loaded());
     }
 
     @Transactional(readOnly = true)
     public SupplierResponse getSupplierById(Long id) {
         Supplier supplier = supplierRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Không tìm thấy NCC"));
-        List<SupplierProductCatalog> catalogItems = supplierProductCatalogRepository.findAllBySupplierId(id);
-        return buildSupplierResponse(supplier, catalogItems);
+        CatalogLoadResult catalogLoadResult = loadCatalogItemsSafely(id);
+        return buildSupplierResponse(supplier, catalogLoadResult.items(), catalogLoadResult.loaded());
     }
 
     @Transactional(readOnly = true)
@@ -227,6 +230,10 @@ public class SupplierService {
     }
 
     private SupplierResponse buildSupplierResponse(Supplier supplier, List<SupplierProductCatalog> catalogItems) {
+        return buildSupplierResponse(supplier, catalogItems, true);
+    }
+
+    private SupplierResponse buildSupplierResponse(Supplier supplier, List<SupplierProductCatalog> catalogItems, boolean catalogLoaded) {
         SupplierResponse response = SupplierResponse.fromEntity(supplier);
         Map<Long, String> userNames = resolveUserNames(java.util.stream.Stream.of(
                         supplier.getCreatedByUserId(),
@@ -246,7 +253,7 @@ public class SupplierService {
         response.setCheckingProductCount((int) catalogItems.stream()
                 .filter(item -> item.getStatus() == SupplierProductCatalogStatus.CHECKING)
                 .count());
-        response.setWarnings(buildWarnings(supplier, catalogItems));
+        response.setWarnings(buildWarnings(supplier, catalogItems, catalogLoaded));
         return response;
     }
 
@@ -261,10 +268,18 @@ public class SupplierService {
         return response;
     }
 
-    private List<SupplierWarningResponse> buildWarnings(Supplier supplier, List<SupplierProductCatalog> catalogItems) {
+    private List<SupplierWarningResponse> buildWarnings(Supplier supplier, List<SupplierProductCatalog> catalogItems, boolean catalogLoaded) {
         List<SupplierWarningResponse> warnings = new ArrayList<>();
 
-        if (supplier.getStatus() == SupplierStatus.ACTIVE && catalogItems.isEmpty()) {
+        if (!catalogLoaded) {
+            warnings.add(SupplierWarningResponse.builder()
+                    .code("CATALOG_DATA_UNAVAILABLE")
+                    .severity("WARNING")
+                    .message("Khong the doc catalog cua nha cung cap o thoi diem hien tai. Ho so supplier van duoc mo voi du lieu co ban.")
+                    .build());
+        }
+
+        if (catalogLoaded && supplier.getStatus() == SupplierStatus.ACTIVE && catalogItems.isEmpty()) {
             warnings.add(SupplierWarningResponse.builder()
                     .code("ACTIVE_WITHOUT_CATALOG")
                     .severity("WARNING")
@@ -272,17 +287,19 @@ public class SupplierService {
                     .build());
         }
 
-        long checkingTooLongCount = catalogItems.stream()
+        if (catalogLoaded) {
+            long checkingTooLongCount = catalogItems.stream()
                 .map(item -> calculateCheckingAgeDays(item.getStatus(), item.getUpdatedAt()))
                 .filter(Objects::nonNull)
                 .filter(days -> days >= CHECKING_TOO_LONG_DAYS)
                 .count();
-        if (checkingTooLongCount > 0) {
-            warnings.add(SupplierWarningResponse.builder()
+            if (checkingTooLongCount > 0) {
+                warnings.add(SupplierWarningResponse.builder()
                     .code("CHECKING_TOO_LONG")
                     .severity("WARNING")
                     .message(checkingTooLongCount + " sản phẩm đang ở trạng thái CHECKING quá " + CHECKING_TOO_LONG_DAYS + " ngày.")
-                    .build());
+                        .build());
+            }
         }
 
         findDuplicatePhone(supplier).ifPresent(duplicate -> warnings.add(SupplierWarningResponse.builder()
@@ -298,6 +315,18 @@ public class SupplierService {
                 .build()));
 
         return warnings;
+    }
+
+    private CatalogLoadResult loadCatalogItemsSafely(Long supplierId) {
+        try {
+            return new CatalogLoadResult(supplierProductCatalogRepository.findAllBySupplierId(supplierId), true);
+        } catch (Exception exception) {
+            log.warn("Unable to load supplier catalog for supplierId={}. Returning supplier detail without catalog summary.", supplierId, exception);
+            return new CatalogLoadResult(List.of(), false);
+        }
+    }
+
+    private record CatalogLoadResult(List<SupplierProductCatalog> items, boolean loaded) {
     }
 
     private Optional<Supplier> findDuplicatePhone(Supplier supplier) {
