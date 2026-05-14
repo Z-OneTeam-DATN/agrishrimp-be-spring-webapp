@@ -105,6 +105,18 @@ public class SchemaUpdateConfig {
                                 INDEX idx_spc_product (product_id)
                             )
                             """);
+            applyPatch(
+                    "Patch suppliers adds created_by_user_id",
+                    "ALTER TABLE suppliers ADD COLUMN created_by_user_id BIGINT NULL");
+            applyPatch(
+                    "Patch suppliers adds updated_by_user_id",
+                    "ALTER TABLE suppliers ADD COLUMN updated_by_user_id BIGINT NULL");
+            applyPatch(
+                    "Patch supplier_product_catalogs adds created_by_user_id",
+                    "ALTER TABLE supplier_product_catalogs ADD COLUMN created_by_user_id BIGINT NULL");
+            applyPatch(
+                    "Patch supplier_product_catalogs adds updated_by_user_id",
+                    "ALTER TABLE supplier_product_catalogs ADD COLUMN updated_by_user_id BIGINT NULL");
         };
     }
 
