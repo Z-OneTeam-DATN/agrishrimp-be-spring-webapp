@@ -98,7 +98,7 @@ public class InventoryService {
 
         // Quy trình 2: GR luôn bắt đầu ở PENDING_GR_APPROVAL (= PENDING).
         // Kể cả Admin tạo cũng phải PENDING để có bước kiểm tra trước khi duyệt.
-        // Bước Duyệt (approveReceipt) mới là nơi cộng kho và ghi nợ NCC.
+        // Bước duyệt chỉ xác nhận chứng từ; tồn kho và công nợ được chốt ở bước QC/complete.
         boolean autoApprovedOnCreate =
                 "IMPORTED".equalsIgnoreCase(request.getImportStatus()) || hasAuthority("IMPORT_APPROVE");
         noteEntity.setStatus(autoApprovedOnCreate ? InventoryNoteStatus.APPROVED : InventoryNoteStatus.PENDING);
@@ -161,69 +161,20 @@ public class InventoryService {
     @Transactional
     public InventoryReceiptResponse approveReceipt(Long id) {
         InventoryNote note = noteRepository.findByIdWithDetails(id)
-                .orElseThrow(() -> new NotFoundException("Không tìm thấy phiếu ID: " + id));
+                .orElseThrow(() -> new NotFoundException("Khong tim thay phieu ID: " + id));
         warehouseContext.assertAccess(note.getBranch().getId());
-        inventoryCheckGuardService.assertNoOpenCheckForBranch(note.getBranch().getId(), "duyệt phiếu nhập kho");
+        inventoryCheckGuardService.assertNoOpenCheckForBranch(note.getBranch().getId(), "duyet phieu nhap kho");
 
         if (note.getStatus() != InventoryNoteStatus.PENDING) {
-            throw new BadRequestException("Chỉ có thể duyệt phiếu đang ở trạng thái Chờ duyệt (PENDING).");
+            throw new BadRequestException("Chi co the duyet phieu dang o trang thai Cho duyet (PENDING).");
         }
         if (note.getType() != InventoryNoteType.IMPORT) {
-            throw new BadRequestException("Endpoint này chỉ dùng để duyệt Phiếu nhập kho (IMPORT).");
+            throw new BadRequestException("Endpoint nay chi dung de duyet phieu nhap kho (IMPORT).");
         }
 
-        BigDecimal totalDebt = BigDecimal.ZERO;
-
-        for (InventoryNoteDetail detail : note.getDetails()) {
-            int accepted  = Objects.requireNonNullElse(detail.getQuantityAccepted(), 0);
-            int defective = Objects.requireNonNullElse(detail.getQuantityRejected(), 0);
-
-            // Nếu GR được tạo mà không có QC data (quantityAccepted chưa set), lấy từ plannedQuantity
-            if (accepted == 0 && defective == 0) {
-                int planned = Objects.requireNonNullElse(detail.getQuantityRequested(), 0);
-                accepted = planned;
-                detail.setQuantityAccepted(planned);
-                detail.setQuantityReal(planned);
-            }
-
-            // Cập nhật tồn kho: Đạt → quantity, Lỗi → defectiveQuantity
-            if (accepted > 0 || defective > 0) {
-                updateStockWithQC(note, detail);
-            }
-
-            // Công nợ NCC = (Đạt + Lỗi) × Đơn giá
-            // Lý do: NCC đã giao đến cửa, hóa đơn tính cả lô hàng.
-            // Phần lỗi sẽ được trừ ngược lại khi hoàn trả qua Phiếu xuất trả.
-            BigDecimal price = Objects.requireNonNullElse(detail.getPrice(), BigDecimal.ZERO);
-            totalDebt = totalDebt.add(price.multiply(BigDecimal.valueOf(accepted + defective)));
-        }
-
-        note.setTotalAmount(totalDebt);
-        note.setDebtAmount(totalDebt.subtract(Objects.requireNonNullElse(note.getPaymentAmount(), BigDecimal.ZERO)));
-        note.setStatus(InventoryNoteStatus.COMPLETED);
-
-        InventoryNote savedNote = noteRepository.save(note);
-
-        // Cập nhật lũy kế trên Phiếu yêu cầu mua (PO)
-        if (savedNote.getPurchaseRequest() != null) {
-            PurchaseRequestService prService = applicationContext.getBean(PurchaseRequestService.class);
-            prService.updateCumulativeQtyAfterReceipt(savedNote);
-        }
-
-        // Kích hoạt xử lý backorder (hàng đạt được nhập vào kho)
-        for (InventoryNoteDetail detail : savedNote.getDetails()) {
-            int accepted = Objects.requireNonNullElse(detail.getQuantityAccepted(), 0);
-            if (accepted > 0) {
-                backorderService.fulfillBackordersOnStockReceive(
-                        savedNote.getBranch().getId(),
-                        detail.getProductVariant().getId(),
-                        accepted);
-            }
-        }
-
-        return mapToResponse(savedNote);
+        note.setStatus(InventoryNoteStatus.APPROVED);
+        return mapToResponse(noteRepository.save(note));
     }
-
     @Transactional
     public InventoryReceiptResponse rejectReceipt(Long id) {
         InventoryNote note = noteRepository.findById(id)
@@ -240,59 +191,47 @@ public class InventoryService {
     @Transactional
     public InventoryReceiptResponse completeReceipt(Long id, InventoryQCRequest qcRequest) {
         InventoryNote note = noteRepository.findById(id)
-                .orElseThrow(() -> new NotFoundException("Không tìm thấy phiếu ID: " + id));
+                .orElseThrow(() -> new NotFoundException("Khong tim thay phieu ID: " + id));
         warehouseContext.assertAccess(note.getBranch().getId());
 
         inventoryCheckGuardService.assertNoOpenCheckForBranch(note.getBranch().getId(), "chot phieu nhap kho");
-        if (note.getStatus() != InventoryNoteStatus.APPROVED && note.getStatus() != InventoryNoteStatus.PENDING) {
-            throw new BadRequestException("Phiếu phải ở trạng thái Đã duyệt hoặc Chờ duyệt mới có thể nhập kho.");
-        }
-
-        // Cập nhật thông tin kiểm đếm thực tế
-        if (false) {
-            Map<String, InventoryQCRequest.ItemQCRequest> qcMap = qcRequest.getItems().stream()
-                    .collect(Collectors.toMap(InventoryQCRequest.ItemQCRequest::getProductCode, i -> i));
-
-            for (InventoryNoteDetail detail : note.getDetails()) {
-                InventoryQCRequest.ItemQCRequest qcItem = qcMap.get(detail.getProductVariant().getSku());
-                if (qcItem == null) {
-                    continue;
-                }
-
-                int acceptedQty = Objects.requireNonNullElse(qcItem.getQuantityReal(), 0);
-                int defectiveQty = Objects.requireNonNullElse(qcItem.getQuantityRejected(), 0);
-                int deliveredQty = resolveDeliveredQty(qcItem, acceptedQty, defectiveQty);
-
-                detail.setQuantityReal(deliveredQty);
-                detail.setQuantityAccepted(acceptedQty);
-                detail.setQuantityRejected(defectiveQty);
-
-                if (qcItem.getLotNumber() != null && !qcItem.getLotNumber().isBlank()) {
-                    detail.setBatchNumber(qcItem.getLotNumber());
-                }
-                if (qcItem.getExpiryDate() != null && !qcItem.getExpiryDate().isBlank()) {
-                    detail.setExpiryDate(LocalDate.parse(qcItem.getExpiryDate()).atStartOfDay());
-                }
-                if (qcItem.getNote() != null) {
-                    detail.setNote(qcItem.getNote());
-                }
-            }
-
-            return mapToResponse(finalizeReceiptCompletion(note));
+        if (note.getStatus() != InventoryNoteStatus.APPROVED) {
+            throw new BadRequestException("Phieu phai o trang thai Da duyet moi co the hoan tat nhap kho.");
         }
 
         Map<String, InventoryQCRequest.ItemQCRequest> qcMap = qcRequest.getItems().stream()
-                .collect(Collectors.toMap(InventoryQCRequest.ItemQCRequest::getProductCode, i -> i));
+                .collect(Collectors.toMap(
+                        InventoryQCRequest.ItemQCRequest::getProductCode,
+                        i -> i,
+                        (first, duplicate) -> {
+                            throw new BadRequestException("Danh sach QC khong duoc chua SKU trung lap: " + first.getProductCode());
+                        }));
 
         for (InventoryNoteDetail detail : note.getDetails()) {
-            InventoryQCRequest.ItemQCRequest qcItem = qcMap.get(detail.getProductVariant().getSku());
+            String sku = detail.getProductVariant().getSku();
+            InventoryQCRequest.ItemQCRequest qcItem = qcMap.get(sku);
             if (qcItem == null) {
-                continue;
+                throw new BadRequestException("Thieu du lieu QC cho SKU " + sku + ".");
             }
 
+            int plannedQty = Objects.requireNonNullElse(detail.getQuantityRequested(), 0);
             int acceptedQty = Objects.requireNonNullElse(qcItem.getQuantityReal(), 0);
             int defectiveQty = Objects.requireNonNullElse(qcItem.getQuantityRejected(), 0);
             int deliveredQty = resolveDeliveredQty(qcItem, acceptedQty, defectiveQty);
+
+            if (acceptedQty + defectiveQty != deliveredQty) {
+                throw new BadRequestException("SKU " + sku + ": so luong dat va loi phai cong lai dung bang so NCC giao.");
+            }
+            if (deliveredQty > plannedQty) {
+                throw new BadRequestException("SKU " + sku + ": so NCC giao khong duoc vuot so luong da lap tren phieu nhap.");
+            }
+            if (note.getPurchaseRequest() != null) {
+                validateCompletedQtyAgainstPurchaseRequest(
+                        note.getPurchaseRequest().getId(),
+                        detail.getProductVariant().getId(),
+                        acceptedQty,
+                        note.getId());
+            }
 
             detail.setQuantityReal(deliveredQty);
             detail.setQuantityAccepted(acceptedQty);
@@ -309,81 +248,8 @@ public class InventoryService {
             }
         }
 
-        if (note != null) {
-            return mapToResponse(finalizeReceiptCompletion(note));
-        }
-
-        BigDecimal totalAmount = BigDecimal.ZERO;
-        for (InventoryNoteDetail detail : note.getDetails()) {
-            InventoryQCRequest.ItemQCRequest qcItem = qcMap.get(detail.getProductVariant().getSku());
-            if (qcItem != null) {
-                int plannedQty = Objects.requireNonNullElse(detail.getQuantityRequested(), 0);
-                int acceptedQty = Objects.requireNonNullElse(qcItem.getQuantityReal(), 0);
-                int defectiveQty = Objects.requireNonNullElse(qcItem.getQuantityRejected(), 0);
-                int deliveredQty = resolveDeliveredQty(qcItem, acceptedQty, defectiveQty);
-
-                if (acceptedQty + defectiveQty != deliveredQty) {
-                    throw new BadRequestException("SKU " + detail.getProductVariant().getSku() + ": số lượng đạt và lỗi phải cộng lại đúng bằng số NCC giao.");
-                }
-                if (deliveredQty > plannedQty) {
-                    throw new BadRequestException("SKU " + detail.getProductVariant().getSku() + ": số NCC giao không được vượt số lượng đã lập trên phiếu nhập.");
-                }
-
-                if (note.getPurchaseRequest() != null) {
-                    validateCompletedQtyAgainstPurchaseRequest(note.getPurchaseRequest().getId(), detail.getProductVariant().getId(), acceptedQty, note.getId());
-                }
-
-                detail.setQuantityReal(deliveredQty);
-                detail.setQuantityAccepted(acceptedQty);
-                detail.setQuantityRejected(defectiveQty);
-                
-                // CẬP NHẬT SỐ LÔ VÀ HẠN DÙNG (Nếu có thay đổi lúc kiểm đếm)
-                if (qcItem.getLotNumber() != null && !qcItem.getLotNumber().isBlank()) {
-                    detail.setBatchNumber(qcItem.getLotNumber());
-                }
-                if (qcItem.getExpiryDate() != null && !qcItem.getExpiryDate().isBlank()) {
-                    detail.setExpiryDate(LocalDate.parse(qcItem.getExpiryDate()).atStartOfDay());
-                }
-                
-                if (qcItem.getNote() != null) {
-                    detail.setNote(qcItem.getNote());
-                }
-                
-                // Cập nhật tồn kho một lần duy nhất cho cả hàng tốt và hàng lỗi
-                updateStockWithQC(note, detail);
-
-                // Khi hàng tốt đã nhập về kho, tự động phân bổ cho các đơn đang thiếu hàng
-                // tại cùng chi nhánh giống luồng nhận phiếu điều chuyển.
-                if (acceptedQty > 0) {
-                    backorderService.fulfillBackordersOnStockReceive(
-                            note.getBranch().getId(),
-                            detail.getProductVariant().getId(),
-                            acceptedQty);
-                }
-            }
-            // Tổng tiền nợ NCC tính trên số lượng hàng tốt thực nhận (hoặc tùy nghiệp vụ có tính cả hàng lỗi không)
-            // Ở đây tính trên số lượng thực tế nhập kho (Accepted)
-            BigDecimal itemTotal = (detail.getPrice() != null ? detail.getPrice() : BigDecimal.ZERO)
-                    .multiply(BigDecimal.valueOf(detail.getQuantityAccepted()));
-            totalAmount = totalAmount.add(itemTotal);
-        }
-
-        note.setTotalAmount(totalAmount);
-        // Cập nhật lại số nợ thực tế dựa trên hàng tốt thực nhận
-        note.setDebtAmount(totalAmount.subtract(Objects.requireNonNullElse(note.getPaymentAmount(), BigDecimal.ZERO)));
-
-        note.setStatus(InventoryNoteStatus.COMPLETED);
-        InventoryNote savedNote = noteRepository.save(note);
-
-        // Cập nhật lũy kế số lượng trên Phiếu yêu cầu mua (nếu phiếu nhập này thuộc về 1 PR)
-        if (savedNote.getPurchaseRequest() != null) {
-            PurchaseRequestService prService = applicationContext.getBean(PurchaseRequestService.class);
-            prService.updateCumulativeQtyAfterReceipt(savedNote);
-        }
-
-        return mapToResponse(savedNote);
+        return mapToResponse(finalizeReceiptCompletion(note));
     }
-
     private boolean hasStoredQcDecision(InventoryNote note) {
         return note.getDetails() != null && note.getDetails().stream().anyMatch(detail ->
                 Objects.requireNonNullElse(detail.getQuantityAccepted(), 0) > 0
@@ -426,7 +292,7 @@ public class InventoryService {
             }
 
             BigDecimal itemTotal = Objects.requireNonNullElse(detail.getPrice(), BigDecimal.ZERO)
-                    .multiply(BigDecimal.valueOf(deliveredQty));
+                    .multiply(BigDecimal.valueOf(acceptedQty));
             totalAmount = totalAmount.add(itemTotal);
         }
 
@@ -588,7 +454,7 @@ public class InventoryService {
             }
         }
         note.setTotalAmount(totalAmount);
-        note.setDebtAmount(totalAmount.subtract(note.getPaymentAmount()));
+        note.setDebtAmount(totalAmount.subtract(Objects.requireNonNullElse(note.getPaymentAmount(), BigDecimal.ZERO)));
     }
 
     // Hàm cập nhật đích danh một Lô (Dùng cho nhập kho) - Giữ lại version cũ cho các hàm khác nếu cần
