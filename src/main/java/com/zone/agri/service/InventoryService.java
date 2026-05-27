@@ -135,11 +135,6 @@ public class InventoryService {
         updateMetadata(existingNote, request, destBranch, supplier);
         existingNote.setPurchaseRequest(linkedPurchaseRequest);
 
-        // Chặn không cho phép cập nhật status thành COMPLETED qua API update thông thường
-        if (existingNote.getStatus() == InventoryNoteStatus.COMPLETED) {
-             existingNote.setStatus(InventoryNoteStatus.APPROVED);
-        }
-
         // Clear and re-process items
         existingNote.getDetails().clear();
         noteRepository.flush();
@@ -149,15 +144,8 @@ public class InventoryService {
         return mapToResponse(noteRepository.save(existingNote));
     }
 
-    // ──────────────────────────────────────────────────────────────────────────
-    // DUYỆT PHIẾU NHẬP (Admin) – Quy trình 2
-    // Trong một Transaction duy nhất:
-    //   1. Cộng Số lượng Đạt vào Kho chính (quantity)
-    //   2. Cộng Số lượng Lỗi vào Kho chờ xử lý (defectiveQuantity)
-    //   3. Ghi nhận Công nợ NCC = (Đạt + Lỗi) × Đơn giá
-    //   4. Cập nhật trạng thái PO gốc (PARTIALLY_RECEIVED / COMPLETED)
-    //   5. Đặt status GR = COMPLETED
-    // ──────────────────────────────────────────────────────────────────────────
+    // DUYET PHIEU NHAP (Giai doan 2): chi xac nhan chung tu.
+    // Ton kho va cong no NCC chi duoc chot khi completeReceipt hoan tat QC.
     @Transactional
     public InventoryReceiptResponse approveReceipt(Long id) {
         InventoryNote note = noteRepository.findByIdWithDetails(id)
@@ -214,28 +202,14 @@ public class InventoryService {
                 throw new BadRequestException("Thieu du lieu QC cho SKU " + sku + ".");
             }
 
-            int plannedQty = Objects.requireNonNullElse(detail.getQuantityRequested(), 0);
             int acceptedQty = Objects.requireNonNullElse(qcItem.getQuantityReal(), 0);
             int defectiveQty = Objects.requireNonNullElse(qcItem.getQuantityRejected(), 0);
             int deliveredQty = resolveDeliveredQty(qcItem, acceptedQty, defectiveQty);
 
-            if (acceptedQty + defectiveQty != deliveredQty) {
-                throw new BadRequestException("SKU " + sku + ": so luong dat va loi phai cong lai dung bang so NCC giao.");
-            }
-            if (deliveredQty > plannedQty) {
-                throw new BadRequestException("SKU " + sku + ": so NCC giao khong duoc vuot so luong da lap tren phieu nhap.");
-            }
-            if (note.getPurchaseRequest() != null) {
-                validateCompletedQtyAgainstPurchaseRequest(
-                        note.getPurchaseRequest().getId(),
-                        detail.getProductVariant().getId(),
-                        acceptedQty,
-                        note.getId());
-            }
-
             detail.setQuantityReal(deliveredQty);
             detail.setQuantityAccepted(acceptedQty);
             detail.setQuantityRejected(defectiveQty);
+            validateReceiptDetailQuantities(note, detail);
 
             if (qcItem.getLotNumber() != null && !qcItem.getLotNumber().isBlank()) {
                 detail.setBatchNumber(qcItem.getLotNumber());
@@ -262,26 +236,12 @@ public class InventoryService {
         BigDecimal totalAmount = BigDecimal.ZERO;
 
         for (InventoryNoteDetail detail : note.getDetails()) {
-            int plannedQty = Objects.requireNonNullElse(detail.getQuantityRequested(), 0);
             int acceptedQty = Objects.requireNonNullElse(detail.getQuantityAccepted(), 0);
             int defectiveQty = Objects.requireNonNullElse(detail.getQuantityRejected(), 0);
             int deliveredQty = Objects.requireNonNullElse(detail.getQuantityReal(), acceptedQty + defectiveQty);
 
-            if (acceptedQty + defectiveQty != deliveredQty) {
-                throw new BadRequestException("SKU " + detail.getProductVariant().getSku() + ": sá»‘ lÆ°á»£ng Ä‘áº¡t vĂ  lá»—i pháº£i cá»™ng láº¡i Ä‘Ăºng báº±ng sá»‘ NCC giao.");
-            }
-            if (deliveredQty > plannedQty) {
-                throw new BadRequestException("SKU " + detail.getProductVariant().getSku() + ": sá»‘ NCC giao khĂ´ng Ä‘Æ°á»£c vÆ°á»£t sá»‘ lÆ°á»£ng Ä‘Ă£ láº­p trĂªn phiáº¿u nháº­p.");
-            }
-            if (note.getPurchaseRequest() != null) {
-                validateCompletedQtyAgainstPurchaseRequest(
-                        note.getPurchaseRequest().getId(),
-                        detail.getProductVariant().getId(),
-                        acceptedQty,
-                        note.getId());
-            }
-
             detail.setQuantityReal(deliveredQty);
+            validateReceiptDetailQuantities(note, detail);
             updateStockWithQC(note, detail);
 
             if (acceptedQty > 0) {
@@ -805,6 +765,28 @@ public class InventoryService {
             if (item.getPlannedQuantity() > availableQty) {
                 throw new BadRequestException("SKU " + sku + " vượt quá số lượng còn có thể lập phiếu nhập. Còn lại: " + availableQty + ".");
             }
+        }
+    }
+
+    private void validateReceiptDetailQuantities(InventoryNote note, InventoryNoteDetail detail) {
+        String sku = detail.getProductVariant().getSku();
+        int plannedQty = Objects.requireNonNullElse(detail.getQuantityRequested(), 0);
+        int acceptedQty = Objects.requireNonNullElse(detail.getQuantityAccepted(), 0);
+        int defectiveQty = Objects.requireNonNullElse(detail.getQuantityRejected(), 0);
+        int deliveredQty = Objects.requireNonNullElse(detail.getQuantityReal(), acceptedQty + defectiveQty);
+
+        if (acceptedQty + defectiveQty != deliveredQty) {
+            throw new BadRequestException("SKU " + sku + ": so luong dat va loi phai cong lai dung bang so NCC giao.");
+        }
+        if (deliveredQty > plannedQty) {
+            throw new BadRequestException("SKU " + sku + ": so NCC giao khong duoc vuot so luong da lap tren phieu nhap.");
+        }
+        if (note.getPurchaseRequest() != null) {
+            validateCompletedQtyAgainstPurchaseRequest(
+                    note.getPurchaseRequest().getId(),
+                    detail.getProductVariant().getId(),
+                    acceptedQty,
+                    note.getId());
         }
     }
 
