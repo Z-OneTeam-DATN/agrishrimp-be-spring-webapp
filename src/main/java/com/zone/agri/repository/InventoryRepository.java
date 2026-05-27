@@ -67,6 +67,7 @@ public interface InventoryRepository extends JpaRepository<Inventory, Long> {
         Long sumQuantityByBranchAndVariantAndBatch(@Param("branchId") Long branchId, @Param("variantId") Long variantId,
                         @Param("batchNumber") String batchNumber);
 
+        @Lock(LockModeType.PESSIMISTIC_WRITE)
         @Query("SELECT i FROM Inventory i WHERE i.branch.id = :branchId AND i.productVariant.id = :variantId AND i.batchNumber = :batchNumber")
         List<Inventory> findExactBatchListByNumber(@Param("branchId") Long branchId, @Param("variantId") Long variantId,
                         @Param("batchNumber") String batchNumber);
