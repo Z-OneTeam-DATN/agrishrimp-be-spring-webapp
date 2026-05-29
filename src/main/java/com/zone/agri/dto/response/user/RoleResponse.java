@@ -32,6 +32,9 @@ public class RoleResponse {
     @Schema(description = "Đánh dấu vai trò mặc định của hệ thống (không được xóa/sửa)", example = "true")
     Boolean isSystem;
 
+    @Schema(description = "Số lượng thành viên đang được gán vai trò này", example = "5")
+    Long memberCount;
+
     @Schema(description = "Danh sách các mã quyền hạn (Permission Codes) được gán cho vai trò này", 
             example = "[\"DASHBOARD_VIEW\", \"USER_MANAGE\", \"PRODUCT_CREATE\"]")
     List<String> permissionCodes;

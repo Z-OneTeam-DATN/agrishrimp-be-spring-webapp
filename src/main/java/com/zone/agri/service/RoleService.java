@@ -52,7 +52,7 @@ public class RoleService {
     @Transactional
     public RoleResponse createRole(RoleRequest request) {
         Role role = saveRoleFromRequest(new Role(), request);
-        return mapToResponse(roleRepository.save(role));
+        return mapToResponse(roleRepository.save(role), 0L);
     }
 
     public Page<RoleResponse> getAllRoles(String keyword, String type, String status, Pageable pageable) {
@@ -71,8 +71,10 @@ public class RoleService {
 
         String searchKeyword = (keyword == null || keyword.isBlank()) ? null : keyword.trim();
 
-        return roleRepository.findAllWithFilter(searchKeyword, isSystem, isActive, pageable)
-                .map(this::mapToResponse);
+        Page<Role> rolesPage = roleRepository.findAllWithFilter(searchKeyword, isSystem, isActive, pageable);
+        Map<Long, Long> memberCountMap = getMemberCountMap(rolesPage.getContent());
+
+        return rolesPage.map(role -> mapToResponse(role, memberCountMap.getOrDefault(role.getId(), 0L)));
     }
 
     public List<Permission> getAllPermissions() {
@@ -89,13 +91,15 @@ public class RoleService {
         }
 
         saveRoleFromRequest(existingRole, request);
-        return mapToResponse(roleRepository.save(existingRole));
+        long memberCount = roleRepository.countUsersByRoleId(roleId);
+        return mapToResponse(roleRepository.save(existingRole), memberCount);
     }
 
     public RoleResponse getRoleById(Long roleId) {
         Role role = roleRepository.findById(roleId)
                 .orElseThrow(() -> new NotFoundException("Không tìm thấy vai trò với ID: " + roleId));
-        return mapToResponse(role);
+        long memberCount = roleRepository.countUsersByRoleId(roleId);
+        return mapToResponse(role, memberCount);
     }
 
     @Transactional
@@ -182,7 +186,23 @@ public class RoleService {
         return role;
     }
 
-    private RoleResponse mapToResponse(Role role) {
+    private Map<Long, Long> getMemberCountMap(List<Role> roles) {
+        if (roles == null || roles.isEmpty()) {
+            return Collections.emptyMap();
+        }
+
+        List<Long> roleIds = roles.stream()
+                .map(Role::getId)
+                .toList();
+
+        return roleRepository.countUsersByRoleIds(roleIds).stream()
+                .collect(Collectors.toMap(
+                        row -> (Long) row[0],
+                        row -> (Long) row[1]
+                ));
+    }
+
+    private RoleResponse mapToResponse(Role role, Long memberCount) {
         return RoleResponse.builder()
                 .id(role.getId())
                 .displayName(role.getDisplayName())
@@ -190,6 +210,7 @@ public class RoleService {
                 .description(role.getDescription())
                 .isActive(role.getIsActive())
                 .isSystem(role.getIsSystem())
+                .memberCount(memberCount)
                 .permissionCodes(role.getPermissions().stream()
                         .map(Permission::getCode)
                         .collect(Collectors.toList()))
