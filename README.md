@@ -122,6 +122,72 @@ After startup:
 - Swagger UI: `http://localhost:8004/swagger-ui/index.html`
 - Health check: `http://localhost:8004/actuator/health`
 
+### Option 1A: Run the backend locally and test against the real server database
+
+This project already auto-loads `.env` and `.env.local` via Spring config import, so after a one-time local override setup you can start the backend with a normal Spring Boot command.
+
+Recommended flow:
+
+1. Open an SSH tunnel from your machine to the server database:
+
+```bash
+ssh -L 3307:127.0.0.1:3306 your-user@your-server
+```
+
+2. Copy `.env.local.example` to `.env.local`.
+3. Keep the tunnel open.
+4. Start local Redis if needed:
+
+```bash
+docker compose up -d redis
+```
+
+5. Run the backend normally:
+
+```bash
+./mvnw spring-boot:run -Dspring-boot.run.profiles=dev
+```
+
+Windows PowerShell:
+
+```powershell
+.\mvnw.cmd spring-boot:run "-Dspring-boot.run.profiles=dev"
+```
+
+Because `.env.local` is loaded automatically, no manual `source .env` or extra wrapper script is required for this workflow.
+
+### Option 1B: Run the backend locally but connect to a remote MySQL database
+
+Use this when you want localhost API behavior while working against the real server database, similar to how the local web app can point at production services.
+
+1. Copy `.env.local.example` to `.env.local` if you do not already have it.
+2. Update `SPRING_DATASOURCE_URL`, `SPRING_DATASOURCE_USERNAME`, and `SPRING_DATASOURCE_PASSWORD` in `.env.local` with the remote MySQL connection details.
+3. Keep `SPRING_PROFILES_ACTIVE=dev` so local-friendly defaults still apply.
+4. Start local Redis if your flow uses JWT revocation, order preparation, or other Redis-backed features.
+5. Run:
+
+```powershell
+.\run-local-remote-db.ps1
+```
+
+Linux/macOS:
+
+```bash
+chmod +x ./run-local-remote-db.sh
+./run-local-remote-db.sh
+```
+
+How it works:
+
+- The script loads `.env` first if it exists, so you can reuse existing integration keys.
+- Then it loads `.env.local` and overrides profile, URLs, CORS, datasource, and Redis settings for local execution.
+- The application still runs on `http://localhost:8004`, but Spring connects directly to the remote MySQL server.
+
+Important:
+
+- Your machine must be allowed to reach the remote MySQL host. Firewall, security groups, bind-address, and MySQL user host rules can still block the connection.
+- The local web app should point to `http://localhost:8004/api` if you want the browser to use your local backend instead of the deployed API.
+
 ### Option 2: Run in a more production-like container setup
 
 - Use `.env.example` as the template for your `.env` file.

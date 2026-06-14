@@ -15,7 +15,7 @@ import java.util.List;
 @RequestMapping("/api/admin/dashboard")
 @RequiredArgsConstructor
 @Tag(name = "Dashboard API", description = "API cho trang quản trị - Thống kê")
-@PreAuthorize("hasAnyRole('ADMIN', 'MANAGER', 'SUPER_ADMIN', 'STAFF')")
+@PreAuthorize("hasAnyRole('ADMIN', 'MANAGER', 'SUPER_ADMIN')")
 public class DashboardController {
 
     private final DashboardService dashboardService;

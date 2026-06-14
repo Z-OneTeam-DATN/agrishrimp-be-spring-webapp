@@ -45,7 +45,7 @@ public interface UserRepository extends JpaRepository<User, Long> {
                         Pageable pageable);
 
         @Query("SELECT u FROM User u WHERE " +
-                        "u.role.slug NOT IN ('CUSTOMER', 'USER') AND " +
+                        "u.role.slug <> 'USER' AND " +
                         "(:keyword IS NULL OR LOWER(u.fullName) LIKE LOWER(CONCAT('%', :keyword, '%')) OR u.email LIKE LOWER(CONCAT('%', :keyword, '%')) OR u.phoneNumber LIKE CONCAT('%', :keyword, '%') OR u.citizenId LIKE CONCAT('%', :keyword, '%')) AND "
                         +
                         "(:roleId IS NULL OR u.role.id = :roleId) AND " +
@@ -58,12 +58,12 @@ public interface UserRepository extends JpaRepository<User, Long> {
                         @Param("status") com.zone.agri.entity.enums.UserStatus status,
                         Pageable pageable);
 
-        @Query("SELECT u FROM User u WHERE u.role.slug IN ('CUSTOMER', 'USER') " +
+        @Query("SELECT u FROM User u WHERE u.role.slug = 'USER' " +
                         "AND (:branchId IS NULL OR u.branch.id = :branchId) " +
                         "ORDER BY u.createdAt DESC")
         List<User> findRecentCustomers(@Param("branchId") Long branchId, Pageable pageable);
 
-        @Query("SELECT COUNT(u) FROM User u WHERE u.role.slug IN ('CUSTOMER', 'USER') " +
+        @Query("SELECT COUNT(u) FROM User u WHERE u.role.slug = 'USER' " +
                         "AND (:branchId IS NULL OR u.branch.id = :branchId)")
         long countCustomers(@Param("branchId") Long branchId);
 
@@ -74,7 +74,7 @@ public interface UserRepository extends JpaRepository<User, Long> {
         boolean existsByCitizenIdAndIdNot(String citizenId, Long id);
 
         @EntityGraph(attributePaths = { "customer" })
-        @Query("SELECT u FROM User u WHERE u.role.slug IN ('CUSTOMER', 'USER') " +
+        @Query("SELECT u FROM User u WHERE u.role.slug = 'USER' " +
                         "AND (:status = 'all' OR CAST(u.status AS string) = :status) " +
                         "AND (:keyword IS NULL OR :keyword = '' OR LOWER(u.fullName) LIKE LOWER(CONCAT('%', :keyword, '%')) "
                         +
@@ -92,7 +92,7 @@ public interface UserRepository extends JpaRepository<User, Long> {
 
         @EntityGraph(attributePaths = { "customer" })
         @Query("SELECT u FROM User u LEFT JOIN u.customer c LEFT JOIN c.assignedBranch b WHERE " +
-                        "u.role.slug IN ('CUSTOMER', 'USER') AND " +
+                        "u.role.slug = 'USER' AND " +
                         "(:status IS NULL OR u.status = :status) AND " +
                         "(:branchId IS NULL OR b.id = :branchId) AND " +
                         "(:keyword IS NULL OR :keyword = '' OR LOWER(u.fullName) LIKE LOWER(CONCAT('%', :keyword, '%')) "
@@ -110,6 +110,6 @@ public interface UserRepository extends JpaRepository<User, Long> {
 
         // 🟢 Get staff by branch
         @Query("SELECT NEW MAP(u.id AS id, u.fullName AS fullName, u.email AS email, u.phoneNumber AS phoneNumber) " +
-                        "FROM User u WHERE u.branch.id = :branchId AND u.role.slug = 'STAFF' ORDER BY u.fullName")
+                        "FROM User u WHERE u.branch.id = :branchId AND u.role.slug = :slug ORDER BY u.fullName")
         List<Map<String, Object>> findByBranchIdAndRole(@Param("branchId") Long branchId, @Param("slug") String slug);
 }

@@ -238,6 +238,7 @@ public class BranchService {
         if (entity.getUsers() != null) {
             dto.setManagerIds(entity.getUsers().stream().map(User::getId).toList());
             dto.setManagerNames(entity.getUsers().stream().map(User::getFullName).toList());
+            dto.setManagerAvatarUrls(entity.getUsers().stream().map(User::getAvatarUrl).toList());
         }
         return dto;
     }

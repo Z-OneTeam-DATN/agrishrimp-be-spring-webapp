@@ -155,6 +155,26 @@ public class DataSeeder implements CommandLineRunner {
         Permission aChatV = pAct("Xem hội thoại chat", "CHAT_VIEW", PermissionGroup.COMMUNICATION, mChat);
         Permission aChatM = pAct("Quản lý chat (ghim, phân công)", "CHAT_MANAGE", PermissionGroup.COMMUNICATION, mChat);
 
+        Role superAdminRole = saveRole("SUPER_ADMIN", "Siêu quản trị", true, Set.of(
+                aDashV, aWspaceV,
+                aRptSale, aRptInv, aRptFin,
+                aUserV, aUserC, aUserU, aUserD,
+                aRoleV, aRoleC, aRoleU, aRoleD,
+                aBranchV, aBranchC, aBranchU, aBranchD,
+                aProdV, aProdC, aProdU, aProdD,
+                aCatV, aCatC, aCatU, aCatD,
+                aAttrV, aAttrC, aAttrU, aAttrD,
+                aImpV, aImpC, aImpA, aImpU, aImpX, aImpD,
+                aExpV, aExpC, aExpA, aExpU, aExpX, aExpD,
+                aTrfV, aTrfC, aTrfA, aTrfU, aTrfX, aTrfD,
+                aChkV, aChkC, aChkA, aChkU, aChkX, aChkD,
+                aCusV, aCusC, aCusU, aCusD,
+                aVouV, aVouC, aVouU, aVouD,
+                aSupV, aSupC, aSupU, aSupD,
+                aOrdV, aOrdC, aOrdU, aOrdD, aOrdCnf, aOrdShip, aOrdX, aOrdDone, aOrdRefund, aOrdExport,
+                aSetV, aSetU,
+                aChatV, aChatM));
+
         Role adminRole = saveRole("ADMIN", "Quản trị viên", true, Set.of(
                 aDashV, aWspaceV,
                 aRptSale, aRptInv, aRptFin,
@@ -190,20 +210,17 @@ public class DataSeeder implements CommandLineRunner {
                 aOrdV, aOrdC, aOrdU, aOrdCnf, aOrdShip, aOrdX, aOrdDone, aOrdExport,
                 aChatV, aChatM));
 
-        saveRole("STAFF", "Nhân viên", false, Set.of(
-                aDashV, aWspaceV, aRptInv, aProdV, aCatV, aOrdV, aOrdC, aChatV));
-
         Set<Permission> customerPermissions = Set.of(aOrdV, aOrdC, aOrdX);
-        saveRole("USER", "Khách hàng", false, customerPermissions);
-        saveRole("CUSTOMER", "Khách hàng CRM", false, customerPermissions);
+        saveRole("USER", "Người dùng", false, customerPermissions);
 
         ensureUser("admin@agrishrimp.vn", "Admin", "0901000001", "123456", adminRole, UserStatus.ACTIVE);
+        ensureUser("superadmin@agrishrimp.vn", "Super Admin", "0901000002", "123456", superAdminRole, UserStatus.ACTIVE);
         ensureUser(
                 "bot@agrishrimp.vn",
                 "AgriShrimp Bot",
                 "0900000000",
                 "bot_disabled_bootstrap",
-                adminRole,
+                superAdminRole,
                 UserStatus.INACTIVE);
 
         if (hasExistingRoles) {
@@ -262,22 +279,31 @@ public class DataSeeder implements CommandLineRunner {
             String rawPassword,
             Role role,
             UserStatus status) {
-        if (userRepository.existsByEmail(email)) {
-            return;
-        }
-
-        userRepository.save(User.builder()
-                .fullName(fullName)
-                .email(email)
-                .phoneNumber(phoneNumber)
-                .passwordHash(passwordEncoder.encode(rawPassword))
-                .status(status)
-                .role(role)
-                .gender("bot@agrishrimp.vn".equals(email) ? Gender.OTHER : Gender.MALE)
-                .dateOfBirth("bot@agrishrimp.vn".equals(email)
-                        ? LocalDate.of(2000, 1, 1)
-                        : LocalDate.of(1985, 3, 15))
-                .provider(AuthProvider.LOCAL)
-                .build());
+        userRepository.findByEmail(email)
+                .map(existingUser -> {
+                    existingUser.setFullName(fullName);
+                    existingUser.setPhoneNumber(phoneNumber);
+                    existingUser.setStatus(status);
+                    existingUser.setRole(role);
+                    existingUser.setProvider(AuthProvider.LOCAL);
+                    existingUser.setGender("bot@agrishrimp.vn".equals(email) ? Gender.OTHER : Gender.MALE);
+                    existingUser.setDateOfBirth("bot@agrishrimp.vn".equals(email)
+                            ? LocalDate.of(2000, 1, 1)
+                            : LocalDate.of(1985, 3, 15));
+                    return userRepository.save(existingUser);
+                })
+                .orElseGet(() -> userRepository.save(User.builder()
+                        .fullName(fullName)
+                        .email(email)
+                        .phoneNumber(phoneNumber)
+                        .passwordHash(passwordEncoder.encode(rawPassword))
+                        .status(status)
+                        .role(role)
+                        .gender("bot@agrishrimp.vn".equals(email) ? Gender.OTHER : Gender.MALE)
+                        .dateOfBirth("bot@agrishrimp.vn".equals(email)
+                                ? LocalDate.of(2000, 1, 1)
+                                : LocalDate.of(1985, 3, 15))
+                        .provider(AuthProvider.LOCAL)
+                        .build()));
     }
 }

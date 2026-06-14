@@ -36,6 +36,8 @@ spring:
       host: ${SPRING_DATA_REDIS_HOST:redis}
       port: ${SPRING_DATA_REDIS_PORT:6379}
       password: ${SPRING_DATA_REDIS_PASSWORD:}
+      repositories:
+        enabled: ${SPRING_DATA_REDIS_REPOSITORIES_ENABLED:false}
 
   mail:
     host: ${SPRING_MAIL_HOST:smtp.gmail.com}
@@ -145,6 +147,7 @@ logging:
   level:
     root: INFO
     com.zone.agri: INFO
+    com.zone.agri.logging: ${LOGGING_LEVEL_COM_ZONE_AGRI_LOGGING:WARN}
 
 # 16. CẤU HÌNH OCR (GOOGLE VISION)
 ocr:

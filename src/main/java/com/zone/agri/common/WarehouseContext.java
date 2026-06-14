@@ -10,7 +10,7 @@ public class WarehouseContext {
 
     /**
      * SUPER_ADMIN → null (no branch filter, sees all)
-     * BRANCH_MANAGER → their branchId
+     * ADMIN / MANAGER → branch-scoped access
      * USER / unauthenticated → throws 403
      */
     public Long resolveWarehouseId() {
@@ -22,7 +22,7 @@ public class WarehouseContext {
         String slug = (user.getRole() != null) ? user.getRole().getSlug().toUpperCase() : "USER";
 
         return switch (slug) {
-            case "ADMIN" -> null;
+            case "SUPER_ADMIN", "ADMIN" -> null;
             case "MANAGER", "BRANCH_MANAGER" -> user.getBranchId(); // null means all branches
             default -> throw new Forbidden("Không có quyền truy cập kho");
         };
@@ -42,6 +42,7 @@ public class WarehouseContext {
     public boolean isSuperAdmin() {
         UserDetail user = AuthUtils.getUserDetail();
         if (user == null || user.getRole() == null) return false;
-        return "ADMIN".equalsIgnoreCase(user.getRole().getSlug());
+        String slug = user.getRole().getSlug();
+        return "SUPER_ADMIN".equalsIgnoreCase(slug) || "ADMIN".equalsIgnoreCase(slug);
     }
 }

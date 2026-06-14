@@ -43,5 +43,6 @@ public class BranchDTO {
     private Double lng;
     private List<Long> managerIds;
     private List<String> managerNames;
+    private List<String> managerAvatarUrls;
     private BranchStatus status;
 }

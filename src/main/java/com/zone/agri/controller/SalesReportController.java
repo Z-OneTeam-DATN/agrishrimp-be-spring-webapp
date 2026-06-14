@@ -20,7 +20,7 @@ import java.time.LocalDate;
 @RequestMapping("/api/admin/reports/sales")
 @RequiredArgsConstructor
 @Tag(name = "Sales Report API", description = "API báo cáo bán hàng")
-@PreAuthorize("hasAnyRole('ADMIN', 'MANAGER', 'SUPER_ADMIN', 'STAFF')")
+@PreAuthorize("hasAnyRole('ADMIN', 'MANAGER', 'SUPER_ADMIN')")
 public class SalesReportController {
 
     private final SalesReportService salesReportService;
