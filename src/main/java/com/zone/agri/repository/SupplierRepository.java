@@ -19,6 +19,8 @@ import com.zone.agri.entity.enums.SupplierStatus;
 @Repository
 public interface SupplierRepository extends JpaRepository<Supplier, Long> {
 
+        List<Supplier> findByStatus(SupplierStatus status);
+
         boolean existsByTaxCode(String taxCode);
 
         boolean existsByTaxCodeAndIdNot(String taxCode, Long id);

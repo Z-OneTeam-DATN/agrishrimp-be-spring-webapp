@@ -17,6 +17,8 @@ public class SupplierProductCatalogResponse {
     private Long id;
     private Long supplierId;
     private String supplierCode;
+    private Long productVariantId;
+    private String sku;
     private Long productId;
     private String productName;
     private String productSlug;
@@ -25,6 +27,8 @@ public class SupplierProductCatalogResponse {
     private String categoryName;
     private SupplierProductCatalogStatus status;
     private String note;
+    private LocalDateTime statusChangedAt;
+    private Integer version;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
     private Long createdByUserId;
@@ -39,18 +43,30 @@ public class SupplierProductCatalogResponse {
                 .id(catalog.getId())
                 .supplierId(catalog.getSupplier() != null ? catalog.getSupplier().getId() : null)
                 .supplierCode(catalog.getSupplier() != null ? catalog.getSupplier().getCode() : null)
-                .productId(catalog.getProduct() != null ? catalog.getProduct().getId() : null)
-                .productName(catalog.getProduct() != null ? catalog.getProduct().getName() : null)
-                .productSlug(catalog.getProduct() != null ? catalog.getProduct().getSlug() : null)
-                .brandName(catalog.getProduct() != null && catalog.getProduct().getBrand() != null
-                        ? catalog.getProduct().getBrand().getName()
+                .productVariantId(catalog.getProductVariant() != null ? catalog.getProductVariant().getId() : null)
+                .sku(catalog.getProductVariant() != null ? catalog.getProductVariant().getSku() : null)
+                .productId(catalog.getProductVariant() != null && catalog.getProductVariant().getProduct() != null
+                        ? catalog.getProductVariant().getProduct().getId()
                         : null)
-                .origin(catalog.getProduct() != null ? catalog.getProduct().getOrigin() : null)
-                .categoryName(catalog.getProduct() != null && catalog.getProduct().getCategory() != null
-                        ? catalog.getProduct().getCategory().getName()
+                .productName(catalog.getProductVariant() != null && catalog.getProductVariant().getProduct() != null
+                        ? catalog.getProductVariant().getProduct().getName()
+                        : null)
+                .productSlug(catalog.getProductVariant() != null && catalog.getProductVariant().getProduct() != null
+                        ? catalog.getProductVariant().getProduct().getSlug()
+                        : null)
+                .brandName(catalog.getProductVariant() != null && catalog.getProductVariant().getProduct() != null
+                        && catalog.getProductVariant().getProduct().getSupplier() != null
+                        ? catalog.getProductVariant().getProduct().getSupplier().getName()
+                        : null)
+                .origin(null)
+                .categoryName(catalog.getProductVariant() != null && catalog.getProductVariant().getProduct() != null
+                        && catalog.getProductVariant().getProduct().getCategory() != null
+                        ? catalog.getProductVariant().getProduct().getCategory().getName()
                         : null)
                 .status(catalog.getStatus())
                 .note(catalog.getNote())
+                .statusChangedAt(catalog.getStatusChangedAt())
+                .version(catalog.getVersion())
                 .createdAt(catalog.getCreatedAt())
                 .updatedAt(catalog.getUpdatedAt())
                 .createdByUserId(catalog.getCreatedByUserId())

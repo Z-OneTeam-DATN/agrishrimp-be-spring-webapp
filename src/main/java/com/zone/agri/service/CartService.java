@@ -99,7 +99,7 @@ public class CartService {
                     .variant(variantName)
                     .variantName(variantName)
                     .categoryName(product != null && product.getCategory() != null ? product.getCategory().getName() : "")
-                    .brandName(product != null && product.getBrand() != null ? product.getBrand().getName() : "")
+                    .brandName(product != null && product.getSupplier() != null ? product.getSupplier().getName() : "")
                     .price(sellingPrice)
                     .quantity(item.getQuantity())
                     .stock(totalStock)

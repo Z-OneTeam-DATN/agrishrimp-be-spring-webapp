@@ -86,6 +86,10 @@ public class PurchaseRequestService {
         Supplier supplier = supplierRepository.findByCode(request.getSupplierCode())
                 .orElseThrow(() -> new NotFoundException("Nhà cung cấp không tồn tại: " + request.getSupplierCode()));
 
+        if (supplier.getStatus() == com.zone.agri.entity.enums.SupplierStatus.INACTIVE) {
+            throw new BadRequestException("Nhà cung cấp đang tạm ngừng giao dịch. Không thể tạo phiếu yêu cầu mua.");
+        }
+
         Branch branch = resolveRequestBranch(request);
         validatePurchaseRequestBranch(branch);
         warehouseContext.assertAccess(branch.getId());
@@ -190,6 +194,10 @@ public class PurchaseRequestService {
 
         Supplier supplier = supplierRepository.findByCode(request.getSupplierCode())
                 .orElseThrow(() -> new NotFoundException("Nhà cung cấp không tồn tại"));
+
+        if (supplier.getStatus() == com.zone.agri.entity.enums.SupplierStatus.INACTIVE) {
+            throw new BadRequestException("Nhà cung cấp đang tạm ngừng giao dịch. Không thể tạo phiếu yêu cầu mua.");
+        }
         Branch branch = resolveRequestBranch(request);
         validatePurchaseRequestBranch(branch);
         warehouseContext.assertAccess(branch.getId());
@@ -466,13 +474,13 @@ public class PurchaseRequestService {
 
     // Mapping đầy đủ (dùng cho getById - có details và goodsReceipts)
     private void validateSupplierCatalogContainsVariant(Supplier supplier, ProductVariant variant) {
-        if (supplier == null || variant == null || variant.getProduct() == null) {
+        if (supplier == null || variant == null) {
             throw new BadRequestException("Invalid supplier or product data.");
         }
 
-        boolean isAvailableForSupplier = supplierProductCatalogRepository.existsAvailableBySupplierIdAndProductId(
+        boolean isAvailableForSupplier = supplierProductCatalogRepository.existsAvailableBySupplierIdAndProductVariantId(
                 supplier.getId(),
-                variant.getProduct().getId());
+                variant.getId());
 
         if (!isAvailableForSupplier) {
             throw new BadRequestException(
