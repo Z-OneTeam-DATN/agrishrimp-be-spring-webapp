@@ -222,4 +222,6 @@ public interface InventoryNoteRepository extends JpaRepository<InventoryNote, Lo
             @Param("statuses") Collection<InventoryNoteStatus> statuses,
             @Param("excludeNoteId") Long excludeNoteId
     );
+
+    boolean existsBySupplierId(Long supplierId);
 }

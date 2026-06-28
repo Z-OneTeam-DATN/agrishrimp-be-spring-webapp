@@ -21,6 +21,8 @@ import com.zone.agri.repository.ProductVariantRepository;
 import com.zone.agri.repository.SupplierProductCatalogRepository;
 import com.zone.agri.repository.SupplierRepository;
 import com.zone.agri.repository.UserRepository;
+import com.zone.agri.repository.InventoryReceiptPaymentRepository;
+import com.zone.agri.repository.PurchaseRequestRepository;
 import com.zone.agri.exception.ConflictException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -54,6 +56,8 @@ public class SupplierService {
     private final ProductVariantRepository productVariantRepository;
     private final SupplierProductCatalogRepository supplierProductCatalogRepository;
     private final UserRepository userRepository;
+    private final InventoryReceiptPaymentRepository inventoryReceiptPaymentRepository;
+    private final PurchaseRequestRepository purchaseRequestRepository;
 
     @Transactional
     public SupplierResponse createSupplier(SupplierRequest request) {
@@ -116,8 +120,34 @@ public class SupplierService {
     @Transactional
     public void deleteSupplier(Long id) {
         if (!supplierRepository.existsById(id)) {
-            throw new RuntimeException("Không tìm thấy nhà cung cấp để xóa");
+            throw new IllegalArgumentException("Không tìm thấy nhà cung cấp để xóa");
         }
+
+        // Check 1: Catalog sản phẩm (SupplierProductCatalog)
+        if (supplierProductCatalogRepository.existsBySupplierId(id)) {
+            throw new IllegalArgumentException("Không thể xóa nhà cung cấp vì đã có sản phẩm trong catalog");
+        }
+
+        // Check 2: Sản phẩm liên quan (Product)
+        if (productRepository.existsBySupplierId(id) || productRepository.existsBySuppliersId(id)) {
+            throw new IllegalArgumentException("Không thể xóa nhà cung cấp vì đang liên kết với sản phẩm");
+        }
+
+        // Check 3: Phiếu nhập kho (InventoryNote)
+        if (inventoryNoteRepository.existsBySupplierId(id)) {
+            throw new IllegalArgumentException("Không thể xóa nhà cung cấp vì đã có phiếu nhập kho phát sinh");
+        }
+
+        // Check 4: Thanh toán phiếu nhập (InventoryReceiptPayment)
+        if (inventoryReceiptPaymentRepository.existsBySupplierId(id)) {
+            throw new IllegalArgumentException("Không thể xóa nhà cung cấp vì đã có giao dịch thanh toán");
+        }
+
+        // Check 5: Yêu cầu mua hàng (PurchaseRequest)
+        if (purchaseRequestRepository.existsBySupplierId(id)) {
+            throw new IllegalArgumentException("Không thể xóa nhà cung cấp vì đã có yêu cầu mua hàng");
+        }
+
         supplierRepository.deleteById(id);
     }
 

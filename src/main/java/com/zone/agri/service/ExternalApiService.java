@@ -105,13 +105,13 @@ public class ExternalApiService {
         queriedSources.add("XINVOICE");
         xInvoiceData.ifPresent(data -> absorbData(data, "XINVOICE", rawByField, fieldSources));
 
-        Optional<VietQrResponse.BusinessData> doanhNghiepData = joinFuture(doanhNghiepFuture);
-        queriedSources.add("DOANH_NGHIEP_BIZ");
-        doanhNghiepData.ifPresent(data -> absorbData(data, "DOANH_NGHIEP_BIZ", rawByField, fieldSources));
-
         Optional<VietQrResponse.BusinessData> masothueData = joinFuture(masothueFuture);
         queriedSources.add("MA_SO_THUE");
         masothueData.ifPresent(data -> absorbData(data, "MA_SO_THUE", rawByField, fieldSources));
+
+        Optional<VietQrResponse.BusinessData> doanhNghiepData = joinFuture(doanhNghiepFuture);
+        queriedSources.add("DOANH_NGHIEP_BIZ");
+        doanhNghiepData.ifPresent(data -> absorbData(data, "DOANH_NGHIEP_BIZ", rawByField, fieldSources));
 
         Optional<VietQrResponse.BusinessData> internalData = joinFuture(internalFuture);
         queriedSources.add("INTERNAL_SUPPLIER");
@@ -330,39 +330,24 @@ public class ExternalApiService {
             return sector;
         }
         String trimmed = sector.trim();
-        String lower = trimmed.toLowerCase();
-        
-        if (lower.contains("xu?t") && lower.contains("ph?n m?m")) {
-            return "Xuất bản phần mềm khác";
-        }
-        if (lower.contains("l?p trinh") || lower.contains("lập trinh") || lower.contains("l?p trinh")) {
-            return "Lập trình máy tính";
-        }
-        if (lower.contains("bỏn buụn") && (lower.contains("thiỏt b?") || lower.contains("linh kiỏn"))) {
-            return "Bán buôn thiết bị và linh kiện điện tử, viễn thông";
-        }
-        if (lower.contains("bỏn buụn") && lower.contains("may tinh")) {
-            return "Bán buôn máy vi tính, thiết bị ngoại vi và phần mềm";
-        }
-        if (lower.contains("nhõn gi?ng") || (lower.contains("nuụi tr?ng") && lower.contains("thu? s?n"))) {
-            return "Nhân giống và nuôi trồng thuỷ sản";
-        }
-        if (lower.contains("s?n xu?t") && lower.contains("th?c") && lower.contains("thu? s?n")) {
-            return "Sản xuất thức ăn gia súc, gia cầm và thuỷ sản";
-        }
-        if (lower.contains("t? v?n") && lower.contains("mỏy tớnh")) {
-            return "Tư vấn máy tính và quản trị hệ thống máy tính";
-        }
-        
-        if (trimmed.contains("khỏc")) {
-            trimmed = trimmed.replace("khỏc", "khác");
-        }
-        if (trimmed.contains("Khỏc")) {
-            trimmed = trimmed.replace("Khỏc", "khác");
-        }
-        if (trimmed.contains("KHỎC")) {
-            trimmed = trimmed.replace("KHỎC", "KHÁC");
-        }
+
+        // Sửa các cụm từ lỗi font phổ biến từ các trang tra cứu
+        trimmed = trimmed.replaceAll("(?i)bỏn\\s+buụn", "Bán buôn");
+        trimmed = trimmed.replaceAll("(?i)thiỏt\\s+b\\?", "thiết bị");
+        trimmed = trimmed.replaceAll("(?i)linh\\s+kiỏn", "linh kiện");
+        trimmed = trimmed.replaceAll("(?i)xu\\?t\\s+b\\?n", "Xuất bản");
+        trimmed = trimmed.replaceAll("(?i)ph\\?n\\s+m\\?m", "phần mềm");
+        trimmed = trimmed.replaceAll("(?i)mỏy\\s+tớnh", "máy tính");
+        trimmed = trimmed.replaceAll("(?i)nuụi\\s+tr\\?ng", "nuôi trồng");
+        trimmed = trimmed.replaceAll("(?i)thu\\?\\s+s\\?n", "thuỷ sản");
+        trimmed = trimmed.replaceAll("(?i)nhõn\\s+gi\\?ng", "nhân giống");
+        trimmed = trimmed.replaceAll("(?i)t\\?\\s+v\\?n", "tư vấn");
+        trimmed = trimmed.replaceAll("(?i)d\\?ch\\s+v\\?", "dịch vụ");
+        trimmed = trimmed.replaceAll("(?i)viỏn\\s+thụng", "viễn thông");
+        trimmed = trimmed.replaceAll("(?i)cụng\\s+nghỏ", "công nghệ");
+        trimmed = trimmed.replaceAll("(?i)thụng\\s+tin", "thông tin");
+        trimmed = trimmed.replaceAll("(?i)khỏc", "khác");
+        trimmed = trimmed.replaceAll("(?i)KHỎC", "KHÁC");
 
         return trimmed;
     }

@@ -43,4 +43,6 @@ public interface SupplierProductCatalogRepository extends JpaRepository<Supplier
     @Modifying
     @Query("DELETE FROM SupplierProductCatalog spc WHERE spc.supplier.id = :supplierId")
     void deleteBySupplierId(@Param("supplierId") Long supplierId);
+
+    boolean existsBySupplierId(Long supplierId);
 }

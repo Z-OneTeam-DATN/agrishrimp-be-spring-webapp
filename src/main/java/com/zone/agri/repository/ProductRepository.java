@@ -235,6 +235,12 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
   // Kiểm tra xem danh mục có sản phẩm không (phục vụ logic xóa)
   boolean existsByCategoryId(Long categoryId);
 
+  // Kiểm tra xem nhà cung cấp có sản phẩm không (phục vụ logic xóa)
+  boolean existsBySupplierId(Long supplierId);
+
+  @Query("SELECT COUNT(p) > 0 FROM Product p JOIN p.suppliers s WHERE s.id = :supplierId")
+  boolean existsBySuppliersId(@Param("supplierId") Long supplierId);
+
   @Query("SELECT COUNT(p) FROM Product p WHERE p.status = 'ACTIVE'")
   long countActiveProducts();
 
