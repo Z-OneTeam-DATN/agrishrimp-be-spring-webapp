@@ -80,6 +80,8 @@ import com.zone.agri.repository.ProductVariantRepository;
 import com.zone.agri.repository.ProductVectorRepository;
 import com.zone.agri.repository.SKUAttributeValueRepository;
 import com.zone.agri.repository.UserRepository;
+import com.zone.agri.repository.SupplierRepository;
+import com.zone.agri.entity.Supplier;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -95,6 +97,7 @@ public class ProductService {
     private final ProductVariantRepository variantRepository;
     private final ProductImageRepository imageRepository;
     private final BrandRepository brandRepository;
+    private final SupplierRepository supplierRepository;
     private final CategoryRepository categoryRepository;
     private final AttributeValueRepository attributeValueRepository;
     private final SKUAttributeValueRepository skuAttributeValueRepository;
@@ -157,11 +160,15 @@ public class ProductService {
         validateSkusInRequest(request.getVariants());
         ProductStatus targetStatus = parseProductStatus(request.getStatus());
 
-        if (targetStatus == ProductStatus.ACTIVE
-                && (request.getBrand() == null || request.getBrand().isBlank()
-                        || request.getOrigin() == null || request.getOrigin().isBlank())) {
+        if (targetStatus == ProductStatus.ACTIVE && request.getSupplierId() == null) {
             throw new BadRequestException(
-                    "Sản phẩm ở trạng thái ACTIVE bắt buộc phải có thương hiệu và xuất xứ để đảm bảo giao đúng hàng.");
+                    "Sản phẩm ở trạng thái ACTIVE bắt buộc phải có nhà cung cấp để đảm bảo nguồn hàng.");
+        }
+
+        Supplier supplier = null;
+        if (request.getSupplierId() != null) {
+            supplier = supplierRepository.findById(request.getSupplierId())
+                    .orElseThrow(() -> new NotFoundException("Nhà cung cấp không tồn tại với ID: " + request.getSupplierId()));
         }
 
         Product product = Product.builder()
@@ -169,15 +176,11 @@ public class ProductService {
                 .slug(toSlug(request.getName()) + "-" + System.currentTimeMillis())
                 .description(request.getDescription())
                 .status(targetStatus)
-                .origin(request.getOrigin() != null ? request.getOrigin().trim() : null)
                 .baseSku(request.getBaseSku())
                 .category(category)
+                .supplier(supplier)
                 .createdAt(LocalDateTime.now())
                 .build();
-
-        if (request.getBrand() != null && !request.getBrand().isBlank()) {
-            product.setBrand(getOrCreateBrand(request.getBrand().trim()));
-        }
 
         Product savedProduct = productRepository.save(product);
         List<ProductImage> savedImages = uploadAndSaveProductImages(savedProduct, productImages);
@@ -207,16 +210,24 @@ public class ProductService {
         Product product = productRepository.findById(id)
                 .orElseThrow(() -> new NotFoundException("Sản phẩm không tồn tại với ID: " + id));
 
+        ProductStatus targetStatus = parseProductStatus(request.getStatus());
+        if (targetStatus == ProductStatus.ACTIVE && request.getSupplierId() == null) {
+            throw new BadRequestException("Sản phẩm ở trạng thái ACTIVE bắt buộc phải có nhà cung cấp.");
+        }
+
+        Supplier supplier = null;
+        if (request.getSupplierId() != null) {
+            supplier = supplierRepository.findById(request.getSupplierId())
+                    .orElseThrow(() -> new NotFoundException("Nhà cung cấp không tồn tại với ID: " + request.getSupplierId()));
+        }
+
         product.setName(request.getName());
-        product.setOrigin(request.getOrigin());
         product.setDescription(request.getDescription());
-        product.setStatus(parseProductStatus(request.getStatus()));
+        product.setStatus(targetStatus);
+        product.setSupplier(supplier);
 
         if (request.getCategoryId() != null) {
             categoryRepository.findById(request.getCategoryId()).ifPresent(product::setCategory);
-        }
-        if (request.getBrand() != null && !request.getBrand().trim().isEmpty()) {
-            product.setBrand(getOrCreateBrand(request.getBrand()));
         }
 
         // 1. XỬ LÝ ẢNH CHÍNH
@@ -622,12 +633,27 @@ public class ProductService {
                 ? product.getProductImages().stream().map(ProductImage::getImageUrl).collect(Collectors.toList())
                 : Collections.emptyList();
 
-        // TRUYỀN HỆ SỐ profitMultiplier VÀO HÀM MAP BIẾN THẾ
-        List<ProductVariantResponse> variantResponses = product.getVariants() != null ? product.getVariants().stream()
+        // TRUYỀN HỆ SỐ profitMultiplier VÀO HÀM MAP BIẾN THẾ (Tải kho gộp để tránh N+1 Query)
+        List<ProductVariant> activeVariants = product.getVariants() != null ? product.getVariants().stream()
                 .filter(variant -> variant.getStatus() == VariantStatus.ACTIVE)
                 .filter(this::hasOnlyActiveAttributes)
-                .map(variant -> mapVariantToResponse(variant, currentUser, profitMultiplier, roundingRule))
                 .collect(Collectors.toList()) : Collections.emptyList();
+
+        Map<Long, List<Inventory>> inventoryMap = new HashMap<>();
+        if (!activeVariants.isEmpty()) {
+            List<Long> activeVariantIds = activeVariants.stream().map(ProductVariant::getId).toList();
+            List<Inventory> allInventories = inventoryRepository.findByProductVariantIdInWithBranch(activeVariantIds);
+            inventoryMap = allInventories.stream()
+                    .collect(Collectors.groupingBy(inv -> inv.getProductVariant().getId()));
+        }
+
+        final Map<Long, List<Inventory>> finalInventoryMap = inventoryMap;
+        List<ProductVariantResponse> variantResponses = activeVariants.stream()
+                .map(variant -> {
+                    List<Inventory> variantInventories = finalInventoryMap.getOrDefault(variant.getId(), List.of());
+                    return mapVariantToResponse(variant, currentUser, profitMultiplier, roundingRule, variantInventories);
+                })
+                .collect(Collectors.toList());
 
         int totalInventory = variantResponses.stream()
                 .map(ProductVariantResponse::getQuantity)
@@ -644,14 +670,6 @@ public class ProductService {
             categoryDTO.setStatus(product.getCategory().getStatus());
         }
 
-        BrandResponse brandResponse = null;
-        if (product.getBrand() != null) {
-            brandResponse = BrandResponse.builder()
-                    .id(product.getBrand().getId())
-                    .name(product.getBrand().getName())
-                    .build();
-        }
-
         return ProductResponse.builder()
                 .id(product.getId())
                 .name(product.getName())
@@ -659,15 +677,14 @@ public class ProductService {
                 .shortDesc(product.getShortDesc())
                 .description(product.getDescription())
                 .status(product.getStatus() != null ? product.getStatus().name() : null)
-                .origin(product.getOrigin())
+                .supplierId(product.getSupplier() != null ? product.getSupplier().getId() : null)
+                .supplierName(product.getSupplier() != null ? product.getSupplier().getName() : null)
                 .baseSku(product.getBaseSku())
                 .categoryName(product.getCategory() != null ? product.getCategory().getName() : null)
-                .brandName(product.getBrand() != null ? product.getBrand().getName() : null)
                 .soldCount(soldCountMap.getOrDefault(product.getId(), 0L))
                 .ratingAverage(product.getRatingAverage())
                 .reviewCount(product.getReviewCount())
                 .category(categoryDTO)
-                .brand(brandResponse)
                 .inventory(totalInventory)
                 .imageUrls(imageUrls)
                 .variants(variantResponses)
@@ -690,6 +707,12 @@ public class ProductService {
 
     public ProductVariantResponse mapVariantToResponse(ProductVariant variant, User currentUser, BigDecimal multiplier,
             String roundingRule) {
+        List<Inventory> allInventories = inventoryRepository.findByProductVariantIdWithBranch(variant.getId());
+        return mapVariantToResponse(variant, currentUser, multiplier, roundingRule, allInventories);
+    }
+
+    public ProductVariantResponse mapVariantToResponse(ProductVariant variant, User currentUser, BigDecimal multiplier,
+            String roundingRule, List<Inventory> allInventories) {
         // Tránh lỗi NullPointerException khi role null
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
         boolean hasExportPermission = auth != null && auth.getAuthorities().stream()
@@ -708,8 +731,6 @@ public class ProductService {
         boolean canSeeImportPrice = isAdmin || isManager || hasExportPermission;
 
         Branch currentBranch = currentUser != null ? currentUser.getBranch() : null;
-
-        List<Inventory> allInventories = inventoryRepository.findByProductVariantIdWithBranch(variant.getId());
 
         // Chỉ Admin mới được thấy tồn kho/lô hàng của tất cả chi nhánh.
         boolean canSeeAllBranches = isAdmin;
@@ -839,13 +860,7 @@ public class ProductService {
                         && sav.getAttribute().getStatus() == AttributeStatus.ACTIVE);
     }
 
-    private Brand getOrCreateBrand(String name) {
-        return brandRepository.findByName(name.trim())
-                .orElseGet(() -> brandRepository.save(Brand.builder()
-                        .name(name.trim())
-                        .status(BrandStatus.ACTIVE)
-                        .build()));
-    }
+
 
     private void validateSkusInRequest(List<VariantRequest> variants) {
         if (variants == null)

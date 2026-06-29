@@ -62,7 +62,7 @@ public class SecurityConfig {
             "/ws/**",
             "/ws-native",
             "/ws-native/**",
-
+            "/api/external/**"
     };
 
     @Bean

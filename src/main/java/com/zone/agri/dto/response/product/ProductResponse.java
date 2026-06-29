@@ -14,15 +14,14 @@ public class ProductResponse {
     private String shortDesc;
     private String description;
     private String status;
-    private String origin;
+    private Long supplierId;
+    private String supplierName;
     private String baseSku;
     private String categoryName;
-    private String brandName;
     private Long soldCount;
     private Float ratingAverage;
     private Integer reviewCount;
     private CategoryDTO category;
-    private BrandResponse brand;
 
     // Tồn kho động (tính tổng từ các kho/lô hàng)
     private Integer inventory;

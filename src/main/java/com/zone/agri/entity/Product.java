@@ -50,18 +50,16 @@ public class Product {
     @Column(name = "review_count")
     Integer reviewCount;
 
-    @Column(name = "origin", length = 100)
-    String origin;
 
     @Column(name = "base_sku", length = 50)
     String baseSku;
 
     // --- KHÓA NGOẠI ---
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "brand_id")
+    @JoinColumn(name = "supplier_id")
     @ToString.Exclude
     @EqualsAndHashCode.Exclude
-    Brand brand;
+    Supplier supplier;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "category_id")

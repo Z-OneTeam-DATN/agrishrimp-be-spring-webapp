@@ -67,4 +67,6 @@ public interface PurchaseRequestRepository extends JpaRepository<PurchaseRequest
         ORDER BY pr.createdAt DESC
     """)
     List<PurchaseRequest> findByStatusIn(@Param("statuses") List<PurchaseRequestStatus> statuses);
+
+    boolean existsBySupplierId(Long supplierId);
 }

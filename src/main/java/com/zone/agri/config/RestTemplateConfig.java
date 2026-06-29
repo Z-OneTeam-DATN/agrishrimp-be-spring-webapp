@@ -16,9 +16,11 @@ public class RestTemplateConfig {
      */
     @Bean
     public RestTemplate restTemplate(RestTemplateBuilder builder) {
-        return builder
+        RestTemplate restTemplate = builder
                 .connectTimeout(Duration.ofSeconds(5))
                 .readTimeout(Duration.ofSeconds(10))
                 .build();
+        restTemplate.getMessageConverters().add(0, new org.springframework.http.converter.StringHttpMessageConverter(java.nio.charset.StandardCharsets.UTF_8));
+        return restTemplate;
     }
 }
