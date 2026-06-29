@@ -244,6 +244,10 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
   @Query("SELECT COUNT(p) FROM Product p WHERE p.status = 'ACTIVE'")
   long countActiveProducts();
 
+  boolean existsByNameIgnoreCase(String name);
+
+  boolean existsByNameIgnoreCaseAndIdNot(String name, Long id);
+
   // 3. Tỷ trọng doanh thu theo danh mục (Admin - Toàn hệ thống)
   interface CategorySalesProjection {
     Long getCategoryId();
