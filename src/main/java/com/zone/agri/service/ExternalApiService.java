@@ -130,15 +130,15 @@ public class ExternalApiService {
         merged.setMainBusinessSector(rawByField.get(FIELD_MAIN_BUSINESS_SECTOR));
 
         Map<String, String> fieldStatuses = new LinkedHashMap<>();
-        for (String field : Arrays.asList(FIELD_NAME, FIELD_ADDRESS, FIELD_OWNER, FIELD_PHONE, FIELD_EMAIL,
-                FIELD_STATUS, FIELD_ISSUE_DATE, FIELD_TAX_AUTHORITY, FIELD_MAIN_BUSINESS_SECTOR)) {
-            String value = rawByField.get(field);
-            if (isNotBlank(value)) {
-                fieldStatuses.put(field, "FOUND");
-            } else {
-                fieldStatuses.put(field, "SOURCE_MISSING");
-            }
-        }
+        fieldStatuses.put(FIELD_NAME, isNotBlank(merged.getName()) ? "FOUND" : "SOURCE_MISSING");
+        fieldStatuses.put(FIELD_ADDRESS, isNotBlank(merged.getAddress()) ? "FOUND" : "SOURCE_MISSING");
+        fieldStatuses.put(FIELD_OWNER, isNotBlank(merged.getOwner()) ? "FOUND" : "SOURCE_MISSING");
+        fieldStatuses.put(FIELD_PHONE, isNotBlank(merged.getPhone()) ? "FOUND" : "SOURCE_MISSING");
+        fieldStatuses.put(FIELD_EMAIL, isNotBlank(merged.getEmail()) ? "FOUND" : "SOURCE_MISSING");
+        fieldStatuses.put(FIELD_STATUS, isNotBlank(merged.getStatus()) ? "FOUND" : "SOURCE_MISSING");
+        fieldStatuses.put(FIELD_ISSUE_DATE, isNotBlank(merged.getIssueDate()) ? "FOUND" : "SOURCE_MISSING");
+        fieldStatuses.put(FIELD_TAX_AUTHORITY, isNotBlank(merged.getTaxAuthority()) ? "FOUND" : "SOURCE_MISSING");
+        fieldStatuses.put(FIELD_MAIN_BUSINESS_SECTOR, isNotBlank(merged.getMainBusinessSector()) ? "FOUND" : "SOURCE_MISSING");
         fieldStatuses.put(FIELD_TAX_CODE, "FOUND");
 
         merged.setFieldStatuses(fieldStatuses);
@@ -698,81 +698,197 @@ public class ExternalApiService {
         if (address == null || address.trim().isEmpty()) {
             return null;
         }
-        String lower = address.toLowerCase();
+        String cleanedAddress = address.replaceAll("(?i),\\s*(việt nam|viet nam|vn)\\s*$", "").trim();
+        String asciiAddress = removeAccents(cleanedAddress).toLowerCase();
         
         // Cần Thơ
-        if (lower.contains("cần thơ") || lower.contains("can tho")) {
-            if (lower.contains("ninh kiều") || lower.contains("ninh kieu") ||
-                lower.contains("cái khế") || lower.contains("cai khe") ||
-                lower.contains("an khánh") || lower.contains("an khanh") ||
-                lower.contains("hưng lợi") || lower.contains("hung loi") ||
-                lower.contains("xuân khánh") || lower.contains("xuan khanh") ||
-                lower.contains("an nghiệp") || lower.contains("an nghiep") ||
-                lower.contains("an cư") || lower.contains("an cu") ||
-                lower.contains("an hòa") || lower.contains("an hoa") ||
-                lower.contains("thới bình") || lower.contains("thoi binh") ||
-                lower.contains("tân an") || lower.contains("tan an") ||
-                lower.contains("an bình") || lower.contains("an binh")) {
+        if (asciiAddress.contains("can tho")) {
+            if (asciiAddress.contains("ninh kieu") ||
+                asciiAddress.contains("cai khe") ||
+                asciiAddress.contains("an khanh") ||
+                asciiAddress.contains("hung loi") ||
+                asciiAddress.contains("xuan khanh") ||
+                asciiAddress.contains("an nghiep") ||
+                asciiAddress.contains("an cu") ||
+                asciiAddress.contains("an hoa") ||
+                asciiAddress.contains("thoi binh") ||
+                asciiAddress.contains("tan an") ||
+                asciiAddress.contains("an binh")) {
                 return "Thuế cơ sở 1 thành phố Cần Thơ";
             }
-            if (lower.contains("bình thủy") || lower.contains("binh thuy") ||
-                lower.contains("an thới") || lower.contains("an thoi") ||
-                lower.contains("long hòa") || lower.contains("long hoa") ||
-                lower.contains("long tuyền") || lower.contains("long tuyen") ||
-                lower.contains("thới an đông") || lower.contains("thoi an dong") ||
-                lower.contains("trà an") || lower.contains("tra an") ||
-                lower.contains("trà nóc") || lower.contains("tra noc")) {
+            if (asciiAddress.contains("binh thuy") ||
+                asciiAddress.contains("an thoi") ||
+                asciiAddress.contains("long hoa") ||
+                asciiAddress.contains("long tuyen") ||
+                asciiAddress.contains("thoi an dong") ||
+                asciiAddress.contains("tra an") ||
+                asciiAddress.contains("tra noc")) {
                 return "Thuế cơ sở 2 thành phố Cần Thơ";
             }
-            if (lower.contains("cái răng") || lower.contains("cai rang")) {
+            if (asciiAddress.contains("cai rang")) {
                 return "Chi cục Thuế Quận Cái Răng";
             }
-            if (lower.contains("ô môn") || lower.contains("o mon")) {
+            if (asciiAddress.contains("o mon")) {
                 return "Chi cục Thuế Quận Ô Môn";
             }
-            if (lower.contains("thốt nốt") || lower.contains("thot not")) {
+            if (asciiAddress.contains("thot not")) {
                 return "Chi cục Thuế Quận Thốt Nốt";
             }
             return "Cục Thuế Thành phố Cần Thơ";
         }
         
         // Hậu Giang
-        if (lower.contains("hậu giang") || lower.contains("hau giang")) {
-            if (lower.contains("vị thanh") || lower.contains("vi thanh")) {
+        if (asciiAddress.contains("hau giang")) {
+            if (asciiAddress.contains("vi thanh")) {
                 return "Chi cục Thuế Thành phố Vị Thanh";
             }
-            if (lower.contains("ngã bảy") || lower.contains("nga bay")) {
+            if (asciiAddress.contains("nga bay")) {
                 return "Chi cục Thuế Thành phố Ngã Bảy";
             }
             return "Cục Thuế Tỉnh Hậu Giang";
         }
         
         // Vĩnh Long
-        if (lower.contains("vĩnh long") || lower.contains("vinh long")) {
+        if (asciiAddress.contains("vinh long")) {
             return "Cục Thuế Tỉnh Vĩnh Long";
         }
         
         // Sóc Trăng
-        if (lower.contains("sóc trăng") || lower.contains("soc trang")) {
+        if (asciiAddress.contains("soc trang")) {
             return "Cục Thuế Tỉnh Sóc Trăng";
         }
         
         // Đồng Tháp
-        if (lower.contains("đồng tháp") || lower.contains("dong thap")) {
+        if (asciiAddress.contains("dong thap")) {
             return "Cục Thuế Tỉnh Đồng Tháp";
         }
         
         // An Giang
-        if (lower.contains("an giang")) {
+        if (asciiAddress.contains("an giang")) {
             return "Cục Thuế Tỉnh An Giang";
         }
         
         // Kiên Giang
-        if (lower.contains("kiên giang") || lower.contains("kien giang")) {
+        if (asciiAddress.contains("kien giang")) {
             return "Cục Thuế Tỉnh Kiên Giang";
         }
         
-        return null;
+        // Thực hiện suy luận chung cho tất cả các tỉnh thành khác
+        return generalInferTaxAuthority(cleanedAddress);
+    }
+
+    private String generalInferTaxAuthority(String address) {
+        String[] parts = address.split(",");
+        if (parts.length == 0) {
+            return null;
+        }
+        
+        String provincePart = parts[parts.length - 1].trim();
+        String provinceName = cleanProvinceName(provincePart);
+        if (provinceName.isEmpty()) {
+            return null;
+        }
+        
+        String districtPart = parts.length >= 2 ? parts[parts.length - 2].trim() : "";
+        if (districtPart.isEmpty() || !isDistrictKeyword(districtPart)) {
+            districtPart = findDistrictInAddress(address);
+        }
+        
+        if (!districtPart.isEmpty()) {
+            String districtName = cleanDistrictName(districtPart);
+            return "Chi cục Thuế " + districtName;
+        }
+        
+        if (provinceName.startsWith("Thành phố")) {
+            return "Cục Thuế " + provinceName;
+        } else {
+            return "Cục Thuế Tỉnh " + provinceName;
+        }
+    }
+
+    private String cleanProvinceName(String part) {
+        String clean = part.replaceAll("(?i)^(tỉnh|thành phố|tp\\.?|t\\.p\\.?)\\s+", "").trim();
+        String asciiClean = removeAccents(clean).toLowerCase();
+        if (asciiClean.equals("hcm") || asciiClean.equals("ho chi minh")) {
+            return "Thành phố Hồ Chí Minh";
+        }
+        if (asciiClean.equals("ha noi") || asciiClean.equals("hn")) {
+            return "Thành phố Hà Nội";
+        }
+        if (asciiClean.equals("da nang") || asciiClean.equals("dn")) {
+            return "Thành phố Đà Nẵng";
+        }
+        if (asciiClean.equals("hai phong") || asciiClean.equals("hp")) {
+            return "Thành phố Hải Phòng";
+        }
+        if (asciiClean.equals("can tho") || asciiClean.equals("ct")) {
+            return "Thành phố Cần Thơ";
+        }
+        return capitalizeWords(clean);
+    }
+
+    private boolean isDistrictKeyword(String part) {
+        String asciiLower = removeAccents(part).trim().toLowerCase();
+        return asciiLower.startsWith("quan") || asciiLower.startsWith("q.") || 
+               asciiLower.startsWith("huyen") || asciiLower.startsWith("h.") || 
+               asciiLower.startsWith("thi xa") || asciiLower.startsWith("tx.") || 
+               asciiLower.startsWith("thanh pho") || asciiLower.startsWith("tp.");
+    }
+
+    private String cleanDistrictName(String part) {
+        String clean = part.trim();
+        String asciiLower = removeAccents(clean).toLowerCase();
+        if (asciiLower.startsWith("q.")) {
+            clean = "Quận " + clean.substring(2).trim();
+        } else if (asciiLower.startsWith("h.")) {
+            clean = "Huyện " + clean.substring(2).trim();
+        } else if (asciiLower.startsWith("tx.")) {
+            clean = "Thị xã " + clean.substring(3).trim();
+        } else if (asciiLower.startsWith("tp.")) {
+            clean = "Thành phố " + clean.substring(3).trim();
+        } else {
+            if (asciiLower.startsWith("quan ")) {
+                clean = "Quận " + clean.substring(5).trim();
+            } else if (asciiLower.startsWith("huyen ")) {
+                clean = "Huyện " + clean.substring(6).trim();
+            } else if (asciiLower.startsWith("thi xa ")) {
+                clean = "Thị xã " + clean.substring(7).trim();
+            } else if (asciiLower.startsWith("thanh pho ")) {
+                clean = "Thành phố " + clean.substring(10).trim();
+            }
+        }
+        return capitalizeWords(clean);
+    }
+
+    private String findDistrictInAddress(String address) {
+        String[] parts = address.split(",");
+        for (int i = parts.length - 2; i >= 0; i--) {
+            String p = parts[i].trim();
+            if (isDistrictKeyword(p)) {
+                return p;
+            }
+        }
+        return "";
+    }
+
+    private String capitalizeWords(String str) {
+        if (str == null || str.isEmpty()) return "";
+        String[] words = str.split("\\s+");
+        StringBuilder sb = new StringBuilder();
+        for (String w : words) {
+            if (w.isEmpty()) continue;
+            sb.append(Character.toUpperCase(w.charAt(0)))
+              .append(w.substring(1).toLowerCase())
+              .append(" ");
+        }
+        return sb.toString().trim();
+    }
+
+    private String removeAccents(String src) {
+        if (src == null) return "";
+        String temp = java.text.Normalizer.normalize(src, java.text.Normalizer.Form.NFD);
+        java.util.regex.Pattern pattern = java.util.regex.Pattern.compile("\\p{InCombiningDiacriticalMarks}+");
+        return pattern.matcher(temp).replaceAll("").replace('đ', 'd').replace('Đ', 'D');
     }
 
     private String decodeCloudflareEmail(String encoded) {

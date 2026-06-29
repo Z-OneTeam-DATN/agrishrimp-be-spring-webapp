@@ -157,6 +157,10 @@ public class ProductService {
         Category category = categoryRepository.findById(request.getCategoryId())
                 .orElseThrow(() -> new NotFoundException("Danh mục không tồn tại với ID: " + request.getCategoryId()));
 
+        if (request.getName() != null && productRepository.existsByNameIgnoreCase(request.getName().trim())) {
+            throw new ConflictException("Tên sản phẩm đã tồn tại trong hệ thống. Vui lòng chọn tên khác!", true);
+        }
+
         validateSkusInRequest(request.getVariants());
         ProductStatus targetStatus = parseProductStatus(request.getStatus());
 
@@ -209,6 +213,10 @@ public class ProductService {
             List<MultipartFile> variantImages) {
         Product product = productRepository.findById(id)
                 .orElseThrow(() -> new NotFoundException("Sản phẩm không tồn tại với ID: " + id));
+
+        if (request.getName() != null && productRepository.existsByNameIgnoreCaseAndIdNot(request.getName().trim(), id)) {
+            throw new ConflictException("Tên sản phẩm đã tồn tại trong hệ thống. Vui lòng chọn tên khác!", true);
+        }
 
         ProductStatus targetStatus = parseProductStatus(request.getStatus());
         if (targetStatus == ProductStatus.ACTIVE && request.getSupplierId() == null) {
