@@ -1,6 +1,11 @@
 server:
   port: ${SERVER_PORT:8004}
 
+management:
+  health:
+    mail:
+      enabled: ${MANAGEMENT_HEALTH_MAIL_ENABLED:false}
+
 spring:
   application:
     name: agri-shrimp
