@@ -10,6 +10,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.web.util.UriComponentsBuilder;
 
+import java.text.Normalizer;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -100,8 +101,9 @@ public class TrackAsiaGeocodingProvider implements GeocodingProvider {
 
                         return new AddressSuggestionDto(label, suggestionProvince, suggestionDistrict, suggestionWard, lat, lng);
                     })
+                    .filter(item -> hasText(item.getLabel()))
                     .filter(item -> matchesAdministrativeScope(item, province, district, ward))
-                    .limit(8)
+                    .limit(12)
                     .collect(Collectors.toList());
         } catch (Exception e) {
             log.warn("TrackAsia autocomplete failed for query '{}' with scope [{}, {}, {}]: {}",
@@ -111,9 +113,21 @@ public class TrackAsiaGeocodingProvider implements GeocodingProvider {
     }
 
     private boolean matchesAdministrativeScope(AddressSuggestionDto suggestion, String province, String district, String ward) {
-        return matchesText(province, suggestion.getProvince())
-                && matchesText(district, suggestion.getDistrict())
-                && matchesText(ward, suggestion.getWard());
+        return (matchesText(province, suggestion.getProvince()) || labelContains(suggestion.getLabel(), province))
+                && (matchesText(district, suggestion.getDistrict()) || labelContains(suggestion.getLabel(), district))
+                && (matchesText(ward, suggestion.getWard()) || labelContains(suggestion.getLabel(), ward));
+    }
+
+    private boolean labelContains(String label, String expected) {
+        if (!hasText(expected)) {
+            return true;
+        }
+        if (!hasText(label)) {
+            return false;
+        }
+        String normalizedLabel = normalizeAdministrativeName(label);
+        String normalizedExpected = normalizeAdministrativeName(expected);
+        return normalizedLabel.contains(normalizedExpected);
     }
 
     private boolean matchesText(String expected, String actual) {
@@ -133,9 +147,10 @@ public class TrackAsiaGeocodingProvider implements GeocodingProvider {
         if (value == null) {
             return "";
         }
-        return value
+        return Normalizer.normalize(value, Normalizer.Form.NFD)
+                .replaceAll("\\p{M}", "")
                 .toLowerCase()
-                .replaceAll("^(thành phố|tỉnh|quận|huyện|thị xã|thị trấn|phường|xã)\\s+", "")
+                .replaceAll("^(thanh pho|tinh|quan|huyen|thi xa|thi tran|phuong|xa)\\s+", "")
                 .replaceAll("[^\\p{L}\\p{Nd}\\s]", " ")
                 .replaceAll("\\s+", " ")
                 .trim();

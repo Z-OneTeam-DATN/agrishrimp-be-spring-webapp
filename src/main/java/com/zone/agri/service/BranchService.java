@@ -70,8 +70,10 @@ public class BranchService {
         Branch branch = new Branch();
         mapToEntity(branch, dto);
 
-        // Geocode địa chỉ → lat/lng (chỉ gọi trong admin flow)
-        geocodeBranchSilently(branch);
+        // Geocode địa chỉ → lat/lng (chỉ gọi trong admin flow) nếu chưa có tọa độ
+        if (branch.getLat() == null || branch.getLng() == null) {
+            geocodeBranchSilently(branch, dto);
+        }
 
         Branch savedBranch = branchRepository.save(branch);
 
@@ -97,9 +99,11 @@ public class BranchService {
 
         mapToEntity(branch, dto);
 
-        // Re-geocode nếu địa chỉ thay đổi
-        if (dto.getAddressDetail() != null && !dto.getAddressDetail().equals(oldAddress)) {
-            geocodeBranchSilently(branch);
+        // Re-geocode nếu địa chỉ thay đổi và không truyền tọa độ mới
+        if (branch.getLat() == null || branch.getLng() == null) {
+            if (dto.getAddressDetail() != null && !dto.getAddressDetail().equals(oldAddress)) {
+                geocodeBranchSilently(branch, dto);
+            }
         }
 
         // Xử lý cập nhật danh sách quản lý
@@ -120,6 +124,8 @@ public class BranchService {
         entity.setWardId(dto.getWardId());
         entity.setWardCode(dto.getWardCode());
         entity.setStatus(dto.getStatus());
+        entity.setLat(dto.getLat());
+        entity.setLng(dto.getLng());
     }
 
     private void updateBranchManagers(Branch branch, List<Long> managerIds) {
@@ -205,10 +211,23 @@ public class BranchService {
      * Geocode địa chỉ chi nhánh → lat/lng.
      * Silent: lỗi geocoding không dừng việc lưu branch.
      */
-    private void geocodeBranchSilently(Branch branch) {
+    private void geocodeBranchSilently(Branch branch, BranchDTO dto) {
         try {
-            if (branch.getAddressDetail() != null && !branch.getAddressDetail().isBlank()) {
-                CoordinateDto coord = geocodingService.geocode(branch.getAddressDetail());
+            String detail = branch.getAddressDetail();
+            String ward = dto.getWardName();
+            String district = dto.getDistrictName();
+            String province = dto.getProvinceName();
+
+            List<String> parts = new ArrayList<>();
+            if (detail != null && !detail.isBlank()) parts.add(detail);
+            if (ward != null && !ward.isBlank()) parts.add(ward);
+            if (district != null && !district.isBlank()) parts.add(district);
+            if (province != null && !province.isBlank()) parts.add(province);
+
+            String fullAddress = String.join(", ", parts);
+
+            if (!fullAddress.isBlank()) {
+                CoordinateDto coord = geocodingService.geocode(fullAddress);
                 branch.setLat(coord.getLat());
                 branch.setLng(coord.getLng());
                 branch.setGeocodedAt(Instant.now());
