@@ -30,7 +30,7 @@ public interface BranchRepository extends JpaRepository<Branch, Long> {
     @Query("SELECT COUNT(b) > 0 FROM Branch b WHERE b.phone = :phone AND b.id <> :id")
     boolean existsByPhoneForUpdate(@Param("phone") String phone, @Param("id") Long id);
 
-    @Query("SELECT (COUNT(s) + COUNT(r)) FROM Branch b " +
+    @Query("SELECT (COALESCE(COUNT(DISTINCT s),0) + COALESCE(COUNT(DISTINCT r),0)) FROM Branch b " +
             "LEFT JOIN b.sentTransfers s " +
             "LEFT JOIN b.receivedTransfers r " +
             "WHERE b.id = :id")
