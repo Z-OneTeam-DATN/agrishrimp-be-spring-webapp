@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zone.agri.common.CloudinaryService;
 import com.zone.agri.dto.request.blog.BlogCategoryRequest;
 import com.zone.agri.dto.request.blog.BlogPostRequest;
+import com.zone.agri.dto.request.blog.BlogTagRequest;
 import com.zone.agri.dto.response.blog.BlogCategoryResponse;
 import com.zone.agri.dto.response.blog.BlogPostResponse;
 import com.zone.agri.entity.*;
@@ -44,6 +45,39 @@ public class BlogService {
                 .description(c.getDescription())
                 .postCount(c.getPosts() == null ? 0L : (long) c.getPosts().size())
                 .build()).collect(Collectors.toList());
+    }
+
+    public List<BlogPostResponse.TagInfo> getAllTags() {
+        return tagRepo.findAll().stream()
+                .sorted(Comparator.comparing(BlogTag::getName, String.CASE_INSENSITIVE_ORDER))
+                .map(this::toTagInfo)
+                .collect(Collectors.toList());
+    }
+
+    @Transactional
+    public BlogPostResponse.TagInfo createTag(BlogTagRequest req) {
+        String normalizedName = normalizeTagName(req.getName());
+        if (normalizedName.isBlank()) {
+            throw new RuntimeException("Tên tag không được để trống");
+        }
+
+        Optional<BlogTag> existingByName = tagRepo.findByNameIgnoreCase(normalizedName);
+        if (existingByName.isPresent()) {
+            return toTagInfo(existingByName.get());
+        }
+
+        String slug = resolveTagSlug(req.getSlug(), normalizedName);
+
+        Optional<BlogTag> existingBySlug = tagRepo.findBySlugIgnoreCase(slug);
+        if (existingBySlug.isPresent()) {
+            return toTagInfo(existingBySlug.get());
+        }
+
+        BlogTag tag = BlogTag.builder()
+                .name(normalizedName)
+                .slug(slug)
+                .build();
+        return toTagInfo(tagRepo.save(tag));
     }
 
     @Transactional
@@ -251,10 +285,31 @@ public class BlogService {
         return slug;
     }
 
+    private String resolveTagSlug(String requestedSlug, String name) {
+        String base = (requestedSlug != null && !requestedSlug.isBlank()) ? toSlug(requestedSlug) : toSlug(name);
+        if (base.isBlank()) {
+            base = "tag-" + System.currentTimeMillis();
+        }
+
+        String slug = base;
+        int i = 2;
+        while (tagRepo.findBySlugIgnoreCase(slug).isPresent()) {
+            slug = base + "-" + i++;
+        }
+        return slug;
+    }
+
     private BlogPostStatus parseStatus(String s) {
         if (s == null) return BlogPostStatus.DRAFT;
         try { return BlogPostStatus.valueOf(s.toUpperCase()); }
         catch (Exception e) { return BlogPostStatus.DRAFT; }
+    }
+
+    private String normalizeTagName(String value) {
+        if (value == null) {
+            return "";
+        }
+        return value.trim().replaceAll("\\s+", " ");
     }
 
     private String toSlug(String text) {
@@ -277,6 +332,14 @@ public class BlogService {
         return BlogCategoryResponse.builder()
                 .id(c.getId()).name(c.getName()).slug(c.getSlug()).description(c.getDescription())
                 .postCount(c.getPosts() == null ? 0L : (long) c.getPosts().size())
+                .build();
+    }
+
+    private BlogPostResponse.TagInfo toTagInfo(BlogTag tag) {
+        return BlogPostResponse.TagInfo.builder()
+                .id(tag.getId())
+                .name(tag.getName())
+                .slug(tag.getSlug())
                 .build();
     }
 
@@ -315,7 +378,7 @@ public class BlogService {
                 .category(p.getCategory() == null ? null : BlogPostResponse.CategoryInfo.builder()
                         .id(p.getCategory().getId()).name(p.getCategory().getName()).slug(p.getCategory().getSlug()).build())
                 .tags(p.getTags() == null ? List.of() : p.getTags().stream().map(t ->
-                        BlogPostResponse.TagInfo.builder().id(t.getId()).name(t.getName()).slug(t.getSlug()).build()
+                        toTagInfo(t)
                 ).collect(Collectors.toList()))
                 .relatedProducts(relatedList)
                 .build();

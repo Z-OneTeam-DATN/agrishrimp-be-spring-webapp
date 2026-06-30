@@ -3,6 +3,7 @@ package com.zone.agri.controller;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zone.agri.dto.request.blog.BlogCategoryRequest;
 import com.zone.agri.dto.request.blog.BlogPostRequest;
+import com.zone.agri.dto.request.blog.BlogTagRequest;
 import com.zone.agri.dto.response.blog.BlogCategoryResponse;
 import com.zone.agri.dto.response.blog.BlogPostResponse;
 import com.zone.agri.dto.response.common.ApiResponse;
@@ -37,6 +38,18 @@ public class AdminBlogController {
     @RequirePermission("BLOG_VIEW")
     public ResponseEntity<ApiResponse<List<BlogCategoryResponse>>> getCategories() {
         return ResponseEntity.ok(ApiResponse.success(blogService.getAllCategories(), "OK"));
+    }
+
+    @GetMapping("/tags")
+    @RequirePermission("BLOG_VIEW")
+    public ResponseEntity<ApiResponse<List<BlogPostResponse.TagInfo>>> getTags() {
+        return ResponseEntity.ok(ApiResponse.success(blogService.getAllTags(), "OK"));
+    }
+
+    @PostMapping("/tags")
+    @RequirePermission({"BLOG_CREATE", "BLOG_EDIT"})
+    public ResponseEntity<ApiResponse<BlogPostResponse.TagInfo>> createTag(@RequestBody BlogTagRequest req) {
+        return ResponseEntity.ok(ApiResponse.success(blogService.createTag(req), "Tạo tag thành công"));
     }
 
     @PostMapping("/categories")

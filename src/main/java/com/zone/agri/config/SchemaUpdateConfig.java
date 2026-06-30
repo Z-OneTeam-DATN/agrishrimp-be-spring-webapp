@@ -160,6 +160,14 @@ public class SchemaUpdateConfig implements BeanPostProcessor {
                     "ALTER TABLE products ADD COLUMN supplier_id BIGINT NULL");
 
             executeSql(stmt,
+                    "Patch banners adds mobile_image_url",
+                    "ALTER TABLE banners ADD COLUMN mobile_image_url TEXT NULL");
+
+            executeSql(stmt,
+                    "Patch banners adds mobile_public_id",
+                    "ALTER TABLE banners ADD COLUMN mobile_public_id VARCHAR(255) NULL");
+
+            executeSql(stmt,
                     "Patch products drops origin column",
                     "ALTER TABLE products DROP COLUMN origin");
 

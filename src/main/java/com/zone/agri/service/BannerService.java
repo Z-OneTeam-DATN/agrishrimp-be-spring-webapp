@@ -12,6 +12,7 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Objects;
 import java.util.stream.Collectors;
 
 @Service
@@ -41,7 +42,7 @@ public class BannerService {
     }
 
     @Transactional
-    public BannerResponse create(BannerRequest req, MultipartFile file) {
+    public BannerResponse create(BannerRequest req, MultipartFile file, MultipartFile mobileFile) {
         Banner banner = Banner.builder()
                 .title(req.getTitle())
                 .linkUrl(req.getLinkUrl())
@@ -51,32 +52,19 @@ public class BannerService {
                 .endDate(req.getEndDate())
                 .build();
 
-        if (file != null && !file.isEmpty()) {
-            CloudinaryService.UploadResult result = cloudinaryService.upload(file, "banners");
-            banner.setImageUrl(result.secureUrl());
-            banner.setPublicId(result.publicId());
-        } else if (req.getImageUrl() != null) {
-            banner.setImageUrl(req.getImageUrl());
-            banner.setPublicId(req.getPublicId());
-        }
+        applyDesktopImage(banner, req, file);
+        applyMobileImage(banner, req, mobileFile);
 
         return toResponse(bannerRepository.save(banner));
     }
 
     @Transactional
-    public BannerResponse update(Long id, BannerRequest req, MultipartFile file) {
+    public BannerResponse update(Long id, BannerRequest req, MultipartFile file, MultipartFile mobileFile) {
         Banner banner = bannerRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Banner không tồn tại: " + id));
 
-        if (file != null && !file.isEmpty()) {
-            if (banner.getPublicId() != null) cloudinaryService.delete(banner.getPublicId());
-            CloudinaryService.UploadResult result = cloudinaryService.upload(file, "banners");
-            banner.setImageUrl(result.secureUrl());
-            banner.setPublicId(result.publicId());
-        } else if (req.getImageUrl() != null && !req.getImageUrl().equals(banner.getImageUrl())) {
-            banner.setImageUrl(req.getImageUrl());
-            banner.setPublicId(req.getPublicId());
-        }
+        applyDesktopImage(banner, req, file);
+        applyMobileImage(banner, req, mobileFile);
 
         if (req.getTitle() != null) banner.setTitle(req.getTitle());
         if (req.getLinkUrl() != null) banner.setLinkUrl(req.getLinkUrl());
@@ -101,7 +89,78 @@ public class BannerService {
         Banner banner = bannerRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Banner không tồn tại: " + id));
         if (banner.getPublicId() != null) cloudinaryService.delete(banner.getPublicId());
+        if (banner.getMobilePublicId() != null) cloudinaryService.delete(banner.getMobilePublicId());
         bannerRepository.delete(banner);
+    }
+
+    private void applyDesktopImage(Banner banner, BannerRequest req, MultipartFile file) {
+        if (file != null && !file.isEmpty()) {
+            if (banner.getPublicId() != null) cloudinaryService.delete(banner.getPublicId());
+            CloudinaryService.UploadResult result = cloudinaryService.upload(file, "banners");
+            banner.setImageUrl(result.secureUrl());
+            banner.setPublicId(result.publicId());
+            return;
+        }
+
+        if (req.getImageUrl() == null) {
+            return;
+        }
+
+        String nextUrl = normalizeText(req.getImageUrl());
+        String nextPublicId = normalizeText(req.getPublicId());
+
+        if (nextUrl == null) {
+            if (banner.getPublicId() != null) {
+                cloudinaryService.delete(banner.getPublicId());
+            }
+            banner.setImageUrl(null);
+            banner.setPublicId(null);
+            return;
+        }
+
+        if (!nextUrl.equals(banner.getImageUrl()) || !Objects.equals(nextPublicId, banner.getPublicId())) {
+            banner.setImageUrl(nextUrl);
+            banner.setPublicId(nextPublicId);
+        }
+    }
+
+    private void applyMobileImage(Banner banner, BannerRequest req, MultipartFile mobileFile) {
+        if (mobileFile != null && !mobileFile.isEmpty()) {
+            if (banner.getMobilePublicId() != null) cloudinaryService.delete(banner.getMobilePublicId());
+            CloudinaryService.UploadResult result = cloudinaryService.upload(mobileFile, "banners/mobile");
+            banner.setMobileImageUrl(result.secureUrl());
+            banner.setMobilePublicId(result.publicId());
+            return;
+        }
+
+        if (req.getMobileImageUrl() == null) {
+            return;
+        }
+
+        String nextUrl = normalizeText(req.getMobileImageUrl());
+        String nextPublicId = normalizeText(req.getMobilePublicId());
+
+        if (nextUrl == null) {
+            if (banner.getMobilePublicId() != null) {
+                cloudinaryService.delete(banner.getMobilePublicId());
+            }
+            banner.setMobileImageUrl(null);
+            banner.setMobilePublicId(null);
+            return;
+        }
+
+        if (!nextUrl.equals(banner.getMobileImageUrl()) || !Objects.equals(nextPublicId, banner.getMobilePublicId())) {
+            banner.setMobileImageUrl(nextUrl);
+            banner.setMobilePublicId(nextPublicId);
+        }
+    }
+
+    private String normalizeText(String value) {
+        if (value == null) {
+            return null;
+        }
+        String normalized = value.trim();
+        return normalized.isEmpty() ? null : normalized;
     }
 
     private BannerResponse toResponse(Banner b) {
@@ -110,6 +169,8 @@ public class BannerService {
                 .title(b.getTitle())
                 .imageUrl(b.getImageUrl())
                 .publicId(b.getPublicId())
+                .mobileImageUrl(b.getMobileImageUrl())
+                .mobilePublicId(b.getMobilePublicId())
                 .linkUrl(b.getLinkUrl())
                 .displayOrder(b.getDisplayOrder())
                 .isActive(b.getIsActive())

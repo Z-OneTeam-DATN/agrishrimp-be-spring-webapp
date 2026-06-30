@@ -10,6 +10,8 @@ import java.util.Optional;
 @Repository
 public interface BlogTagRepository extends JpaRepository<BlogTag, Long> {
     Optional<BlogTag> findBySlug(String slug);
+    Optional<BlogTag> findBySlugIgnoreCase(String slug);
     Optional<BlogTag> findByName(String name);
+    Optional<BlogTag> findByNameIgnoreCase(String name);
     List<BlogTag> findAllByIdIn(List<Long> ids);
 }

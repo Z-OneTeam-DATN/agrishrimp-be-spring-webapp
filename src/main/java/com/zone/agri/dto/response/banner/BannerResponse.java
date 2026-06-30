@@ -16,6 +16,8 @@ public class BannerResponse {
     private String title;
     private String imageUrl;
     private String publicId;
+    private String mobileImageUrl;
+    private String mobilePublicId;
     private String linkUrl;
     private Integer displayOrder;
     private Boolean isActive;
