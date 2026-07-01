@@ -28,4 +28,5 @@ public class ProductResponse {
 
     private List<String> imageUrls;
     private List<ProductVariantResponse> variants;
+    private Double similarity;
 }

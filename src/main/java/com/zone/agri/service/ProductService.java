@@ -491,11 +491,25 @@ public class ProductService {
      */
     public List<ProductResponse> searchByImage(MultipartFile image) {
         List<ImageSearchResult> results = imageSearchService.searchByImage(image);
+        List<Long> productIds = results.stream()
+                .map(ImageSearchResult::getProductId)
+                .toList();
+        Map<Long, Product> productMap = productRepository.findAllById(productIds)
+                .stream()
+                .collect(Collectors.toMap(Product::getId, product -> product));
+
         return results.stream()
                 .sorted(Comparator.comparingDouble(r -> -r.getScore()))
-                .map(r -> productRepository.findById(r.getProductId()).orElse(null))
+                .map(r -> {
+                    Product product = productMap.get(r.getProductId());
+                    if (product == null) {
+                        return null;
+                    }
+                    ProductResponse response = convertToResponse(product);
+                    response.setSimilarity(r.getScore());
+                    return response;
+                })
                 .filter(Objects::nonNull)
-                .map(this::convertToResponse)
                 .collect(Collectors.toList());
     }
 

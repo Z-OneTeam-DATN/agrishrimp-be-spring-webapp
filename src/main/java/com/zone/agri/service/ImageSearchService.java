@@ -1,6 +1,7 @@
 package com.zone.agri.service;
 
 import com.zone.agri.dto.response.ImageSearchResult;
+import com.zone.agri.dto.response.ImageIndexBatchResponse;
 import com.zone.agri.entity.ProductVector;
 import com.zone.agri.repository.ProductVectorRepository;
 import lombok.RequiredArgsConstructor;
@@ -14,12 +15,15 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
 import org.springframework.web.client.RestTemplate;
+import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.time.LocalDateTime;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.HashSet;
 
 @Service
 @RequiredArgsConstructor
@@ -61,12 +65,28 @@ public class ImageSearchService {
      */
     public int indexBatch(List<Map<String, Object>> products) {
         Map<String, Object> body = Map.of("products", products);
-        restTemplate.postForObject(baseUrl + "/index/batch", body, Object.class);
+        ImageIndexBatchResponse response = restTemplate.postForObject(
+                baseUrl + "/index/batch",
+                body,
+                ImageIndexBatchResponse.class
+        );
 
-        // Upsert tất cả product_vectors
+        Set<Long> successIds = response != null && response.getSuccessIds() != null
+                ? new HashSet<>(response.getSuccessIds())
+                : Collections.emptySet();
+
+        if (successIds.isEmpty()) {
+            log.warn("[ImageSearch] Batch index returned no successful products");
+            return 0;
+        }
+
+        // Chỉ upsert những sản phẩm Python xác nhận index thành công.
         LocalDateTime now = LocalDateTime.now();
         for (Map<String, Object> p : products) {
             Long productId = ((Number) p.get("productId")).longValue();
+            if (!successIds.contains(productId)) {
+                continue;
+            }
             String imageUrl = (String) p.get("imageUrl");
 
             ProductVector record = productVectorRepository.findByProductId(productId)
@@ -76,8 +96,13 @@ public class ImageSearchService {
             productVectorRepository.save(record);
         }
 
-        log.info("[ImageSearch] Batch indexed {} products", products.size());
-        return products.size();
+        int failedCount = response.getFailed() != null ? response.getFailed() : 0;
+        if (failedCount > 0) {
+            log.warn("[ImageSearch] Batch indexed {} products, {} failed", successIds.size(), failedCount);
+        } else {
+            log.info("[ImageSearch] Batch indexed {} products", successIds.size());
+        }
+        return successIds.size();
     }
 
     /**
@@ -128,7 +153,10 @@ public class ImageSearchService {
             return response.getBody() != null ? response.getBody() : Collections.emptyList();
         } catch (Exception e) {
             log.error("[ImageSearch] Search failed: {}", e.getMessage());
-            throw new RuntimeException("Dịch vụ tìm kiếm bằng ảnh hiện không khả dụng. Vui lòng thử lại sau.");
+            throw new ResponseStatusException(
+                    HttpStatus.SERVICE_UNAVAILABLE,
+                    "Dịch vụ tìm kiếm bằng ảnh hiện không khả dụng. Vui lòng thử lại sau."
+            );
         }
     }
 }
