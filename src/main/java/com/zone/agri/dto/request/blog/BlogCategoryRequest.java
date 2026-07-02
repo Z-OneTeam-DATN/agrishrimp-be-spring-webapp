@@ -7,4 +7,5 @@ public class BlogCategoryRequest {
     private String name;
     private String slug;
     private String description;
+    private String status;
 }

@@ -34,12 +34,12 @@ public class PublicBlogController {
     @Operation(summary = "Chi tiết bài viết theo slug (tăng lượt xem)")
     @GetMapping("/posts/{slug}")
     public ResponseEntity<BlogPostResponse> getPost(@PathVariable String slug) {
-        return ResponseEntity.ok(blogService.getBySlug(slug, true));
+        return ResponseEntity.ok(blogService.getPublicBySlug(slug, true));
     }
 
     @Operation(summary = "Danh sách danh mục blog")
     @GetMapping("/categories")
     public ResponseEntity<List<BlogCategoryResponse>> getCategories() {
-        return ResponseEntity.ok(blogService.getAllCategories());
+        return ResponseEntity.ok(blogService.getPublicCategories());
     }
 }

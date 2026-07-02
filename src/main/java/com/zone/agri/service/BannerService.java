@@ -6,11 +6,15 @@ import com.zone.agri.dto.response.banner.BannerResponse;
 import com.zone.agri.entity.Banner;
 import com.zone.agri.repository.BannerRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.stream.Collectors;
@@ -22,15 +26,20 @@ public class BannerService {
 
     private final BannerRepository bannerRepository;
     private final CloudinaryService cloudinaryService;
+    private final BannerAssetCleanupService bannerAssetCleanupService;
 
+    @Transactional
     public List<BannerResponse> getAll() {
-        return bannerRepository.findAllByOrderByDisplayOrderAscCreatedAtDesc()
+        syncExpiredBanners(LocalDateTime.now());
+        return normalizeDisplayOrders()
                 .stream().map(this::toResponse).collect(Collectors.toList());
     }
 
+    @Transactional
     public List<BannerResponse> getPublicBanners() {
         LocalDateTime now = LocalDateTime.now();
-        return bannerRepository.findAllByOrderByDisplayOrderAscCreatedAtDesc()
+        syncExpiredBanners(now);
+        return normalizeDisplayOrders()
                 .stream()
                 .filter(b -> Boolean.TRUE.equals(b.getIsActive()))
                 .filter(b -> b.getStartDate() == null || !b.getStartDate().isAfter(now))
@@ -46,7 +55,7 @@ public class BannerService {
         Banner banner = Banner.builder()
                 .title(req.getTitle())
                 .linkUrl(req.getLinkUrl())
-                .displayOrder(req.getDisplayOrder() != null ? req.getDisplayOrder() : 0)
+                .displayOrder(req.getDisplayOrder())
                 .isActive(req.getIsActive() != null ? req.getIsActive() : true)
                 .startDate(req.getStartDate())
                 .endDate(req.getEndDate())
@@ -54,8 +63,21 @@ public class BannerService {
 
         applyDesktopImage(banner, req, file);
         applyMobileImage(banner, req, mobileFile);
+        if (isExpired(banner)) {
+            banner.setIsActive(false);
+        }
 
-        return toResponse(bannerRepository.save(banner));
+        List<Banner> orderedBanners = normalizeDisplayOrders();
+        int targetIndex = clampDisplayOrder(req.getDisplayOrder(), orderedBanners.size());
+
+        List<Banner> reorderedBanners = new ArrayList<>(orderedBanners);
+        reorderedBanners.add(targetIndex, banner);
+        assignSequentialDisplayOrders(reorderedBanners);
+
+        return toResponse(bannerRepository.saveAll(reorderedBanners).stream()
+                .filter(item -> item.getId() != null && item.getId().equals(banner.getId()))
+                .findFirst()
+                .orElse(banner));
     }
 
     @Transactional
@@ -68,19 +90,49 @@ public class BannerService {
 
         if (req.getTitle() != null) banner.setTitle(req.getTitle());
         if (req.getLinkUrl() != null) banner.setLinkUrl(req.getLinkUrl());
-        if (req.getDisplayOrder() != null) banner.setDisplayOrder(req.getDisplayOrder());
         if (req.getIsActive() != null) banner.setIsActive(req.getIsActive());
         banner.setStartDate(req.getStartDate());
         banner.setEndDate(req.getEndDate());
+        if (isExpired(banner)) {
+            banner.setIsActive(false);
+        }
 
-        return toResponse(bannerRepository.save(banner));
+        List<Banner> orderedBanners = normalizeDisplayOrders();
+        List<Banner> reorderedBanners = orderedBanners.stream()
+                .filter(item -> !item.getId().equals(banner.getId()))
+                .collect(Collectors.toCollection(ArrayList::new));
+
+        int currentIndex = orderedBanners.stream()
+                .map(Banner::getId)
+                .toList()
+                .indexOf(banner.getId());
+        int targetIndex = clampDisplayOrder(
+                req.getDisplayOrder() != null ? req.getDisplayOrder() : currentIndex,
+                reorderedBanners.size()
+        );
+
+        reorderedBanners.add(targetIndex, banner);
+        assignSequentialDisplayOrders(reorderedBanners);
+
+        return toResponse(bannerRepository.saveAll(reorderedBanners).stream()
+                .filter(item -> item.getId().equals(banner.getId()))
+                .findFirst()
+                .orElse(banner));
     }
 
     @Transactional
     public void toggleActive(Long id) {
         Banner banner = bannerRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Banner không tồn tại: " + id));
-        banner.setIsActive(!Boolean.TRUE.equals(banner.getIsActive()));
+
+        boolean nextActive = !Boolean.TRUE.equals(banner.getIsActive());
+        if (nextActive && isExpired(banner)) {
+            banner.setIsActive(false);
+            bannerRepository.save(banner);
+            throw new RuntimeException("Banner đã hết hạn và được chuyển sang trạng thái tạm ẩn.");
+        }
+
+        banner.setIsActive(nextActive);
         bannerRepository.save(banner);
     }
 
@@ -88,9 +140,27 @@ public class BannerService {
     public void delete(Long id) {
         Banner banner = bannerRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Banner không tồn tại: " + id));
-        if (banner.getPublicId() != null) cloudinaryService.delete(banner.getPublicId());
-        if (banner.getMobilePublicId() != null) cloudinaryService.delete(banner.getMobilePublicId());
+        String publicId = banner.getPublicId();
+        String mobilePublicId = banner.getMobilePublicId();
         bannerRepository.delete(banner);
+
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    bannerAssetCleanupService.deleteImages(publicId, mobilePublicId);
+                }
+            });
+            return;
+        }
+
+        bannerAssetCleanupService.deleteImages(publicId, mobilePublicId);
+    }
+
+    @Scheduled(fixedDelay = 300000)
+    @Transactional
+    public void syncExpiredBannerStatuses() {
+        syncExpiredBanners(LocalDateTime.now());
     }
 
     private void applyDesktopImage(Banner banner, BannerRequest req, MultipartFile file) {
@@ -161,6 +231,42 @@ public class BannerService {
         }
         String normalized = value.trim();
         return normalized.isEmpty() ? null : normalized;
+    }
+
+    private void syncExpiredBanners(LocalDateTime now) {
+        bannerRepository.deactivateExpiredBanners(now);
+    }
+
+    private List<Banner> normalizeDisplayOrders() {
+        List<Banner> orderedBanners = new ArrayList<>(bannerRepository.findAllByOrderByDisplayOrderAscCreatedAtDesc());
+        boolean changed = assignSequentialDisplayOrders(orderedBanners);
+        if (changed) {
+            bannerRepository.saveAll(orderedBanners);
+        }
+        return orderedBanners;
+    }
+
+    private boolean assignSequentialDisplayOrders(List<Banner> banners) {
+        boolean changed = false;
+        for (int index = 0; index < banners.size(); index++) {
+            Banner item = banners.get(index);
+            if (!Objects.equals(item.getDisplayOrder(), index)) {
+                item.setDisplayOrder(index);
+                changed = true;
+            }
+        }
+        return changed;
+    }
+
+    private int clampDisplayOrder(Integer requestedOrder, int maxIndex) {
+        if (requestedOrder == null) {
+            return maxIndex;
+        }
+        return Math.max(0, Math.min(requestedOrder, maxIndex));
+    }
+
+    private boolean isExpired(Banner banner) {
+        return banner.getEndDate() != null && banner.getEndDate().isBefore(LocalDateTime.now());
     }
 
     private BannerResponse toResponse(Banner b) {

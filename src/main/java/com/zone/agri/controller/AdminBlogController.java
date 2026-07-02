@@ -46,6 +46,12 @@ public class AdminBlogController {
         return ResponseEntity.ok(ApiResponse.success(blogService.getAllTags(), "OK"));
     }
 
+    @GetMapping("/authors")
+    @RequirePermission("BLOG_VIEW")
+    public ResponseEntity<ApiResponse<List<BlogPostResponse.AuthorInfo>>> getAuthors() {
+        return ResponseEntity.ok(ApiResponse.success(blogService.getAllAuthors(), "OK"));
+    }
+
     @PostMapping("/tags")
     @RequirePermission({"BLOG_CREATE", "BLOG_EDIT"})
     public ResponseEntity<ApiResponse<BlogPostResponse.TagInfo>> createTag(@RequestBody BlogTagRequest req) {
@@ -80,9 +86,10 @@ public class AdminBlogController {
             @RequestParam(required = false) String keyword,
             @RequestParam(required = false) String status,
             @RequestParam(required = false) Long categoryId,
+            @RequestParam(required = false) Long authorId,
             @PageableDefault(size = 10, sort = "createdAt") Pageable pageable) {
         return ResponseEntity.ok(ApiResponse.success(
-                blogService.getAll(keyword, status, categoryId, pageable), "OK"));
+                blogService.getAll(keyword, status, categoryId, authorId, pageable), "OK"));
     }
 
     @GetMapping("/posts/{id}")

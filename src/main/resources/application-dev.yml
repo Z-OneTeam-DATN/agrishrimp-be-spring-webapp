@@ -5,6 +5,11 @@ logging:
   level:
     org.springframework.web.filter.CommonsRequestLoggingFilter: DEBUG
 
+management:
+  health:
+    mail:
+      enabled: ${MANAGEMENT_HEALTH_MAIL_ENABLED:false}
+
 spring:
   application:
     name: agri-shrimp

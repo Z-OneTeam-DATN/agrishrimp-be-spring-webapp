@@ -168,6 +168,14 @@ public class SchemaUpdateConfig implements BeanPostProcessor {
                     "ALTER TABLE banners ADD COLUMN mobile_public_id VARCHAR(255) NULL");
 
             executeSql(stmt,
+                    "Patch blog_categories adds status",
+                    "ALTER TABLE blog_categories ADD COLUMN status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE'");
+
+            executeSql(stmt,
+                    "Backfill blog_categories.status nulls to ACTIVE",
+                    "UPDATE blog_categories SET status = 'ACTIVE' WHERE status IS NULL OR TRIM(status) = ''");
+
+            executeSql(stmt,
                     "Patch products drops origin column",
                     "ALTER TABLE products DROP COLUMN origin");
 
