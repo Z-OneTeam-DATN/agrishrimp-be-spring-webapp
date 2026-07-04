@@ -20,7 +20,7 @@ public class ProductRequest {
     @NotNull(message = "Danh mục không được để trống")
     private Long categoryId;
 
-    private Long supplierId;
+    private Long brandId;
 
 
     private String description;

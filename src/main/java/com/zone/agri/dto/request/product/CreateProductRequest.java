@@ -15,7 +15,7 @@ public class CreateProductRequest {
     @NotNull(message = "Danh mục không được để trống")
     private Long categoryId;
 
-    private Long supplierId;
+    private Long brandId;
 
 
     @Size(max = 50, message = "Mã SKU gốc không được vượt quá 50 ký tự")

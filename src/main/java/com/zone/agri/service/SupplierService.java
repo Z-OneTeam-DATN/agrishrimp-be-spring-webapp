@@ -128,10 +128,6 @@ public class SupplierService {
             throw new IllegalArgumentException("Không thể xóa nhà cung cấp vì đã có sản phẩm trong catalog");
         }
 
-        // Check 2: Sản phẩm liên quan (Product)
-        if (productRepository.existsBySupplierId(id) || productRepository.existsBySuppliersId(id)) {
-            throw new IllegalArgumentException("Không thể xóa nhà cung cấp vì đang liên kết với sản phẩm");
-        }
 
         // Check 3: Phiếu nhập kho (InventoryNote)
         if (inventoryNoteRepository.existsBySupplierId(id)) {

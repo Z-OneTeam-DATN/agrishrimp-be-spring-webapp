@@ -19,21 +19,21 @@ import com.zone.agri.entity.enums.ProductStatus;
 @Repository
 public interface ProductRepository extends JpaRepository<Product, Long> {
 
-  // Fetch supplier + category + productImages trong 1 query, tránh N+1
+  // Fetch brand + category + productImages trong 1 query, tránh N+1
   @Query("SELECT DISTINCT p FROM Product p " +
-      "LEFT JOIN FETCH p.supplier " +
+      "LEFT JOIN FETCH p.brand " +
       "LEFT JOIN FETCH p.category " +
       "LEFT JOIN FETCH p.productImages " +
       "LEFT JOIN FETCH p.variants")
   List<Product> findAllWithDetails();
 
   @Query("SELECT DISTINCT p FROM Product p " +
-      "LEFT JOIN FETCH p.supplier s " +
+      "LEFT JOIN FETCH p.brand b " +
       "LEFT JOIN FETCH p.category c " +
       "LEFT JOIN FETCH p.productImages " +
       "LEFT JOIN FETCH p.variants v " +
       "WHERE (:keyword IS NULL OR LOWER(p.name) LIKE LOWER(CONCAT('%', :keyword, '%')) " +
-      "      OR LOWER(s.name) LIKE LOWER(CONCAT('%', :keyword, '%')) " +
+      "      OR LOWER(b.name) LIKE LOWER(CONCAT('%', :keyword, '%')) " +
       "      OR LOWER(v.sku) LIKE LOWER(CONCAT('%', :keyword, '%'))) " +
       "AND (:categoryId IS NULL OR c.id = :categoryId) " +
       "AND (:status IS NULL OR p.status = :status) " +
@@ -156,12 +156,12 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
   @Query(value = """
       SELECT p.id FROM Product p
       JOIN p.category c
-      LEFT JOIN p.supplier s
+      LEFT JOIN p.brand b
       WHERE p.status = com.zone.agri.entity.enums.ProductStatus.ACTIVE
         AND c.status = com.zone.agri.entity.enums.CategoryStatus.ACTIVE
         AND (:keyword IS NULL OR LOWER(p.name) LIKE LOWER(CONCAT('%', :keyword, '%')))
         AND (:categoryId IS NULL OR c.id = :categoryId)
-        AND (:brandId IS NULL OR s.id = :brandId)
+        AND (:brandId IS NULL OR b.id = :brandId)
         AND EXISTS (
           SELECT 1 FROM ProductVariant v
           JOIN Inventory i ON i.productVariant.id = v.id
@@ -179,12 +179,12 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
       """, countQuery = """
       SELECT COUNT(p) FROM Product p
       JOIN p.category c
-      LEFT JOIN p.supplier s
+      LEFT JOIN p.brand b
       WHERE p.status = com.zone.agri.entity.enums.ProductStatus.ACTIVE
         AND c.status = com.zone.agri.entity.enums.CategoryStatus.ACTIVE
         AND (:keyword IS NULL OR LOWER(p.name) LIKE LOWER(CONCAT('%', :keyword, '%')))
         AND (:categoryId IS NULL OR c.id = :categoryId)
-        AND (:brandId IS NULL OR s.id = :brandId)
+        AND (:brandId IS NULL OR b.id = :brandId)
         AND EXISTS (
           SELECT 1 FROM ProductVariant v
           JOIN Inventory i ON i.productVariant.id = v.id
@@ -212,7 +212,7 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
    */
   @Query("""
       SELECT DISTINCT p FROM Product p
-      LEFT JOIN FETCH p.supplier
+      LEFT JOIN FETCH p.brand
       LEFT JOIN FETCH p.category
       LEFT JOIN FETCH p.productImages
       WHERE p.id IN :ids
@@ -235,11 +235,8 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
   // Kiểm tra xem danh mục có sản phẩm không (phục vụ logic xóa)
   boolean existsByCategoryId(Long categoryId);
 
-  // Kiểm tra xem nhà cung cấp có sản phẩm không (phục vụ logic xóa)
-  boolean existsBySupplierId(Long supplierId);
-
-  @Query("SELECT COUNT(p) > 0 FROM Product p JOIN p.suppliers s WHERE s.id = :supplierId")
-  boolean existsBySuppliersId(@Param("supplierId") Long supplierId);
+  // Kiểm tra xem thương hiệu có sản phẩm không (phục vụ logic xóa)
+  boolean existsByBrandId(Long brandId);
 
   @Query("SELECT COUNT(p) FROM Product p WHERE p.status = 'ACTIVE'")
   long countActiveProducts();

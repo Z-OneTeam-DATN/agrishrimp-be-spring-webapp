@@ -58,3 +58,6 @@ logs/
 hs_err_pid*
 replay_pid*
 GEMINI.md
+
+# Maven local cache
+.m2/

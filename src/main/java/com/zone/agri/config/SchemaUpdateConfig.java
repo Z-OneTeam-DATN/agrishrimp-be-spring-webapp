@@ -179,9 +179,40 @@ public class SchemaUpdateConfig implements BeanPostProcessor {
                     "Patch products drops origin column",
                     "ALTER TABLE products DROP COLUMN origin");
 
+            // Safe drop foreign key and column for supplier_id in products table
+            dropForeignKeyIfExists(stmt, "products", "supplier_id");
+            executeSql(stmt,
+                    "Patch products drops supplier_id column",
+                    "ALTER TABLE products DROP COLUMN supplier_id");
+
+            // Add brand_id column and foreign key to products
+            executeSql(stmt,
+                    "Patch products adds brand_id column",
+                    "ALTER TABLE products ADD COLUMN brand_id BIGINT NULL");
+            executeSql(stmt,
+                    "Patch products adds fk_products_brand constraint",
+                    "ALTER TABLE products ADD CONSTRAINT fk_products_brand FOREIGN KEY (brand_id) REFERENCES brands(id)");
+
             log.info("All schema patches executed successfully.");
         } catch (Exception e) {
             log.error("Failed to run database schema patches", e);
+        }
+    }
+
+    private void dropForeignKeyIfExists(Statement stmt, String tableName, String columnName) {
+        try {
+            java.sql.ResultSet rs = stmt.executeQuery(String.format(
+                "SELECT CONSTRAINT_NAME FROM information_schema.KEY_COLUMN_USAGE " +
+                "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = '%s' AND COLUMN_NAME = '%s' " +
+                "AND REFERENCED_TABLE_NAME IS NOT NULL", tableName, columnName));
+            if (rs.next()) {
+                String constraintName = rs.getString("CONSTRAINT_NAME");
+                stmt.execute(String.format("ALTER TABLE %s DROP FOREIGN KEY %s", tableName, constraintName));
+                log.info("Dropped foreign key {} on {}.{}", constraintName, tableName, columnName);
+            }
+            rs.close();
+        } catch (Exception e) {
+            log.debug("Skipped dropping foreign key on {}.{}: {}", tableName, columnName, e.getMessage());
         }
     }
 

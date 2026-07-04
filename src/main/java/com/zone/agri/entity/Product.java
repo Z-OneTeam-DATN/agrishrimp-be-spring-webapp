@@ -56,10 +56,10 @@ public class Product {
 
     // --- KHÓA NGOẠI ---
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "supplier_id")
+    @JoinColumn(name = "brand_id")
     @ToString.Exclude
     @EqualsAndHashCode.Exclude
-    Supplier supplier;
+    Brand brand;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "category_id")
