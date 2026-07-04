@@ -55,8 +55,8 @@ public class SupplierProductCatalogResponse {
                         ? catalog.getProductVariant().getProduct().getSlug()
                         : null)
                 .brandName(catalog.getProductVariant() != null && catalog.getProductVariant().getProduct() != null
-                        && catalog.getProductVariant().getProduct().getSupplier() != null
-                        ? catalog.getProductVariant().getProduct().getSupplier().getName()
+                        && catalog.getProductVariant().getProduct().getBrand() != null
+                        ? catalog.getProductVariant().getProduct().getBrand().getName()
                         : null)
                 .origin(null)
                 .categoryName(catalog.getProductVariant() != null && catalog.getProductVariant().getProduct() != null

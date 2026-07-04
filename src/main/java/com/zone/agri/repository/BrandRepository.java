@@ -12,4 +12,8 @@ import java.util.Optional;
 public interface BrandRepository extends JpaRepository<Brand, Long> {
     Optional<Brand> findByName(String name);
     List<Brand> findByStatus(BrandStatus status);
-}
+    List<Brand> findByNameContainingIgnoreCaseOrderByIdDesc(String keyword);
+    List<Brand> findAllByOrderByIdDesc();
+    boolean existsByNameIgnoreCase(String name);
+    boolean existsByNameIgnoreCaseAndIdNot(String name, Long id);
+}

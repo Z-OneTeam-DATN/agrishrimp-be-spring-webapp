@@ -14,8 +14,8 @@ public class ProductResponse {
     private String shortDesc;
     private String description;
     private String status;
-    private Long supplierId;
-    private String supplierName;
+    private Long brandId;
+    private String brandName;
     private String baseSku;
     private String categoryName;
     private Long soldCount;

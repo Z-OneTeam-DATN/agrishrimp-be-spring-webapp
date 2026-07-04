@@ -164,15 +164,15 @@ public class ProductService {
         validateSkusInRequest(request.getVariants());
         ProductStatus targetStatus = parseProductStatus(request.getStatus());
 
-        if (targetStatus == ProductStatus.ACTIVE && request.getSupplierId() == null) {
+        if (targetStatus == ProductStatus.ACTIVE && request.getBrandId() == null) {
             throw new BadRequestException(
-                    "Sản phẩm ở trạng thái ACTIVE bắt buộc phải có nhà cung cấp để đảm bảo nguồn hàng.");
+                    "Sản phẩm ở trạng thái ACTIVE bắt buộc phải có thương hiệu.");
         }
 
-        Supplier supplier = null;
-        if (request.getSupplierId() != null) {
-            supplier = supplierRepository.findById(request.getSupplierId())
-                    .orElseThrow(() -> new NotFoundException("Nhà cung cấp không tồn tại với ID: " + request.getSupplierId()));
+        Brand brand = null;
+        if (request.getBrandId() != null) {
+            brand = brandRepository.findById(request.getBrandId())
+                    .orElseThrow(() -> new NotFoundException("Thương hiệu không tồn tại với ID: " + request.getBrandId()));
         }
 
         Product product = Product.builder()
@@ -182,7 +182,7 @@ public class ProductService {
                 .status(targetStatus)
                 .baseSku(request.getBaseSku())
                 .category(category)
-                .supplier(supplier)
+                .brand(brand)
                 .createdAt(LocalDateTime.now())
                 .build();
 
@@ -219,20 +219,20 @@ public class ProductService {
         }
 
         ProductStatus targetStatus = parseProductStatus(request.getStatus());
-        if (targetStatus == ProductStatus.ACTIVE && request.getSupplierId() == null) {
-            throw new BadRequestException("Sản phẩm ở trạng thái ACTIVE bắt buộc phải có nhà cung cấp.");
+        if (targetStatus == ProductStatus.ACTIVE && request.getBrandId() == null) {
+            throw new BadRequestException("Sản phẩm ở trạng thái ACTIVE bắt buộc phải có thương hiệu.");
         }
 
-        Supplier supplier = null;
-        if (request.getSupplierId() != null) {
-            supplier = supplierRepository.findById(request.getSupplierId())
-                    .orElseThrow(() -> new NotFoundException("Nhà cung cấp không tồn tại với ID: " + request.getSupplierId()));
+        Brand brand = null;
+        if (request.getBrandId() != null) {
+            brand = brandRepository.findById(request.getBrandId())
+                    .orElseThrow(() -> new NotFoundException("Thương hiệu không tồn tại với ID: " + request.getBrandId()));
         }
 
         product.setName(request.getName());
         product.setDescription(request.getDescription());
         product.setStatus(targetStatus);
-        product.setSupplier(supplier);
+        product.setBrand(brand);
 
         if (request.getCategoryId() != null) {
             categoryRepository.findById(request.getCategoryId()).ifPresent(product::setCategory);
@@ -699,8 +699,8 @@ public class ProductService {
                 .shortDesc(product.getShortDesc())
                 .description(product.getDescription())
                 .status(product.getStatus() != null ? product.getStatus().name() : null)
-                .supplierId(product.getSupplier() != null ? product.getSupplier().getId() : null)
-                .supplierName(product.getSupplier() != null ? product.getSupplier().getName() : null)
+                .brandId(product.getBrand() != null ? product.getBrand().getId() : null)
+                .brandName(product.getBrand() != null ? product.getBrand().getName() : null)
                 .baseSku(product.getBaseSku())
                 .categoryName(product.getCategory() != null ? product.getCategory().getName() : null)
                 .soldCount(soldCountMap.getOrDefault(product.getId(), 0L))

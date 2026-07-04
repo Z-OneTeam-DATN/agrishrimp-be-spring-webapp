@@ -28,6 +28,7 @@ public class PublicProductResponse {
     private CategoryInfo category;
 
     private String supplierName;
+    private String brandName;
 
     /** Danh sách URL ảnh sản phẩm chính */
     private List<String> imageUrls;
