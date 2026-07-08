@@ -42,14 +42,29 @@ public class Branch extends BaseEntity {
     @Column(name = "address_detail", columnDefinition = "TEXT")
     String addressDetail;
 
+    @Column(name = "full_address", columnDefinition = "TEXT")
+    String fullAddress;
+
+    @Column(name = "map_display_name", columnDefinition = "TEXT")
+    String mapDisplayName;
+
     @Column(name = "province_id")
     Integer provinceId;
+
+    @Column(name = "province_name", length = 100)
+    String provinceName;
 
     @Column(name = "district_id")
     Integer districtId;
 
+    @Column(name = "district_name", length = 100)
+    String districtName;
+
     @Column(name = "ward_id")
     Integer wardId;
+
+    @Column(name = "ward_name", length = 100)
+    String wardName;
 
     @Enumerated(EnumType.STRING)
     @Column(length = 20)
