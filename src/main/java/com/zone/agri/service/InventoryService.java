@@ -313,18 +313,18 @@ public class InventoryService {
         inv.setLastReceiptDate(LocalDateTime.now());
         inv = inventoryRepository.save(inv);
 
-        // Log biến động kho (chỉ log phần thay đổi)
-        int change = aQty + rQty;
-        transactionRepository.save(InventoryTransaction.builder()
-                .type(type)
-                .quantityChange(change)
-                .newBalance(Objects.requireNonNullElse(inv.getQuantity(), 0) + Objects.requireNonNullElse(inv.getDefectiveQuantity(), 0))
-                .referenceCode(note != null ? note.getCode() : null)
-                .reason(note != null ? "Nhập kho QC (Phiếu: " + note.getCode() + ")" : "Cập nhật QC")
-                .createdAt(LocalDateTime.now())
-                .inventory(inv)
-                .inventoryNote(note)
-                .build());
+        if (aQty > 0) {
+            transactionRepository.save(InventoryTransaction.builder()
+                    .type(type)
+                    .quantityChange(aQty)
+                    .newBalance(Objects.requireNonNullElse(inv.getQuantity(), 0))
+                    .referenceCode(note != null ? note.getCode() : null)
+                    .reason(note != null ? "Nhap kho hang dat QC (Phieu: " + note.getCode() + ")" : "Nhap kho hang dat QC")
+                    .createdAt(LocalDateTime.now())
+                    .inventory(inv)
+                    .inventoryNote(note)
+                    .build());
+        }
     }
 
     private void updateMetadata(InventoryNote note, InventoryReceiptRequest request, Branch destBranch, Supplier supplier) {
@@ -382,7 +382,11 @@ public class InventoryService {
                     .orElseThrow(() -> new NotFoundException("SKU không tồn tại: " + itemDTO.getProductCode()));
 
             BigDecimal importPrice = Objects.requireNonNullElse(itemDTO.getImportPrice(), BigDecimal.ZERO);
-            BigDecimal itemSubtotal = importPrice.multiply(BigDecimal.valueOf(itemDTO.getPlannedQuantity()));
+            int deliveredQty = Objects.requireNonNullElse(itemDTO.getQuantityReal(), 0);
+            int acceptedQty = Objects.requireNonNullElse(itemDTO.getQuantityAccepted(), 0);
+            int rejectedQty = Objects.requireNonNullElse(itemDTO.getQuantityRejected(), 0);
+            validateReceiptItemQuantities(itemDTO.getProductCode(), itemDTO.getPlannedQuantity(), deliveredQty, acceptedQty, rejectedQty);
+            BigDecimal itemSubtotal = importPrice.multiply(BigDecimal.valueOf(acceptedQty));
             totalAmount = totalAmount.add(itemSubtotal);
 
             LocalDateTime expiry = (itemDTO.getExpiryDate() != null && !itemDTO.getExpiryDate().isBlank())
@@ -395,9 +399,9 @@ public class InventoryService {
                     .productVariant(variant)
                     .quantity(itemDTO.getPlannedQuantity())
                     .quantityRequested(itemDTO.getPlannedQuantity())
-                    .quantityReal(itemDTO.getQuantityReal() != null ? itemDTO.getQuantityReal() : 0)
-                    .quantityAccepted(itemDTO.getQuantityAccepted() != null ? itemDTO.getQuantityAccepted() : 0)
-                    .quantityRejected(itemDTO.getQuantityRejected() != null ? itemDTO.getQuantityRejected() : 0)
+                    .quantityReal(deliveredQty)
+                    .quantityAccepted(acceptedQty)
+                    .quantityRejected(rejectedQty)
                     .price(importPrice)
                     .batchNumber(batch)
                     .expiryDate(expiry)
@@ -683,7 +687,7 @@ public class InventoryService {
 
     private void ensurePurchaseRequestReceivable(PurchaseRequest pr) {
         Set<PurchaseRequestStatus> receivableStatuses = Set.of(
-                PurchaseRequestStatus.SENT_TO_SUPPLIER,
+                PurchaseRequestStatus.DELIVERING,
                 PurchaseRequestStatus.PARTIALLY_RECEIVED
         );
         if (!receivableStatuses.contains(pr.getStatus())) {
@@ -775,6 +779,9 @@ public class InventoryService {
         int defectiveQty = Objects.requireNonNullElse(detail.getQuantityRejected(), 0);
         int deliveredQty = Objects.requireNonNullElse(detail.getQuantityReal(), acceptedQty + defectiveQty);
 
+        if (deliveredQty < 0 || acceptedQty < 0 || defectiveQty < 0) {
+            throw new BadRequestException("SKU " + sku + ": so luong giao, dat va loi khong duoc am.");
+        }
         if (acceptedQty + defectiveQty != deliveredQty) {
             throw new BadRequestException("SKU " + sku + ": so luong dat va loi phai cong lai dung bang so NCC giao.");
         }
@@ -787,6 +794,19 @@ public class InventoryService {
                     detail.getProductVariant().getId(),
                     acceptedQty,
                     note.getId());
+        }
+    }
+
+    private void validateReceiptItemQuantities(String sku, Integer plannedQuantity, int deliveredQty, int acceptedQty, int defectiveQty) {
+        int plannedQty = Objects.requireNonNullElse(plannedQuantity, 0);
+        if (deliveredQty < 0 || acceptedQty < 0 || defectiveQty < 0) {
+            throw new BadRequestException("SKU " + sku + ": so luong giao, dat va loi khong duoc am.");
+        }
+        if (acceptedQty + defectiveQty != deliveredQty) {
+            throw new BadRequestException("SKU " + sku + ": so luong dat va loi phai cong lai dung bang so NCC giao.");
+        }
+        if (deliveredQty > plannedQty) {
+            throw new BadRequestException("SKU " + sku + ": so NCC giao khong duoc vuot so luong da lap tren phieu nhap.");
         }
     }
 
