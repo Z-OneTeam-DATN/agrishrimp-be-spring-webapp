@@ -29,7 +29,7 @@ public interface ProductVariantRepository extends JpaRepository<ProductVariant, 
             "AND (:supplierCode IS NULL OR :supplierCode = '' OR EXISTS (" +
             "   SELECT 1 FROM SupplierProductCatalog spc " +
             "   JOIN spc.supplier s " +
-            "   WHERE spc.product.id = p.id " +
+            "   WHERE spc.productVariant.id = v.id " +
             "     AND s.code = :supplierCode " +
             "     AND spc.status = com.zone.agri.entity.enums.SupplierProductCatalogStatus.AVAILABLE" +
             "))")

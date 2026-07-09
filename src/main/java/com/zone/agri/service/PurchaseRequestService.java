@@ -4,7 +4,6 @@ import com.zone.agri.common.WarehouseContext;
 import com.zone.agri.dto.request.purchase.PurchaseRequestCreateRequest;
 import com.zone.agri.dto.response.purchase.PurchaseRequestResponse;
 import com.zone.agri.entity.*;
-import com.zone.agri.entity.enums.InventoryNoteStatus;
 import com.zone.agri.entity.enums.PurchaseRequestStatus;
 import com.zone.agri.exception.BadRequestException;
 import com.zone.agri.exception.NotFoundException;
@@ -27,7 +26,6 @@ import java.util.stream.Collectors;
 public class PurchaseRequestService {
     private final PurchaseRequestRepository purchaseRequestRepository;
     private final PurchaseRequestItemRepository purchaseRequestItemRepository;
-    private final InventoryNoteRepository inventoryNoteRepository;
     private final SupplierRepository supplierRepository;
     private final SupplierProductCatalogRepository supplierProductCatalogRepository;
     private final BranchRepository branchRepository;
@@ -54,21 +52,15 @@ public class PurchaseRequestService {
                 .anyMatch(a -> a.getAuthority().equals(authority));
     }
 
-    private boolean hasRole(String role) {
-        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-        return auth != null && auth.getAuthorities().stream()
-                .anyMatch(a -> a.getAuthority().equals("ROLE_" + role));
-    }
-
     private Branch resolveRequestBranch(PurchaseRequestCreateRequest request) {
         if (request.getBranchId() != null) {
             return branchRepository.findById(request.getBranchId())
-                    .orElseThrow(() -> new NotFoundException("Khong tim thay chi nhanh ID: " + request.getBranchId()));
+                    .orElseThrow(() -> new NotFoundException("Không tìm thấy chi nhánh ID: " + request.getBranchId()));
         }
 
         String branchName = request.getBranchName() != null ? request.getBranchName().trim() : "";
         return branchRepository.findByName(branchName)
-                .orElseThrow(() -> new NotFoundException("Chi nhanh khong ton tai: " + branchName));
+                .orElseThrow(() -> new NotFoundException("Chi nhánh không tồn tại: " + branchName));
     }
 
     private String generateCode() {
@@ -85,6 +77,10 @@ public class PurchaseRequestService {
     public PurchaseRequestResponse createRequest(PurchaseRequestCreateRequest request) {
         Supplier supplier = supplierRepository.findByCode(request.getSupplierCode())
                 .orElseThrow(() -> new NotFoundException("Nhà cung cấp không tồn tại: " + request.getSupplierCode()));
+
+        if (supplier.getStatus() == com.zone.agri.entity.enums.SupplierStatus.INACTIVE) {
+            throw new BadRequestException("Nhà cung cấp đang tạm ngừng giao dịch. Không thể tạo phiếu yêu cầu mua.");
+        }
 
         Branch branch = resolveRequestBranch(request);
         validatePurchaseRequestBranch(branch);
@@ -125,6 +121,8 @@ public class PurchaseRequestService {
         pr = purchaseRequestRepository.save(pr);
 
         // Tạo các dòng hàng
+        validateUniqueRequestItems(request.getItems());
+
         BigDecimal totalAmount = BigDecimal.ZERO;
         for (PurchaseRequestCreateRequest.ItemRequest itemReq : request.getItems()) {
             ProductVariant variant = productVariantRepository.findBySku(itemReq.getProductCode())
@@ -190,6 +188,10 @@ public class PurchaseRequestService {
 
         Supplier supplier = supplierRepository.findByCode(request.getSupplierCode())
                 .orElseThrow(() -> new NotFoundException("Nhà cung cấp không tồn tại"));
+
+        if (supplier.getStatus() == com.zone.agri.entity.enums.SupplierStatus.INACTIVE) {
+            throw new BadRequestException("Nhà cung cấp đang tạm ngừng giao dịch. Không thể tạo phiếu yêu cầu mua.");
+        }
         Branch branch = resolveRequestBranch(request);
         validatePurchaseRequestBranch(branch);
         warehouseContext.assertAccess(branch.getId());
@@ -205,6 +207,8 @@ public class PurchaseRequestService {
         // Xóa items cũ và tạo lại
         pr.getItems().clear();
         purchaseRequestRepository.flush();
+
+        validateUniqueRequestItems(request.getItems());
 
         for (PurchaseRequestCreateRequest.ItemRequest itemReq : request.getItems()) {
             ProductVariant variant = productVariantRepository.findBySku(itemReq.getProductCode())
@@ -268,7 +272,7 @@ public class PurchaseRequestService {
                 .orElseThrow(() -> new NotFoundException("Không tìm thấy phiếu yêu cầu mua ID: " + id));
         warehouseContext.assertAccess(pr.getBranch().getId());
 
-        if (pr.getStatus() != PurchaseRequestStatus.SENT_TO_SUPPLIER &&
+        if (pr.getStatus() != PurchaseRequestStatus.DELIVERING &&
                 pr.getStatus() != PurchaseRequestStatus.PARTIALLY_RECEIVED) {
             throw new BadRequestException("Phiáº¿u yĂªu cáº§u mua pháº£i Ä‘Æ°á»£c gá»­i nhĂ  cung cáº¥p trÆ°á»›c khi táº¡o phiáº¿u nháº­p.");
         }
@@ -343,13 +347,64 @@ public class PurchaseRequestService {
     }
 
     @Transactional
+    public PurchaseRequestResponse resendToSupplier(Long id) {
+        PurchaseRequest pr = findOrThrow(id);
+        warehouseContext.assertAccess(pr.getBranch().getId());
+        if (pr.getStatus() != PurchaseRequestStatus.SENT_TO_SUPPLIER) {
+            throw new BadRequestException("Chi co the gui lai email khi phieu da gui nha cung cap.");
+        }
+        if (pr.getSupplier() == null || pr.getSupplier().getEmail() == null || pr.getSupplier().getEmail().isBlank()) {
+            throw new BadRequestException("Nha cung cap chua co email de gui lai phieu yeu cau.");
+        }
+        emailService.sendPurchaseRequestToSupplier(pr);
+        return mapToResponseShallow(pr);
+    }
+
+    @Transactional
+    public PurchaseRequestResponse confirmSupplier(Long id) {
+        PurchaseRequest pr = findOrThrow(id);
+        warehouseContext.assertAccess(pr.getBranch().getId());
+        if (pr.getStatus() != PurchaseRequestStatus.SENT_TO_SUPPLIER) {
+            throw new BadRequestException("Chi co the ghi nhan xac nhan khi phieu da gui nha cung cap.");
+        }
+        pr.setStatus(PurchaseRequestStatus.SUPPLIER_CONFIRMED);
+        return mapToResponseShallow(purchaseRequestRepository.save(pr));
+    }
+
+    @Transactional
+    public PurchaseRequestResponse markPreparing(Long id) {
+        PurchaseRequest pr = findOrThrow(id);
+        warehouseContext.assertAccess(pr.getBranch().getId());
+        if (pr.getStatus() != PurchaseRequestStatus.SUPPLIER_CONFIRMED) {
+            throw new BadRequestException("Chi co the cap nhat chuan bi hang sau khi nha cung cap xac nhan.");
+        }
+        pr.setStatus(PurchaseRequestStatus.PREPARING);
+        return mapToResponseShallow(purchaseRequestRepository.save(pr));
+    }
+
+    @Transactional
+    public PurchaseRequestResponse markDelivering(Long id) {
+        PurchaseRequest pr = findOrThrow(id);
+        warehouseContext.assertAccess(pr.getBranch().getId());
+        if (pr.getStatus() != PurchaseRequestStatus.PREPARING) {
+            throw new BadRequestException("Chi co the cap nhat dang giao sau khi nha cung cap dang chuan bi hang.");
+        }
+        pr.setStatus(PurchaseRequestStatus.DELIVERING);
+        return mapToResponseShallow(purchaseRequestRepository.save(pr));
+    }
+
+    @Transactional
     public PurchaseRequestResponse cancel(Long id) {
         PurchaseRequest pr = findOrThrow(id);
         warehouseContext.assertAccess(pr.getBranch().getId());
         Set<PurchaseRequestStatus> cancellableStatuses = Set.of(
                 PurchaseRequestStatus.DRAFT,
                 PurchaseRequestStatus.PENDING_APPROVAL,
-                PurchaseRequestStatus.APPROVED
+                PurchaseRequestStatus.APPROVED,
+                PurchaseRequestStatus.SENT_TO_SUPPLIER,
+                PurchaseRequestStatus.SUPPLIER_CONFIRMED,
+                PurchaseRequestStatus.PREPARING,
+                PurchaseRequestStatus.DELIVERING
         );
         if (!cancellableStatuses.contains(pr.getStatus())) {
             throw new BadRequestException("Không thể hủy phiếu ở trạng thái hiện tại. Phiếu đã gửi NCC hoặc đang nhận hàng.");
@@ -367,8 +422,8 @@ public class PurchaseRequestService {
         PurchaseRequest pr = findOrThrow(id);
         warehouseContext.assertAccess(pr.getBranch().getId());
         Set<PurchaseRequestStatus> closableStatuses = Set.of(
-                PurchaseRequestStatus.SENT_TO_SUPPLIER,
-                PurchaseRequestStatus.PARTIALLY_RECEIVED
+                PurchaseRequestStatus.PARTIALLY_RECEIVED,
+                PurchaseRequestStatus.COMPLETED
         );
         if (!closableStatuses.contains(pr.getStatus())) {
             throw new BadRequestException("Chỉ có thể đóng phiếu đang gửi NCC hoặc đang nhận một phần.");
@@ -439,8 +494,7 @@ public class PurchaseRequestService {
             pr.setCompletedAt(LocalDateTime.now());
         } else {
             // Còn thiếu → PARTIALLY_RECEIVED (chuyển từ trạng thái chờ hàng sang đã nhận một phần)
-            if (pr.getStatus() == PurchaseRequestStatus.SENT_TO_SUPPLIER ||
-                    pr.getStatus() == PurchaseRequestStatus.APPROVED) {
+            if (pr.getStatus() == PurchaseRequestStatus.DELIVERING) {
                 pr.setStatus(PurchaseRequestStatus.PARTIALLY_RECEIVED);
             }
         }
@@ -465,18 +519,30 @@ public class PurchaseRequestService {
     }
 
     // Mapping đầy đủ (dùng cho getById - có details và goodsReceipts)
+    private void validateUniqueRequestItems(List<PurchaseRequestCreateRequest.ItemRequest> items) {
+        Set<String> seenSkus = new HashSet<>();
+        for (PurchaseRequestCreateRequest.ItemRequest item : items) {
+            String sku = item.getProductCode() != null ? item.getProductCode().trim() : "";
+            String normalizedSku = sku.toUpperCase(Locale.ROOT);
+            if (!seenSkus.add(normalizedSku)) {
+                throw new BadRequestException("SKU " + sku + " bị trùng trong phiếu yêu cầu mua.");
+            }
+        }
+    }
+
     private void validateSupplierCatalogContainsVariant(Supplier supplier, ProductVariant variant) {
-        if (supplier == null || variant == null || variant.getProduct() == null) {
-            throw new BadRequestException("Invalid supplier or product data.");
+        if (supplier == null || variant == null) {
+            throw new BadRequestException("Dữ liệu nhà cung cấp hoặc sản phẩm không hợp lệ. Vui lòng tải lại trang và thử lại.");
         }
 
-        boolean isAvailableForSupplier = supplierProductCatalogRepository.existsAvailableBySupplierIdAndProductId(
+        boolean isAvailableForSupplier = supplierProductCatalogRepository.existsAvailableBySupplierIdAndProductVariantId(
                 supplier.getId(),
-                variant.getProduct().getId());
+                variant.getId());
 
         if (!isAvailableForSupplier) {
             throw new BadRequestException(
-                    "SKU " + variant.getSku() + " is not available in supplier catalog " + supplier.getCode());
+                    "SKU " + variant.getSku() + " không nằm trong catalog đang bán của nhà cung cấp "
+                            + supplier.getCode() + ". Vui lòng chọn sản phẩm trong danh sách catalog của nhà cung cấp.");
         }
     }
 

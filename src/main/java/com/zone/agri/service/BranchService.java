@@ -70,14 +70,17 @@ public class BranchService {
         Branch branch = new Branch();
         mapToEntity(branch, dto);
 
-        // Geocode địa chỉ → lat/lng (chỉ gọi trong admin flow)
-        geocodeBranchSilently(branch);
+        // Geocode địa chỉ → lat/lng (chỉ gọi trong admin flow) nếu chưa có tọa độ
+        if (branch.getLat() == null || branch.getLng() == null) {
+            geocodeBranchSilently(branch, dto);
+        }
 
         Branch savedBranch = branchRepository.save(branch);
 
         // Cập nhật chi nhánh cho các user được chọn làm quản lý
-        if (dto.getManagerIds() != null && !dto.getManagerIds().isEmpty()) {
-            updateBranchManagers(savedBranch, dto.getManagerIds());
+        List<Long> managerIds = resolveManagerIds(dto);
+        if (!managerIds.isEmpty()) {
+            updateBranchManagers(savedBranch, managerIds);
         }
 
         return mapToDTO(savedBranch);
@@ -97,29 +100,48 @@ public class BranchService {
 
         mapToEntity(branch, dto);
 
-        // Re-geocode nếu địa chỉ thay đổi
-        if (dto.getAddressDetail() != null && !dto.getAddressDetail().equals(oldAddress)) {
-            geocodeBranchSilently(branch);
+        // Re-geocode nếu địa chỉ thay đổi và không truyền tọa độ mới
+        if (branch.getLat() == null || branch.getLng() == null) {
+            if (dto.getAddressDetail() != null && !dto.getAddressDetail().equals(oldAddress)) {
+                geocodeBranchSilently(branch, dto);
+            }
         }
 
         // Xử lý cập nhật danh sách quản lý
-        updateBranchManagers(branch, dto.getManagerIds());
+        updateBranchManagers(branch, resolveManagerIds(dto));
 
         return mapToDTO(branchRepository.save(branch));
+    }
+
+    private List<Long> resolveManagerIds(BranchDTO dto) {
+        if (dto.getManagerIds() != null) {
+            return dto.getManagerIds();
+        }
+        if (dto.getManagerId() != null) {
+            return List.of(dto.getManagerId());
+        }
+        return List.of();
     }
 
     private void mapToEntity(Branch entity, BranchDTO dto) {
         entity.setName(dto.getName());
         entity.setBranchCode(dto.getBranchCode());
-        entity.setBranchType(dto.getBranchType());
+        entity.setBranchType(dto.getBranchType() != null ? dto.getBranchType() : dto.getType());
         entity.setPhone(dto.getPhone());
         entity.setEmail(dto.getEmail());
-        entity.setAddressDetail(dto.getAddressDetail());
-        entity.setProvinceId(dto.getProvinceId());
-        entity.setDistrictId(dto.getDistrictId());
+        entity.setAddressDetail(dto.getAddressDetail() != null ? dto.getAddressDetail() : dto.getDetailAddress());
+        entity.setFullAddress(dto.getFullAddress());
+        entity.setMapDisplayName(dto.getMapDisplayName());
+        entity.setProvinceId(dto.getProvinceId() != null ? dto.getProvinceId() : dto.getProvinceCode());
+        entity.setProvinceName(dto.getProvinceName());
+        entity.setDistrictId(dto.getDistrictId() != null ? dto.getDistrictId() : dto.getDistrictCode());
+        entity.setDistrictName(dto.getDistrictName());
         entity.setWardId(dto.getWardId());
+        entity.setWardName(dto.getWardName());
         entity.setWardCode(dto.getWardCode());
         entity.setStatus(dto.getStatus());
+        entity.setLat(dto.getLat() != null ? dto.getLat() : dto.getLatitude());
+        entity.setLng(dto.getLng() != null ? dto.getLng() : dto.getLongitude());
     }
 
     private void updateBranchManagers(Branch branch, List<Long> managerIds) {
@@ -205,10 +227,23 @@ public class BranchService {
      * Geocode địa chỉ chi nhánh → lat/lng.
      * Silent: lỗi geocoding không dừng việc lưu branch.
      */
-    private void geocodeBranchSilently(Branch branch) {
+    private void geocodeBranchSilently(Branch branch, BranchDTO dto) {
         try {
-            if (branch.getAddressDetail() != null && !branch.getAddressDetail().isBlank()) {
-                CoordinateDto coord = geocodingService.geocode(branch.getAddressDetail());
+            String detail = branch.getAddressDetail();
+            String ward = dto.getWardName();
+            String district = dto.getDistrictName();
+            String province = dto.getProvinceName();
+
+            List<String> parts = new ArrayList<>();
+            if (detail != null && !detail.isBlank()) parts.add(detail);
+            if (ward != null && !ward.isBlank()) parts.add(ward);
+            if (district != null && !district.isBlank()) parts.add(district);
+            if (province != null && !province.isBlank()) parts.add(province);
+
+            String fullAddress = String.join(", ", parts);
+
+            if (!fullAddress.isBlank()) {
+                CoordinateDto coord = geocodingService.geocode(fullAddress);
                 branch.setLat(coord.getLat());
                 branch.setLng(coord.getLng());
                 branch.setGeocodedAt(Instant.now());
@@ -223,20 +258,34 @@ public class BranchService {
         dto.setId(entity.getId());
         dto.setBranchCode(entity.getBranchCode());
         dto.setBranchType(entity.getBranchType());
+        dto.setType(entity.getBranchType());
         dto.setName(entity.getName());
         dto.setPhone(entity.getPhone());
         dto.setEmail(entity.getEmail());
         dto.setAddressDetail(entity.getAddressDetail());
+        dto.setDetailAddress(entity.getAddressDetail());
+        dto.setFullAddress(entity.getFullAddress());
+        dto.setMapDisplayName(entity.getMapDisplayName());
         dto.setProvinceId(entity.getProvinceId());
+        dto.setProvinceCode(entity.getProvinceId());
+        dto.setProvinceName(entity.getProvinceName());
         dto.setDistrictId(entity.getDistrictId());
+        dto.setDistrictCode(entity.getDistrictId());
+        dto.setDistrictName(entity.getDistrictName());
         dto.setWardId(entity.getWardId());
+        dto.setWardName(entity.getWardName());
         dto.setWardCode(entity.getWardCode());
         dto.setLat(entity.getLat());
         dto.setLng(entity.getLng());
+        dto.setLatitude(entity.getLat());
+        dto.setLongitude(entity.getLng());
         dto.setStatus(entity.getStatus());
 
         if (entity.getUsers() != null) {
             dto.setManagerIds(entity.getUsers().stream().map(User::getId).toList());
+            if (!dto.getManagerIds().isEmpty()) {
+                dto.setManagerId(dto.getManagerIds().get(0));
+            }
             dto.setManagerNames(entity.getUsers().stream().map(User::getFullName).toList());
             dto.setManagerAvatarUrls(entity.getUsers().stream().map(User::getAvatarUrl).toList());
         }

@@ -20,12 +20,8 @@ public class ProductRequest {
     @NotNull(message = "Danh mục không được để trống")
     private Long categoryId;
 
-    @NotBlank(message = "Thương hiệu không được để trống")
-    @Size(max = 100, message = "Thương hiệu không được vượt quá 100 ký tự")
-    private String brand;
+    private Long brandId;
 
-    @Size(max = 100, message = "Xuất xứ không được vượt quá 100 ký tự")
-    private String origin;
 
     private String description;
 

@@ -40,3 +40,8 @@ ocr:
     data-path: ${OCR_TESSERACT_DATA_PATH:/usr/share/tesseract-ocr/5/tessdata}
   max-file-size-bytes: ${OCR_MAX_FILE_SIZE_BYTES:5242880}
   max-image-width: ${OCR_MAX_IMAGE_WIDTH:1800}
+
+# VietQR API Configuration
+vietqr:
+  client-id: ${VIETQR_CLIENT_ID:}
+  api-key: ${VIETQR_API_KEY:}

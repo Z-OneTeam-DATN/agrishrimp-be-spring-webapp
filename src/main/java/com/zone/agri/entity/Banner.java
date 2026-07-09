@@ -29,6 +29,12 @@ public class Banner {
     @Column(name = "public_id", length = 255)
     String publicId;
 
+    @Column(name = "mobile_image_url", columnDefinition = "TEXT")
+    String mobileImageUrl;
+
+    @Column(name = "mobile_public_id", length = 255)
+    String mobilePublicId;
+
     @Column(name = "link_url", length = 512)
     String linkUrl;
 

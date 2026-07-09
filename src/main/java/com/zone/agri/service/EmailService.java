@@ -13,12 +13,16 @@ import com.sendgrid.SendGrid;
 import com.sendgrid.helpers.mail.Mail;
 import com.sendgrid.helpers.mail.objects.Content;
 import com.sendgrid.helpers.mail.objects.Email;
+import com.zone.agri.exception.BadRequestException;
 
 import jakarta.mail.internet.MimeMessage;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
+import java.text.NumberFormat;
+import java.util.Locale;
 
 @Service
 @RequiredArgsConstructor
@@ -29,6 +33,12 @@ public class EmailService {
 
     @Value("${sendgrid.api-key:}")
     private String sendGridApiKey;
+
+    @Value("${spring.mail.username:}")
+    private String smtpUsername;
+
+    @Value("${spring.mail.password:}")
+    private String smtpPassword;
 
     @Value("${mail.from:${spring.mail.username:noreply@agrishrimp.vn}}")
     private String fromEmail;
@@ -104,7 +114,7 @@ public class EmailService {
 
     public void sendPurchaseRequestToSupplier(PurchaseRequest purchaseRequest) {
         if (purchaseRequest == null || purchaseRequest.getSupplier() == null) {
-            throw new RuntimeException("KhĂ´ng cĂ³ thĂ´ng tin nhĂ  cung cáº¥p Ä‘á»ƒ gá»­i email.");
+            throw new BadRequestException("Khong co thong tin nha cung cap de gui email.");
         }
 
         String supplierEmail = purchaseRequest.getSupplier().getEmail();
@@ -178,10 +188,18 @@ public class EmailService {
 
     private String formatCurrency(BigDecimal amount) {
         BigDecimal safeAmount = amount != null ? amount : BigDecimal.ZERO;
-        return safeAmount.toPlainString() + " VND";
+        NumberFormat formatter = NumberFormat.getNumberInstance(Locale.forLanguageTag("vi-VN"));
+        formatter.setMinimumFractionDigits(0);
+        formatter.setMaximumFractionDigits(0);
+        formatter.setRoundingMode(RoundingMode.HALF_UP);
+        return formatter.format(safeAmount) + " VND";
     }
 
     private void sendEmail(String toEmail, String subject, String htmlContent) {
+        if (!hasSmtpCredentials() && !canFallbackToSendGrid()) {
+            throw new BadRequestException("Chua cau hinh email gui. Vui long cau hinh SPRING_MAIL_USERNAME/SPRING_MAIL_PASSWORD hoac SENDGRID_API_KEY roi khoi dong lai backend.");
+        }
+
         try {
             sendBySmtp(toEmail, subject, htmlContent);
             log.info("Email sent via SMTP to {}", toEmail);
@@ -198,8 +216,25 @@ public class EmailService {
                 }
             }
 
-            throw new RuntimeException("Lỗi gửi email tới " + toEmail, smtpEx);
+            throw new BadRequestException("Khong gui duoc email toi " + toEmail + ". Ly do SMTP: " + summarizeMailError(smtpEx));
         }
+    }
+
+    private boolean hasSmtpCredentials() {
+        return smtpUsername != null && !smtpUsername.isBlank()
+                && smtpPassword != null && !smtpPassword.isBlank();
+    }
+
+    private String summarizeMailError(Exception ex) {
+        String message = ex.getMessage();
+        Throwable cause = ex.getCause();
+        if ((message == null || message.isBlank()) && cause != null) {
+            message = cause.getMessage();
+        }
+        if (message == null || message.isBlank()) {
+            return "Khong ro loi tu may chu mail.";
+        }
+        return message.replaceAll("(?i)(password|pass|pwd)=\\S+", "$1=[hidden]");
     }
 
     private void sendBySmtp(String toEmail, String subject, String htmlContent) throws Exception {

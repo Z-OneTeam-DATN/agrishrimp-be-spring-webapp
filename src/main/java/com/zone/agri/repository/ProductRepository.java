@@ -235,8 +235,15 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
   // Kiểm tra xem danh mục có sản phẩm không (phục vụ logic xóa)
   boolean existsByCategoryId(Long categoryId);
 
+  // Kiểm tra xem thương hiệu có sản phẩm không (phục vụ logic xóa)
+  boolean existsByBrandId(Long brandId);
+
   @Query("SELECT COUNT(p) FROM Product p WHERE p.status = 'ACTIVE'")
   long countActiveProducts();
+
+  boolean existsByNameIgnoreCase(String name);
+
+  boolean existsByNameIgnoreCaseAndIdNot(String name, Long id);
 
   // 3. Tỷ trọng doanh thu theo danh mục (Admin - Toàn hệ thống)
   interface CategorySalesProjection {

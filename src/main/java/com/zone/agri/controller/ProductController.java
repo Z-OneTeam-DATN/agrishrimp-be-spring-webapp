@@ -34,6 +34,7 @@ public class ProductController {
     private final ProductService productService;
     private final CategoryRepository categoryRepository;
     private final BrandRepository brandRepository;
+    private final SupplierRepository supplierRepository;
     private final AttributeService attributeService;
 
     // =========================================================================
@@ -196,6 +197,14 @@ public class ProductController {
     @GetMapping("/brands")
     public ResponseEntity<List<Brand>> getAllBrands() {
         return ResponseEntity.ok(brandRepository.findAll());
+    }
+
+    @Operation(summary = "Lấy danh sách nhà cung cấp (cho form sản phẩm)")
+    @SecurityRequirement(name = "bearerAuth")
+    @RequirePermission("PRODUCT_VIEW")
+    @GetMapping("/suppliers-list")
+    public ResponseEntity<List<Supplier>> getActiveSuppliers() {
+        return ResponseEntity.ok(supplierRepository.findByStatus(com.zone.agri.entity.enums.SupplierStatus.ACTIVE));
     }
 
     @Operation(summary = "Lấy danh sách Từ điển Thuộc tính động")

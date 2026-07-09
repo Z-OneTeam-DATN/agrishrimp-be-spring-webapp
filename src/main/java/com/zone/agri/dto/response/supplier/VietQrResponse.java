@@ -31,6 +31,19 @@ public class VietQrResponse {
 
         @JsonProperty("email")
         private String email;
+
+        @JsonProperty("status")
+        private String status;
+
+        @JsonProperty("issueDate")
+        private String issueDate;
+
+        @JsonProperty("taxAuthority")
+        private String taxAuthority;
+
+        @JsonProperty("mainBusinessSector")
+        private String mainBusinessSector;
+
         private String content;
 
         private Map<String, String> fieldStatuses;

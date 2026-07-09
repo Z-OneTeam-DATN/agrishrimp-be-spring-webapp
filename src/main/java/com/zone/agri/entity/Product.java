@@ -50,8 +50,6 @@ public class Product {
     @Column(name = "review_count")
     Integer reviewCount;
 
-    @Column(name = "origin", length = 100)
-    String origin;
 
     @Column(name = "base_sku", length = 50)
     String baseSku;

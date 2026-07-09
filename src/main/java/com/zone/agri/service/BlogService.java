@@ -4,10 +4,15 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zone.agri.common.CloudinaryService;
 import com.zone.agri.dto.request.blog.BlogCategoryRequest;
 import com.zone.agri.dto.request.blog.BlogPostRequest;
+import com.zone.agri.dto.request.blog.BlogTagRequest;
 import com.zone.agri.dto.response.blog.BlogCategoryResponse;
 import com.zone.agri.dto.response.blog.BlogPostResponse;
 import com.zone.agri.entity.*;
+import com.zone.agri.entity.enums.BlogCategoryStatus;
 import com.zone.agri.entity.enums.BlogPostStatus;
+import com.zone.agri.exception.BadRequestException;
+import com.zone.agri.exception.ConflictException;
+import com.zone.agri.exception.NotFoundException;
 import com.zone.agri.repository.*;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
@@ -37,21 +42,80 @@ public class BlogService {
     // ─── CATEGORY ──────────────────────────────────────────────────────────────
 
     public List<BlogCategoryResponse> getAllCategories() {
-        return categoryRepo.findAll().stream().map(c -> BlogCategoryResponse.builder()
-                .id(c.getId())
-                .name(c.getName())
-                .slug(c.getSlug())
-                .description(c.getDescription())
-                .postCount(c.getPosts() == null ? 0L : (long) c.getPosts().size())
-                .build()).collect(Collectors.toList());
+        return categoryRepo.findAllByOrderByIdAsc().stream()
+                .map(this::toCategoryResponse)
+                .collect(Collectors.toList());
+    }
+
+    public List<BlogCategoryResponse> getPublicCategories() {
+        return categoryRepo.findByStatusOrderByIdAsc(BlogCategoryStatus.ACTIVE).stream()
+                .map(this::toCategoryResponse)
+                .collect(Collectors.toList());
+    }
+
+    public List<BlogPostResponse.TagInfo> getAllTags() {
+        return tagRepo.findAll().stream()
+                .sorted(
+                        Comparator
+                                .comparingLong((BlogTag tag) -> tag.getPosts() == null ? 0L : tag.getPosts().size())
+                                .reversed()
+                                .thenComparing(BlogTag::getName, String.CASE_INSENSITIVE_ORDER)
+                )
+                .map(this::toTagInfo)
+                .collect(Collectors.toList());
+    }
+
+    public List<BlogPostResponse.AuthorInfo> getAllAuthors() {
+        return postRepo.findDistinctAuthors().stream()
+                .map(user -> BlogPostResponse.AuthorInfo.builder()
+                        .id(user.getId())
+                        .fullName(user.getFullName())
+                        .build())
+                .collect(Collectors.toList());
+    }
+
+    @Transactional
+    public BlogPostResponse.TagInfo createTag(BlogTagRequest req) {
+        String normalizedName = normalizeTagName(req.getName());
+        if (normalizedName.isBlank()) {
+            throw new RuntimeException("Tên tag không được để trống");
+        }
+
+        Optional<BlogTag> existingByName = tagRepo.findByNameIgnoreCase(normalizedName);
+        if (existingByName.isPresent()) {
+            return toTagInfo(existingByName.get());
+        }
+
+        String slug = resolveTagSlug(req.getSlug(), normalizedName);
+
+        Optional<BlogTag> existingBySlug = tagRepo.findBySlugIgnoreCase(slug);
+        if (existingBySlug.isPresent()) {
+            return toTagInfo(existingBySlug.get());
+        }
+
+        BlogTag tag = BlogTag.builder()
+                .name(normalizedName)
+                .slug(slug)
+                .build();
+        return toTagInfo(tagRepo.save(tag));
     }
 
     @Transactional
     public BlogCategoryResponse createCategory(BlogCategoryRequest req) {
+        String normalizedName = normalizeCategoryName(req.getName());
+        if (normalizedName.isBlank()) {
+            throw new BadRequestException("Vui lòng nhập tên danh mục");
+        }
+        if (categoryRepo.existsByNameIgnoreCase(normalizedName)) {
+            throw new ConflictException("Tên danh mục đã tồn tại", true);
+        }
+
+        String slug = resolveCategorySlug(req.getSlug(), normalizedName, null);
         BlogCategory cat = BlogCategory.builder()
-                .name(req.getName())
-                .slug(req.getSlug() != null ? req.getSlug() : toSlug(req.getName()))
-                .description(req.getDescription())
+                .name(normalizedName)
+                .slug(slug)
+                .description(normalizeNullableText(req.getDescription()))
+                .status(parseCategoryStatus(req.getStatus()))
                 .build();
         return toCategoryResponse(categoryRepo.save(cat));
     }
@@ -59,10 +123,25 @@ public class BlogService {
     @Transactional
     public BlogCategoryResponse updateCategory(Long id, BlogCategoryRequest req) {
         BlogCategory cat = categoryRepo.findById(id)
-                .orElseThrow(() -> new RuntimeException("Danh mục không tồn tại: " + id));
-        if (req.getName() != null) cat.setName(req.getName());
-        if (req.getSlug() != null) cat.setSlug(req.getSlug());
-        if (req.getDescription() != null) cat.setDescription(req.getDescription());
+                .orElseThrow(() -> new NotFoundException("Danh mục không tồn tại: " + id));
+
+        if (req.getName() != null) {
+            String normalizedName = normalizeCategoryName(req.getName());
+            if (normalizedName.isBlank()) {
+                throw new BadRequestException("Vui lòng nhập tên danh mục");
+            }
+            if (categoryRepo.existsByNameIgnoreCaseAndIdNot(normalizedName, id)) {
+                throw new ConflictException("Tên danh mục đã tồn tại", true);
+            }
+            cat.setName(normalizedName);
+        }
+
+        String slugSeed = cat.getName();
+        if (req.getSlug() != null || req.getName() != null) {
+            cat.setSlug(resolveCategorySlug(req.getSlug(), slugSeed, id));
+        }
+        if (req.getDescription() != null) cat.setDescription(normalizeNullableText(req.getDescription()));
+        if (req.getStatus() != null) cat.setStatus(parseCategoryStatus(req.getStatus()));
         return toCategoryResponse(categoryRepo.save(cat));
     }
 
@@ -73,20 +152,21 @@ public class BlogService {
 
     // ─── POST ──────────────────────────────────────────────────────────────────
 
-    public Page<BlogPostResponse> getAll(String keyword, String status, Long categoryId, Pageable pageable) {
+    public Page<BlogPostResponse> getAll(String keyword, String status, Long categoryId, Long authorId, Pageable pageable) {
         BlogPostStatus statusEnum = null;
         if (status != null && !status.isBlank()) {
             try { statusEnum = BlogPostStatus.valueOf(status.toUpperCase()); } catch (Exception ignored) {}
         }
         return postRepo.findAllFiltered(
                 keyword != null && keyword.isBlank() ? null : keyword,
-                statusEnum, categoryId, pageable
+                statusEnum, categoryId, authorId, pageable
         ).map(p -> toResponse(p, false));
     }
 
     public Page<BlogPostResponse> getPublished(String keyword, Long categoryId, Pageable pageable) {
         return postRepo.findPublished(
                 BlogPostStatus.PUBLISHED,
+                BlogCategoryStatus.ACTIVE,
                 keyword != null && keyword.isBlank() ? null : keyword,
                 categoryId, pageable
         ).map(p -> toResponse(p, false));
@@ -96,6 +176,21 @@ public class BlogService {
     public BlogPostResponse getBySlug(String slug, boolean incrementView) {
         BlogPost post = postRepo.findBySlug(slug)
                 .orElseThrow(() -> new RuntimeException("Bài viết không tồn tại: " + slug));
+        if (incrementView) {
+            postRepo.incrementViewCount(post.getId());
+            post.setViewCount((post.getViewCount() == null ? 0L : post.getViewCount()) + 1);
+        }
+        return toResponse(post, true);
+    }
+
+    @Transactional
+    public BlogPostResponse getPublicBySlug(String slug, boolean incrementView) {
+        BlogPost post = postRepo.findPublishedBySlug(
+                        slug,
+                        BlogPostStatus.PUBLISHED,
+                        BlogCategoryStatus.ACTIVE
+                )
+                .orElseThrow(() -> new NotFoundException("Bài viết không tồn tại hoặc đã bị ẩn: " + slug));
         if (incrementView) {
             postRepo.incrementViewCount(post.getId());
             post.setViewCount((post.getViewCount() == null ? 0L : post.getViewCount()) + 1);
@@ -251,10 +346,70 @@ public class BlogService {
         return slug;
     }
 
+    private String resolveTagSlug(String requestedSlug, String name) {
+        String base = (requestedSlug != null && !requestedSlug.isBlank()) ? toSlug(requestedSlug) : toSlug(name);
+        if (base.isBlank()) {
+            base = "tag-" + System.currentTimeMillis();
+        }
+
+        String slug = base;
+        int i = 2;
+        while (tagRepo.findBySlugIgnoreCase(slug).isPresent()) {
+            slug = base + "-" + i++;
+        }
+        return slug;
+    }
+
+    private String resolveCategorySlug(String requestedSlug, String name, Long excludeId) {
+        String base = (requestedSlug != null && !requestedSlug.isBlank()) ? toSlug(requestedSlug) : toSlug(name);
+        if (base.isBlank()) {
+            base = "danh-muc-" + System.currentTimeMillis();
+        }
+
+        String slug = base;
+        int i = 2;
+        while (categoryRepo.existsBySlugIgnoreCase(slug)) {
+            if (excludeId != null) {
+                Optional<BlogCategory> existing = categoryRepo.findBySlugIgnoreCase(slug);
+                if (existing.isPresent() && existing.get().getId().equals(excludeId)) break;
+            }
+            slug = base + "-" + i++;
+        }
+        return slug;
+    }
+
     private BlogPostStatus parseStatus(String s) {
         if (s == null) return BlogPostStatus.DRAFT;
         try { return BlogPostStatus.valueOf(s.toUpperCase()); }
         catch (Exception e) { return BlogPostStatus.DRAFT; }
+    }
+
+    private BlogCategoryStatus parseCategoryStatus(String value) {
+        if (value == null || value.isBlank()) return BlogCategoryStatus.ACTIVE;
+        try { return BlogCategoryStatus.valueOf(value.trim().toUpperCase()); }
+        catch (Exception e) { throw new BadRequestException("Trạng thái danh mục không hợp lệ"); }
+    }
+
+    private String normalizeTagName(String value) {
+        if (value == null) {
+            return "";
+        }
+        return value.trim().replaceAll("\\s+", " ");
+    }
+
+    private String normalizeCategoryName(String value) {
+        if (value == null) {
+            return "";
+        }
+        return value.trim().replaceAll("\\s+", " ");
+    }
+
+    private String normalizeNullableText(String value) {
+        if (value == null) {
+            return null;
+        }
+        String normalized = value.trim();
+        return normalized.isBlank() ? null : normalized;
     }
 
     private String toSlug(String text) {
@@ -275,8 +430,21 @@ public class BlogService {
 
     private BlogCategoryResponse toCategoryResponse(BlogCategory c) {
         return BlogCategoryResponse.builder()
-                .id(c.getId()).name(c.getName()).slug(c.getSlug()).description(c.getDescription())
+                .id(c.getId())
+                .name(c.getName())
+                .slug(c.getSlug())
+                .description(c.getDescription())
+                .status(c.getStatus() != null ? c.getStatus().name() : BlogCategoryStatus.ACTIVE.name())
                 .postCount(c.getPosts() == null ? 0L : (long) c.getPosts().size())
+                .build();
+    }
+
+    private BlogPostResponse.TagInfo toTagInfo(BlogTag tag) {
+        return BlogPostResponse.TagInfo.builder()
+                .id(tag.getId())
+                .name(tag.getName())
+                .slug(tag.getSlug())
+                .usageCount(tag.getPosts() == null ? 0L : (long) tag.getPosts().size())
                 .build();
     }
 
@@ -315,7 +483,7 @@ public class BlogService {
                 .category(p.getCategory() == null ? null : BlogPostResponse.CategoryInfo.builder()
                         .id(p.getCategory().getId()).name(p.getCategory().getName()).slug(p.getCategory().getSlug()).build())
                 .tags(p.getTags() == null ? List.of() : p.getTags().stream().map(t ->
-                        BlogPostResponse.TagInfo.builder().id(t.getId()).name(t.getName()).slug(t.getSlug()).build()
+                        toTagInfo(t)
                 ).collect(Collectors.toList()))
                 .relatedProducts(relatedList)
                 .build();

@@ -173,6 +173,9 @@ public interface InventoryRepository extends JpaRepository<Inventory, Long> {
         @Query("SELECT i FROM Inventory i WHERE i.productVariant.id IN :variantIds")
         List<Inventory> rawFindByProductVariantIdIn(@Param("variantIds") List<Long> variantIds);
 
+        @Query("SELECT i FROM Inventory i JOIN FETCH i.branch b WHERE i.productVariant.id IN :variantIds")
+        List<Inventory> findByProductVariantIdInWithBranch(@Param("variantIds") List<Long> variantIds);
+
         @Query("""
                         SELECT i FROM Inventory i
                         WHERE i.branch.id IN :branchIds

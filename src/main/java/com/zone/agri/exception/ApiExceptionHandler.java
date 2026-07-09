@@ -32,8 +32,8 @@ public class ApiExceptionHandler {
     return new ResponseEntity<>(errorVm, HttpStatus.NOT_FOUND);
   }
 
-  @ExceptionHandler(BadRequestException.class)
-  public ResponseEntity<ErrorDetail> handleBadRequestException(BadRequestException ex,
+  @ExceptionHandler({ BadRequestException.class, IllegalArgumentException.class })
+  public ResponseEntity<ErrorDetail> handleBadRequestException(Exception ex,
       WebRequest request) {
     String message = ex.getMessage();
     ErrorDetail errorVm = new ErrorDetail(HttpStatus.BAD_REQUEST.toString(), "Bad Request",

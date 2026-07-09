@@ -46,6 +46,7 @@ public class BlogPostResponse {
         private Long id;
         private String name;
         private String slug;
+        private Long usageCount;
     }
 
     @Data @Builder @NoArgsConstructor @AllArgsConstructor

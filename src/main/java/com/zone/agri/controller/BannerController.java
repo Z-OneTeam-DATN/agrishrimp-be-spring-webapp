@@ -37,9 +37,10 @@ public class BannerController {
     @RequirePermission("BANNER_CREATE")
     public ResponseEntity<ApiResponse<BannerResponse>> create(
             @RequestPart("data") String dataJson,
-            @RequestPart(value = "file", required = false) MultipartFile file) throws Exception {
+            @RequestPart(value = "file", required = false) MultipartFile file,
+            @RequestPart(value = "mobileFile", required = false) MultipartFile mobileFile) throws Exception {
         BannerRequest req = objectMapper.readValue(dataJson, BannerRequest.class);
-        return ResponseEntity.ok(ApiResponse.success(bannerService.create(req, file), "Tạo banner thành công"));
+        return ResponseEntity.ok(ApiResponse.success(bannerService.create(req, file, mobileFile), "Tạo banner thành công"));
     }
 
     @PutMapping(value = "/{id}", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
@@ -47,9 +48,10 @@ public class BannerController {
     public ResponseEntity<ApiResponse<BannerResponse>> update(
             @PathVariable Long id,
             @RequestPart("data") String dataJson,
-            @RequestPart(value = "file", required = false) MultipartFile file) throws Exception {
+            @RequestPart(value = "file", required = false) MultipartFile file,
+            @RequestPart(value = "mobileFile", required = false) MultipartFile mobileFile) throws Exception {
         BannerRequest req = objectMapper.readValue(dataJson, BannerRequest.class);
-        return ResponseEntity.ok(ApiResponse.success(bannerService.update(id, req, file), "Cập nhật banner thành công"));
+        return ResponseEntity.ok(ApiResponse.success(bannerService.update(id, req, file, mobileFile), "Cập nhật banner thành công"));
     }
 
     @PatchMapping("/{id}/toggle")

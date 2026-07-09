@@ -5,6 +5,10 @@ on:
     branches: [main]
   workflow_dispatch:
 
+permissions:
+  contents: read
+  packages: write
+
 concurrency:
   group: deploy-agrishrimp
   cancel-in-progress: false
@@ -52,7 +56,7 @@ jobs:
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
-          password: ${{ secrets.GHCR_WRITE_TOKEN }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Extract metadata
         id: meta
@@ -82,11 +86,12 @@ jobs:
     runs-on: [self-hosted, linux, agrishrimp]
     needs: build
     environment: production
+    permissions:
+      contents: read
+      packages: read
     steps:
       - name: Pull & restart api
         env:
-          GHCR_TOKEN: ${{ secrets.GHCR_WRITE_TOKEN }}
-          ACTOR: ${{ github.actor }}
           REGISTRY: ${{ env.REGISTRY }}
           IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
         run: |
@@ -95,7 +100,7 @@ jobs:
 
           CURRENT_IMAGE=$(docker inspect --format='{{index .RepoDigests 0}}' agrishrimp-api 2>/dev/null || echo "none")
 
-          echo "$GHCR_TOKEN" | docker login ghcr.io -u "$ACTOR" --password-stdin
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
 
           docker pull "$IMAGE:latest"
 

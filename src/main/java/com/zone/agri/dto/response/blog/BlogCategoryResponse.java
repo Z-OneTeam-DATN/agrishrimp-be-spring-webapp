@@ -11,5 +11,6 @@ public class BlogCategoryResponse {
     private String name;
     private String slug;
     private String description;
+    private String status;
     private Long postCount;
 }

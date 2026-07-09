@@ -1,6 +1,7 @@
 package com.zone.agri.entity;
 
 import jakarta.persistence.*;
+import com.zone.agri.entity.enums.BlogCategoryStatus;
 import lombok.*;
 import lombok.experimental.FieldDefaults;
 
@@ -26,6 +27,10 @@ public class BlogCategory {
     @Column(name = "description", columnDefinition = "TEXT")
     String description;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "status", length = 20, nullable = false)
+    BlogCategoryStatus status;
+
     @Column(name = "created_at")
     LocalDateTime createdAt;
 
@@ -35,5 +40,8 @@ public class BlogCategory {
     List<BlogPost> posts;
 
     @PrePersist
-    void onCreate() { createdAt = LocalDateTime.now(); }
+    void onCreate() {
+        createdAt = LocalDateTime.now();
+        if (status == null) status = BlogCategoryStatus.ACTIVE;
+    }
 }

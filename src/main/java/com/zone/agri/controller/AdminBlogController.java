@@ -3,6 +3,7 @@ package com.zone.agri.controller;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zone.agri.dto.request.blog.BlogCategoryRequest;
 import com.zone.agri.dto.request.blog.BlogPostRequest;
+import com.zone.agri.dto.request.blog.BlogTagRequest;
 import com.zone.agri.dto.response.blog.BlogCategoryResponse;
 import com.zone.agri.dto.response.blog.BlogPostResponse;
 import com.zone.agri.dto.response.common.ApiResponse;
@@ -39,6 +40,24 @@ public class AdminBlogController {
         return ResponseEntity.ok(ApiResponse.success(blogService.getAllCategories(), "OK"));
     }
 
+    @GetMapping("/tags")
+    @RequirePermission("BLOG_VIEW")
+    public ResponseEntity<ApiResponse<List<BlogPostResponse.TagInfo>>> getTags() {
+        return ResponseEntity.ok(ApiResponse.success(blogService.getAllTags(), "OK"));
+    }
+
+    @GetMapping("/authors")
+    @RequirePermission("BLOG_VIEW")
+    public ResponseEntity<ApiResponse<List<BlogPostResponse.AuthorInfo>>> getAuthors() {
+        return ResponseEntity.ok(ApiResponse.success(blogService.getAllAuthors(), "OK"));
+    }
+
+    @PostMapping("/tags")
+    @RequirePermission({"BLOG_CREATE", "BLOG_EDIT"})
+    public ResponseEntity<ApiResponse<BlogPostResponse.TagInfo>> createTag(@RequestBody BlogTagRequest req) {
+        return ResponseEntity.ok(ApiResponse.success(blogService.createTag(req), "Tạo tag thành công"));
+    }
+
     @PostMapping("/categories")
     @RequirePermission("BLOG_CREATE")
     public ResponseEntity<ApiResponse<BlogCategoryResponse>> createCategory(@RequestBody BlogCategoryRequest req) {
@@ -67,9 +86,10 @@ public class AdminBlogController {
             @RequestParam(required = false) String keyword,
             @RequestParam(required = false) String status,
             @RequestParam(required = false) Long categoryId,
+            @RequestParam(required = false) Long authorId,
             @PageableDefault(size = 10, sort = "createdAt") Pageable pageable) {
         return ResponseEntity.ok(ApiResponse.success(
-                blogService.getAll(keyword, status, categoryId, pageable), "OK"));
+                blogService.getAll(keyword, status, categoryId, authorId, pageable), "OK"));
     }
 
     @GetMapping("/posts/{id}")
