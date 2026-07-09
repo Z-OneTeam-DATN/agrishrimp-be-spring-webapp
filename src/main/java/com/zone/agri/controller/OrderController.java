@@ -219,9 +219,10 @@ public class OrderController {
         return ResponseEntity.ok(orderService.getBranchOrderDetail(user.getBranch().getId(), orderId));
     }
 
-    @Operation(summary = "Cập nhật trạng thái phần đơn của chi nhánh", description = "Chi nhánh tự quản lý trạng thái phần đơn của mình theo quy trình: "
-            + "PENDING → CONFIRMED → PROCESSING → READY_FOR_PICKUP → SHIPPING → RECEIVED → COMPLETED. "
-            + "Trạng thái tổng của đơn hàng sẽ được tự động đồng bộ theo chi nhánh chậm nhất.")
+    @Operation(summary = "Cập nhật trạng thái phần đơn của chi nhánh", description = "Chi nhánh tự quản lý phần đơn theo luồng: "
+            + "PENDING → CONFIRMED → PROCESSING → READY_FOR_PICKUP, sau đó bàn giao qua handover để sang SHIPPING. "
+            + "Nếu thiếu hàng thì phần đơn nằm ở AWAITING_REPLENISHMENT cho đến khi được bổ sung đủ. "
+            + "Trạng thái tổng của đơn hàng sẽ được đồng bộ tự động theo tiến độ các sub-order.")
     @RequirePermission("ORDER_UPDATE")
     @PutMapping("/branch/orders/{orderId}/status")
     public ResponseEntity<?> updateBranchSubOrderStatus(

@@ -70,6 +70,8 @@ public class OrderService {
     private final InventoryTransferService inventoryTransferService;
     private final BackorderService backorderService;
     private final ImmediateReplenishmentService immediateReplenishmentService;
+    private final VoucherService voucherService;
+    private final OrderStatusSyncService orderStatusSyncService;
 
     @Lazy
     private final CustomerService customerService;
@@ -106,16 +108,7 @@ public class OrderService {
     public List<OrderResponse> getMyOrders(Long userId, OrderStatus status) {
         List<Order> orders;
         if (status != null) {
-            if (status == OrderStatus.PROCESSING) {
-                orders = orderRepository.findByUserIdOrderByCreatedAtDesc(userId).stream()
-                        .filter(o -> o.getStatus() == OrderStatus.PROCESSING
-                                || o.getStatus() == OrderStatus.AWAITING_REPLENISHMENT)
-                        .collect(Collectors.toList());
-            } else if (status == OrderStatus.AWAITING_REPLENISHMENT) {
-                orders = new ArrayList<>();
-            } else {
-                orders = orderRepository.findByUserIdAndStatusOrderByCreatedAtDesc(userId, status);
-            }
+            orders = orderRepository.findByUserIdAndStatusOrderByCreatedAtDesc(userId, status);
         } else {
             orders = orderRepository.findByUserIdOrderByCreatedAtDesc(userId);
         }
@@ -199,7 +192,7 @@ public class OrderService {
         }
 
         releaseAllocatedInventoryForOrder(order);
-        restoreVoucherForOrder(order);
+        voucherService.restoreVoucherForOrder(order);
         LocalDateTime cancelledAt = LocalDateTime.now();
         applyOrderStatus(order, OrderStatus.CANCELLED, cancelledAt);
         if (order.getSubOrders() != null) {
@@ -251,7 +244,7 @@ public class OrderService {
         LocalDateTime statusChangedAt = LocalDateTime.now();
         if (newStatus == OrderStatus.CANCELLED) {
             releaseAllocatedInventoryForOrder(order);
-            restoreVoucherForOrder(order);
+            voucherService.restoreVoucherForOrder(order);
             if (order.getSubOrders() != null) {
                 List<SubOrder> cancelledSubOrders = order.getSubOrders().stream()
                         .filter(subOrder -> subOrder.getStatus() != OrderStatus.CANCELLED)
@@ -282,7 +275,7 @@ public class OrderService {
         if (current == OrderStatus.PENDING) {
             if (next != OrderStatus.CONFIRMED) {
                 throw new BadRequestException(
-                        "Đơn hàng chờ xác nhận chỉ có thể chuyển sang 'Đã duyệt' hoặc 'Đang xử lý'.");
+                        "Đơn hàng chờ xác nhận chỉ có thể chuyển sang 'Đã xác nhận'.");
             }
             return;
         }
@@ -310,20 +303,20 @@ public class OrderService {
         if (current == OrderStatus.PROCESSING) {
             if (next != OrderStatus.READY_FOR_PICKUP) {
                 throw new BadRequestException(
-                        "Đơn hàng ở trạng thái 'Đang xử lý' chỉ có thể chuyển sang 'Sẵn sàng lấy' hoặc 'Đang giao'.");
+                        "Đơn hàng ở trạng thái 'Đang xử lý' chỉ có thể chuyển sang 'Sẵn sàng bàn giao'.");
             }
             return;
         }
         if (current == OrderStatus.READY_FOR_PICKUP) {
             if (next != OrderStatus.SHIPPING) {
-                throw new BadRequestException("Đơn hàng chờ lấy hàng chỉ có thể chuyển sang 'Đang giao'.");
+                throw new BadRequestException("Đơn hàng chờ bàn giao chỉ có thể chuyển sang 'Đang giao'.");
             }
             return;
         }
         if (current == OrderStatus.SHIPPING) {
             if (next != OrderStatus.RECEIVED && next != OrderStatus.RETURNED) {
                 throw new BadRequestException(
-                        "Đơn hàng đang giao chỉ có thể chuyển sang 'Hoàn thành' hoặc 'Đã trả hàng'.");
+                        "Đơn hàng đang giao chỉ có thể chuyển sang 'Đã nhận hàng' hoặc 'Đã trả hàng'.");
             }
             return;
         }
@@ -456,7 +449,7 @@ public class OrderService {
         applySubOrderStatus(subOrder, newStatus, LocalDateTime.now());
         subOrderRepository.saveAndFlush(subOrder);
 
-        syncMasterOrderStatus(subOrder.getOrder().getId());
+        orderStatusSyncService.syncMasterOrderStatus(subOrder.getOrder().getId());
     }
 
     private void syncMasterOrderStatus(Long orderId) {
@@ -496,7 +489,7 @@ public class OrderService {
         // Fix lỗi: Khi tất cả SubOrder bị hủy, Master Order chuyển thành Hủy -> Hoàn
         // Voucher và Hủy link PayOS
         if (newMasterStatus == OrderStatus.CANCELLED && order.getStatus() != OrderStatus.CANCELLED) {
-            restoreVoucherForOrder(order);
+            voucherService.restoreVoucherForOrder(order);
             if (PaymentMethod.PAYOS.equals(order.getPaymentMethod())
                     && PaymentStatus.UNPAID.equals(order.getPaymentStatus())) {
                 payOSService.cancelPaymentLink(order);
@@ -935,7 +928,7 @@ public class OrderService {
         }
 
         finalCart = normalizeCartItems(finalCart);
-        String voucherCode = normalizeVoucherCode(request.getVoucherCode());
+        String voucherCode = voucherService.normalizeVoucherCode(request.getVoucherCode());
 
         List<Long> variantIds = finalCart.stream().map(CartItemDto::getProductVariantId).distinct().toList();
         List<ProductVariant> variants = variantRepository.findAllById(variantIds);
@@ -992,7 +985,12 @@ public class OrderService {
         if (voucherCode != null) {
             User previewUser = userRepository.findById(userId)
                     .orElseThrow(() -> new NotFoundException("User khong ton tai"));
-            discountAmount = validateVoucher(previewUser, voucherCode, totalSubtotal, false, false).discountAmount();
+            discountAmount = voucherService.validateVoucherForOrder(
+                    previewUser,
+                    voucherCode,
+                    totalSubtotal,
+                    false,
+                    false).discountAmount();
         }
 
         BigDecimal totalAmount = totalSubtotal.add(totalShippingFee).subtract(discountAmount);
@@ -1020,7 +1018,6 @@ public class OrderService {
 
         return PrepareOrderResponse.builder()
                 .prepareToken(token)
-                .canFulfill(true) // Đánh lừa Frontend để luôn cho phép bấm nút Thanh toán
                 .voucherCode(voucherCode)
                 .canFulfill(allocation.outOfStockItems().isEmpty() && !enrichedSubOrders.isEmpty())
                 .subOrders(enrichedSubOrders)
@@ -1028,8 +1025,6 @@ public class OrderService {
                 .discountAmount(discountAmount)
                 .totalShippingFee(totalShippingFee)
                 .totalAmount(totalAmount)
-                .canFulfill(!enrichedSubOrders.isEmpty())
-                .outOfStockItems(allocation.outOfStockItems())
                 .outOfStockItems(allocation.outOfStockItems())
                 .build();
     }
@@ -1081,13 +1076,13 @@ public class OrderService {
                     draft.getDeliveryDistrictId(),
                     draft.getDeliveryWardCode(),
                     draft.getVoucherCode());
-            if (false && (!liveQuote.outOfStockItems().isEmpty() || liveQuote.subOrders().isEmpty())) {
+            if (liveQuote.subOrders().isEmpty()) {
                 throw new ConflictException(
                         "Một hoặc nhiều sản phẩm không còn đủ hàng tại chi nhánh bán hàng gần nhất, vui lòng tải lại giỏ hàng",
                         true);
             }
             ensurePreparedQuoteStillValid(draft, liveQuote);
-            VoucherValidation committedVoucher = validateVoucher(
+            VoucherService.VoucherOrderEvaluation committedVoucher = voucherService.validateVoucherForOrder(
                     user,
                     draft.getVoucherCode(),
                     liveQuote.totalSubtotal(),
@@ -1340,11 +1335,16 @@ public class OrderService {
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
 
         BigDecimal discountAmount = BigDecimal.ZERO;
-        String normalizedVoucherCode = normalizeVoucherCode(voucherCode);
+        String normalizedVoucherCode = voucherService.normalizeVoucherCode(voucherCode);
         if (normalizedVoucherCode != null) {
             User user = userRepository.findById(userId)
                     .orElseThrow(() -> new NotFoundException("Người dùng không tồn tại"));
-            discountAmount = validateVoucher(user, normalizedVoucherCode, totalSubtotal, false, false).discountAmount();
+            discountAmount = voucherService.validateVoucherForOrder(
+                    user,
+                    normalizedVoucherCode,
+                    totalSubtotal,
+                    false,
+                    false).discountAmount();
         }
 
         BigDecimal totalAmount = totalSubtotal.add(totalShippingFee).subtract(discountAmount);
@@ -1417,10 +1417,7 @@ public class OrderService {
     }
 
     private String normalizeVoucherCode(String voucherCode) {
-        if (voucherCode == null || voucherCode.isBlank()) {
-            return null;
-        }
-        return voucherCode.trim().toUpperCase();
+        return voucherService.normalizeVoucherCode(voucherCode);
     }
 
     private VoucherValidation validateVoucher(
@@ -1500,21 +1497,7 @@ public class OrderService {
     }
 
     private void restoreVoucherForOrder(Order order) {
-        if (order.getVoucher() != null) {
-            Voucher voucher = voucherRepository.findByIdForUpdate(order.getVoucher().getId()).orElse(null);
-            if (voucher != null) {
-                voucher.setQuantity(Objects.requireNonNullElse(voucher.getQuantity(), 0) + 1);
-                voucherRepository.save(voucher);
-
-                userVoucherRepository.findByUserAndVoucher(order.getUser(), voucher).ifPresent(userVoucher -> {
-                    int currentUsage = Objects.requireNonNullElse(userVoucher.getUsageCount(), 0);
-                    if (currentUsage > 0) {
-                        userVoucher.setUsageCount(currentUsage - 1);
-                        userVoucherRepository.save(userVoucher);
-                    }
-                });
-            }
-        }
+        voucherService.restoreVoucherForOrder(order);
     }
 
     private String buildSubOrderReferenceCode(SubOrder subOrder) {
@@ -1719,7 +1702,12 @@ public class OrderService {
         // 👉 VOUCHER LOGIC
         BigDecimal discountAmount = BigDecimal.ZERO;
         if (req.getVoucherCode() != null && !req.getVoucherCode().trim().isEmpty()) {
-            VoucherValidation validation = validateVoucher(user, req.getVoucherCode(), subTotal, true, false);
+            VoucherService.VoucherOrderEvaluation validation = voucherService.validateVoucherForOrder(
+                    user,
+                    req.getVoucherCode(),
+                    subTotal,
+                    true,
+                    false);
             discountAmount = validation.discountAmount();
         }
 

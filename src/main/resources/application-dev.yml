@@ -70,6 +70,13 @@ spring:
           timeout: 3000
           writetimeout: 5000
 
+management:
+  health:
+    mail:
+      enabled: false
+    redis:
+      enabled: false
+
 # 5. CẤU HÌNH JWT
 security:
   jwt:
@@ -88,7 +95,7 @@ app:
   google:
     client-id: "${APP_GOOGLE_CLIENT_ID:}"
   cookie:
-    secure: ${APP_COOKIE_SECURE:false}     # true khi deploy HTTPS
+    secure: ${APP_COOKIE_SECURE:false} # true khi deploy HTTPS
     same-site: ${APP_COOKIE_SAME_SITE:Lax}
   web-base-url: "${APP_WEB_BASE_URL:http://localhost:3004}"
   server:
@@ -124,7 +131,7 @@ cloudinary:
 
 # 10. GEOCODING (TrackAsia hoặc Nominatim)
 geocoding:
-  provider: ${GEOCODING_PROVIDER:trackasia}          # trackasia | nominatim
+  provider: ${GEOCODING_PROVIDER:trackasia} # trackasia | nominatim
   trackasia:
     api-key: ${TRACKASIA_API_KEY:}
     url: https://api.trackasia.vn/api/geocode/search
@@ -134,7 +141,7 @@ geocoding:
 
 # 11. DISTANCE MATRIX / ROUTING (OpenRouteService)
 routing:
-  provider: ${ROUTING_PROVIDER:ors}                # ors | trackasia
+  provider: ${ROUTING_PROVIDER:ors} # ors | trackasia
   ors:
     api-key: "${ORS_API_KEY:}"
     url: https://api.openrouteservice.org/v2/matrix/driving-car
@@ -143,7 +150,7 @@ routing:
 
 # 12. SHIPPING (GHN)
 shipping:
-  provider: ${SHIPPING_PROVIDER:ghn}                # ghn | ghtk
+  provider: ${SHIPPING_PROVIDER:ghn} # ghn | ghtk
   ghn:
     token: ${GHN_API_KEY:}
     shop-id: ${GHN_SHOP_ID:}

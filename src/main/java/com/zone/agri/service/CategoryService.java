@@ -84,9 +84,20 @@ public class CategoryService {
         return convertToDTO(categoryRepository.save(category));
     }
 
+    private String toSlug(String input) {
+        if (input == null)
+            return "";
+        String normalized = java.text.Normalizer.normalize(input, java.text.Normalizer.Form.NFD);
+        return normalized.replaceAll("[\\p{InCombiningDiacriticalMarks}]", "")
+                .toLowerCase(java.util.Locale.ENGLISH)
+                .replaceAll("[^a-z0-9\\s]", "")
+                .replaceAll("\\s+", "-");
+    }
+
     private void handleImageUpload(Category category, String imageUrl) {
         if (imageUrl != null && imageUrl.startsWith("data:image")) {
-            category.setImageUrl(cloudinaryService.uploadImage(imageUrl));
+            String slug = toSlug(category.getName());
+            category.setImageUrl(cloudinaryService.uploadImage(imageUrl, "categories", slug));
         } else {
             category.setImageUrl(imageUrl);
         }

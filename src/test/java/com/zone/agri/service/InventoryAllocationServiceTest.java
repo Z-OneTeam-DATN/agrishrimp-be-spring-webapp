@@ -130,6 +130,7 @@ class InventoryAllocationServiceTest {
 
     // ── Case b: chọn chi nhánh gần nhất và ghi nhận phần thiếu ─────
 
+    @org.junit.jupiter.api.Disabled("Legacy split-across-branches expectation")
     @Test
     void allocate_case_b_choosesNearestBranchAndReportsMissingQuantity() {
         List<CartItemDto> cart = List.of(
@@ -205,6 +206,7 @@ class InventoryAllocationServiceTest {
 
     // ── Case d: có hàng nhưng không đủ số lượng (partial) ────────
 
+    @org.junit.jupiter.api.Disabled("Legacy split-across-branches expectation")
     @Test
     void allocate_case_d_partialStockAcrossBranches() {
         List<CartItemDto> cart = List.of(
@@ -240,6 +242,122 @@ class InventoryAllocationServiceTest {
     }
 
     // ── Helper method ─────────────────────────────────────────────
+
+    @Test
+    void allocate_case_e_chooseFartherBranchWhenItAloneCanFulfillWholeCart() {
+        List<CartItemDto> cart = List.of(
+                new CartItemDto(101L, 5),
+                new CartItemDto(102L, 5)
+        );
+
+        Map<Long, Map<Long, List<Inventory>>> matrix = new HashMap<>();
+
+        Map<Long, List<Inventory>> b1Stock = new HashMap<>();
+        b1Stock.put(101L, new ArrayList<>(List.of(createBatch(1L, branch1, varA, 5, 100000))));
+        b1Stock.put(102L, new ArrayList<>(List.of(createBatch(2L, branch1, varB, 2, 200000))));
+        matrix.put(1L, b1Stock);
+
+        Map<Long, List<Inventory>> b2Stock = new HashMap<>();
+        b2Stock.put(101L, new ArrayList<>(List.of(createBatch(3L, branch2, varA, 5, 100000))));
+        b2Stock.put(102L, new ArrayList<>(List.of(createBatch(4L, branch2, varB, 5, 200000))));
+        matrix.put(2L, b2Stock);
+
+        List<BranchWithRealDistance> branches = List.of(
+                new BranchWithRealDistance(branch1, 2.5, 300, 5.0),
+                new BranchWithRealDistance(branch2, 50.0, 3600, 60.0)
+        );
+
+        AllocationResult result = allocationService.allocate(cart, variantMap, branches, matrix);
+
+        assertThat(result.subOrders()).hasSize(1);
+        assertThat(result.outOfStockItems()).isEmpty();
+
+        SubOrderDraftDto subOrder = result.subOrders().get(0);
+        assertThat(subOrder.getBranchId()).isEqualTo(2L);
+        assertThat(subOrder.getItems()).allSatisfy(item -> assertThat(item.getMissingQuantity()).isZero());
+    }
+
+    @Test
+    void allocate_case_f_noFullBranch_consolidatesAtNearestBranch() {
+        List<CartItemDto> cart = List.of(
+                new CartItemDto(101L, 10),
+                new CartItemDto(102L, 5)
+        );
+
+        Map<Long, Map<Long, List<Inventory>>> matrix = new HashMap<>();
+
+        Map<Long, List<Inventory>> b1Stock = new HashMap<>();
+        b1Stock.put(101L, new ArrayList<>(List.of(createBatch(1L, branch1, varA, 6, 100000))));
+        b1Stock.put(102L, new ArrayList<>(List.of(createBatch(2L, branch1, varB, 5, 200000))));
+        matrix.put(1L, b1Stock);
+
+        Map<Long, List<Inventory>> b2Stock = new HashMap<>();
+        b2Stock.put(101L, new ArrayList<>(List.of(createBatch(3L, branch2, varA, 4, 100000))));
+        matrix.put(2L, b2Stock);
+
+        List<BranchWithRealDistance> branches = List.of(
+                new BranchWithRealDistance(branch1, 2.5, 300, 5.0),
+                new BranchWithRealDistance(branch2, 50.0, 3600, 60.0)
+        );
+
+        AllocationResult result = allocationService.allocate(cart, variantMap, branches, matrix);
+
+        assertThat(result.subOrders()).hasSize(1);
+        assertThat(result.outOfStockItems()).isEmpty();
+
+        SubOrderDraftDto subOrder = result.subOrders().get(0);
+        assertThat(subOrder.getBranchId()).isEqualTo(1L);
+
+        OrderItemDto itemA = findItem(subOrder, 101L);
+        OrderItemDto itemB = findItem(subOrder, 102L);
+        assertThat(itemA.getAllocatedQuantity()).isEqualTo(6);
+        assertThat(itemA.getMissingQuantity()).isEqualTo(4);
+        assertThat(itemB.getAllocatedQuantity()).isEqualTo(5);
+        assertThat(itemB.getMissingQuantity()).isZero();
+    }
+
+    @Test
+    void allocate_case_g_networkShortage_marksOnlyTrueShortage() {
+        List<CartItemDto> cart = List.of(
+                new CartItemDto(101L, 20)
+        );
+
+        Map<Long, Map<Long, List<Inventory>>> matrix = new HashMap<>();
+        Map<Long, List<Inventory>> b1Stock = new HashMap<>();
+        b1Stock.put(101L, new ArrayList<>(List.of(createBatch(1L, branch1, varA, 8, 100000))));
+        matrix.put(1L, b1Stock);
+
+        Map<Long, List<Inventory>> b2Stock = new HashMap<>();
+        b2Stock.put(101L, new ArrayList<>(List.of(createBatch(2L, branch2, varA, 7, 100000))));
+        matrix.put(2L, b2Stock);
+
+        List<BranchWithRealDistance> branches = List.of(
+                new BranchWithRealDistance(branch1, 2.5, 300, 5.0),
+                new BranchWithRealDistance(branch2, 50.0, 3600, 60.0)
+        );
+
+        AllocationResult result = allocationService.allocate(cart, variantMap, branches, matrix);
+
+        assertThat(result.subOrders()).hasSize(1);
+        assertThat(result.subOrders().get(0).getBranchId()).isEqualTo(1L);
+
+        OrderItemDto itemA = findItem(result.subOrders().get(0), 101L);
+        assertThat(itemA.getAllocatedQuantity()).isEqualTo(8);
+        assertThat(itemA.getMissingQuantity()).isEqualTo(12);
+
+        assertThat(result.outOfStockItems()).hasSize(1);
+        OutOfStockItemDto outOfStock = result.outOfStockItems().get(0);
+        assertThat(outOfStock.getProductVariantId()).isEqualTo(101L);
+        assertThat(outOfStock.getRequestedQty()).isEqualTo(5);
+        assertThat(outOfStock.getAvailableQty()).isZero();
+    }
+
+    private OrderItemDto findItem(SubOrderDraftDto subOrder, Long variantId) {
+        return subOrder.getItems().stream()
+                .filter(item -> variantId.equals(item.getProductVariantId()))
+                .findFirst()
+                .orElseThrow();
+    }
 
     @SuppressWarnings("SameParameterValue")
     private void setId(Object obj, Long id, String fieldName) {
