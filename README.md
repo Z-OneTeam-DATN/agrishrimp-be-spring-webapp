@@ -8,6 +8,10 @@
 
 AgriShrimp Backend is a Spring Boot API for a shrimp farming operations and agri-commerce platform. This repository powers the core backend for the storefront, admin dashboard, multi-branch inventory workflows, payment processing, shipping integration, and AI-enabled mini app features.
 
+## Team Workflow
+
+Team members should follow the shared Git and PR process documented in [docs/git-workflow-pr-guide.md](docs/git-workflow-pr-guide.md).
+
 ## 📌 Project Snapshot
 
 | Item | Details |
