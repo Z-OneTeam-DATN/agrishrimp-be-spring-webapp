@@ -79,15 +79,11 @@ public class InventoryAllocationService {
                 .map(candidate -> candidate.branch().getId())
                 .collect(java.util.stream.Collectors.toSet());
 
+        // Rule moi:
+        // 1. Neu co chi nhanh nao du toan bo gio hang thi uu tien chi nhanh gan khach nhat trong nhom do.
+        // 2. Neu khong co chi nhanh nao du tron bo, chon chi nhanh giao hang gan khach nhat de gom bo sung noi bo.
         BranchWithRealDistance selectedBranchWithDistance = sellableBranches.stream()
-                .sorted(Comparator
-                        .comparingInt((BranchWithRealDistance candidate) -> hasAllocatableStock(
-                                candidate.branch().getId(),
-                                cart,
-                                inventoryMatrix) ? 0 : 1)
-                        .thenComparingDouble(BranchWithRealDistance::distanceKm)
-                        .thenComparing(Comparator.comparingInt((BranchWithRealDistance candidate) ->
-                                calculateAllocatableQuantity(candidate.branch().getId(), cart, inventoryMatrix)).reversed()))
+                .filter(candidate -> isBranchFullyStocked(candidate.branch().getId(), cart, inventoryMatrix))
                 .findFirst()
                 .orElse(sellableBranches.get(0));
 
@@ -101,6 +97,7 @@ public class InventoryAllocationService {
             Long variantId = item.getProductVariantId();
             int requested = item.getQuantity();
             int originalRequested = requested;
+            int totalAvailableAcrossBranches = calculateTotalAvailable(variantId, inventoryMatrix, sellableBranchIds);
 
             List<Inventory> batches = branchBatches.getOrDefault(variantId, new ArrayList<>());
             ProductVariant variant = variantMap.get(variantId);
@@ -147,13 +144,14 @@ public class InventoryAllocationService {
                     .subtotal(lastUnitPrice.multiply(BigDecimal.valueOf(originalRequested)))
                     .build());
 
-            if (requested > 0) {
+            int networkShortage = Math.max(0, originalRequested - totalAvailableAcrossBranches);
+            if (networkShortage > 0) {
                 outOfStockItems.add(OutOfStockItemDto.builder()
                         .productVariantId(variantId)
                         .variantName(variantName)
                         .variantSku(variantSku)
-                        .requestedQty(originalRequested)
-                        .availableQty(calculateTotalAvailable(variantId, inventoryMatrix, sellableBranchIds))
+                        .requestedQty(networkShortage)
+                        .availableQty(0)
                         .build());
             }
 
