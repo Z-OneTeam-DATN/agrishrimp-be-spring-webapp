@@ -18,7 +18,6 @@ public class BrandRequest {
     @Size(max = 100, message = "Tên thương hiệu không được vượt quá 100 ký tự")
     private String name;
 
-    @Size(max = 255, message = "Logo URL không được vượt quá 255 ký tự")
     private String logoUrl;
 
     private BrandStatus status;

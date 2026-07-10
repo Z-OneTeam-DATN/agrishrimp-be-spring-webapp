@@ -4,7 +4,6 @@ import com.zone.agri.dto.response.order.CartItemDto;
 import com.zone.agri.dto.response.order.OrderItemDto;
 import com.zone.agri.dto.response.order.OutOfStockItemDto;
 import com.zone.agri.dto.response.order.SubOrderDraftDto;
-import com.zone.agri.entity.Branch;
 import com.zone.agri.entity.Inventory;
 import com.zone.agri.entity.ProductVariant;
 import com.zone.agri.repository.InventoryRepository;
@@ -18,7 +17,6 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.*;
 import java.util.Locale;
-import java.util.stream.Collectors;
 
 /**
  * Thuật toán Greedy kết hợp lô hàng (FIFO).
@@ -81,122 +79,107 @@ public class InventoryAllocationService {
                 .map(candidate -> candidate.branch().getId())
                 .collect(java.util.stream.Collectors.toSet());
 
-        Map<Long, List<OrderItemDto>> branchItems = new LinkedHashMap<>();
+        BranchWithRealDistance selectedBranchWithDistance = sellableBranches.stream()
+                .sorted(Comparator
+                        .comparingInt((BranchWithRealDistance candidate) -> hasAllocatableStock(
+                                candidate.branch().getId(),
+                                cart,
+                                inventoryMatrix) ? 0 : 1)
+                        .thenComparingDouble(BranchWithRealDistance::distanceKm)
+                        .thenComparing(Comparator.comparingInt((BranchWithRealDistance candidate) ->
+                                calculateAllocatableQuantity(candidate.branch().getId(), cart, inventoryMatrix)).reversed()))
+                .findFirst()
+                .orElse(sellableBranches.get(0));
+
+        Long selectedBranchId = selectedBranchWithDistance.branch().getId();
+        Map<Long, List<Inventory>> branchBatches = inventoryMatrix.getOrDefault(selectedBranchId, Collections.emptyMap());
         Map<Long, BigDecimal> transferImportPriceCache = new HashMap<>();
-        Map<Long, BranchWithRealDistance> branchLookup = sellableBranches.stream()
-                .collect(Collectors.toMap(candidate -> candidate.branch().getId(), candidate -> candidate));
+
+        List<OrderItemDto> allocatedItems = new ArrayList<>();
 
         for (CartItemDto item : cart) {
             Long variantId = item.getProductVariantId();
-            int requested = Objects.requireNonNullElse(item.getQuantity(), 0);
-            if (requested <= 0) {
-                continue;
-            }
+            int requested = item.getQuantity();
+            int originalRequested = requested;
 
+            List<Inventory> batches = branchBatches.getOrDefault(variantId, new ArrayList<>());
             ProductVariant variant = variantMap.get(variantId);
             String variantName = (variant != null && variant.getSku() != null) ? variant.getSku() : "Unknown";
             String variantSku = variant != null ? variant.getSku() : "";
+            Long categoryId = (variant != null && variant.getProduct() != null && variant.getProduct().getCategory() != null)
+                    ? variant.getProduct().getCategory().getId()
+                    : null;
 
-            for (BranchWithRealDistance branchWithDistance : sellableBranches) {
-                if (requested <= 0) {
-                    break;
-                }
+            int totalAllocatedForItem = 0;
+            BigDecimal lastUnitPrice = BigDecimal.ZERO;
 
-                Long branchId = branchWithDistance.branch().getId();
-                Map<Long, List<Inventory>> branchBatches = inventoryMatrix.getOrDefault(branchId, Collections.emptyMap());
-                List<Inventory> batches = branchBatches.getOrDefault(variantId, Collections.emptyList());
-                if (batches.isEmpty()) {
+            Iterator<Inventory> batchIterator = batches.iterator();
+            while (batchIterator.hasNext() && requested > 0) {
+                Inventory batch = batchIterator.next();
+                int availableInBatch = Objects.requireNonNullElse(batch.getQuantity(), 0);
+                if (availableInBatch <= 0) {
                     continue;
                 }
 
-                int allocatedForBranch = 0;
-                BigDecimal resolvedUnitPrice = BigDecimal.ZERO;
-                Iterator<Inventory> batchIterator = batches.iterator();
-                while (batchIterator.hasNext() && requested > 0) {
-                    Inventory batch = batchIterator.next();
-                    int availableInBatch = Objects.requireNonNullElse(batch.getQuantity(), 0);
-                    if (availableInBatch <= 0) {
-                        continue;
-                    }
+                int quantityToTake = Math.min(requested, availableInBatch);
+                BigDecimal importPrice = resolveDisplayImportPrice(batch, variantId, transferImportPriceCache);
+                lastUnitPrice = settingService.calculateSellingPrice(importPrice, categoryId, batch.getExpiryDate());
 
-                    int quantityToTake = Math.min(requested, availableInBatch);
-                    BigDecimal importPrice = resolveDisplayImportPrice(batch, variantId, transferImportPriceCache);
-                    resolvedUnitPrice = calculateSellingPriceSafe(importPrice, profitMultiplier, roundingRule);
-
-                    allocatedForBranch += quantityToTake;
-                    batch.setQuantity(availableInBatch - quantityToTake);
-                    requested -= quantityToTake;
-                }
-
-                if (allocatedForBranch <= 0) {
-                    continue;
-                }
-
-                if (resolvedUnitPrice.compareTo(BigDecimal.ZERO) == 0) {
-                    resolvedUnitPrice = resolveFallbackUnitPrice(
-                            variantId,
-                            inventoryMatrix,
-                            profitMultiplier,
-                            roundingRule,
-                            transferImportPriceCache);
-                }
-
-                branchItems.computeIfAbsent(branchId, ignored -> new ArrayList<>())
-                        .add(OrderItemDto.builder()
-                                .productVariantId(variantId)
-                                .variantName(variantName)
-                                .variantSku(variantSku)
-                                .quantity(allocatedForBranch)
-                                .allocatedQuantity(allocatedForBranch)
-                                .missingQuantity(0)
-                                .unitPrice(resolvedUnitPrice)
-                                .subtotal(resolvedUnitPrice.multiply(BigDecimal.valueOf(allocatedForBranch)))
-                                .build());
+                totalAllocatedForItem += quantityToTake;
+                batch.setQuantity(availableInBatch - quantityToTake);
+                requested -= quantityToTake;
             }
+
+            if (lastUnitPrice.compareTo(BigDecimal.ZERO) == 0) {
+                lastUnitPrice = resolveFallbackUnitPrice(
+                        variantId,
+                        inventoryMatrix,
+                        categoryId,
+                        transferImportPriceCache);
+            }
+
+            allocatedItems.add(OrderItemDto.builder()
+                    .productVariantId(variantId)
+                    .variantName(variantName)
+                    .variantSku(variantSku)
+                    .quantity(originalRequested)
+                    .allocatedQuantity(totalAllocatedForItem)
+                    .missingQuantity(requested)
+                    .unitPrice(lastUnitPrice)
+                    .subtotal(lastUnitPrice.multiply(BigDecimal.valueOf(originalRequested)))
+                    .build());
 
             if (requested > 0) {
                 outOfStockItems.add(OutOfStockItemDto.builder()
                         .productVariantId(variantId)
                         .variantName(variantName)
                         .variantSku(variantSku)
-                        .requestedQty(requested)
-                        .availableQty(0)
+                        .requestedQty(originalRequested)
+                        .availableQty(calculateTotalAvailable(variantId, inventoryMatrix, sellableBranchIds))
                         .build());
             }
+
         }
 
-        for (BranchWithRealDistance branchWithDistance : sellableBranches) {
-            Long branchId = branchWithDistance.branch().getId();
-            List<OrderItemDto> allocatedItems = branchItems.getOrDefault(branchId, Collections.emptyList());
-            if (allocatedItems.isEmpty()) {
-                continue;
-            }
-
+        if (!allocatedItems.isEmpty()) {
             BigDecimal subtotal = allocatedItems.stream()
-                    .map(item -> Objects.requireNonNullElse(item.getSubtotal(), BigDecimal.ZERO))
+                    .map(OrderItemDto::getSubtotal)
                     .reduce(BigDecimal.ZERO, BigDecimal::add);
 
-            subOrders.add(buildSubOrderDraft(branchWithDistance, allocatedItems, subtotal));
+            subOrders.add(SubOrderDraftDto.builder()
+                    .branchId(selectedBranchId)
+                    .branchName(selectedBranchWithDistance.branch().getName())
+                    .branchAddress(selectedBranchWithDistance.branch().getAddressDetail())
+                    .fromDistrictId(selectedBranchWithDistance.branch().getDistrictId())
+                    .durationMinutes(selectedBranchWithDistance.durationMinutes())
+                    .distanceKm(selectedBranchWithDistance.distanceKm())
+                    .items(allocatedItems)
+                    .subtotal(subtotal)
+                    .shippingFee(BigDecimal.ZERO)
+                    .build());
         }
 
         return new AllocationResult(subOrders, outOfStockItems);
-    }
-
-    private SubOrderDraftDto buildSubOrderDraft(BranchWithRealDistance branchWithDistance,
-                                                List<OrderItemDto> allocatedItems,
-                                                BigDecimal subtotal) {
-        Branch branch = branchWithDistance.branch();
-        return SubOrderDraftDto.builder()
-                .branchId(branch.getId())
-                .branchName(branch.getName())
-                .branchAddress(branch.getAddressDetail())
-                .fromDistrictId(branch.getDistrictId())
-                .durationMinutes(branchWithDistance.durationMinutes())
-                .distanceKm(branchWithDistance.distanceKm())
-                .items(allocatedItems)
-                .subtotal(subtotal)
-                .shippingFee(BigDecimal.ZERO)
-                .build();
     }
 
     private Inventory copyInventory(Inventory inventory) {
@@ -217,14 +200,14 @@ public class InventoryAllocationService {
     }
 
     private BigDecimal resolveFallbackUnitPrice(Long variantId, Map<Long, Map<Long, List<Inventory>>> matrix,
-                                                BigDecimal multiplier, String roundingRule,
+                                                Long categoryId,
                                                 Map<Long, BigDecimal> transferImportPriceCache) {
         for (Map<Long, List<Inventory>> branchMap : matrix.values()) {
             List<Inventory> batches = branchMap.getOrDefault(variantId, Collections.emptyList());
             for (Inventory batch : batches) {
                 BigDecimal importPrice = resolveDisplayImportPrice(batch, variantId, transferImportPriceCache);
                 if (importPrice.compareTo(BigDecimal.ZERO) > 0) {
-                    return calculateSellingPriceSafe(importPrice, multiplier, roundingRule);
+                    return settingService.calculateSellingPrice(importPrice, categoryId, batch.getExpiryDate());
                 }
             }
         }
@@ -244,20 +227,8 @@ public class InventoryAllocationService {
         }
 
         return transferImportPriceCache.computeIfAbsent(
-                buildTransferImportPriceCacheKey(branchId, variantId),
+                branchId,
                 ignored -> resolveInboundTransferAverageImportPrice(branchId, variantId));
-    }
-
-    private long buildTransferImportPriceCacheKey(Long branchId, Long variantId) {
-        long safeBranchId = branchId != null ? branchId : 0L;
-        long safeVariantId = variantId != null ? variantId : 0L;
-        return (safeBranchId << 32) ^ (safeVariantId & 0xffffffffL);
-    }
-
-    private BigDecimal calculateSellingPriceSafe(BigDecimal importPrice, BigDecimal multiplier, String roundingRule) {
-        BigDecimal resolvedImportPrice = importPrice != null ? importPrice : BigDecimal.ZERO;
-        BigDecimal calculatedPrice = settingService.calculateSellingPrice(resolvedImportPrice, multiplier, roundingRule);
-        return calculatedPrice != null ? calculatedPrice : BigDecimal.ZERO;
     }
 
     private boolean isTransferBatchWithoutCost(Inventory inventory) {

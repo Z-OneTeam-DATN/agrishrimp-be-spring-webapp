@@ -43,5 +43,6 @@ public class ProductVariantResponse {
         private BigDecimal importPrice;// Giá vốn (Chỉ Admin/Manager mới có data này, NV sẽ null)
         private BigDecimal sellingPrice; // Giá bán (Auto = importPrice * Hệ số lợi nhuận)
         private String expiryDate;     // Ngày hết hạn (ISO-8601 string)
+        private Boolean marginCapped;  // Đánh dấu biên lợi nhuận bị chạm sàn tối thiểu
     }
 }

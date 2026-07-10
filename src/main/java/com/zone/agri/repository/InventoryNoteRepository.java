@@ -224,4 +224,14 @@ public interface InventoryNoteRepository extends JpaRepository<InventoryNote, Lo
     );
 
     boolean existsBySupplierId(Long supplierId);
+
+    @Query("SELECT COUNT(n) FROM InventoryNote n " +
+           "WHERE n.supplier.id = :supplierId " +
+           "AND n.type = com.zone.agri.entity.enums.InventoryNoteType.IMPORT " +
+           "AND n.status = com.zone.agri.entity.enums.InventoryNoteStatus.COMPLETED " +
+           "AND n.createdAt >= :sinceDate")
+    long countCompletedImportsSince(
+            @Param("supplierId") Long supplierId,
+            @Param("sinceDate") java.time.LocalDateTime sinceDate
+    );
 }

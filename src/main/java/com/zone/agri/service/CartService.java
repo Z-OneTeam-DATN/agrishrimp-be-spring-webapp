@@ -80,17 +80,20 @@ public class CartService {
                     .mapToInt(Inventory::getQuantity)
                     .sum();
 
-            BigDecimal fifoImportPrice = batches.stream()
+            Inventory fifoBatch = batches.stream()
                     .filter(inv -> inv.getQuantity() != null && inv.getQuantity() > 0)
                     .sorted(Comparator.comparing(Inventory::getId, Comparator.nullsLast(Long::compareTo)))
-                    .map(inv -> resolveDisplayImportPrice(inv, variant.getId(), transferImportPriceCache))
                     .findFirst()
-                    .orElse(BigDecimal.ZERO);
+                    .orElse(null);
 
-            BigDecimal sellingPrice = settingService.calculateSellingPrice(
-                    fifoImportPrice,
-                    profitMultiplier,
-                    roundingRule);
+            BigDecimal fifoImportPrice = fifoBatch != null
+                    ? resolveDisplayImportPrice(fifoBatch, variant.getId(), transferImportPriceCache)
+                    : BigDecimal.ZERO;
+
+            Long categoryId = (product != null && product.getCategory() != null) ? product.getCategory().getId() : null;
+            java.time.LocalDateTime expiryDate = fifoBatch != null ? fifoBatch.getExpiryDate() : null;
+
+            BigDecimal sellingPrice = settingService.calculateSellingPrice(fifoImportPrice, categoryId, expiryDate);
 
             return CartItemResponse.builder()
                     .id(item.getId())
