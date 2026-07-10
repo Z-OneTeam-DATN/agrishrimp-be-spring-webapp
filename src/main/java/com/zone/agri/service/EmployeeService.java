@@ -138,6 +138,7 @@ public class EmployeeService {
         }
     }
 
+    @Transactional(readOnly = true)
     public Page<EmployeeResponse> getEmployees(String keyword, Long branchId, Long roleId, String status,
             Pageable pageable) {
         UserStatus userStatus = null;
@@ -169,6 +170,7 @@ public class EmployeeService {
         emailService.sendAccountInfo(employee.getEmail(), employee.getFullName(), newPassword);
     }
 
+    @Transactional(readOnly = true)
     public EmployeeResponse getEmployeeById(Long employeeId) {
         return userRepository.findById(employeeId)
                 .map(this::mapToResponse)
