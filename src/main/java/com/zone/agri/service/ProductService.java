@@ -117,6 +117,7 @@ public class ProductService {
     // READ METHODS
     // =========================================================================
 
+    @Transactional(readOnly = true)
     public List<ProductResponse> getAll(String keyword, Long categoryId, String statusStr) {
         ProductStatus status = null;
         if (statusStr != null && !statusStr.isBlank()) {
@@ -132,12 +133,14 @@ public class ProductService {
                 .collect(Collectors.toList());
     }
 
+    @Transactional(readOnly = true)
     public List<ProductResponse> getAll() {
         return productRepository.findAllWithDetails().stream()
                 .map(this::convertToResponse)
                 .collect(Collectors.toList());
     }
 
+    @Transactional(readOnly = true)
     public ProductResponse getById(Long id) {
         Product product = productRepository.findById(id)
                 .orElseThrow(() -> new NotFoundException("Không tìm thấy sản phẩm với ID: " + id));

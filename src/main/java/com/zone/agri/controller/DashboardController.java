@@ -27,6 +27,13 @@ public class DashboardController {
         return ResponseEntity.ok(dashboardService.getStats(branchId));
     }
 
+    @Operation(summary = "Chỉ số khách hàng tổng hợp")
+    @GetMapping("/customer-insights")
+    public ResponseEntity<CustomerInsightsResponse> getCustomerInsights(
+            @RequestParam(required = false) Long branchId) {
+        return ResponseEntity.ok(dashboardService.getCustomerInsights(branchId));
+    }
+
     @Operation(summary = "Kết quả kinh doanh ngày")
     @GetMapping("/daily-results")
     public ResponseEntity<DailyBusinessResultsResponse> getDailyResults(
