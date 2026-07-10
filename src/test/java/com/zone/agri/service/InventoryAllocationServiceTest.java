@@ -7,6 +7,7 @@ import com.zone.agri.entity.Branch;
 import com.zone.agri.entity.Inventory;
 import com.zone.agri.entity.ProductVariant;
 import com.zone.agri.repository.InventoryRepository;
+import com.zone.agri.repository.InventoryTransactionRepository;
 import com.zone.agri.service.BranchSearchService.BranchWithRealDistance;
 import com.zone.agri.service.InventoryAllocationService.AllocationResult;
 import org.junit.jupiter.api.BeforeEach;
@@ -28,6 +29,9 @@ class InventoryAllocationServiceTest {
     private InventoryRepository inventoryRepository;
 
     @Mock
+    private InventoryTransactionRepository inventoryTransactionRepository;
+
+    @Mock
     private SettingService settingService;
 
     @InjectMocks
@@ -41,6 +45,17 @@ class InventoryAllocationServiceTest {
     void setUp() {
         org.mockito.Mockito.when(settingService.getProfitMultiplier())
                 .thenReturn(new BigDecimal("1.3"));
+        org.mockito.Mockito.when(settingService.getProfitRoundingRuleRaw())
+                .thenReturn("NONE");
+        org.mockito.Mockito.when(settingService.calculateSellingPrice(
+                org.mockito.ArgumentMatchers.any(BigDecimal.class),
+                org.mockito.ArgumentMatchers.any(BigDecimal.class),
+                org.mockito.ArgumentMatchers.anyString()))
+                .thenAnswer(invocation -> {
+                    BigDecimal importPrice = invocation.getArgument(0);
+                    BigDecimal multiplier = invocation.getArgument(1);
+                    return importPrice.multiply(multiplier);
+                });
 
         branch1 = Branch.builder().build();
         setId(branch1, 1L, "id");

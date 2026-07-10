@@ -79,7 +79,7 @@ class CustomerServiceTest {
     @BeforeEach
     void setUp() {
         customerRole = Role.builder()
-                .slug("CUSTOMER")
+                .slug("USER")
                 .displayName("Khach hang")
                 .isActive(true)
                 .isSystem(true)

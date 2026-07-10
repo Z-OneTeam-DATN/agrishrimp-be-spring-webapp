@@ -1,6 +1,7 @@
 package com.zone.agri.config;
 
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.beans.BeansException;
 import org.springframework.beans.factory.config.BeanPostProcessor;
 import org.springframework.context.annotation.Configuration;
@@ -15,6 +16,7 @@ import java.sql.Statement;
  * patches run BEFORE Hibernate starts schema validation.
  */
 @Configuration
+@ConditionalOnProperty(name = "app.startup.schema-patches.enabled", havingValue = "true", matchIfMissing = true)
 @Slf4j
 public class SchemaUpdateConfig implements BeanPostProcessor {
 

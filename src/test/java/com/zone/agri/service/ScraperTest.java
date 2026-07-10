@@ -30,7 +30,6 @@ public class ScraperTest {
             }
         } catch (Exception e) {
             System.out.println("Error scraping DoanhNghiepBiz: " + e.getMessage());
-            e.printStackTrace();
         }
 
         System.out.println("\n=== TESTING MASOTHUE.COM ===");
@@ -51,7 +50,6 @@ public class ScraperTest {
             }
         } catch (Exception e) {
             System.out.println("Error scraping MasoThue: " + e.getMessage());
-            e.printStackTrace();
         }
     }
 }

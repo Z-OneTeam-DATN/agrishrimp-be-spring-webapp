@@ -61,6 +61,9 @@ class InventoryTransferServiceTest {
     @Mock
     private WarehouseContext warehouseContext;
 
+    @Mock
+    private InventoryCheckGuardService inventoryCheckGuardService;
+
     @InjectMocks
     private InventoryTransferService inventoryTransferService;
 
