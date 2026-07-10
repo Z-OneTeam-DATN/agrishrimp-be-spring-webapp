@@ -67,6 +67,21 @@ public interface UserRepository extends JpaRepository<User, Long> {
                         "AND (:branchId IS NULL OR u.branch.id = :branchId)")
         long countCustomers(@Param("branchId") Long branchId);
 
+        @Query("SELECT COUNT(u) FROM User u WHERE u.role.slug = 'USER' " +
+                        "AND (:branchId IS NULL OR u.branch.id = :branchId) " +
+                        "AND u.status = :status")
+        long countCustomersByStatus(
+                        @Param("branchId") Long branchId,
+                        @Param("status") com.zone.agri.entity.enums.UserStatus status);
+
+        @Query("SELECT COUNT(u) FROM User u WHERE u.role.slug = 'USER' " +
+                        "AND (:branchId IS NULL OR u.branch.id = :branchId) " +
+                        "AND u.createdAt >= :startAt AND u.createdAt < :endAt")
+        long countCustomersCreatedBetween(
+                        @Param("branchId") Long branchId,
+                        @Param("startAt") java.time.LocalDateTime startAt,
+                        @Param("endAt") java.time.LocalDateTime endAt);
+
         boolean existsByEmailAndIdNot(String email, Long id);
 
         boolean existsByPhoneNumberAndIdNot(String phoneNumber, Long id);
