@@ -76,5 +76,6 @@ if ($baseLoaded) {
 }
 Write-Host "Loaded override env: $OverrideEnvFile" -ForegroundColor DarkGray
 
-& (Join-Path $projectRoot "mvnw.cmd") spring-boot:run "-Dspring-boot.run.profiles=$($env:SPRING_PROFILES_ACTIVE)"
+& (Join-Path $projectRoot "mvnw.cmd") spring-boot:run "-Dspring-boot.run.profiles=$($env:SPRING_PROFILES_ACTIVE)" "-Dspring-boot.run.jvmArguments=-Xmx384m"
 exit $LASTEXITCODE
+

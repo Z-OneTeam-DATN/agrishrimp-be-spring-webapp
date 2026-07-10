@@ -163,11 +163,21 @@ public class EmployeeService {
             throw new BadRequestException("Nhân viên này chưa có email để gửi lại thông tin tài khoản");
         }
 
-        String newPassword = UUID.randomUUID().toString().replace("-", "").substring(0, 8);
-        employee.setPasswordHash(passwordEncoder.encode(newPassword));
-        userRepository.save(employee);
+        String defaultPassword = (employee.getPhoneNumber() != null && !employee.getPhoneNumber().isBlank())
+                ? employee.getPhoneNumber().replaceAll("\\s+", "")
+                : "123456";
 
-        emailService.sendAccountInfo(employee.getEmail(), employee.getFullName(), newPassword);
+        boolean isAlreadyDefault = passwordEncoder.matches(defaultPassword, employee.getPasswordHash());
+
+        if (!isAlreadyDefault) {
+            employee.setPasswordHash(passwordEncoder.encode(defaultPassword));
+            userRepository.save(employee);
+            log.info("Nhan vien {} da doi mat khau. Set lai ve mat khau mac dinh de gui email.", employee.getEmail());
+        } else {
+            log.info("Nhan vien {} chua doi mat khau (van dung mat khau mac dinh). Chi gui lai email.", employee.getEmail());
+        }
+
+        emailService.sendAccountInfo(employee.getEmail(), employee.getFullName(), defaultPassword);
     }
 
     @Transactional(readOnly = true)

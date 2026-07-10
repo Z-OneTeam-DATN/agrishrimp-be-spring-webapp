@@ -59,8 +59,10 @@ spring:
           timeout: 3000
           writetimeout: 5000
 
-sendgrid:
-  api-key: ${SENDGRID_API_KEY:}
+resend:
+  api-key: ${RESEND_API_KEY:}
+  from-email: ${RESEND_FROM_EMAIL:onboarding@resend.dev}
+  from-name: ${RESEND_FROM_NAME:AgriShrimp}
 
 security:
   jwt:

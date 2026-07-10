@@ -701,8 +701,11 @@ public class SalesReportService {
             return "N/A";
         }
         return switch (method) {
+            case CASH -> "Tiền mặt";
+            case TRANSFER -> "Chuyển khoản";
             case COD -> "COD";
             case PAYOS -> "PayOS";
+            default -> method.name();
         };
     }
 

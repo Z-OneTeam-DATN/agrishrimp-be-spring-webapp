@@ -35,6 +35,7 @@ public class InventoryReceiptPaymentService {
     private final InventoryReceiptPaymentRepository inventoryReceiptPaymentRepository;
     private final UserRepository userRepository;
     private final com.zone.agri.common.WarehouseContext warehouseContext;
+    private final CashflowRiskService cashflowRiskService;
 
     private User getCurrentUser() {
         org.springframework.security.core.Authentication auth = org.springframework.security.core.context.SecurityContextHolder
@@ -109,6 +110,11 @@ public class InventoryReceiptPaymentService {
 
         InventoryReceiptPayment savedPayment = inventoryReceiptPaymentRepository.save(payment);
         rebuildPaymentLedger(note);
+        try {
+            cashflowRiskService.clearCache();
+        } catch (Exception e) {
+            // Ignore cache eviction failure
+        }
         InventoryReceiptPayment refreshedPayment = inventoryReceiptPaymentRepository.findById(savedPayment.getId())
                 .orElse(savedPayment);
         return mapToResponse(refreshedPayment);

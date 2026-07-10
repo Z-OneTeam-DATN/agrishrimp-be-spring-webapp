@@ -782,9 +782,13 @@ public class ProductService {
 
         Map<Long, BigDecimal> transferImportPriceCache = new HashMap<>();
 
+        Long categoryId = (variant.getProduct() != null && variant.getProduct().getCategory() != null)
+                ? variant.getProduct().getCategory().getId()
+                : null;
+
         List<ProductVariantResponse.BatchInfoDto> batchDtos = validBatches.stream().map(inv -> {
             BigDecimal importPrice = resolveDisplayImportPrice(inv, variant.getId(), transferImportPriceCache);
-            BigDecimal sellingPrice = settingService.calculateSellingPrice(importPrice, multiplier, roundingRule);
+            BigDecimal sellingPrice = settingService.calculateSellingPrice(importPrice, categoryId, inv.getExpiryDate());
 
             return ProductVariantResponse.BatchInfoDto.builder()
                     .inventoryId(inv.getId())
@@ -794,6 +798,7 @@ public class ProductService {
                     .importPrice(canSeeImportPrice ? importPrice : null) // Admin/Manager/Exporter được thấy giá nhập
                     .sellingPrice(sellingPrice)
                     .expiryDate(inv.getExpiryDate() != null ? inv.getExpiryDate().toLocalDate().toString() : null)
+                    .marginCapped(settingService.isMarginCapped(categoryId, inv.getExpiryDate()))
                     .build();
         }).collect(Collectors.toList());
 
@@ -806,7 +811,7 @@ public class ProductService {
 
         BigDecimal sellingPriceByAverageImport = averageImportPrice == null
                 ? null
-                : settingService.calculateSellingPrice(averageImportPrice, multiplier, roundingRule);
+                : settingService.calculateSellingPrice(averageImportPrice, categoryId, null);
 
         List<AttributeValueResponse> attributeValues = variant.getAttributeValues() != null
                 ? variant.getAttributeValues().stream().map(sav -> AttributeValueResponse.builder()

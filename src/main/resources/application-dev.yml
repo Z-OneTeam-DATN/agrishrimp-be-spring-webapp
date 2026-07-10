@@ -178,3 +178,9 @@ vapid:
   public-key: ${VAPID_PUBLIC_KEY:}
   private-key: ${VAPID_PRIVATE_KEY:}
   subject: ${VAPID_SUBJECT:mailto:admin@agrishrimp.vn}
+
+# 18. RESEND EMAIL
+resend:
+  api-key: ${RESEND_API_KEY:}
+  from-email: ${RESEND_FROM_EMAIL:onboarding@resend.dev}
+  from-name: ${RESEND_FROM_NAME:AgriShrimp}
