@@ -168,10 +168,10 @@ public class EmployeeController {
                         @ApiResponse(responseCode = "404", description = "Không tìm thấy nhân viên"),
                         @ApiResponse(responseCode = "400", description = "Nhân viên chưa có email")
         })
-        public ResponseEntity<Void> resendCredentials(@PathVariable Long id) {
+        public ResponseEntity<String> resendCredentials(@PathVariable Long id) {
                 log.info("Resending employee credentials for ID: {}", id);
-                employeeService.resendEmployeeCredentials(id);
-                return ResponseEntity.ok().build();
+                String result = employeeService.resendEmployeeCredentials(id);
+                return ResponseEntity.ok(result);
         }
 
         /**
