@@ -2,6 +2,7 @@ package com.zone.agri.dto.request.user;
 
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
 import lombok.*;
 import lombok.experimental.FieldDefaults;
 
@@ -16,9 +17,11 @@ import java.util.List;
 public class RoleRequest {
 
     @NotBlank(message = "Tên vai trò không được để trống")
+    @Size(max = 100, message = "Tên vai trò tối đa 100 ký tự")
     @Schema(description = "Tên hiển thị của vai trò", example = "THỦ KHO TỔNG", requiredMode = Schema.RequiredMode.REQUIRED)
     String roleName;
 
+    @Size(max = 255, message = "Mô tả vai trò tối đa 255 ký tự")
     @Schema(description = "Mô tả chi tiết nhiệm vụ của vai trò", example = "Chịu trách nhiệm nhập xuất và kiểm kê hàng hóa tại kho")
     String description;
 

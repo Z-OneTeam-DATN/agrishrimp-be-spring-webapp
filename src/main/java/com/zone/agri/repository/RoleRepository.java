@@ -31,6 +31,11 @@ public interface RoleRepository extends JpaRepository<Role, Long> {
     // Kiểm tra slug tồn tại (cho trường hợp tạo mới)
     boolean existsBySlug(String slug);
 
+    boolean existsByDisplayNameIgnoreCase(String displayName);
+
+    @Query("SELECT CASE WHEN COUNT(r) > 0 THEN true ELSE false END FROM Role r WHERE LOWER(r.displayName) = LOWER(:displayName) AND r.id != :id")
+    boolean existsByDisplayNameIgnoreCaseAndIdNot(@Param("displayName") String displayName, @Param("id") Long id);
+
     // Đếm số user đang sử dụng role này
     @Query("SELECT COUNT(u) FROM User u WHERE u.role.id = :roleId")
     long countUsersByRoleId(@Param("roleId") Long roleId);
