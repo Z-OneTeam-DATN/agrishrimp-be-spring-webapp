@@ -105,6 +105,7 @@ public class OrderService {
     // QUẢN LÝ ĐƠN HÀNG CHO USER
     // ══════════════════════════════════════════════════════════════════════
 
+    @Transactional
     public List<OrderResponse> getMyOrders(Long userId, OrderStatus status) {
         List<Order> orders;
         if (status != null) {
@@ -116,6 +117,7 @@ public class OrderService {
         return orders.stream().map(o -> mapToOrderResponse(o, true)).collect(Collectors.toList());
     }
 
+    @Transactional
     public OrderResponse getMyOrderDetail(Long userId, Long orderId) {
         Order order = orderRepository.findById(orderId)
                 .orElseThrow(() -> new NotFoundException("Không tìm thấy đơn hàng ID: " + orderId));
@@ -154,6 +156,7 @@ public class OrderService {
     // QUẢN LÝ ĐƠN HÀNG CHO ADMIN
     // ══════════════════════════════════════════════════════════════════════
 
+    @Transactional
     public Page<OrderResponse> getAdminOrders(OrderStatus status, String search, Pageable pageable) {
         Page<Order> orderPage = orderRepository.findAdminOrdersWithFilter(status, search, pageable);
 
@@ -161,6 +164,7 @@ public class OrderService {
         return orderPage.map(o -> mapToOrderResponse(o, false));
     }
 
+    @Transactional
     public OrderResponse getAdminOrderDetail(Long orderId) {
         Order order = orderRepository.findById(orderId)
                 .orElseThrow(() -> new NotFoundException("Không tìm thấy đơn hàng ID: " + orderId));
