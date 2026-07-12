@@ -1,15 +1,5 @@
 package com.zone.agri.service;
 
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
-import java.util.Optional;
-import java.util.stream.Collectors;
-
-import org.springframework.dao.DataIntegrityViolationException;
-import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
-
 import com.zone.agri.dto.response.admin.AttributeDTO;
 import com.zone.agri.dto.response.product.AttributeValueResponse;
 import com.zone.agri.entity.Attribute;
@@ -18,12 +8,23 @@ import com.zone.agri.entity.enums.AttributeStatus;
 import com.zone.agri.exception.ConflictException;
 import com.zone.agri.repository.AttributeRepository;
 import com.zone.agri.repository.SKUAttributeValueRepository;
-
 import lombok.RequiredArgsConstructor;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.text.Normalizer;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.Locale;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
 public class AttributeService {
+
+    private static final int ATTRIBUTE_CODE_MAX_LENGTH = 50;
 
     private final AttributeRepository repository;
     private final SKUAttributeValueRepository skuAttributeValueRepository;
@@ -44,17 +45,13 @@ public class AttributeService {
     @Transactional(readOnly = true)
     public AttributeDTO getById(Long id) {
         Attribute attr = repository.findById(id)
-                .orElseThrow(() -> new RuntimeException("Không tìm thấy thuộc tính!"));
+                .orElseThrow(() -> new RuntimeException("Khong tim thay thuoc tinh!"));
         return toDTO(attr);
     }
 
     @Transactional
     public AttributeDTO create(AttributeDTO dto) {
-        // KIỂM TRA TRÙNG MÃ CODE
-        Optional<Attribute> existing = repository.findByCodeIgnoreCase(dto.getCode());
-        if (existing.isPresent()) {
-            throw new ConflictException("Mã Code '" + dto.getCode() + "' đã tồn tại! Vui lòng sử dụng mã khác.", true);
-        }
+        dto.setCode(resolveAttributeCode(dto.getCode(), dto.getName(), null, null));
 
         Attribute attr = new Attribute();
         mapToEntity(attr, dto);
@@ -64,14 +61,9 @@ public class AttributeService {
     @Transactional
     public AttributeDTO update(Long id, AttributeDTO dto) {
         Attribute attr = repository.findById(id)
-                .orElseThrow(() -> new RuntimeException("Không tìm thấy thuộc tính!"));
+                .orElseThrow(() -> new RuntimeException("Khong tim thay thuoc tinh!"));
 
-        // KIỂM TRA TRÙNG MÃ CODE NHƯNG BỎ QUA CHÍNH NÓ
-        Optional<Attribute> existing = repository.findByCodeIgnoreCase(dto.getCode());
-        if (existing.isPresent() && !existing.get().getId().equals(id)) {
-            throw new ConflictException("Mã Code '" + dto.getCode() + "' đã được sử dụng cho một thuộc tính khác!",
-                    true);
-        }
+        dto.setCode(resolveAttributeCode(dto.getCode(), dto.getName(), id, attr.getCode()));
 
         List<String> newValues = dto.getValues() != null ? dto.getValues().stream()
                 .map(String::trim)
@@ -80,27 +72,25 @@ public class AttributeService {
                 .collect(Collectors.toList())
                 : new ArrayList<>();
 
-        // Check that attribute has at least 1 value
         if (newValues.isEmpty()) {
-            throw new ConflictException("Thuộc tính phải có ít nhất 1 giá trị!", true);
+            throw new ConflictException("Thuoc tinh phai co it nhat 1 gia tri!", true);
         }
 
         List<AttributeValue> valuesToRemove = attr.getAttributeValues() != null
                 ? attr.getAttributeValues().stream()
-                        .filter(av -> !newValues.contains(av.getValue()))
-                        .collect(Collectors.toList())
+                .filter(av -> !newValues.contains(av.getValue()))
+                .collect(Collectors.toList())
                 : Collections.emptyList();
 
         for (AttributeValue value : valuesToRemove) {
             if (skuAttributeValueRepository.existsByAttributeValueId(value.getId())) {
                 throw new ConflictException(
-                        "Không thể xóa giá trị '" + value.getValue() +
-                                "' vì đang được sử dụng bởi biến thể sản phẩm. Chỉ được xóa khi giá trị này chưa được gán cho bất kỳ biến thể nào.",
+                        "Khong the xoa gia tri '" + value.getValue()
+                                + "' vi dang duoc su dung boi bien the san pham.",
                         true);
             }
         }
 
-        // Remove safe-to-delete values from entity
         if (!valuesToRemove.isEmpty()) {
             attr.getAttributeValues().removeAll(valuesToRemove);
         }
@@ -110,7 +100,8 @@ public class AttributeService {
             return toDTO(repository.saveAndFlush(attr));
         } catch (DataIntegrityViolationException e) {
             throw new ConflictException(
-                    "Không thể lưu: Có giá trị thuộc tính bạn vừa xóa đang được gắn cho biến thể sản phẩm!", true);
+                    "Khong the luu vi co gia tri thuoc tinh vua xoa dang duoc gan cho bien the san pham!",
+                    true);
         }
     }
 
@@ -119,15 +110,11 @@ public class AttributeService {
         boolean isUsedInProducts = skuAttributeValueRepository.existsByAttributeId(id);
         if (isUsedInProducts) {
             throw new ConflictException(
-                    "Không thể xóa thuộc tính này vì nó đang được gắn cho các biến thể sản phẩm. Vui lòng chuyển trạng thái sang 'Tạm ngừng' thay vì xóa.",
+                    "Khong the xoa thuoc tinh nay vi no dang duoc gan cho cac bien the san pham.",
                     true);
         }
         repository.deleteById(id);
     }
-
-    // =========================================================================
-    // HELPERS
-    // =========================================================================
 
     private AttributeDTO toDTO(Attribute entity) {
         AttributeDTO dto = new AttributeDTO();
@@ -162,10 +149,70 @@ public class AttributeService {
         return dto;
     }
 
+    private String resolveAttributeCode(String requestedCode, String name, Long currentId, String existingCode) {
+        if (hasText(requestedCode)) {
+            return buildUniqueCode(buildCodeBase(requestedCode), currentId);
+        }
+
+        if (hasText(existingCode)) {
+            return existingCode.trim().toUpperCase(Locale.ROOT);
+        }
+
+        return buildUniqueCode(buildCodeBase(name), currentId);
+    }
+
+    private String buildCodeBase(String value) {
+        String source = hasText(value) ? value : "ATTRIBUTE";
+        String normalized = Normalizer.normalize(source, Normalizer.Form.NFD)
+                .replaceAll("\\p{M}", "")
+                .replace('đ', 'd')
+                .replace('Đ', 'D');
+
+        String code = normalized
+                .toUpperCase(Locale.ROOT)
+                .replaceAll("[^A-Z0-9]+", "_")
+                .replaceAll("_+", "_")
+                .replaceAll("^_|_$", "");
+
+        if (code.isBlank()) {
+            code = "ATTRIBUTE";
+        }
+
+        return code.length() > ATTRIBUTE_CODE_MAX_LENGTH
+                ? code.substring(0, ATTRIBUTE_CODE_MAX_LENGTH).replaceAll("_+$", "")
+                : code;
+    }
+
+    private boolean isCodeTaken(String code, Long currentId) {
+        return currentId == null
+                ? repository.existsByCodeIgnoreCase(code)
+                : repository.existsByCodeIgnoreCaseAndIdNot(code, currentId);
+    }
+
+    private String buildUniqueCode(String baseCode, Long currentId) {
+        String candidate = baseCode;
+        int suffix = 1;
+
+        while (isCodeTaken(candidate, currentId)) {
+            String suffixValue = "_" + suffix++;
+            int maxBaseLength = Math.max(1, ATTRIBUTE_CODE_MAX_LENGTH - suffixValue.length());
+            String truncatedBase = baseCode.length() > maxBaseLength
+                    ? baseCode.substring(0, maxBaseLength).replaceAll("_+$", "")
+                    : baseCode;
+            candidate = truncatedBase + suffixValue;
+        }
+
+        return candidate;
+    }
+
+    private boolean hasText(String value) {
+        return value != null && !value.trim().isEmpty();
+    }
+
     private void mapToEntity(Attribute entity, AttributeDTO dto) {
         entity.setName(dto.getName());
         if (dto.getCode() != null) {
-            entity.setCode(dto.getCode().trim().toUpperCase());
+            entity.setCode(dto.getCode().trim().toUpperCase(Locale.ROOT));
         }
         entity.setStatus(dto.getStatus() != null ? dto.getStatus() : AttributeStatus.ACTIVE);
 
@@ -180,9 +227,6 @@ public class AttributeService {
                 .collect(Collectors.toList())
                 : new ArrayList<>();
 
-        // Do NOT remove values here - removal is handled in update() method after
-        // constraint check
-        // Only add new values that don't exist yet
         List<String> existingValues = entity.getAttributeValues().stream()
                 .map(AttributeValue::getValue)
                 .collect(Collectors.toList());

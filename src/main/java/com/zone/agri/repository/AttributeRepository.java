@@ -11,4 +11,8 @@ public interface AttributeRepository extends JpaRepository<Attribute, Long> {
     Optional<Attribute> findByNameIgnoreCase(String name);
 
     Optional<Attribute> findByCodeIgnoreCase(String code);
+
+    boolean existsByCodeIgnoreCase(String code);
+
+    boolean existsByCodeIgnoreCaseAndIdNot(String code, Long id);
 }
