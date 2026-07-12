@@ -39,6 +39,7 @@ public class CartService {
     private final SKUAttributeValueRepository skuAttributeValueRepo;
     private final SettingService settingService;
 
+    @Transactional(readOnly = true)
     public List<CartItemResponse> getMyCart(Long userId) {
         List<CartItem> items = cartItemRepo.findByUserIdWithDetails(userId);
         if (items.isEmpty()) {
@@ -97,6 +98,8 @@ public class CartService {
 
             return CartItemResponse.builder()
                     .id(item.getId())
+                    .productId(product != null ? product.getId() : null)
+                    .productSlug(product != null ? product.getSlug() : null)
                     .variantId(variant.getId())
                     .name(product != null ? product.getName() : "Sản phẩm")
                     .variant(variantName)

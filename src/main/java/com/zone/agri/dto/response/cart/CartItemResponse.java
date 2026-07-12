@@ -8,6 +8,8 @@ import java.math.BigDecimal;
 @Builder
 public class CartItemResponse {
     private Long id; // ID của dòng trong giỏ hàng
+    private Long productId; // ID sản phẩm gốc
+    private String productSlug; // slug sản phẩm để điều hướng trang chi tiết
     private Long variantId; // ID của phân loại sản phẩm
     private String name; // Tên sản phẩm
     private String variant; // Tên phân loại (VD: 500g/túi) - Giữ nguyên nếu cũ
