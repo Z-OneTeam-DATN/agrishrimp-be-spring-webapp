@@ -155,7 +155,7 @@ public class EmployeeService {
     }
 
     @Transactional
-    public void resendEmployeeCredentials(Long employeeId) {
+    public String resendEmployeeCredentials(Long employeeId) {
         User employee = userRepository.findById(employeeId)
                 .orElseThrow(() -> new NotFoundException("Không tìm thấy nhân viên với ID: " + employeeId));
 
@@ -177,7 +177,13 @@ public class EmployeeService {
             log.info("Nhan vien {} chua doi mat khau (van dung mat khau mac dinh). Chi gui lai email.", employee.getEmail());
         }
 
-        emailService.sendAccountInfo(employee.getEmail(), employee.getFullName(), defaultPassword);
+        try {
+            emailService.sendAccountInfo(employee.getEmail(), employee.getFullName(), defaultPassword);
+            return "Đặt lại mật khẩu và gửi email thành công!";
+        } catch (Exception e) {
+            log.error("Lỗi khi gửi email thông tin tài khoản cho nhân viên {}: {}", employee.getEmail(), e.getMessage());
+            return "Đặt lại mật khẩu thành công! Tuy nhiên không gửi được email do lỗi máy chủ gửi thư. Mật khẩu mặc định là: " + defaultPassword;
+        }
     }
 
     @Transactional(readOnly = true)
