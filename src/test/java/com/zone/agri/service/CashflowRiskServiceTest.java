@@ -158,6 +158,10 @@ class CashflowRiskServiceTest {
             public BigDecimal getPaidAmount() { return BigDecimal.ZERO; }
             @Override
             public LocalDateTime getCreatedAt() { return LocalDateTime.now().minusDays(20); }
+            @Override
+            public Long getCreatedById() { return null; }
+            @Override
+            public String getCreatedByName() { return null; }
         };
 
         when(supplierRepository.findSupplierDebtLedger(any(), any(), eq(1L), any())).thenReturn(List.of(proj));
@@ -227,6 +231,8 @@ class CashflowRiskServiceTest {
             @Override public BigDecimal getTotalAmount() { return new BigDecimal("5000000.00"); }
             @Override public BigDecimal getPaidAmount() { return BigDecimal.ZERO; }
             @Override public LocalDateTime getCreatedAt() { return LocalDateTime.now().minusDays(40); }
+            @Override public Long getCreatedById() { return null; }
+            @Override public String getCreatedByName() { return null; }
         };
 
         // Supplier 30 (NCC C): outstanding 10M, created 25 days ago (due in 5 days)
@@ -240,6 +246,8 @@ class CashflowRiskServiceTest {
             @Override public BigDecimal getTotalAmount() { return new BigDecimal("10000000.00"); }
             @Override public BigDecimal getPaidAmount() { return BigDecimal.ZERO; }
             @Override public LocalDateTime getCreatedAt() { return LocalDateTime.now().minusDays(25); }
+            @Override public Long getCreatedById() { return null; }
+            @Override public String getCreatedByName() { return null; }
         };
 
         when(supplierRepository.findSupplierDebtLedger(any(), any(), eq(1L), any()))

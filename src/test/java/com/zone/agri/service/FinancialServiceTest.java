@@ -572,6 +572,16 @@ class FinancialServiceTest {
             public LocalDateTime getCreatedAt() {
                 return LocalDateTime.now();
             }
+
+            @Override
+            public Long getCreatedById() {
+                return null;
+            }
+
+            @Override
+            public String getCreatedByName() {
+                return null;
+            }
         };
     }
 }
