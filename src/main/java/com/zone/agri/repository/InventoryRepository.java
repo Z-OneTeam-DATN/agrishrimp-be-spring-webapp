@@ -107,6 +107,16 @@ public interface InventoryRepository extends JpaRepository<Inventory, Long> {
         List<Object[]> sumQuantityGroupByProductIds(@Param("productIds") List<Long> productIds);
 
         @Query("""
+                        SELECT i.productVariant.product.id, COALESCE(SUM(i.quantity), 0L)
+                        FROM Inventory i
+                        WHERE i.productVariant.product.id IN :productIds
+                        AND i.branch.status = com.zone.agri.entity.enums.BranchStatus.ACTIVE
+                        AND i.productVariant.status = com.zone.agri.entity.enums.VariantStatus.ACTIVE
+                        GROUP BY i.productVariant.product.id
+                        """)
+        List<Object[]> sumActiveBranchQuantityGroupByProductIds(@Param("productIds") List<Long> productIds);
+
+        @Query("""
                         SELECT i.productVariant.product.id, MIN(i.importPrice)
                         FROM Inventory i
                         WHERE i.productVariant.product.id IN :productIds AND i.quantity > 0

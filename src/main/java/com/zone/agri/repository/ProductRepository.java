@@ -139,6 +139,15 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
   // Tìm theo Slug cho trang chi tiết
   Optional<Product> findBySlug(String slug);
 
+  @Query("""
+      SELECT DISTINCT p FROM Product p
+      LEFT JOIN FETCH p.brand
+      LEFT JOIN FETCH p.category
+      LEFT JOIN FETCH p.productImages
+      WHERE p.slug = :slug
+      """)
+  Optional<Product> findBySlugWithPublicDetails(@Param("slug") String slug);
+
   // =========================================================================
   // PUBLIC WEBSITE API — không lộ dữ liệu nội bộ
   // =========================================================================

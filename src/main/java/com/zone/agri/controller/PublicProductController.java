@@ -1,12 +1,16 @@
 package com.zone.agri.controller;
 
+import com.zone.agri.dto.request.product.RecommendationClickRequest;
+import com.zone.agri.dto.response.product.FrequentlyBoughtTogetherResponse;
 import com.zone.agri.dto.response.product.ProductResponse;
 import com.zone.agri.dto.response.review.ReviewResponse;
 import com.zone.agri.service.ProductService;
+import com.zone.agri.service.ProductRecommendationService;
 import com.zone.agri.service.ReviewService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page; // Import Page
 import org.springframework.data.domain.Pageable; // Import Pageable
@@ -23,6 +27,7 @@ import java.util.List;
 public class PublicProductController {
 
     private final ProductService productService;
+    private final ProductRecommendationService productRecommendationService;
     private final ReviewService reviewService;
 
     @Operation(summary = "Lấy danh sách đánh giá của sản phẩm",
@@ -32,6 +37,28 @@ public class PublicProductController {
             @Parameter(description = "ID của sản phẩm", example = "1", required = true)
             @PathVariable Long productId) {
         return ResponseEntity.ok(reviewService.getReviewsByProductId(productId));
+    }
+
+    @Operation(summary = "Lấy danh sách sản phẩm khách hàng thường mua kèm",
+               description = "Trả về danh sách sản phẩm mua kèm đã được tính sẵn từ các đơn hàng hoàn tất.")
+    @GetMapping("/products/{productId}/frequently-bought-together")
+    public ResponseEntity<List<FrequentlyBoughtTogetherResponse>> getFrequentlyBoughtTogether(
+            @Parameter(description = "ID của sản phẩm gốc", example = "1", required = true)
+            @PathVariable Long productId,
+            @Parameter(description = "Số lượng gợi ý cần lấy, từ 1 đến 10", example = "4")
+            @RequestParam(required = false) Integer limit) {
+        return ResponseEntity.ok(productRecommendationService.getFrequentlyBoughtTogether(productId, limit));
+    }
+
+    @Operation(summary = "Ghi nhận click vào sản phẩm mua kèm",
+               description = "Endpoint public nhẹ để đo CTR của widget Khách hàng thường mua kèm.")
+    @PostMapping("/products/{productId}/frequently-bought-together/clicks")
+    public ResponseEntity<Void> trackFrequentlyBoughtTogetherClick(
+            @Parameter(description = "ID của sản phẩm gốc", example = "1", required = true)
+            @PathVariable Long productId,
+            @Valid @RequestBody RecommendationClickRequest request) {
+        productRecommendationService.trackClick(productId, request);
+        return ResponseEntity.noContent().build();
     }
 
     @Operation(summary = "Lấy danh sách đánh giá của sản phẩm theo slug",

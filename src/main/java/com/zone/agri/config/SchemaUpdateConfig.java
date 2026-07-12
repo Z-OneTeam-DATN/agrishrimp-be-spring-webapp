@@ -138,6 +138,40 @@ public class SchemaUpdateConfig implements BeanPostProcessor {
                             """);
 
             executeSql(stmt,
+                    "Create product_recommendations when missing",
+                    """
+                            CREATE TABLE IF NOT EXISTS product_recommendations (
+                                id BIGINT PRIMARY KEY AUTO_INCREMENT,
+                                product_id BIGINT NOT NULL,
+                                recommended_product_id BIGINT NOT NULL,
+                                support_count INT NOT NULL,
+                                customer_count INT NOT NULL,
+                                support DECIMAL(12,6) NOT NULL,
+                                confidence DECIMAL(12,6) NOT NULL,
+                                lift DECIMAL(12,6) NOT NULL,
+                                calculated_at DATETIME NOT NULL,
+                                UNIQUE KEY uq_product_recommendation_pair (product_id, recommended_product_id),
+                                INDEX idx_product_recommendations_product (product_id),
+                                INDEX idx_product_recommendations_rank (product_id, lift, confidence)
+                            )
+                            """);
+
+            executeSql(stmt,
+                    "Create product_recommendation_clicks when missing",
+                    """
+                            CREATE TABLE IF NOT EXISTS product_recommendation_clicks (
+                                id BIGINT PRIMARY KEY AUTO_INCREMENT,
+                                product_id BIGINT NOT NULL,
+                                recommended_product_id BIGINT NOT NULL,
+                                source VARCHAR(80) NULL,
+                                clicked_at DATETIME NOT NULL,
+                                INDEX idx_recommendation_clicks_product (product_id),
+                                INDEX idx_recommendation_clicks_recommended (recommended_product_id),
+                                INDEX idx_recommendation_clicks_clicked_at (clicked_at)
+                            )
+                            """);
+
+            executeSql(stmt,
                     "Patch suppliers adds created_by_user_id",
                     "ALTER TABLE suppliers ADD COLUMN created_by_user_id BIGINT NULL");
 

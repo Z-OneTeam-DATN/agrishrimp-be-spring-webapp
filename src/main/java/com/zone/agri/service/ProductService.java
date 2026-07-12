@@ -1023,8 +1023,9 @@ public class ProductService {
                 .collect(Collectors.toList());
     }
 
+    @Transactional(readOnly = true)
     public ProductResponse getProductDetailForUser(String slug) {
-        Product product = productRepository.findBySlug(slug)
+        Product product = productRepository.findBySlugWithPublicDetails(slug)
                 .orElseThrow(() -> new NotFoundException("Sản phẩm không tồn tại hoặc đã bị xóa."));
 
         if (product.getStatus() != ProductStatus.ACTIVE) {
