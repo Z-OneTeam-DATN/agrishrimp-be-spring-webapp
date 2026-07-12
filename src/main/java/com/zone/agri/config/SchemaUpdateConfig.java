@@ -242,7 +242,11 @@ public class SchemaUpdateConfig implements BeanPostProcessor {
                             ('CASHFLOW_WEIGHT_TIME', '0.5', 'Trọng số mức độ gấp thời gian của công nợ'),
                             ('CASHFLOW_WEIGHT_FREQUENCY', '0.3', 'Trọng số tần suất nhập hàng từ nhà cung cấp'),
                             ('CASHFLOW_WEIGHT_VALUE', '0.2', 'Trọng số giá trị tuyệt đối của khoản nợ'),
-                            ('SUPPLIER_DEBT_DEFAULT_TERM_DAYS', '30', 'Kỳ hạn nợ mặc định của phiếu nhập nếu không cấu hình (ngày)')
+                            ('SUPPLIER_DEBT_DEFAULT_TERM_DAYS', '30', 'Kỳ hạn nợ mặc định của phiếu nhập nếu không cấu hình (ngày)'),
+                            ('DEBT_AGE_WARNING_DAYS', '45', 'Ngưỡng tuổi nợ cảnh báo công nợ NCC (ngày)'),
+                            ('DEBT_AGE_CRITICAL_DAYS', '90', 'Ngưỡng tuổi nợ nghiêm trọng công nợ NCC (ngày)'),
+                            ('DEBT_WEIGHT_AGE', '0.5', 'Trọng số tuổi nợ trong điểm ưu tiên thanh toán'),
+                            ('DEBT_WEIGHT_VALUE', '0.5', 'Trọng số giá trị nợ trong điểm ưu tiên thanh toán')
                             """);
 
             log.info("All schema patches executed successfully.");

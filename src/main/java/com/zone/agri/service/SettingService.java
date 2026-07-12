@@ -453,4 +453,52 @@ public class SettingService {
                 .map(Integer::parseInt)
                 .orElse(30);
     }
+
+    public int getDebtAgeWarningDays() {
+        return settingRepo.findById("DEBT_AGE_WARNING_DAYS")
+                .map(SystemSetting::getSettingValue)
+                .map(String::trim)
+                .map(Integer::parseInt)
+                .orElse(45);
+    }
+
+    public int getDebtAgeCriticalDays() {
+        return settingRepo.findById("DEBT_AGE_CRITICAL_DAYS")
+                .map(SystemSetting::getSettingValue)
+                .map(String::trim)
+                .map(Integer::parseInt)
+                .orElse(90);
+    }
+
+    public BigDecimal getDebtWeightAge() {
+        return settingRepo.findById("DEBT_WEIGHT_AGE")
+                .map(SystemSetting::getSettingValue)
+                .map(String::trim)
+                .map(BigDecimal::new)
+                .orElse(BigDecimal.valueOf(0.5));
+    }
+
+    public BigDecimal getDebtWeightValue() {
+        return settingRepo.findById("DEBT_WEIGHT_VALUE")
+                .map(SystemSetting::getSettingValue)
+                .map(String::trim)
+                .map(BigDecimal::new)
+                .orElse(BigDecimal.valueOf(0.5));
+    }
+
+    public BigDecimal getPLCOGSWarningThreshold() {
+        return settingRepo.findById("PL_COGS_RATIO_WARNING_THRESHOLD")
+                .map(SystemSetting::getSettingValue)
+                .map(String::trim)
+                .map(BigDecimal::new)
+                .orElse(BigDecimal.valueOf(75.0));
+    }
+
+    public BigDecimal getPLReturnWarningThreshold() {
+        return settingRepo.findById("PL_RETURN_RATIO_WARNING_THRESHOLD")
+                .map(SystemSetting::getSettingValue)
+                .map(String::trim)
+                .map(BigDecimal::new)
+                .orElse(BigDecimal.valueOf(10.0));
+    }
 }
