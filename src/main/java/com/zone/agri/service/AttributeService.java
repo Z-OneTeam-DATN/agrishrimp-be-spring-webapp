@@ -34,6 +34,14 @@ public class AttributeService {
     }
 
     @Transactional(readOnly = true)
+    public List<AttributeDTO> getPublicAttributes() {
+        return repository.findAll().stream()
+                .filter(attribute -> attribute.getStatus() == null || attribute.getStatus() == AttributeStatus.ACTIVE)
+                .map(this::toDTO)
+                .collect(Collectors.toList());
+    }
+
+    @Transactional(readOnly = true)
     public AttributeDTO getById(Long id) {
         Attribute attr = repository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Không tìm thấy thuộc tính!"));

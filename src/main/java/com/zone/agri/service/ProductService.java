@@ -92,6 +92,9 @@ import lombok.extern.slf4j.Slf4j;
 @SuppressWarnings({ "boxing", "unboxing" })
 public class ProductService {
 
+    private static final int PRICE_FILTER_SCAN_LIMIT = 10_000;
+    private static final String DEFAULT_PUBLIC_SORT = "featured";
+
     private final UserRepository userRepository;
     private final ProductRepository productRepository;
     private final ProductVariantRepository variantRepository;
@@ -112,6 +115,18 @@ public class ProductService {
     private final SettingService settingService;
     private final ImageSearchService imageSearchService;
     private final ProductVectorRepository productVectorRepository;
+
+    private enum PublicProductSort {
+        FEATURED,
+        PRICE_ASC,
+        PRICE_DESC,
+        NAME_ASC,
+        NAME_DESC,
+        OLDEST,
+        NEWEST,
+        BEST_SELLING,
+        INVENTORY_DESC
+    }
 
     // =========================================================================
     // READ METHODS
@@ -1090,16 +1105,424 @@ public class ProductService {
     }
 
     @Transactional(readOnly = true)
-    public Page<ProductResponse> getPublicProducts(String keyword, Long categoryId, Long brandId, Pageable pageable) {
-        Page<Long> productIdsPage = productRepository.findPublicProductIds(keyword, categoryId, brandId, pageable);
+    public Page<ProductResponse> getPublicProducts(
+            String keyword,
+            Long categoryId,
+            Long brandId,
+            BigDecimal minPrice,
+            BigDecimal maxPrice,
+            String packaging,
+            String packagingValueIds,
+            String sort,
+            Pageable pageable) {
+        validatePriceRange(minPrice, maxPrice);
+
+        List<Long> packagingValueIdList = normalizePackagingValueIds(packagingValueIds);
+        List<String> packagingValues = resolvePackagingValues(
+                normalizePackagingValues(packaging),
+                packagingValueIdList);
+        PublicProductSort sortOption = parsePublicProductSort(sort);
+        boolean hasPackagingValueIdFilter = !packagingValueIdList.isEmpty();
+        boolean hasPackagingFilter = hasPackagingValueIdFilter || !packagingValues.isEmpty();
+        List<Long> categoryIds = resolveCategoryFilterIds(categoryId);
+        boolean hasCategoryFilter = !categoryIds.isEmpty();
+        String normalizedKeyword = blankToNull(keyword);
+        List<Long> keywordCategoryIds = resolveKeywordCategoryFilterIds(normalizedKeyword);
+        List<Long> keywordBrandIds = resolveKeywordBrandFilterIds(normalizedKeyword);
+        boolean hasKeywordCategoryFilter = !keywordCategoryIds.isEmpty();
+        boolean hasKeywordBrandFilter = !keywordBrandIds.isEmpty();
+        Pageable lookupPageable = PageRequest.of(0, PRICE_FILTER_SCAN_LIMIT);
+
+        Page<Long> productIdsPage = productRepository.findPublicProductIdsFiltered(
+                normalizedKeyword,
+                hasKeywordCategoryFilter,
+                hasKeywordCategoryFilter ? keywordCategoryIds : List.of(-1L),
+                hasKeywordBrandFilter,
+                hasKeywordBrandFilter ? keywordBrandIds : List.of(-1L),
+                hasCategoryFilter,
+                hasCategoryFilter ? categoryIds : List.of(-1L),
+                brandId,
+                hasPackagingFilter,
+                hasPackagingValueIdFilter,
+                hasPackagingValueIdFilter ? packagingValueIdList : List.of(-1L),
+                hasPackagingFilter ? packagingValues : List.of("__no_packaging_filter__"),
+                lookupPageable);
+
         List<Long> productIds = productIdsPage.getContent();
         if (productIds.isEmpty())
             return Page.empty(pageable);
+
         Map<Long, Long> soldCountMap = buildSoldCountMap(productIds);
-        List<ProductResponse> productResponses = productRepository.findPublicByIds(productIds).stream()
+
+        Map<Long, Product> productsById = productRepository.findPublicByIds(productIds).stream()
+                .collect(Collectors.toMap(Product::getId, product -> product));
+
+        List<ProductResponse> productResponses = productIds.stream()
+                .map(productsById::get)
+                .filter(Objects::nonNull)
                 .map(product -> convertToResponse(product, soldCountMap))
-                .filter(p -> p.getInventory() != null && p.getInventory() > 0)
+                .map(p -> applyPublicListVariantFilters(p, minPrice, maxPrice, packagingValueIdList, packagingValues))
+                .filter(p -> p.getVariants() != null && !p.getVariants().isEmpty())
                 .collect(Collectors.toList());
-        return new PageImpl<>(productResponses, pageable, productIdsPage.getTotalElements());
+
+        productResponses.sort(buildPublicProductComparator(sortOption, productsById));
+
+        int fromIndex = (int) Math.min(pageable.getOffset(), productResponses.size());
+        int toIndex = Math.min(fromIndex + pageable.getPageSize(), productResponses.size());
+        List<ProductResponse> pageContent = productResponses.subList(fromIndex, toIndex);
+
+        return new PageImpl<>(pageContent, pageable, productResponses.size());
+    }
+
+    private PublicProductSort parsePublicProductSort(String sort) {
+        if (sort == null || sort.isBlank()) {
+            return PublicProductSort.FEATURED;
+        }
+
+        return switch (sort.trim().toLowerCase(Locale.ROOT)) {
+            case "price-asc" -> PublicProductSort.PRICE_ASC;
+            case "price-desc" -> PublicProductSort.PRICE_DESC;
+            case "name-asc" -> PublicProductSort.NAME_ASC;
+            case "name-desc" -> PublicProductSort.NAME_DESC;
+            case "oldest" -> PublicProductSort.OLDEST;
+            case "newest" -> PublicProductSort.NEWEST;
+            case "best-selling" -> PublicProductSort.BEST_SELLING;
+            case "inventory-desc" -> PublicProductSort.INVENTORY_DESC;
+            default -> PublicProductSort.FEATURED;
+        };
+    }
+
+    private Comparator<ProductResponse> buildPublicProductComparator(
+            PublicProductSort sortOption,
+            Map<Long, Product> productsById) {
+        Comparator<ProductResponse> newestTieBreaker = Comparator
+                .comparing(
+                        (ProductResponse response) -> resolveProductCreatedAt(productsById.get(response.getId())),
+                        Comparator.nullsLast(Comparator.reverseOrder()))
+                .thenComparing(ProductResponse::getId, Comparator.nullsLast(Comparator.reverseOrder()));
+
+        return switch (sortOption) {
+            case PRICE_ASC -> Comparator
+                    .comparing(this::resolveLowestVariantPrice, Comparator.nullsLast(Comparator.naturalOrder()))
+                    .thenComparing(newestTieBreaker);
+            case PRICE_DESC -> Comparator
+                    .comparing(this::resolveLowestVariantPrice, Comparator.nullsLast(Comparator.reverseOrder()))
+                    .thenComparing(newestTieBreaker);
+            case NAME_ASC -> Comparator
+                    .comparing(
+                            (ProductResponse response) -> blankToEmpty(response.getName()),
+                            String.CASE_INSENSITIVE_ORDER)
+                    .thenComparing(newestTieBreaker);
+            case NAME_DESC -> Comparator
+                    .comparing(
+                            (ProductResponse response) -> blankToEmpty(response.getName()),
+                            String.CASE_INSENSITIVE_ORDER.reversed())
+                    .thenComparing(newestTieBreaker);
+            case OLDEST -> Comparator
+                    .comparing(
+                            (ProductResponse response) -> resolveProductCreatedAt(productsById.get(response.getId())),
+                            Comparator.nullsLast(Comparator.naturalOrder()))
+                    .thenComparing(ProductResponse::getId, Comparator.nullsLast(Comparator.naturalOrder()));
+            case NEWEST -> newestTieBreaker;
+            case BEST_SELLING -> Comparator
+                    .comparing(this::safeLong, Comparator.reverseOrder())
+                    .thenComparing(newestTieBreaker);
+            case INVENTORY_DESC -> Comparator
+                    .comparing(this::safeInventory, Comparator.reverseOrder())
+                    .thenComparing(newestTieBreaker);
+            case FEATURED -> Comparator
+                    .comparing(this::safeLong, Comparator.reverseOrder())
+                    .thenComparing(this::safeRating, Comparator.reverseOrder())
+                    .thenComparing(this::safeReviewCount, Comparator.reverseOrder())
+                    .thenComparing(this::safeInventory, Comparator.reverseOrder())
+                    .thenComparing(newestTieBreaker);
+        };
+    }
+
+    private BigDecimal resolveLowestVariantPrice(ProductResponse response) {
+        if (response == null || response.getVariants() == null || response.getVariants().isEmpty()) {
+            return null;
+        }
+
+        return response.getVariants().stream()
+                .map(ProductVariantResponse::getPrice)
+                .filter(Objects::nonNull)
+                .min(Comparator.naturalOrder())
+                .orElse(null);
+    }
+
+    private LocalDateTime resolveProductCreatedAt(Product product) {
+        return product != null ? product.getCreatedAt() : null;
+    }
+
+    private Long safeLong(ProductResponse response) {
+        return response != null && response.getSoldCount() != null ? response.getSoldCount() : 0L;
+    }
+
+    private Integer safeInventory(ProductResponse response) {
+        return response != null && response.getInventory() != null ? response.getInventory() : 0;
+    }
+
+    private Float safeRating(ProductResponse response) {
+        return response != null && response.getRatingAverage() != null ? response.getRatingAverage() : 0F;
+    }
+
+    private Integer safeReviewCount(ProductResponse response) {
+        return response != null && response.getReviewCount() != null ? response.getReviewCount() : 0;
+    }
+
+    private String blankToEmpty(String value) {
+        return value == null ? "" : value;
+    }
+
+    private List<Long> resolveKeywordCategoryFilterIds(String keyword) {
+        String normalizedKeyword = normalizeSearchText(keyword);
+        if (normalizedKeyword.isBlank()) {
+            return Collections.emptyList();
+        }
+
+        List<Category> activeCategories = categoryRepository.findAll().stream()
+                .filter(category -> category.getStatus() == CategoryStatus.ACTIVE)
+                .collect(Collectors.toList());
+
+        Map<Long, List<Category>> childrenByParentId = activeCategories.stream()
+                .filter(category -> category.getParent() != null && category.getParent().getId() != null)
+                .collect(Collectors.groupingBy(category -> category.getParent().getId()));
+
+        LinkedHashSet<Long> ids = new LinkedHashSet<>();
+        activeCategories.stream()
+                .filter(category -> matchesNormalizedKeyword(category.getName(), normalizedKeyword))
+                .forEach(category -> collectCategoryAndChildren(category.getId(), childrenByParentId, ids));
+
+        return new ArrayList<>(ids);
+    }
+
+    private List<Long> resolveKeywordBrandFilterIds(String keyword) {
+        String normalizedKeyword = normalizeSearchText(keyword);
+        if (normalizedKeyword.isBlank()) {
+            return Collections.emptyList();
+        }
+
+        return brandRepository.findAll().stream()
+                .filter(brand -> brand.getStatus() == BrandStatus.ACTIVE)
+                .filter(brand -> matchesNormalizedKeyword(brand.getName(), normalizedKeyword))
+                .map(Brand::getId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .collect(Collectors.toList());
+    }
+
+    private boolean matchesNormalizedKeyword(String value, String normalizedKeyword) {
+        String normalizedValue = normalizeSearchText(value);
+        if (normalizedValue.isBlank()) {
+            return false;
+        }
+
+        if (normalizedValue.contains(normalizedKeyword)) {
+            return true;
+        }
+
+        List<String> tokens = Arrays.stream(normalizedKeyword.split("\\s+"))
+                .filter(token -> token.length() > 1)
+                .collect(Collectors.toList());
+
+        return !tokens.isEmpty() && tokens.stream().allMatch(normalizedValue::contains);
+    }
+
+    private String normalizeSearchText(String value) {
+        if (value == null || value.isBlank()) {
+            return "";
+        }
+
+        return Normalizer.normalize(value, Normalizer.Form.NFD)
+                .replaceAll("[\\p{InCombiningDiacriticalMarks}]", "")
+                .replace('đ', 'd')
+                .replace('Đ', 'D')
+                .toLowerCase(Locale.ROOT)
+                .replaceAll("[^a-z0-9]+", " ")
+                .trim();
+    }
+
+    private List<Long> resolveCategoryFilterIds(Long categoryId) {
+        if (categoryId == null) {
+            return Collections.emptyList();
+        }
+
+        Category root = categoryRepository.findById(categoryId)
+                .orElseThrow(() -> new NotFoundException("Không tìm thấy danh mục với ID: " + categoryId));
+
+        if (root.getStatus() != CategoryStatus.ACTIVE) {
+            throw new BadRequestException("Danh mục không hoạt động.");
+        }
+
+        List<Category> activeCategories = categoryRepository.findAll().stream()
+                .filter(category -> category.getStatus() == CategoryStatus.ACTIVE)
+                .collect(Collectors.toList());
+
+        Map<Long, List<Category>> childrenByParentId = activeCategories.stream()
+                .filter(category -> category.getParent() != null && category.getParent().getId() != null)
+                .collect(Collectors.groupingBy(category -> category.getParent().getId()));
+
+        LinkedHashSet<Long> ids = new LinkedHashSet<>();
+        collectCategoryAndChildren(root.getId(), childrenByParentId, ids);
+        return new ArrayList<>(ids);
+    }
+
+    private void collectCategoryAndChildren(
+            Long categoryId,
+            Map<Long, List<Category>> childrenByParentId,
+            Set<Long> targetIds) {
+        if (categoryId == null || !targetIds.add(categoryId)) {
+            return;
+        }
+
+        childrenByParentId.getOrDefault(categoryId, Collections.emptyList())
+                .forEach(child -> collectCategoryAndChildren(child.getId(), childrenByParentId, targetIds));
+    }
+
+    private void validatePriceRange(BigDecimal minPrice, BigDecimal maxPrice) {
+        if (minPrice != null && minPrice.compareTo(BigDecimal.ZERO) < 0) {
+            throw new BadRequestException("Giá tối thiểu không được âm.");
+        }
+
+        if (maxPrice != null && maxPrice.compareTo(BigDecimal.ZERO) < 0) {
+            throw new BadRequestException("Giá tối đa không được âm.");
+        }
+
+        if (minPrice != null && maxPrice != null && minPrice.compareTo(maxPrice) > 0) {
+            throw new BadRequestException("Giá tối thiểu không được lớn hơn giá tối đa.");
+        }
+    }
+
+    private List<String> normalizePackagingValues(String packaging) {
+        if (packaging == null || packaging.isBlank()) {
+            return Collections.emptyList();
+        }
+
+        return Arrays.stream(packaging.split(","))
+                .map(String::trim)
+                .filter(value -> !value.isBlank())
+                .map(value -> value.toLowerCase(Locale.ROOT))
+                .distinct()
+                .limit(20)
+                .collect(Collectors.toList());
+    }
+
+    private List<String> resolvePackagingValues(List<String> packagingValues, List<Long> packagingValueIds) {
+        LinkedHashSet<String> values = new LinkedHashSet<>();
+        if (packagingValues != null) {
+            values.addAll(packagingValues);
+        }
+
+        if (packagingValueIds != null && !packagingValueIds.isEmpty()) {
+            attributeValueRepository.findAllById(packagingValueIds).stream()
+                    .map(AttributeValue::getValue)
+                    .filter(Objects::nonNull)
+                    .map(String::trim)
+                    .filter(value -> !value.isBlank())
+                    .map(value -> value.toLowerCase(Locale.ROOT))
+                    .forEach(values::add);
+        }
+
+        return values.stream()
+                .limit(50)
+                .collect(Collectors.toList());
+    }
+
+    private List<Long> normalizePackagingValueIds(String packagingValueIds) {
+        if (packagingValueIds == null || packagingValueIds.isBlank()) {
+            return Collections.emptyList();
+        }
+
+        return Arrays.stream(packagingValueIds.split(","))
+                .map(String::trim)
+                .filter(value -> !value.isBlank())
+                .map(value -> {
+                    try {
+                        return Long.valueOf(value);
+                    } catch (NumberFormatException ex) {
+                        return null;
+                    }
+                })
+                .filter(Objects::nonNull)
+                .distinct()
+                .limit(50)
+                .collect(Collectors.toList());
+    }
+
+    private ProductResponse applyPublicListVariantFilters(
+            ProductResponse product,
+            BigDecimal minPrice,
+            BigDecimal maxPrice,
+            List<Long> packagingValueIds,
+            List<String> packagingValues) {
+        if (product == null || product.getVariants() == null) {
+            return product;
+        }
+
+        boolean hasPackagingFilter = (packagingValueIds != null && !packagingValueIds.isEmpty())
+                || (packagingValues != null && !packagingValues.isEmpty());
+
+        List<ProductVariantResponse> filteredVariants = product.getVariants().stream()
+                .filter(variant -> variant.getQuantity() != null && variant.getQuantity() > 0)
+                .filter(variant -> matchesVariantPriceRange(variant, minPrice, maxPrice))
+                .filter(variant -> !hasPackagingFilter || matchesVariantPackaging(variant, packagingValueIds, packagingValues))
+                .collect(Collectors.toList());
+
+        product.setVariants(filteredVariants);
+        product.setInventory(filteredVariants.stream()
+                .map(ProductVariantResponse::getQuantity)
+                .filter(Objects::nonNull)
+                .mapToInt(Integer::intValue)
+                .sum());
+
+        return product;
+    }
+
+    private boolean matchesVariantPriceRange(ProductVariantResponse variant, BigDecimal minPrice, BigDecimal maxPrice) {
+        if (minPrice == null && maxPrice == null) {
+            return true;
+        }
+
+        BigDecimal price = variant != null ? variant.getPrice() : null;
+        return price != null
+                && (minPrice == null || price.compareTo(minPrice) >= 0)
+                && (maxPrice == null || price.compareTo(maxPrice) <= 0);
+    }
+
+    private boolean matchesVariantPackaging(
+            ProductVariantResponse variant,
+            List<Long> packagingValueIds,
+            List<String> packagingValues) {
+        boolean hasValueIdFilter = packagingValueIds != null && !packagingValueIds.isEmpty();
+        boolean hasValueFilter = packagingValues != null && !packagingValues.isEmpty();
+
+        if (!hasValueIdFilter && !hasValueFilter) {
+            return true;
+        }
+
+        if (variant == null || variant.getAttributeValues() == null) {
+            return false;
+        }
+
+        if (hasValueIdFilter) {
+            boolean matchedById = variant.getAttributeValues().stream()
+                    .map(AttributeValueResponse::getValueId)
+                    .filter(Objects::nonNull)
+                    .anyMatch(packagingValueIds::contains);
+            if (matchedById) {
+                return true;
+            }
+        }
+
+        return variant.getAttributeValues().stream()
+                .map(AttributeValueResponse::getValue)
+                .filter(Objects::nonNull)
+                .map(value -> value.toLowerCase(Locale.ROOT))
+                .anyMatch(packagingValues::contains);
+    }
+
+    private String blankToNull(String value) {
+        return value == null || value.isBlank() ? null : value.trim();
     }
 }

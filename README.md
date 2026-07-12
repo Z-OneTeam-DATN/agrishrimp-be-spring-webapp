@@ -145,43 +145,16 @@ docker compose up -d redis
 5. Run the backend normally:
 
 ```bash
-./mvnw spring-boot:run -Dspring-boot.run.profiles=dev
+./mvnw spring-boot:run -Dspring-boot.run.profiles=dev,live-local
 ```
 
 Windows PowerShell:
 
 ```powershell
-.\mvnw.cmd spring-boot:run "-Dspring-boot.run.profiles=dev"
+.\mvnw.cmd spring-boot:run "-Dspring-boot.run.profiles=dev,live-local"
 ```
 
-Because `.env.local` is loaded automatically, no manual `source .env` or extra wrapper script is required for this workflow.
-
-### Option 1B: Run the backend locally but connect to a remote MySQL database
-
-Use this when you want localhost API behavior while working against the real server database, similar to how the local web app can point at production services.
-
-1. Copy `.env.local.example` to `.env.local` if you do not already have it.
-2. Update `SPRING_DATASOURCE_URL`, `SPRING_DATASOURCE_USERNAME`, and `SPRING_DATASOURCE_PASSWORD` in `.env.local` with the remote MySQL connection details.
-3. Keep `SPRING_PROFILES_ACTIVE=dev` so local-friendly defaults still apply.
-4. Start local Redis if your flow uses JWT revocation, order preparation, or other Redis-backed features.
-5. Run:
-
-```powershell
-.\run-local-remote-db.ps1
-```
-
-Linux/macOS:
-
-```bash
-chmod +x ./run-local-remote-db.sh
-./run-local-remote-db.sh
-```
-
-How it works:
-
-- The script loads `.env` first if it exists, so you can reuse existing integration keys.
-- Then it loads `.env.local` and overrides profile, URLs, CORS, datasource, and Redis settings for local execution.
-- The application still runs on `http://localhost:8004`, but Spring connects directly to the remote MySQL server.
+Because `.env.local` is loaded automatically, no manual `source .env` or extra wrapper script is required for this workflow. The `live-local` profile keeps local runs safer against the real database by disabling startup schema patches and seed data.
 
 Important:
 

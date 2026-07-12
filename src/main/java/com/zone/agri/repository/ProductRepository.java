@@ -169,7 +169,7 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
       WHERE p.status = com.zone.agri.entity.enums.ProductStatus.ACTIVE
         AND c.status = com.zone.agri.entity.enums.CategoryStatus.ACTIVE
         AND (:keyword IS NULL OR LOWER(p.name) LIKE LOWER(CONCAT('%', :keyword, '%')))
-        AND (:categoryId IS NULL OR c.id = :categoryId)
+        AND (:categoryId IS NULL OR c.id = :categoryId OR c.parent.id = :categoryId)
         AND (:brandId IS NULL OR b.id = :brandId)
         AND EXISTS (
           SELECT 1 FROM ProductVariant v
@@ -192,7 +192,7 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
       WHERE p.status = com.zone.agri.entity.enums.ProductStatus.ACTIVE
         AND c.status = com.zone.agri.entity.enums.CategoryStatus.ACTIVE
         AND (:keyword IS NULL OR LOWER(p.name) LIKE LOWER(CONCAT('%', :keyword, '%')))
-        AND (:categoryId IS NULL OR c.id = :categoryId)
+        AND (:categoryId IS NULL OR c.id = :categoryId OR c.parent.id = :categoryId)
         AND (:brandId IS NULL OR b.id = :brandId)
         AND EXISTS (
           SELECT 1 FROM ProductVariant v
@@ -212,6 +212,115 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
       @Param("keyword") String keyword,
       @Param("categoryId") Long categoryId,
       @Param("brandId") Long brandId, // Thêm tham số brandId
+      Pageable pageable);
+
+  @Query(value = """
+      SELECT p.id FROM Product p
+      JOIN p.category c
+      LEFT JOIN p.brand b
+      WHERE p.status = com.zone.agri.entity.enums.ProductStatus.ACTIVE
+        AND c.status = com.zone.agri.entity.enums.CategoryStatus.ACTIVE
+        AND (
+          :keyword IS NULL
+          OR LOWER(p.name) LIKE LOWER(CONCAT('%', :keyword, '%'))
+          OR LOWER(c.name) LIKE LOWER(CONCAT('%', :keyword, '%'))
+          OR LOWER(COALESCE(b.name, '')) LIKE LOWER(CONCAT('%', :keyword, '%'))
+          OR (:hasKeywordCategoryFilter = true AND c.id IN :keywordCategoryIds)
+          OR (:hasKeywordBrandFilter = true AND b.id IN :keywordBrandIds)
+          OR EXISTS (
+            SELECT 1 FROM ProductVariant kv
+            WHERE kv.product.id = p.id
+              AND (
+                LOWER(kv.sku) LIKE LOWER(CONCAT('%', :keyword, '%'))
+                OR LOWER(COALESCE(kv.barcode, '')) LIKE LOWER(CONCAT('%', :keyword, '%'))
+              )
+          )
+        )
+        AND (:hasCategoryFilter = false OR c.id IN :categoryIds)
+        AND (:brandId IS NULL OR b.id = :brandId)
+        AND EXISTS (
+          SELECT 1 FROM ProductVariant v
+          JOIN Inventory i ON i.productVariant.id = v.id
+          WHERE v.product.id = p.id
+            AND v.status = com.zone.agri.entity.enums.VariantStatus.ACTIVE
+            AND (:hasPackagingFilter = false OR EXISTS (
+              SELECT 1 FROM SKUAttributeValue savp
+              WHERE savp.sku.id = v.id
+                AND savp.attribute.status = com.zone.agri.entity.enums.AttributeStatus.ACTIVE
+                AND (
+                  (:hasPackagingValueIdFilter = true AND savp.attributeValue.id IN :packagingValueIds)
+                  OR LOWER(savp.attributeValue.value) IN :packagingValues
+                )
+            ))
+            AND NOT EXISTS (
+              SELECT 1 FROM SKUAttributeValue sav
+              WHERE sav.sku.id = v.id
+                AND sav.attribute.status = com.zone.agri.entity.enums.AttributeStatus.INACTIVE
+            )
+            AND i.branch.status = com.zone.agri.entity.enums.BranchStatus.ACTIVE
+            AND i.quantity > 0
+        )
+      ORDER BY p.createdAt DESC
+      """, countQuery = """
+      SELECT COUNT(p) FROM Product p
+      JOIN p.category c
+      LEFT JOIN p.brand b
+      WHERE p.status = com.zone.agri.entity.enums.ProductStatus.ACTIVE
+        AND c.status = com.zone.agri.entity.enums.CategoryStatus.ACTIVE
+        AND (
+          :keyword IS NULL
+          OR LOWER(p.name) LIKE LOWER(CONCAT('%', :keyword, '%'))
+          OR LOWER(c.name) LIKE LOWER(CONCAT('%', :keyword, '%'))
+          OR LOWER(COALESCE(b.name, '')) LIKE LOWER(CONCAT('%', :keyword, '%'))
+          OR (:hasKeywordCategoryFilter = true AND c.id IN :keywordCategoryIds)
+          OR (:hasKeywordBrandFilter = true AND b.id IN :keywordBrandIds)
+          OR EXISTS (
+            SELECT 1 FROM ProductVariant kv
+            WHERE kv.product.id = p.id
+              AND (
+                LOWER(kv.sku) LIKE LOWER(CONCAT('%', :keyword, '%'))
+                OR LOWER(COALESCE(kv.barcode, '')) LIKE LOWER(CONCAT('%', :keyword, '%'))
+              )
+          )
+        )
+        AND (:hasCategoryFilter = false OR c.id IN :categoryIds)
+        AND (:brandId IS NULL OR b.id = :brandId)
+        AND EXISTS (
+          SELECT 1 FROM ProductVariant v
+          JOIN Inventory i ON i.productVariant.id = v.id
+          WHERE v.product.id = p.id
+            AND v.status = com.zone.agri.entity.enums.VariantStatus.ACTIVE
+            AND (:hasPackagingFilter = false OR EXISTS (
+              SELECT 1 FROM SKUAttributeValue savp
+              WHERE savp.sku.id = v.id
+                AND savp.attribute.status = com.zone.agri.entity.enums.AttributeStatus.ACTIVE
+                AND (
+                  (:hasPackagingValueIdFilter = true AND savp.attributeValue.id IN :packagingValueIds)
+                  OR LOWER(savp.attributeValue.value) IN :packagingValues
+                )
+            ))
+            AND NOT EXISTS (
+              SELECT 1 FROM SKUAttributeValue sav
+              WHERE sav.sku.id = v.id
+                AND sav.attribute.status = com.zone.agri.entity.enums.AttributeStatus.INACTIVE
+            )
+            AND i.branch.status = com.zone.agri.entity.enums.BranchStatus.ACTIVE
+            AND i.quantity > 0
+        )
+      """)
+  Page<Long> findPublicProductIdsFiltered(
+      @Param("keyword") String keyword,
+      @Param("hasKeywordCategoryFilter") boolean hasKeywordCategoryFilter,
+      @Param("keywordCategoryIds") List<Long> keywordCategoryIds,
+      @Param("hasKeywordBrandFilter") boolean hasKeywordBrandFilter,
+      @Param("keywordBrandIds") List<Long> keywordBrandIds,
+      @Param("hasCategoryFilter") boolean hasCategoryFilter,
+      @Param("categoryIds") List<Long> categoryIds,
+      @Param("brandId") Long brandId,
+      @Param("hasPackagingFilter") boolean hasPackagingFilter,
+      @Param("hasPackagingValueIdFilter") boolean hasPackagingValueIdFilter,
+      @Param("packagingValueIds") List<Long> packagingValueIds,
+      @Param("packagingValues") List<String> packagingValues,
       Pageable pageable);
 
   /**

@@ -1,6 +1,7 @@
 package com.zone.agri.service;
 
 import com.zone.agri.dto.response.order.CartItemDto;
+import com.zone.agri.dto.response.order.OrderItemDto;
 import com.zone.agri.dto.response.order.OutOfStockItemDto;
 import com.zone.agri.dto.response.order.SubOrderDraftDto;
 import com.zone.agri.entity.Branch;
@@ -18,6 +19,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
 import java.util.*;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -49,12 +51,11 @@ class InventoryAllocationServiceTest {
                 .thenReturn("NONE");
         org.mockito.Mockito.when(settingService.calculateSellingPrice(
                 org.mockito.ArgumentMatchers.any(BigDecimal.class),
-                org.mockito.ArgumentMatchers.any(BigDecimal.class),
-                org.mockito.ArgumentMatchers.anyString()))
+                org.mockito.ArgumentMatchers.nullable(Long.class),
+                org.mockito.ArgumentMatchers.nullable(LocalDateTime.class)))
                 .thenAnswer(invocation -> {
                     BigDecimal importPrice = invocation.getArgument(0);
-                    BigDecimal multiplier = invocation.getArgument(1);
-                    return importPrice.multiply(multiplier);
+                    return importPrice.multiply(new BigDecimal("1.3"));
                 });
 
         branch1 = Branch.builder().build();
@@ -127,10 +128,10 @@ class InventoryAllocationServiceTest {
         assertThat(subOrder.getSubtotal()).isEqualByComparingTo(expectedSubtotal);
     }
 
-    // ── Case b: phải tách 2 chi nhánh ────────────────────────────
+    // ── Case b: chọn chi nhánh gần nhất và ghi nhận phần thiếu ─────
 
     @Test
-    void allocate_case_b_splitAcrossTwoBranches() {
+    void allocate_case_b_choosesNearestBranchAndReportsMissingQuantity() {
         List<CartItemDto> cart = List.of(
                 new CartItemDto(101L, 10), // varA: branch1 chỉ có 6, branch2 có thêm 4
                 new CartItemDto(102L, 5)   // varB: branch1 đủ
@@ -154,21 +155,23 @@ class InventoryAllocationServiceTest {
 
         AllocationResult result = allocationService.allocate(cart, variantMap, branches, matrix);
 
-        assertThat(result.subOrders()).hasSize(2);
-        assertThat(result.outOfStockItems()).isEmpty();
+        assertThat(result.subOrders()).hasSize(1);
+        assertThat(result.outOfStockItems()).hasSize(1);
 
         SubOrderDraftDto subOrder1 = result.subOrders().get(0);
         assertThat(subOrder1.getBranchId()).isEqualTo(1L);
 
-        SubOrderDraftDto subOrder2 = result.subOrders().get(1);
-        assertThat(subOrder2.getBranchId()).isEqualTo(2L);
-
-        // Branch2 chỉ giao phần còn thiếu của varA (4 items)
-        int varAInBranch2 = subOrder2.getItems().stream()
+        OrderItemDto varAItem = subOrder1.getItems().stream()
                 .filter(i -> i.getProductVariantId().equals(101L))
-                .mapToInt(i -> i.getQuantity())
-                .sum();
-        assertThat(varAInBranch2).isEqualTo(4);
+                .findFirst()
+                .orElseThrow();
+        assertThat(varAItem.getAllocatedQuantity()).isEqualTo(6);
+        assertThat(varAItem.getMissingQuantity()).isEqualTo(4);
+
+        OutOfStockItemDto outOfStock = result.outOfStockItems().get(0);
+        assertThat(outOfStock.getProductVariantId()).isEqualTo(101L);
+        assertThat(outOfStock.getRequestedQty()).isEqualTo(10);
+        assertThat(outOfStock.getAvailableQty()).isEqualTo(8);
     }
 
     // ── Case c: 1 sản phẩm không có ở đâu ───────────────────────
@@ -224,14 +227,16 @@ class InventoryAllocationServiceTest {
 
         AllocationResult result = allocationService.allocate(cart, variantMap, branches, matrix);
 
-        // 2 sub-orders: branch1 giao 8, branch2 giao 7
-        assertThat(result.subOrders()).hasSize(2);
-        // 5 cái còn lại không có ở đâu
+        assertThat(result.subOrders()).hasSize(1);
         assertThat(result.outOfStockItems()).hasSize(1);
 
+        OrderItemDto allocatedItem = result.subOrders().get(0).getItems().get(0);
+        assertThat(allocatedItem.getAllocatedQuantity()).isEqualTo(8);
+        assertThat(allocatedItem.getMissingQuantity()).isEqualTo(12);
+
         OutOfStockItemDto outOfStock = result.outOfStockItems().get(0);
-        assertThat(outOfStock.getRequestedQty()).isEqualTo(5); // 20 - 8 - 7
-        assertThat(outOfStock.getAvailableQty()).isEqualTo(0); // Số dư còn lại là 0
+        assertThat(outOfStock.getRequestedQty()).isEqualTo(20);
+        assertThat(outOfStock.getAvailableQty()).isEqualTo(7);
     }
 
     // ── Helper method ─────────────────────────────────────────────

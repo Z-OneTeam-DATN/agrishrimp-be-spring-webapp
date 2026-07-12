@@ -18,6 +18,7 @@ import org.springframework.data.web.PageableDefault; // Import PageableDefault
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.math.BigDecimal;
 import java.util.List;
 
 @RestController
@@ -97,9 +98,20 @@ public class PublicProductController {
             @Parameter(description = "Lọc theo ID danh mục", example = "1")
             @RequestParam(required = false) Long categoryId,
             @Parameter(description = "Lọc theo ID thương hiệu", example = "1")
-            @RequestParam(required = false) Long brandId, // Thêm tham số brandId
+            @RequestParam(required = false) Long brandId,
+            @Parameter(description = "Giá bán public tối thiểu", example = "200000")
+            @RequestParam(required = false) BigDecimal minPrice,
+            @Parameter(description = "Giá bán public tối đa", example = "300000")
+            @RequestParam(required = false) BigDecimal maxPrice,
+            @Parameter(description = "Quy cách đóng gói SKU, phân tách bằng dấu phẩy", example = "Chai,Gói")
+            @RequestParam(required = false) String packaging,
+            @Parameter(description = "ID giá trị thuộc tính quy cách đóng gói, phân tách bằng dấu phẩy", example = "1,2")
+            @RequestParam(required = false) String packagingValueIds,
+            @Parameter(description = "Kiểu sắp xếp", example = "featured")
+            @RequestParam(required = false) String sort,
             @PageableDefault(size = 10, page = 0) Pageable pageable) {
-        return ResponseEntity.ok(productService.getPublicProducts(keyword, categoryId, brandId, pageable));
+        return ResponseEntity.ok(productService.getPublicProducts(
+                keyword, categoryId, brandId, minPrice, maxPrice, packaging, packagingValueIds, sort, pageable));
     }
 
     @Operation(summary = "Chi tiết sản phẩm theo ID",

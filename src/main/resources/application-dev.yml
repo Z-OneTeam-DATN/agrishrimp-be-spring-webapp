@@ -42,6 +42,8 @@ spring:
       host: ${SPRING_DATA_REDIS_HOST:localhost}
       port: ${SPRING_DATA_REDIS_PORT:6379}
       password: ${SPRING_DATA_REDIS_PASSWORD:}
+      repositories:
+        enabled: ${SPRING_DATA_REDIS_REPOSITORIES_ENABLED:false}
 
   # 4. CẤU HÌNH MAIN
   main:
