@@ -73,9 +73,17 @@ public class ApiExceptionHandler {
   protected ResponseEntity<ErrorDetail> handleMethodArgumentNotValid(
       MethodArgumentNotValidException ex) {
     List<String> errors = ex.getBindingResult().getFieldErrors().stream()
-        .map(error -> error.getField() + " " + error.getDefaultMessage()).toList();
+        .map(error -> error.getDefaultMessage() != null
+            ? error.getDefaultMessage()
+            : error.getField() + " không hợp lệ")
+        .distinct()
+        .toList();
 
-    ErrorDetail errorVm = new ErrorDetail("400", "Bad Request", "Request information is not valid",
+    String detail = errors.isEmpty()
+        ? "Dữ liệu gửi lên không hợp lệ"
+        : String.join(". ", errors);
+
+    ErrorDetail errorVm = new ErrorDetail("400", "Bad Request", detail,
         errors);
     return ResponseEntity.badRequest().body(errorVm);
   }
@@ -112,8 +120,17 @@ public class ApiExceptionHandler {
       DataIntegrityViolationException ex, WebRequest request) {
     String detail = "Dữ liệu vi phạm ràng buộc cơ sở dữ liệu.";
     Throwable cause = ex.getRootCause();
-    if (cause != null && cause.getMessage() != null && cause.getMessage().contains("Duplicate entry")) {
-      detail = "Giá trị bị trùng lặp: " + cause.getMessage();
+    if (cause != null && cause.getMessage() != null) {
+      String rootMessage = cause.getMessage();
+      if (rootMessage.contains("Duplicate entry")) {
+        detail = "Dữ liệu bị trùng lặp. Vui lòng kiểm tra lại thông tin đã nhập.";
+      } else if (rootMessage.contains("Data too long for column 'slug'")) {
+        detail = "Mã vai trò vượt quá giới hạn 50 ký tự. Vui lòng rút gọn tên vai trò.";
+      } else if (rootMessage.contains("Data too long for column 'display_name'")) {
+        detail = "Tên vai trò tối đa 100 ký tự.";
+      } else if (rootMessage.contains("Data too long for column 'description'")) {
+        detail = "Mô tả vai trò tối đa 255 ký tự.";
+      }
     }
     ErrorDetail errorVm = new ErrorDetail(HttpStatus.CONFLICT.toString(), "Xung đột dữ liệu", detail);
     log.warn(ERROR_LOG_FORMAT, this.getServletPath(request), 409, detail);

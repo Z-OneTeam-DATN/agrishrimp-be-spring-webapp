@@ -3,6 +3,8 @@ package com.zone.agri.entity.enums;
 import com.fasterxml.jackson.annotation.JsonCreator;
 
 public enum PaymentMethod {
+    CASH,
+    TRANSFER,
     COD,
     PAYOS;
 

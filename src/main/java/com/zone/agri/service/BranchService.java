@@ -34,24 +34,28 @@ public class BranchService {
     private final InventoryRepository inventoryRepository;
     private final GeocodingService geocodingService;
 
+    @Transactional(readOnly = true)
     public List<BranchDTO> getAll() {
         return branchRepository.findAll().stream()
                 .map(this::mapToDTO)
                 .toList();
     }
 
+    @Transactional(readOnly = true)
     public List<BranchDTO> getPublicBranches() {
         return branchRepository.findByStatus(BranchStatus.ACTIVE).stream()
                 .map(this::mapToDTO)
                 .toList();
     }
 
+    @Transactional(readOnly = true)
     public BranchDTO getBranchById(Long id) {
         Branch branch = branchRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Không tìm thấy chi nhánh với ID: " + id));
         return mapToDTO(branch);
     }
 
+    @Transactional(readOnly = true)
     public BranchDTO getPublicBranchById(Long id) {
         Branch branch = branchRepository.findById(id)
                 .orElseThrow(() -> new NotFoundException("Chi nhánh không tồn tại."));

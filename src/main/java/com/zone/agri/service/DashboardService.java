@@ -8,6 +8,7 @@ import com.zone.agri.entity.User;
 import com.zone.agri.entity.InventoryNote;
 import com.zone.agri.entity.SubOrder;
 import com.zone.agri.entity.enums.OrderStatus;
+import com.zone.agri.entity.enums.UserStatus;
 import com.zone.agri.repository.*;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.PageRequest;
@@ -83,6 +84,18 @@ public class DashboardService {
                 .totalRevenue(totalRevenue)
                 .totalCustomers(totalCustomers)
                 .totalProducts(totalProducts)
+                .build();
+    }
+
+    public CustomerInsightsResponse getCustomerInsights(Long branchId) {
+        Long finalBranchId = resolveBranchId(branchId);
+        LocalDateTime startOfMonth = LocalDate.now().withDayOfMonth(1).atStartOfDay();
+        LocalDateTime now = LocalDateTime.now();
+
+        return CustomerInsightsResponse.builder()
+                .totalCustomers(userRepository.countCustomers(finalBranchId))
+                .activeCustomers(userRepository.countCustomersByStatus(finalBranchId, UserStatus.ACTIVE))
+                .newCustomersThisMonth(userRepository.countCustomersCreatedBetween(finalBranchId, startOfMonth, now))
                 .build();
     }
 

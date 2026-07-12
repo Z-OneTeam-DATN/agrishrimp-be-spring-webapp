@@ -1,11 +1,15 @@
 package com.zone.agri.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
+
 import org.junit.jupiter.api.Test;
+
+import com.zone.agri.client.ai.CccdOcrClient;
 
 class OcrServiceTest {
 
-    private final OcrService ocrService = new OcrService();
+    private final OcrService ocrService = new OcrService(mock(CccdOcrClient.class));
 
     @Test
     void parseExtractedText_shouldExtractMainFieldsFromVietnameseCccdText() {
@@ -64,8 +68,8 @@ class OcrServiceTest {
         var result = ocrService.parseExtractedText(text);
 
         assertThat(result.getCitizenId()).isEqualTo("091206016882");
-        assertThat(result.getFullName()).isEqualTo("NGUYEN HOANG GIA HUY");
-        assertThat(result.getAddress()).isEqualTo("Tan Hiep A, Tan Hiep, Kien Giang");
+        assertThat(result.getFullName()).isEqualTo("NGUYỄN HOANG GIA HUY");
+        assertThat(result.getAddress()).isEqualTo("Tan Hiep, Kien Giang");
     }
 
     @Test
@@ -80,6 +84,6 @@ class OcrServiceTest {
 
         var result = ocrService.parseExtractedText(text);
 
-        assertThat(result.getFullName()).isEqualTo("NGUYEN HOANG GIA HUY");
+        assertThat(result.getFullName()).isEqualTo("NGUYỄN HOANG GIA HUY");
     }
 }

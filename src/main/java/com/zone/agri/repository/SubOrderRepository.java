@@ -169,4 +169,72 @@ public interface SubOrderRepository extends JpaRepository<SubOrder, Long> {
             """)
     List<FinancialSubOrderProjection> findFinancialSubOrders(@Param("endDate") LocalDateTime endDate,
                                                              @Param("branchId") Long branchId);
+
+    interface SubOrderAmountProjection {
+        java.math.BigDecimal getSubtotal();
+        java.math.BigDecimal getShippingFee();
+        java.math.BigDecimal getOrderSubtotal();
+        java.math.BigDecimal getOrderDiscountAmount();
+    }
+
+    @Query("""
+        SELECT COALESCE(s.subtotal, 0) AS subtotal,
+               COALESCE(s.shippingFee, 0) AS shippingFee,
+               COALESCE(o.totalAmount, 0) AS orderSubtotal,
+               COALESCE(o.discountAmount, 0) AS orderDiscountAmount
+        FROM SubOrder s
+        JOIN s.order o
+        WHERE o.paymentStatus = com.zone.agri.entity.enums.PaymentStatus.PAID
+          AND o.status NOT IN (com.zone.agri.entity.enums.OrderStatus.CANCELLED, com.zone.agri.entity.enums.OrderStatus.RETURNED)
+          AND s.status NOT IN (com.zone.agri.entity.enums.OrderStatus.CANCELLED, com.zone.agri.entity.enums.OrderStatus.RETURNED)
+          AND (:branchId IS NULL OR s.branch.id = :branchId)
+          AND (
+            CASE WHEN o.paymentMethod = com.zone.agri.entity.enums.PaymentMethod.COD
+                 THEN COALESCE(s.receivedAt, s.completedAt, s.createdAt)
+                 ELSE o.createdAt
+            END < :startDate
+          )
+    """)
+    List<SubOrderAmountProjection> findPaidSubOrderAmountsBefore(
+            @Param("startDate") LocalDateTime startDate,
+            @Param("branchId") Long branchId);
+
+    @Query("""
+        SELECT s
+        FROM SubOrder s
+        JOIN FETCH s.order o
+        WHERE o.paymentStatus = com.zone.agri.entity.enums.PaymentStatus.PAID
+          AND o.status NOT IN (com.zone.agri.entity.enums.OrderStatus.CANCELLED, com.zone.agri.entity.enums.OrderStatus.RETURNED)
+          AND s.status NOT IN (com.zone.agri.entity.enums.OrderStatus.CANCELLED, com.zone.agri.entity.enums.OrderStatus.RETURNED)
+          AND (:branchId IS NULL OR s.branch.id = :branchId)
+          AND (
+            CASE WHEN o.paymentMethod = com.zone.agri.entity.enums.PaymentMethod.COD
+                 THEN COALESCE(s.receivedAt, s.completedAt, s.createdAt)
+                 ELSE o.createdAt
+            END BETWEEN :startDate AND :endDate
+          )
+    """)
+    List<SubOrder> findPaidSubOrdersInRange(
+            @Param("startDate") LocalDateTime startDate,
+            @Param("endDate") LocalDateTime endDate,
+            @Param("branchId") Long branchId);
+
+    @Query("""
+        SELECT s
+        FROM SubOrder s
+        JOIN FETCH s.order o
+        WHERE o.paymentStatus = com.zone.agri.entity.enums.PaymentStatus.PAID
+          AND o.status NOT IN (com.zone.agri.entity.enums.OrderStatus.CANCELLED, com.zone.agri.entity.enums.OrderStatus.RETURNED)
+          AND s.status NOT IN (com.zone.agri.entity.enums.OrderStatus.CANCELLED, com.zone.agri.entity.enums.OrderStatus.RETURNED)
+          AND (:branchId IS NULL OR s.branch.id = :branchId)
+          AND (
+            CASE WHEN o.paymentMethod = com.zone.agri.entity.enums.PaymentMethod.COD
+                 THEN COALESCE(s.receivedAt, s.completedAt, s.createdAt)
+                 ELSE o.createdAt
+            END <= :endDate
+          )
+    """)
+    List<SubOrder> findPaidSubOrdersBefore(
+            @Param("endDate") LocalDateTime endDate,
+            @Param("branchId") Long branchId);
 }

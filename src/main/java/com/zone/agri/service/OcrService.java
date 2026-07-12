@@ -29,9 +29,11 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
+import com.zone.agri.client.ai.CccdOcrClient;
 import com.zone.agri.dto.response.employee.OcrCccdResponse;
 import com.zone.agri.exception.BadRequestException;
 
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import net.sourceforge.tess4j.ITessAPI;
 import net.sourceforge.tess4j.Tesseract;
@@ -39,7 +41,10 @@ import net.sourceforge.tess4j.TesseractException;
 
 @Service
 @Slf4j
+@RequiredArgsConstructor
 public class OcrService {
+
+    private final CccdOcrClient cccdOcrClient;
 
     private static final Pattern DATE_PATTERN = Pattern.compile("(?<!\\d)(\\d{1,2}[\\s./-]\\d{1,2}[\\s./-]\\d{4})(?!\\d)");
     private static final Pattern TWELVE_DIGIT_PATTERN = Pattern.compile("(?<!\\d)(\\d{12})(?!\\d)");
@@ -72,6 +77,23 @@ public class OcrService {
 
     public OcrCccdResponse extractCccdInfo(MultipartFile image) {
         validateUpload(image);
+
+        OcrCccdResponse remoteResponse = cccdOcrClient.extract(image).orElse(null);
+        if (hasEssentialFields(remoteResponse)) {
+            log.info("OCR CCCD thành công qua remote service với confidence={}", remoteResponse.getConfidence());
+            return normalizeResponse(remoteResponse);
+        }
+        if (hasMeaningfulData(remoteResponse)) {
+            OcrCccdResponse localResponse = extractLocally(image);
+            OcrCccdResponse merged = mergeResponses(remoteResponse, localResponse);
+            log.info("OCR CCCD dùng remote + local fallback, confidence={}", merged.getConfidence());
+            return merged;
+        }
+
+        return extractLocally(image);
+    }
+
+    private OcrCccdResponse extractLocally(MultipartFile image) {
 
         BufferedImage original = readImage(image);
         List<BufferedImage> variants = buildVariants(original);
@@ -110,6 +132,54 @@ public class OcrService {
         log.info("OCR CCCD thành công với biến thể ảnh {}, confidence={}", bestAttempt.variantIndex(),
                 result.getConfidence());
         return result;
+    }
+
+    private boolean hasEssentialFields(OcrCccdResponse response) {
+        return response != null
+                && !isBlank(response.getCitizenId())
+                && !isBlank(response.getFullName())
+                && !isBlank(response.getDateOfBirth());
+    }
+
+    private boolean hasMeaningfulData(OcrCccdResponse response) {
+        return response != null
+                && (!isBlank(response.getCitizenId())
+                        || !isBlank(response.getFullName())
+                        || !isBlank(response.getDateOfBirth())
+                        || !isBlank(response.getGender())
+                        || !isBlank(response.getAddress()));
+    }
+
+    private OcrCccdResponse mergeResponses(OcrCccdResponse primary, OcrCccdResponse fallback) {
+        return OcrCccdResponse.builder()
+                .citizenId(prefer(primary != null ? primary.getCitizenId() : null, fallback != null ? fallback.getCitizenId() : null))
+                .fullName(prefer(primary != null ? primary.getFullName() : null, fallback != null ? fallback.getFullName() : null))
+                .dateOfBirth(prefer(primary != null ? primary.getDateOfBirth() : null, fallback != null ? fallback.getDateOfBirth() : null))
+                .gender(prefer(primary != null ? primary.getGender() : null, fallback != null ? fallback.getGender() : null))
+                .address(prefer(primary != null ? primary.getAddress() : null, fallback != null ? fallback.getAddress() : null))
+                .confidence(Math.max(
+                        primary != null && primary.getConfidence() != null ? primary.getConfidence() : 0D,
+                        fallback != null && fallback.getConfidence() != null ? fallback.getConfidence() : 0D))
+                .build();
+    }
+
+    private OcrCccdResponse normalizeResponse(OcrCccdResponse response) {
+        if (response == null) {
+            return emptyResponse(0D);
+        }
+
+        return OcrCccdResponse.builder()
+                .citizenId(defaultString(response.getCitizenId()).trim())
+                .fullName(defaultString(response.getFullName()).trim())
+                .dateOfBirth(isBlank(response.getDateOfBirth()) ? null : response.getDateOfBirth().trim())
+                .gender(defaultString(response.getGender()).trim())
+                .address(defaultString(response.getAddress()).trim())
+                .confidence(response.getConfidence() != null ? response.getConfidence() : 0D)
+                .build();
+    }
+
+    private String prefer(String primary, String fallback) {
+        return !isBlank(primary) ? primary.trim() : defaultString(fallback).trim();
     }
 
     OcrCccdResponse parseExtractedText(String text) {
@@ -697,13 +767,17 @@ public class OcrService {
         if (address == null || address.length() < 5) {
             return false;
         }
-        
-        String lower = address.toLowerCase();
+
+        String lower = address.toLowerCase(Locale.ROOT);
+        String normalized = Normalizer.normalize(lower, Normalizer.Form.NFD)
+                .replaceAll("\\p{M}+", "")
+                .replace('đ', 'd')
+                .replace('Đ', 'D');
         // Must contain at least location keywords like tổ, ấp, xã, huyện, tỉnh, thành phố
         // Or contain actual province names like kiên giang, tân hiệp, etc
-        boolean hasLocationKeyword = lower.matches(".*\\b(tổ|ấp|xã|huyện|tỉnh|thành|phố|quận|hẻm)\\b.*");
-        boolean hasProvinceOrDistrict = lower.matches(".*\\b(kiên giang|tân hiệp|an giang|bạc liêu|cà mau|long an)\\b.*");
-        
+        boolean hasLocationKeyword = normalized.matches(".*\\b(to|ap|xa|huyen|tinh|thanh|pho|quan|hem)\\b.*");
+        boolean hasProvinceOrDistrict = normalized.matches(".*\\b(kien giang|tan hiep|an giang|bac lieu|ca mau|long an)\\b.*");
+
         return hasLocationKeyword || hasProvinceOrDistrict;
     }
 
@@ -984,6 +1058,10 @@ public class OcrService {
             
             // Single letters followed by short text are likely OCR corruption (R tư, Z 7, etc)
             if (normalized.length() == 1 && Character.isLetter(normalized.charAt(0))) {
+                if (shouldKeepSingleLetterAddressToken(tokens, i)) {
+                    kept.add(token);
+                    continue;
+                }
                 // If next token is very short and non-standard, skip both
                 if (i + 1 < tokens.length) {
                     String nextNorm = tokens[i + 1].replaceAll("[,./-]", "");
@@ -1024,15 +1102,44 @@ public class OcrService {
     private String removeIsolatedOneLetterTokens(String value) {
         String[] tokens = value.split("\\s+");
         List<String> kept = new ArrayList<>();
-        for (String token : tokens) {
+        for (int i = 0; i < tokens.length; i++) {
+            String token = tokens[i];
             String normalized = token.replaceAll("[,./-]", "");
             // Remove ANY single letter (both lowercase and uppercase)
             if (normalized.length() == 1 && Character.isLetter(normalized.charAt(0))) {
+                if (token.matches(".*,$")) {
+                    kept.add(token);
+                    continue;
+                }
+                if (shouldKeepSingleLetterAddressToken(tokens, i)) {
+                    kept.add(token);
+                    continue;
+                }
                 continue;
             }
             kept.add(token);
         }
         return String.join(" ", kept);
+    }
+
+    private boolean shouldKeepSingleLetterAddressToken(String[] tokens, int index) {
+        if (tokens == null || index < 0 || index >= tokens.length) {
+            return false;
+        }
+
+        String current = tokens[index].replaceAll("[,./-]", "");
+        if (current.length() != 1 || !Character.isUpperCase(current.charAt(0))) {
+            return false;
+        }
+
+        if (index == 0 || index + 1 >= tokens.length) {
+            return false;
+        }
+
+        String previous = tokens[index - 1].replaceAll("[,./-]", "");
+        String next = tokens[index + 1].replaceAll("[,./-]", "");
+        return previous.length() >= 3 && next.length() >= 3
+                && Character.isUpperCase(next.charAt(0));
     }
 
     private String trimTrailingUppercaseNoise(String value) {

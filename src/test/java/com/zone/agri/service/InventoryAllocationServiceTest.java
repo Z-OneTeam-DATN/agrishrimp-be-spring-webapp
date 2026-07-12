@@ -8,6 +8,7 @@ import com.zone.agri.entity.Branch;
 import com.zone.agri.entity.Inventory;
 import com.zone.agri.entity.ProductVariant;
 import com.zone.agri.repository.InventoryRepository;
+import com.zone.agri.repository.InventoryTransactionRepository;
 import com.zone.agri.service.BranchSearchService.BranchWithRealDistance;
 import com.zone.agri.service.InventoryAllocationService.AllocationResult;
 import org.junit.jupiter.api.BeforeEach;
@@ -28,6 +29,9 @@ class InventoryAllocationServiceTest {
 
     @Mock
     private InventoryRepository inventoryRepository;
+
+    @Mock
+    private InventoryTransactionRepository inventoryTransactionRepository;
 
     @Mock
     private SettingService settingService;

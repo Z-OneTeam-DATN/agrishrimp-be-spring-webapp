@@ -36,6 +36,7 @@ import com.zone.agri.entity.UserAddress;
 import com.zone.agri.entity.enums.AuthProvider;
 import com.zone.agri.entity.enums.CustomerStatus;
 import com.zone.agri.entity.enums.UserStatus;
+import com.zone.agri.exception.BadRequestException;
 import com.zone.agri.exception.ConflictException;
 import com.zone.agri.exception.NotFoundException;
 import com.zone.agri.repository.BranchRepository;
@@ -87,7 +88,9 @@ public class CustomerService {
             throw new ConflictException("SDT " + req.getPhone() + " da duoc su dung!", true);
         }
 
-        String randomPassword = UUID.randomUUID().toString().replace("-", "").substring(0, 8);
+        String randomPassword = (req.getPhone() != null && !req.getPhone().isBlank())
+                ? req.getPhone().replaceAll("\\s+", "")
+                : "123456";
 
         Role customerRole = roleRepository.findBySlug("USER")
                 .orElseThrow(() -> new NotFoundException("Role USER chua duoc cau hinh"));
@@ -349,6 +352,38 @@ public class CustomerService {
         user.setStatus(user.getStatus() == UserStatus.ACTIVE ? UserStatus.INACTIVE : UserStatus.ACTIVE);
         userRepository.save(user);
         saveStatusLog(user, fromStatus, user.getStatus(), "ADMIN_TOGGLE_STATUS");
+    }
+
+    @Transactional
+    public String resendCustomerCredentials(Long userId) {
+        User customerUser = userRepository.findById(userId)
+                .orElseThrow(() -> new NotFoundException("Khong tim thay khach hang"));
+
+        if (customerUser.getEmail() == null || customerUser.getEmail().isBlank()) {
+            throw new BadRequestException("Khach hang nay chua co email de nhan thong tin tai khoan");
+        }
+
+        String defaultPassword = (customerUser.getPhoneNumber() != null && !customerUser.getPhoneNumber().isBlank())
+                ? customerUser.getPhoneNumber().replaceAll("\\s+", "")
+                : "123456";
+
+        boolean isAlreadyDefault = passwordEncoder.matches(defaultPassword, customerUser.getPasswordHash());
+
+        if (!isAlreadyDefault) {
+            customerUser.setPasswordHash(passwordEncoder.encode(defaultPassword));
+            userRepository.save(customerUser);
+            log.info("Khach hang {} da doi mat khau. Set lai ve mat khau mac dinh de gui email.", customerUser.getEmail());
+        } else {
+            log.info("Khach hang {} chua doi mat khau (van dung mat khau mac dinh). Chi gui lai email.", customerUser.getEmail());
+        }
+
+        try {
+            emailService.sendAccountInfo(customerUser.getEmail(), customerUser.getFullName(), defaultPassword);
+            return "Đặt lại mật khẩu và gửi email thành công!";
+        } catch (Exception e) {
+            log.error("Loi khi gui email thong tin tai khoan cho khach hang {}: {}", customerUser.getEmail(), e.getMessage());
+            return "Đặt lại mật khẩu thành công! Tuy nhiên không gửi được email do lỗi máy chủ gửi thư. Mật khẩu mặc định là: " + defaultPassword;
+        }
     }
 
     public CustomerResponse getCustomerById(Long identifier) {

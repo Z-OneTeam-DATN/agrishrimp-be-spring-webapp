@@ -148,6 +148,15 @@ public class CustomerController {
         return ResponseEntity.ok("Cập nhật trạng thái tài khoản thành công!");
     }
 
+    @Operation(summary = "Gửi lại thông tin tài khoản qua email", description = "Gửi lại mật khẩu mới cho khách hàng qua email của họ")
+    @SecurityRequirement(name = "bearerAuth")
+    @RequirePermission("CUSTOMER_UPDATE")
+    @PostMapping("/{id}/resend-credentials")
+    public ResponseEntity<String> resendCredentials(@PathVariable Long id) {
+        String result = customerService.resendCustomerCredentials(id);
+        return ResponseEntity.ok(result);
+    }
+
     // 🟢 Get all branches for FE dropdown
     @Operation(summary = "Danh sách chi nhánh", description = "Lấy danh sách chi nhánh để assign cho khách hàng")
     @SecurityRequirement(name = "bearerAuth")

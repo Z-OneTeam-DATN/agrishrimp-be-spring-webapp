@@ -103,6 +103,9 @@ public class InventoryAllocationService {
             ProductVariant variant = variantMap.get(variantId);
             String variantName = (variant != null && variant.getSku() != null) ? variant.getSku() : "Unknown";
             String variantSku = variant != null ? variant.getSku() : "";
+            Long categoryId = (variant != null && variant.getProduct() != null && variant.getProduct().getCategory() != null)
+                    ? variant.getProduct().getCategory().getId()
+                    : null;
 
             int totalAllocatedForItem = 0;
             BigDecimal lastUnitPrice = BigDecimal.ZERO;
@@ -117,7 +120,7 @@ public class InventoryAllocationService {
 
                 int quantityToTake = Math.min(requested, availableInBatch);
                 BigDecimal importPrice = resolveDisplayImportPrice(batch, variantId, transferImportPriceCache);
-                lastUnitPrice = settingService.calculateSellingPrice(importPrice, profitMultiplier, roundingRule);
+                lastUnitPrice = settingService.calculateSellingPrice(importPrice, categoryId, batch.getExpiryDate());
 
                 totalAllocatedForItem += quantityToTake;
                 batch.setQuantity(availableInBatch - quantityToTake);
@@ -128,8 +131,7 @@ public class InventoryAllocationService {
                 lastUnitPrice = resolveFallbackUnitPrice(
                         variantId,
                         inventoryMatrix,
-                        profitMultiplier,
-                        roundingRule,
+                        categoryId,
                         transferImportPriceCache);
             }
 
@@ -196,14 +198,14 @@ public class InventoryAllocationService {
     }
 
     private BigDecimal resolveFallbackUnitPrice(Long variantId, Map<Long, Map<Long, List<Inventory>>> matrix,
-                                                BigDecimal multiplier, String roundingRule,
+                                                Long categoryId,
                                                 Map<Long, BigDecimal> transferImportPriceCache) {
         for (Map<Long, List<Inventory>> branchMap : matrix.values()) {
             List<Inventory> batches = branchMap.getOrDefault(variantId, Collections.emptyList());
             for (Inventory batch : batches) {
                 BigDecimal importPrice = resolveDisplayImportPrice(batch, variantId, transferImportPriceCache);
                 if (importPrice.compareTo(BigDecimal.ZERO) > 0) {
-                    return settingService.calculateSellingPrice(importPrice, multiplier, roundingRule);
+                    return settingService.calculateSellingPrice(importPrice, categoryId, batch.getExpiryDate());
                 }
             }
         }

@@ -1,10 +1,12 @@
 package com.zone.agri.service;
 
+import java.text.Normalizer;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -33,6 +35,7 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class RoleService {
 
+    private static final int ROLE_SLUG_MAX_LENGTH = 50;
     private static final Map<String, String> LEGACY_PERMISSION_ALIASES;
 
     static {
@@ -125,19 +128,20 @@ public class RoleService {
         }
 
         String normalizedRoleName = request.getRoleName().trim();
-        String requestedSlug = normalizedRoleName.toUpperCase().replace(" ", "_");
         String currentRoleName = role.getDisplayName() == null ? "" : role.getDisplayName().trim();
         boolean isCreate = role.getId() == null;
         boolean isNameChanged = isCreate || !normalizedRoleName.equalsIgnoreCase(currentRoleName);
 
         if (isNameChanged) {
-            boolean isConflict = isCreate
-                    ? roleRepository.existsBySlug(requestedSlug)
-                    : roleRepository.existsBySlugAndIdNot(requestedSlug, role.getId());
+            boolean isDisplayNameConflict = isCreate
+                    ? roleRepository.existsByDisplayNameIgnoreCase(normalizedRoleName)
+                    : roleRepository.existsByDisplayNameIgnoreCaseAndIdNot(normalizedRoleName, role.getId());
 
-            if (isConflict) {
+            if (isDisplayNameConflict) {
                 throw new ConflictException("Tên vai trò này đã tồn tại trong hệ thống");
             }
+
+            role.setSlug(generateUniqueSlug(normalizedRoleName, role.getId()));
         }
 
         List<String> allCodes = new ArrayList<>();
@@ -174,9 +178,6 @@ public class RoleService {
             throw new BadRequestException("Mã quyền không tồn tại: " + String.join(", ", invalidCodes));
         }
 
-        if (isCreate || isNameChanged) {
-            role.setSlug(requestedSlug);
-        }
         role.setDisplayName(normalizedRoleName);
         role.setDescription(request.getDescription());
         role.setIsActive("active".equalsIgnoreCase(request.getStatus()));
@@ -184,6 +185,47 @@ public class RoleService {
         role.setPermissions(permissions);
 
         return role;
+    }
+
+    private String generateUniqueSlug(String roleName, Long currentRoleId) {
+        String baseSlug = buildSlugBase(roleName);
+        String candidate = baseSlug;
+        int suffix = 2;
+
+        while (existsBySlug(candidate, currentRoleId)) {
+            String suffixText = "_" + suffix++;
+            int maxBaseLength = ROLE_SLUG_MAX_LENGTH - suffixText.length();
+            candidate = baseSlug.substring(0, Math.min(baseSlug.length(), maxBaseLength)) + suffixText;
+        }
+
+        return candidate;
+    }
+
+    private String buildSlugBase(String roleName) {
+        String withoutAccents = Normalizer.normalize(roleName, Normalizer.Form.NFD)
+                .replaceAll("\\p{M}", "")
+                .replace('đ', 'd')
+                .replace('Đ', 'D');
+
+        String slug = withoutAccents
+                .toUpperCase(Locale.ROOT)
+                .replaceAll("[^A-Z0-9]+", "_")
+                .replaceAll("_+", "_")
+                .replaceAll("^_|_$", "");
+
+        if (slug.isBlank()) {
+            slug = "ROLE";
+        }
+
+        return slug.length() > ROLE_SLUG_MAX_LENGTH
+                ? slug.substring(0, ROLE_SLUG_MAX_LENGTH).replaceAll("_+$", "")
+                : slug;
+    }
+
+    private boolean existsBySlug(String slug, Long currentRoleId) {
+        return currentRoleId == null
+                ? roleRepository.existsBySlug(slug)
+                : roleRepository.existsBySlugAndIdNot(slug, currentRoleId);
     }
 
     private Map<Long, Long> getMemberCountMap(List<Role> roles) {

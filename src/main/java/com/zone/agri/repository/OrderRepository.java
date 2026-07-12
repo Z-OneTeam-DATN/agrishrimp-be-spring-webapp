@@ -229,6 +229,67 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
                        )
                      """)
        List<LegacyFinancialOrderProjection> findLegacyFinancialOrders(
-                     @Param("endDate") LocalDateTime endDate,
-                     @Param("branchId") Long branchId);
+                      @Param("endDate") LocalDateTime endDate,
+                      @Param("branchId") Long branchId);
+
+       @Query("SELECT COALESCE(SUM(o.finalAmount), 0) FROM Order o " +
+              "WHERE o.paymentStatus = com.zone.agri.entity.enums.PaymentStatus.UNPAID " +
+              "AND o.status NOT IN (com.zone.agri.entity.enums.OrderStatus.CANCELLED, com.zone.agri.entity.enums.OrderStatus.RETURNED) " +
+              "AND (:branchId IS NULL OR o.branch.id = :branchId)")
+       BigDecimal sumUnpaidOrdersAmount(@Param("branchId") Long branchId);
+
+    @Query("""
+        SELECT COALESCE(SUM(o.finalAmount), 0)
+        FROM Order o
+        WHERE o.paymentStatus = com.zone.agri.entity.enums.PaymentStatus.PAID
+          AND o.status NOT IN (com.zone.agri.entity.enums.OrderStatus.CANCELLED, com.zone.agri.entity.enums.OrderStatus.RETURNED)
+          AND (:branchId IS NULL OR o.branch.id = :branchId)
+          AND o.subOrders IS EMPTY
+          AND (
+            CASE WHEN o.paymentMethod = com.zone.agri.entity.enums.PaymentMethod.COD
+                 THEN COALESCE(o.receivedAt, o.completedAt, o.createdAt)
+                 ELSE o.createdAt
+            END < :startDate
+          )
+    """)
+    BigDecimal sumPaidLegacyOrdersAmountBefore(
+            @Param("startDate") LocalDateTime startDate,
+            @Param("branchId") Long branchId);
+
+    @Query("""
+        SELECT o
+        FROM Order o
+        WHERE o.paymentStatus = com.zone.agri.entity.enums.PaymentStatus.PAID
+          AND o.status NOT IN (com.zone.agri.entity.enums.OrderStatus.CANCELLED, com.zone.agri.entity.enums.OrderStatus.RETURNED)
+          AND (:branchId IS NULL OR o.branch.id = :branchId)
+          AND o.subOrders IS EMPTY
+          AND (
+            CASE WHEN o.paymentMethod = com.zone.agri.entity.enums.PaymentMethod.COD
+                 THEN COALESCE(o.receivedAt, o.completedAt, o.createdAt)
+                 ELSE o.createdAt
+            END BETWEEN :startDate AND :endDate
+          )
+    """)
+    List<Order> findPaidLegacyOrdersInRange(
+            @Param("startDate") LocalDateTime startDate,
+            @Param("endDate") LocalDateTime endDate,
+            @Param("branchId") Long branchId);
+
+    @Query("""
+        SELECT o
+        FROM Order o
+        WHERE o.paymentStatus = com.zone.agri.entity.enums.PaymentStatus.PAID
+          AND o.status NOT IN (com.zone.agri.entity.enums.OrderStatus.CANCELLED, com.zone.agri.entity.enums.OrderStatus.RETURNED)
+          AND (:branchId IS NULL OR o.branch.id = :branchId)
+          AND o.subOrders IS EMPTY
+          AND (
+            CASE WHEN o.paymentMethod = com.zone.agri.entity.enums.PaymentMethod.COD
+                 THEN COALESCE(o.receivedAt, o.completedAt, o.createdAt)
+                 ELSE o.createdAt
+            END <= :endDate
+          )
+    """)
+    List<Order> findPaidLegacyOrdersBefore(
+            @Param("endDate") LocalDateTime endDate,
+            @Param("branchId") Long branchId);
 }

@@ -1,6 +1,7 @@
 package com.zone.agri.config;
 
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.beans.BeansException;
 import org.springframework.beans.factory.config.BeanPostProcessor;
 import org.springframework.context.annotation.Configuration;
@@ -15,6 +16,7 @@ import java.sql.Statement;
  * patches run BEFORE Hibernate starts schema validation.
  */
 @Configuration
+@ConditionalOnProperty(name = "app.startup.schema-patches.enabled", havingValue = "true", matchIfMissing = true)
 @Slf4j
 public class SchemaUpdateConfig implements BeanPostProcessor {
 
@@ -192,6 +194,22 @@ public class SchemaUpdateConfig implements BeanPostProcessor {
             executeSql(stmt,
                     "Patch products adds fk_products_brand constraint",
                     "ALTER TABLE products ADD CONSTRAINT fk_products_brand FOREIGN KEY (brand_id) REFERENCES brands(id)");
+
+            executeSql(stmt,
+                    "Patch brands increase logo_url size to TEXT",
+                    "ALTER TABLE brands MODIFY COLUMN logo_url TEXT NULL");
+
+            executeSql(stmt,
+                    "Seed default cashflow risk settings in system_settings if missing",
+                    """
+                            INSERT IGNORE INTO system_settings (setting_key, setting_value, description) VALUES
+                            ('CASHFLOW_RISK_WINDOW_DAYS', '14', 'Cửa sổ thời gian xét rủi ro dòng tiền (ngày)'),
+                            ('CASHFLOW_CRITICAL_THRESHOLD_PERCENT', '20.0', 'Tỷ lệ cảnh báo đỏ rủi ro dòng tiền (%)'),
+                            ('CASHFLOW_WEIGHT_TIME', '0.5', 'Trọng số mức độ gấp thời gian của công nợ'),
+                            ('CASHFLOW_WEIGHT_FREQUENCY', '0.3', 'Trọng số tần suất nhập hàng từ nhà cung cấp'),
+                            ('CASHFLOW_WEIGHT_VALUE', '0.2', 'Trọng số giá trị tuyệt đối của khoản nợ'),
+                            ('SUPPLIER_DEBT_DEFAULT_TERM_DAYS', '30', 'Kỳ hạn nợ mặc định của phiếu nhập nếu không cấu hình (ngày)')
+                            """);
 
             log.info("All schema patches executed successfully.");
         } catch (Exception e) {

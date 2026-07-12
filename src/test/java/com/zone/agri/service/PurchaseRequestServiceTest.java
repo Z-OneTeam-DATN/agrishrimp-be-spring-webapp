@@ -115,6 +115,6 @@ class PurchaseRequestServiceTest {
 
         assertThatThrownBy(() -> purchaseRequestService.createRequest(request))
                 .isInstanceOf(BadRequestException.class)
-                .hasMessageContaining("SKU SKU-10 is not available in supplier catalog");
+                .hasMessageContaining("SKU SKU-10 không nằm trong catalog đang bán của nhà cung cấp");
     }
 }
