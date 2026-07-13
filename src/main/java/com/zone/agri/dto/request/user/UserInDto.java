@@ -29,7 +29,7 @@ public class UserInDto {
 
     Gender gender;      // 0: MALE, 1: FEMALE, ...
 
-    UserStatus status;  // ACTIVE, BANNED (Admin dùng để khóa nick)
+    UserStatus status;  // ACTIVE, INACTIVE
 
     Long branchId;      // Chuyển công tác sang chi nhánh khác
 

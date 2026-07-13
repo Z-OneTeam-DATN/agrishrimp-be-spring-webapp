@@ -85,13 +85,13 @@ public class AuthService {
                     "Tài khoản này đăng nhập bằng " + user.getProvider() + ". Vui lòng dùng đăng nhập Google.");
         }
 
-        // 4. Kiểm tra password
+        // 4. Kiểm tra trạng thái tài khoản trước để luôn trả đúng thông báo khóa/vô hiệu hóa.
+        checkUserStatus(user);
+
+        // 5. Kiểm tra password
         if (!passwordEncoder.matches(request.getPassword(), user.getPasswordHash())) {
             throw new CustomAuthenticationException("Email hoặc mật khẩu không chính xác");
         }
-
-        // 5. Kiểm tra trạng thái tài khoản
-        checkUserStatus(user);
 
         // 6. Tạo token và trả về
         CustomUserDetail userDetails = (CustomUserDetail) userDetailsService.loadUserByUsername(contact);
@@ -243,8 +243,7 @@ public class AuthService {
     // =========================================================
     private void checkUserStatus(User user) {
         switch (user.getStatus()) {
-            case BANNED -> throw new CustomAuthenticationException("Tài khoản đã bị khóa vĩnh viễn");
-            case INACTIVE -> throw new CustomAuthenticationException("Tài khoản tạm thời bị vô hiệu hóa");
+            case INACTIVE -> throw new CustomAuthenticationException("Tài khoản này đã bị khóa. Vui lòng liên hệ quản trị viên.");
             case UNVERIFIED -> throw new CustomAuthenticationException("Tài khoản chưa được xác thực");
             default -> {
                 /* ACTIVE — OK */ }

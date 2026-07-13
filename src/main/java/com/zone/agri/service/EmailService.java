@@ -315,7 +315,7 @@ public class EmailService {
     private void sendEmail(String toEmail, String subject, String htmlContent) {
         if (resendApiKey == null || resendApiKey.isBlank()) {
             throw new BadRequestException(
-                    "Chưa cấu hình RESEND_API_KEY. Vui lòng thêm vào .env.local rồi khởi động lại backend.");
+                    "Chưa cấu hình RESEND_API_KEY. Vui lòng thêm vào .env, .env.local hoặc biến môi trường của server rồi khởi động lại backend.");
         }
 
         try {

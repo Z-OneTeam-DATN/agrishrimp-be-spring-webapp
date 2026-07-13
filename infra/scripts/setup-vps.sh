@@ -39,20 +39,20 @@ echo "[3/7] Creating deploy directory: $DEPLOY_DIR"
 mkdir -p "$DEPLOY_DIR"
 chmod 750 "$DEPLOY_DIR"
 
-# ── 4. Copy docker-compose và tạo .env.backend từ template ────
+# ── 4. Copy docker-compose và tạo .env từ template ────────────
 echo "[4/7] Copying compose file..."
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cp "$SCRIPT_DIR/../docker-compose.prod.yml" "$DEPLOY_DIR/docker-compose.prod.yml"
 
-if [ ! -f "$DEPLOY_DIR/.env.backend" ]; then
-  cp "$SCRIPT_DIR/../.env.template" "$DEPLOY_DIR/.env.backend"
-  chmod 600 "$DEPLOY_DIR/.env.backend"
+if [ ! -f "$DEPLOY_DIR/.env" ]; then
+  cp "$SCRIPT_DIR/../.env.template" "$DEPLOY_DIR/.env"
+  chmod 600 "$DEPLOY_DIR/.env"
   echo ""
   echo "⚠️  QUAN TRỌNG: Điền secrets vào file sau trước khi deploy:"
-  echo "    $DEPLOY_DIR/.env.backend"
+  echo "    $DEPLOY_DIR/.env"
   echo ""
 else
-  echo "    .env.backend already exists — skipped"
+  echo "    .env already exists — skipped"
 fi
 
 # ── 5. Cài Nginx ───────────────────────────────────────────────
@@ -90,7 +90,7 @@ echo "======================================"
 echo "  Setup complete!"
 echo ""
 echo "  Checklist trước khi deploy lần đầu:"
-echo "  [ ] Điền .env.backend: $DEPLOY_DIR/.env.backend"
+echo "  [ ] Điền .env: $DEPLOY_DIR/.env"
 echo "  [ ] Thêm secrets vào GitHub Actions (xem README)"
 echo "  [ ] Cấu hình SSL: certbot --nginx -d agrishrimp.io.vn -d api.agrishrimp.io.vn"
 echo "  [ ] Khởi tạo stack lần đầu: cd $DEPLOY_DIR && docker compose -f docker-compose.prod.yml up -d"

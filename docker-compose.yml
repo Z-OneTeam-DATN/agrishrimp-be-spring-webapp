@@ -132,10 +132,6 @@ services:
       PAYOS_CHECKSUM_KEY: ${PAYOS_CHECKSUM_KEY:-}
       PAYOS_RETURN_URL: ${PAYOS_RETURN_URL:-http://localhost:3004/order-success}
       PAYOS_CANCEL_URL: ${PAYOS_CANCEL_URL:-http://localhost:3004/order-cancel}
-      SPRING_MAIL_HOST: ${SPRING_MAIL_HOST:-smtp.gmail.com}
-      SPRING_MAIL_PORT: ${SPRING_MAIL_PORT:-587}
-      SPRING_MAIL_USERNAME: ${SPRING_MAIL_USERNAME:-}
-      SPRING_MAIL_PASSWORD: ${SPRING_MAIL_PASSWORD:-}
       # CORS & Cookie
       APP_CORS_ALLOWED_ORIGINS: ${APP_CORS_ALLOWED_ORIGINS:-http://localhost:3004}
       APP_WEB_BASE_URL: ${APP_WEB_BASE_URL:-http://localhost:3004}

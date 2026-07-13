@@ -7,6 +7,7 @@ import org.springframework.data.web.PageableDefault;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -19,6 +20,7 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
 import com.zone.agri.dto.request.employee.EmployeeCreateRequest;
+import com.zone.agri.dto.request.employee.EmployeeStatusUpdateRequest;
 import com.zone.agri.dto.response.employee.EmployeeResponse;
 import com.zone.agri.dto.response.employee.OcrCccdResponse;
 import com.zone.agri.exception.BadRequestException;
@@ -68,7 +70,7 @@ public class EmployeeController {
 
                         @Parameter(description = "Lọc theo ID vai trò", example = "2") @RequestParam(required = false) Long roleId,
 
-                        @Parameter(description = "Lọc theo trạng thái (ACTIVE, INACTIVE, BANNED)", example = "ACTIVE") @RequestParam(required = false) String status,
+                        @Parameter(description = "Lọc theo trạng thái (ACTIVE, INACTIVE)", example = "ACTIVE") @RequestParam(required = false) String status,
 
                         @Parameter(hidden = true) @PageableDefault(size = 10, sort = "createdAt", direction = Sort.Direction.DESC) Pageable pageable) {
 
@@ -137,22 +139,54 @@ public class EmployeeController {
                 return ResponseEntity.ok(employeeService.updateEmployee(id, request));
         }
 
+        @PatchMapping("/{id}/status")
+        @SecurityRequirement(name = "bearerAuth")
+        @RequirePermission("STAFF_DELETE")
+        @Operation(summary = "Cập nhật trạng thái nhân viên", description = "Cập nhật trạng thái tài khoản nhân viên giữa ACTIVE và INACTIVE.", responses = {
+                        @ApiResponse(responseCode = "200", description = "Cập nhật trạng thái thành công"),
+                        @ApiResponse(responseCode = "400", description = "Trạng thái không hợp lệ"),
+                        @ApiResponse(responseCode = "403", description = "Không được phép cập nhật nhân viên hệ thống"),
+                        @ApiResponse(responseCode = "404", description = "Không tìm thấy nhân viên")
+        })
+        public ResponseEntity<Void> updateEmployeeStatus(
+                        @PathVariable Long id,
+                        @Valid @RequestBody EmployeeStatusUpdateRequest request) {
+                log.info("Updating employee status ID: {} -> {}", id, request.getStatus());
+                employeeService.updateEmployeeStatus(id, request.getStatus());
+                return ResponseEntity.ok().build();
+        }
+
         /**
-         * Delete employee
+         * Toggle employee status
          * Endpoint: DELETE /api/employees/{id}
          */
         @DeleteMapping("/{id}")
         @SecurityRequirement(name = "bearerAuth")
         @RequirePermission("STAFF_DELETE")
-        @Operation(summary = "Xóa nhân viên", description = "Xóa (soft delete) nhân viên khỏi hệ thống. Không thể xóa nhân viên có vai trò hệ thống.", responses = {
-                        @ApiResponse(responseCode = "204", description = "Xóa thành công"),
-                        @ApiResponse(responseCode = "403", description = "Không được phép xóa nhân viên hệ thống"),
+        @Operation(summary = "Tạm khóa hoặc mở lại nhân viên", description = "Đảo trạng thái tài khoản nhân viên giữa ACTIVE và INACTIVE. Không thể thao tác với nhân viên có vai trò hệ thống.", responses = {
+                        @ApiResponse(responseCode = "204", description = "Cập nhật trạng thái thành công"),
+                        @ApiResponse(responseCode = "403", description = "Không được phép thao tác với nhân viên hệ thống"),
                         @ApiResponse(responseCode = "404", description = "Không tìm thấy nhân viên")
         })
         @SecurityRequirement(name = "bearerAuth")
         public ResponseEntity<Void> deleteEmployee(@PathVariable Long id) {
-                log.info("Deleting employee ID: {}", id);
+                log.info("Toggling employee status ID: {}", id);
                 employeeService.deleteEmployee(id);
+                return ResponseEntity.noContent().build();
+        }
+
+        @DeleteMapping("/{id}/permanent")
+        @SecurityRequirement(name = "bearerAuth")
+        @RequirePermission("STAFF_DELETE")
+        @Operation(summary = "Xóa vĩnh viễn nhân viên", description = "Chỉ xóa được nhân viên chưa phát sinh dữ liệu trong hệ thống. Nếu đã phát sinh dữ liệu, hãy dùng tạm khóa.", responses = {
+                        @ApiResponse(responseCode = "204", description = "Xóa vĩnh viễn thành công"),
+                        @ApiResponse(responseCode = "400", description = "Nhân viên đã phát sinh dữ liệu nên không thể xóa"),
+                        @ApiResponse(responseCode = "403", description = "Không được phép xóa nhân viên hệ thống"),
+                        @ApiResponse(responseCode = "404", description = "Không tìm thấy nhân viên")
+        })
+        public ResponseEntity<Void> permanentlyDeleteEmployee(@PathVariable Long id) {
+                log.info("Permanently deleting employee ID: {}", id);
+                employeeService.permanentlyDeleteEmployee(id);
                 return ResponseEntity.noContent().build();
         }
 
