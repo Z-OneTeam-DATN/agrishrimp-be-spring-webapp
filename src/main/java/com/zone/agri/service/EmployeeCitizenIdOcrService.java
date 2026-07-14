@@ -40,14 +40,14 @@ public class EmployeeCitizenIdOcrService {
 
         JsonNode cardData = parseModelOutput(fptAiMarketplaceVlmClient.extractCitizenId(image));
         if (cardData == null || cardData.isNull() || cardData.isMissingNode()) {
-            throw new BadRequestException("FPT AI Marketplace chưa trả về dữ liệu CCCD hợp lệ.");
+            throw new BadRequestException("Chưa lấy được thông tin từ ảnh. Vui lòng thử lại.");
         }
 
         Boolean isFrontSide = readBoolean(cardData, "isFrontSide");
         if (Boolean.FALSE.equals(isFrontSide)) {
             throw new BadRequestException(firstNonBlank(
                     normalizeText(readText(cardData, "notes")),
-                    "Ảnh tải lên không phải mặt trước CCCD hoặc chưa đủ rõ để trích xuất."));
+                    "Vui lòng dùng ảnh mặt trước CCCD và chụp rõ đủ 4 góc."));
         }
 
         String citizenId = normalizeCitizenId(readText(cardData, "citizenId"));
@@ -62,7 +62,7 @@ public class EmployeeCitizenIdOcrService {
 
         if (isBlank(citizenId) && isBlank(fullName) && isBlank(dateOfBirth)) {
             throw new BadRequestException(
-                    "Không đọc được thông tin chính từ ảnh CCCD. Hãy dùng ảnh mặt trước, đủ 4 góc và rõ nét.");
+                    "Chưa đọc được thông tin trên ảnh. Vui lòng chụp rõ mặt trước CCCD, đủ 4 góc.");
         }
 
         return EmployeeCitizenIdOcrResponse.builder()
@@ -80,16 +80,16 @@ public class EmployeeCitizenIdOcrService {
 
     private void validateUpload(MultipartFile image) {
         if (image == null || image.isEmpty()) {
-            throw new BadRequestException("Vui lòng chọn ảnh CCCD trước khi tải lên.");
+            throw new BadRequestException("Vui lòng chọn ảnh CCCD.");
         }
 
         if (image.getSize() > MAX_IMAGE_SIZE_BYTES) {
-            throw new BadRequestException("Ảnh CCCD vượt quá 5MB. Vui lòng nén ảnh hoặc chọn ảnh khác.");
+            throw new BadRequestException("Ảnh CCCD vượt quá 5MB. Vui lòng chọn ảnh nhỏ hơn.");
         }
 
         String contentType = image.getContentType();
         if (contentType != null && !contentType.isBlank() && !contentType.toLowerCase(Locale.ROOT).startsWith("image/")) {
-            throw new BadRequestException("File tải lên phải là ảnh hợp lệ.");
+            throw new BadRequestException("Ảnh tải lên chưa đúng định dạng.");
         }
     }
 
@@ -103,7 +103,7 @@ public class EmployeeCitizenIdOcrService {
             return objectMapper.readTree(cleaned);
         } catch (JsonProcessingException ex) {
             throw new BadRequestException(
-                    "FPT AI Marketplace trả về định dạng không đúng JSON mong đợi. Vui lòng thử lại với ảnh rõ hơn.");
+                    "Chưa xử lý được ảnh này. Vui lòng thử lại với ảnh rõ hơn.");
         }
     }
 

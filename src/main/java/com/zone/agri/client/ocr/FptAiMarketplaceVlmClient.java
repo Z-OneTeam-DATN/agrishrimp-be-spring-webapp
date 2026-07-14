@@ -78,7 +78,7 @@ public class FptAiMarketplaceVlmClient {
         try {
             imageBytes = imageFile.getBytes();
         } catch (IOException e) {
-            throw new BadRequestException("Không thể đọc file ảnh CCCD. Vui lòng thử lại.");
+            throw new BadRequestException("Không đọc được ảnh CCCD. Vui lòng chọn lại ảnh khác.");
         }
 
         String dataUrl = "data:" + contentType + ";base64," + Base64.getEncoder().encodeToString(imageBytes);
@@ -104,13 +104,13 @@ public class FptAiMarketplaceVlmClient {
 
             JsonNode payload = response.getBody();
             if (payload == null || payload.isNull()) {
-                throw new BadRequestException("FPT AI Marketplace VLM trả về dữ liệu rỗng.");
+                throw new BadRequestException("Chưa lấy được thông tin từ ảnh. Vui lòng thử lại.");
             }
 
             String content = extractAssistantContent(payload);
             if (content == null || content.isBlank()) {
                 log.warn("VLM payload khong co noi dung choices hop le: {}", payload);
-                throw new BadRequestException("FPT AI Marketplace VLM chưa trả về nội dung hợp lệ.");
+                throw new BadRequestException("Chưa lấy được thông tin từ ảnh. Vui lòng thử lại.");
             }
 
             return content.trim();
@@ -118,28 +118,28 @@ public class FptAiMarketplaceVlmClient {
             log.warn("FPT AI Marketplace VLM tra loi HTTP {}: {}", ex.getStatusCode(), ex.getResponseBodyAsString());
             int statusCode = ex.getStatusCode().value();
             if (statusCode == 401 || statusCode == 403) {
-                throw new BadRequestException("FPT AI Marketplace từ chối xác thực. Vui lòng kiểm tra API key mới.");
+                throw new BadRequestException("Hệ thống chưa sẵn sàng để xử lý ảnh. Vui lòng thử lại sau.");
             }
             if (statusCode == 429) {
-                throw new BadRequestException("FPT AI Marketplace đã vượt hạn mức hoặc hết số dư. Vui lòng kiểm tra tài khoản.");
+                throw new BadRequestException("Hệ thống đang bận. Vui lòng thử lại sau ít phút.");
             }
-            throw new BadRequestException("FPT AI Marketplace không xử lý được ảnh này. Vui lòng thử ảnh khác rõ hơn.");
+            throw new BadRequestException("Chưa xử lý được ảnh này. Vui lòng thử lại với ảnh rõ hơn.");
         } catch (ResourceAccessException ex) {
             log.error("Khong ket noi duoc FPT AI Marketplace VLM", ex);
-            throw new BadRequestException("Không thể kết nối FPT AI Marketplace lúc này. Vui lòng thử lại sau.");
+            throw new BadRequestException("Hệ thống đang bận. Vui lòng thử lại sau ít phút.");
         } catch (RestClientException ex) {
             log.error("Loi goi FPT AI Marketplace VLM", ex);
-            throw new BadRequestException("Không thể xử lý ảnh CCCD qua FPT AI Marketplace lúc này. Vui lòng thử lại sau.");
+            throw new BadRequestException("Chưa xử lý được ảnh này. Vui lòng thử lại sau.");
         }
     }
 
     private void validateConfig() {
         if (apiKey == null || apiKey.isBlank()) {
-            throw new BadRequestException("Chưa cấu hình FPT AI Marketplace API key cho backend.");
+            throw new BadRequestException("Hệ thống chưa sẵn sàng để xử lý ảnh. Vui lòng thử lại sau.");
         }
 
         if (model == null || model.isBlank()) {
-            throw new BadRequestException("Chưa cấu hình model FPT AI Marketplace cho OCR CCCD.");
+            throw new BadRequestException("Hệ thống chưa sẵn sàng để xử lý ảnh. Vui lòng thử lại sau.");
         }
     }
 
