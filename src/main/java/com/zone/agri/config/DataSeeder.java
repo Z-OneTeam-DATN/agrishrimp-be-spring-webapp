@@ -149,6 +149,13 @@ public class DataSeeder implements CommandLineRunner {
         Permission aChkX = pAct("Hủy phiếu kiểm kê", "INVENTORY_CHECK_CANCEL", PermissionGroup.INVENTORY, mChk);
         Permission aChkD = pAct("Xóa phiếu kiểm kê", "INVENTORY_CHECK_DELETE", PermissionGroup.INVENTORY, mChk);
 
+        Permission mPr = pMod("Yêu cầu nhập NCC", "PURCHASE_REQUEST", PermissionGroup.INVENTORY);
+        Permission aPrV = pAct("Xem yêu cầu nhập NCC", "PURCHASE_REQUEST_VIEW", PermissionGroup.INVENTORY, mPr);
+        Permission aPrC = pAct("Tạo yêu cầu nhập NCC", "PURCHASE_REQUEST_CREATE", PermissionGroup.INVENTORY, mPr);
+        Permission aPrU = pAct("Sửa yêu cầu nhập NCC", "PURCHASE_REQUEST_UPDATE", PermissionGroup.INVENTORY, mPr);
+        Permission aPrA = pAct("Duyệt yêu cầu nhập NCC", "PURCHASE_REQUEST_APPROVE", PermissionGroup.INVENTORY, mPr);
+        Permission aPrD = pAct("Xóa yêu cầu nhập NCC", "PURCHASE_REQUEST_DELETE", PermissionGroup.INVENTORY, mPr);
+
         Permission mSet = pMod("Cài đặt hệ thống", "SETTING", PermissionGroup.SETTING);
         Permission aSetV = pAct("Xem cài đặt", "SETTING_VIEW", PermissionGroup.SETTING, mSet);
         Permission aSetU = pAct("Cập nhật cài đặt", "SETTING_UPDATE", PermissionGroup.SETTING, mSet);
@@ -170,6 +177,7 @@ public class DataSeeder implements CommandLineRunner {
                 aExpV, aExpC, aExpA, aExpU, aExpX, aExpD,
                 aTrfV, aTrfC, aTrfA, aTrfU, aTrfX, aTrfD,
                 aChkV, aChkC, aChkA, aChkU, aChkX, aChkD,
+                aPrV, aPrC, aPrU, aPrA, aPrD,
                 aCusV, aCusC, aCusU, aCusD,
                 aVouV, aVouC, aVouU, aVouD,
                 aSupV, aSupC, aSupU, aSupD,
@@ -190,6 +198,7 @@ public class DataSeeder implements CommandLineRunner {
                 aExpV, aExpC, aExpA, aExpU, aExpX, aExpD,
                 aTrfV, aTrfC, aTrfA, aTrfU, aTrfX, aTrfD,
                 aChkV, aChkC, aChkA, aChkU, aChkX, aChkD,
+                aPrV, aPrC, aPrU, aPrA, aPrD,
                 aCusV, aCusC, aCusU, aCusD,
                 aVouV, aVouC, aVouU, aVouD,
                 aSupV, aSupC, aSupU, aSupD,
@@ -207,6 +216,7 @@ public class DataSeeder implements CommandLineRunner {
                 aExpV, aExpC, aExpU, aExpX, aExpD,
                 aTrfV, aTrfC, aTrfU, aTrfX, aTrfD,
                 aChkV, aChkC, aChkU, aChkX, aChkD,
+                aPrV, aPrC, aPrU, aPrD,
                 aCusV, aCusC, aCusU, aCusD,
                 aVouV, aVouC, aVouU,
                 aOrdV, aOrdC, aOrdU, aOrdCnf, aOrdShip, aOrdX, aOrdDone, aOrdExport,

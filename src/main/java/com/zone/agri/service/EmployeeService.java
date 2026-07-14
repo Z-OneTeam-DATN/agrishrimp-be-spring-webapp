@@ -150,7 +150,7 @@ public class EmployeeService {
     }
 
     @Transactional(readOnly = true)
-    public Page<EmployeeResponse> getEmployees(String keyword, Long branchId, Long roleId, String status,
+    public Page<EmployeeResponse> getEmployees(String keyword, Long branchId, Long roleId, String permissionCode, String status,
             Pageable pageable) {
         UserStatus userStatus = null;
         if (status != null && !status.isBlank() && !"all".equalsIgnoreCase(status)) {
@@ -161,7 +161,10 @@ public class EmployeeService {
             }
         }
         String searchKeyword = (keyword == null || keyword.isBlank()) ? null : keyword.trim();
-        return userRepository.findAllEmployeesWithFilter(searchKeyword, roleId, branchId, userStatus, pageable)
+        String normalizedPermissionCode = permissionCode != null && !permissionCode.isBlank()
+                ? permissionCode.trim().toUpperCase()
+                : null;
+        return userRepository.findAllEmployeesWithFilter(searchKeyword, roleId, branchId, normalizedPermissionCode, userStatus, pageable)
                 .map(this::mapToResponse);
     }
 

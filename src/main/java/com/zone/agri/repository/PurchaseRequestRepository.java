@@ -54,6 +54,14 @@ public interface PurchaseRequestRepository extends JpaRepository<PurchaseRequest
     @Query("SELECT COUNT(n) FROM InventoryNote n WHERE n.purchaseRequest.id = :prId")
     long countGoodsReceiptsByPrId(@Param("prId") Long prId);
 
+    @Query("""
+        SELECT COUNT(n)
+        FROM InventoryNote n
+        WHERE n.purchaseRequest.id = :prId
+          AND n.status = com.zone.agri.entity.enums.InventoryNoteStatus.COMPLETED
+    """)
+    long countCompletedGoodsReceiptsByPrId(@Param("prId") Long prId);
+
     // Tìm theo mã code
     Optional<PurchaseRequest> findByCode(String code);
 

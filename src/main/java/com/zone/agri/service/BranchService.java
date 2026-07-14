@@ -1,12 +1,16 @@
 package com.zone.agri.service;
 
+import com.zone.agri.common.AuthUtils;
+import com.zone.agri.common.RoleUtils;
 import com.zone.agri.dto.response.admin.BranchDTO;
 import com.zone.agri.dto.request.branch.CheckStockItemRequest;
 import com.zone.agri.dto.response.geo.CoordinateDto;
+import com.zone.agri.dto.response.user.UserDetail;
 import com.zone.agri.entity.Branch;
 import com.zone.agri.entity.Inventory;
 import com.zone.agri.entity.User;
 import com.zone.agri.entity.enums.BranchStatus;
+import com.zone.agri.exception.Forbidden;
 import com.zone.agri.exception.NotFoundException;
 import com.zone.agri.repository.BranchRepository;
 import com.zone.agri.repository.InventoryRepository;
@@ -36,7 +40,21 @@ public class BranchService {
 
     @Transactional(readOnly = true)
     public List<BranchDTO> getAll() {
-        return branchRepository.findAll().stream()
+        UserDetail currentUser = AuthUtils.getUserDetail();
+        if (currentUser == null) {
+            return List.of();
+        }
+
+        List<Branch> branches;
+        if (isAdminLike(currentUser)) {
+            branches = branchRepository.findAll();
+        } else if (currentUser.getBranchId() == null) {
+            branches = List.of();
+        } else {
+            branches = branchRepository.findById(currentUser.getBranchId()).stream().toList();
+        }
+
+        return branches.stream()
                 .map(this::mapToDTO)
                 .toList();
     }
@@ -52,6 +70,7 @@ public class BranchService {
     public BranchDTO getBranchById(Long id) {
         Branch branch = branchRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Không tìm thấy chi nhánh với ID: " + id));
+        ensureCurrentUserCanViewBranch(branch.getId());
         return mapToDTO(branch);
     }
 
@@ -211,8 +230,20 @@ public class BranchService {
                 ));
 
         // 4. Quét từng chi nhánh xem có "vượt qua bài test" không
+        UserDetail currentUser = AuthUtils.getUserDetail();
+        if (currentUser == null) {
+            return List.of();
+        }
+        if (!isAdminLike(currentUser) && currentUser.getBranchId() == null) {
+            return List.of();
+        }
+        Long scopedBranchId = !isAdminLike(currentUser)
+                ? currentUser.getBranchId()
+                : null;
+
         return branchInventoryMap.entrySet().stream()
                 .filter(entry -> entry.getKey().getStatus() == BranchStatus.ACTIVE)
+                .filter(entry -> scopedBranchId == null || scopedBranchId.equals(entry.getKey().getId()))
                 .filter(entry -> {
                     Map<Long, Integer> branchStock = entry.getValue();
                     for (CheckStockItemRequest requestedItem : items) {
@@ -231,6 +262,21 @@ public class BranchService {
      * Geocode địa chỉ chi nhánh → lat/lng.
      * Silent: lỗi geocoding không dừng việc lưu branch.
      */
+    private void ensureCurrentUserCanViewBranch(Long branchId) {
+        UserDetail currentUser = AuthUtils.getUserDetail();
+        if (currentUser == null || isAdminLike(currentUser)) {
+            return;
+        }
+        if (currentUser.getBranchId() == null || !currentUser.getBranchId().equals(branchId)) {
+            throw new Forbidden("Bạn chỉ được xem thông tin chi nhánh mình quản lý");
+        }
+    }
+
+    private boolean isAdminLike(UserDetail currentUser) {
+        return currentUser.getRole() != null
+                && RoleUtils.isAdminLikeRole(currentUser.getRole().getSlug());
+    }
+
     private void geocodeBranchSilently(Branch branch, BranchDTO dto) {
         try {
             String detail = branch.getAddressDetail();

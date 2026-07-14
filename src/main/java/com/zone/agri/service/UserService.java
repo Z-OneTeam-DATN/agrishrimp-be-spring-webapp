@@ -122,14 +122,17 @@ public class UserService {
     // QUẢN LÝ NHÂN VIÊN (DÀNH CHO ADMIN)
     // ==============================================================
 
-    public Page<UserResponse> getUsers(String keyword, Long roleId, Long branchId, String status, Pageable pageable) {
+    public Page<UserResponse> getUsers(String keyword, Long roleId, Long branchId, String permissionCode, String status, Pageable pageable) {
         UserStatus userStatus = null;
         if (status != null && !status.equalsIgnoreCase("all")) {
             try {
                 userStatus = UserStatus.valueOf(status.toUpperCase());
             } catch (IllegalArgumentException ignored) {}
         }
-        return userRepository.findAllWithFilter(keyword, roleId, branchId, userStatus, pageable)
+        String normalizedPermissionCode = permissionCode != null && !permissionCode.isBlank()
+                ? permissionCode.trim().toUpperCase()
+                : null;
+        return userRepository.findAllWithFilter(keyword, roleId, branchId, normalizedPermissionCode, userStatus, pageable)
                 .map(this::mapUserToResponse);
     }
 

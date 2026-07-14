@@ -71,10 +71,12 @@ public class EmployeeController {
 
                         @Parameter(description = "Lọc theo trạng thái (ACTIVE, INACTIVE)", example = "ACTIVE") @RequestParam(required = false) String status,
 
+                        @Parameter(description = "Loc theo ma quyen", example = "BRANCH_VIEW") @RequestParam(required = false) String permissionCode,
+
                         @Parameter(hidden = true) @PageableDefault(size = 10, sort = "createdAt", direction = Sort.Direction.DESC) Pageable pageable) {
 
                 Page<EmployeeResponse> employees = employeeService.getEmployees(
-                                keyword, branchId, roleId, status, pageable);
+                                keyword, branchId, roleId, permissionCode, status, pageable);
                 return ResponseEntity.ok(employees);
         }
 

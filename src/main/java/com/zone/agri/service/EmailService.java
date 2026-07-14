@@ -3,6 +3,7 @@ package com.zone.agri.service;
 import com.resend.Resend;
 import com.resend.core.exception.ResendException;
 import com.resend.services.emails.model.CreateEmailOptions;
+import com.resend.services.emails.model.CreateEmailResponse;
 import com.zone.agri.entity.PurchaseRequest;
 import com.zone.agri.exception.BadRequestException;
 import org.springframework.beans.factory.annotation.Value;
@@ -140,19 +141,16 @@ public class EmailService {
         String supplierName  = purchaseRequest.getSupplier().getName();
         String branchName    = purchaseRequest.getBranch() != null ? purchaseRequest.getBranch().getName() : "—";
         String requestedBy   = purchaseRequest.getCreatedBy() != null ? purchaseRequest.getCreatedBy().getFullName() : "Hệ thống";
-        String expectedDate  = purchaseRequest.getExpectedDeliveryDate() != null
-                ? purchaseRequest.getExpectedDeliveryDate().toString() : "Chưa xác định";
-
         String rows = "";
         if (purchaseRequest.getItems() != null) {
             rows = purchaseRequest.getItems().stream()
                     .map(item -> """
                             <tr>
-                                <td style="padding:10px 12px;border-bottom:1px solid #e5e7eb;font-size:13px;color:#374151;">%s</td>
-                                <td style="padding:10px 12px;border-bottom:1px solid #e5e7eb;font-size:13px;color:#374151;">%s</td>
-                                <td style="padding:10px 12px;border-bottom:1px solid #e5e7eb;font-size:13px;color:#374151;text-align:center;">%s</td>
-                                <td style="padding:10px 12px;border-bottom:1px solid #e5e7eb;font-size:13px;color:#374151;text-align:right;">%s</td>
-                                <td style="padding:10px 12px;border-bottom:1px solid #e5e7eb;font-size:13px;color:#6b7280;">%s</td>
+                                <td style="padding:10px 12px;border:1px solid #d1d5db;font-size:13px;color:#111827;vertical-align:top;">%s</td>
+                                <td style="padding:10px 12px;border:1px solid #d1d5db;font-size:13px;color:#111827;vertical-align:top;">%s</td>
+                                <td style="padding:10px 12px;border:1px solid #d1d5db;font-size:13px;color:#111827;text-align:right;vertical-align:top;">%s</td>
+                                <td style="padding:10px 12px;border:1px solid #d1d5db;font-size:13px;color:#111827;text-align:right;vertical-align:top;">%s</td>
+                                <td style="padding:10px 12px;border:1px solid #d1d5db;font-size:13px;color:#111827;vertical-align:top;">%s</td>
                             </tr>
                             """.formatted(
                             item.getProductVariant() != null ? item.getProductVariant().getSku() : "—",
@@ -165,7 +163,7 @@ public class EmailService {
                     .reduce("", String::concat);
         }
 
-        String subject = "[AgriShrimp] 📋 Phiếu yêu cầu mua " + purchaseRequest.getCode();
+        String subject = "[AgriShrimp] Phiếu yêu cầu mua " + purchaseRequest.getCode();
         String body = """
                 <p style="font-size:15px;color:#374151;line-height:1.8;">
                     Kính gửi <strong>%s</strong>,
@@ -174,36 +172,32 @@ public class EmailService {
                     <strong>AgriShrimp</strong> gửi đến quý đối tác phiếu yêu cầu mua hàng với thông tin như sau:
                 </p>
 
-                <div style="background:#f0f9ff;border-radius:8px;padding:14px 18px;margin:16px 0;">
-                    <table style="width:100%%;border-collapse:collapse;">
+                <div style="margin:18px 0;">
+                    <table style="width:100%%;border-collapse:collapse;border:1px solid #d1d5db;">
                         <tr>
-                            <td style="padding:4px 0;font-size:13px;color:#6b7280;width:40%%;">📋 Mã phiếu</td>
-                            <td style="padding:4px 0;font-size:14px;color:#1e40af;font-weight:bold;">%s</td>
+                            <td style="padding:10px 12px;border:1px solid #d1d5db;background:#f8fafc;font-size:13px;color:#374151;width:28%%;font-weight:600;">Mã phiếu</td>
+                            <td style="padding:10px 12px;border:1px solid #d1d5db;font-size:14px;color:#1e40af;font-weight:bold;">%s</td>
                         </tr>
                         <tr>
-                            <td style="padding:4px 0;font-size:13px;color:#6b7280;">🏪 Kho nhận hàng</td>
-                            <td style="padding:4px 0;font-size:14px;color:#374151;">%s</td>
+                            <td style="padding:10px 12px;border:1px solid #d1d5db;background:#f8fafc;font-size:13px;color:#374151;font-weight:600;">Kho nhận hàng</td>
+                            <td style="padding:10px 12px;border:1px solid #d1d5db;font-size:14px;color:#111827;">%s</td>
                         </tr>
                         <tr>
-                            <td style="padding:4px 0;font-size:13px;color:#6b7280;">👤 Người lập phiếu</td>
-                            <td style="padding:4px 0;font-size:14px;color:#374151;">%s</td>
-                        </tr>
-                        <tr>
-                            <td style="padding:4px 0;font-size:13px;color:#6b7280;">📅 Ngày giao dự kiến</td>
-                            <td style="padding:4px 0;font-size:14px;color:#374151;">%s</td>
+                            <td style="padding:10px 12px;border:1px solid #d1d5db;background:#f8fafc;font-size:13px;color:#374151;font-weight:600;">Người lập phiếu</td>
+                            <td style="padding:10px 12px;border:1px solid #d1d5db;font-size:14px;color:#111827;">%s</td>
                         </tr>
                     </table>
                 </div>
 
                 <p style="font-size:14px;font-weight:bold;color:#1e3a8a;margin:20px 0 8px;">Chi tiết hàng hóa yêu cầu:</p>
-                <table style="width:100%%;border-collapse:collapse;border-radius:8px;overflow:hidden;font-size:13px;">
+                <table style="width:100%%;border-collapse:collapse;border:1px solid #d1d5db;font-size:13px;">
                     <thead>
-                        <tr style="background:#1e40af;color:#fff;">
-                            <th style="padding:10px 12px;text-align:left;font-weight:600;">SKU</th>
-                            <th style="padding:10px 12px;text-align:left;font-weight:600;">Sản phẩm</th>
-                            <th style="padding:10px 12px;text-align:center;font-weight:600;">SL</th>
-                            <th style="padding:10px 12px;text-align:right;font-weight:600;">Đơn giá</th>
-                            <th style="padding:10px 12px;text-align:left;font-weight:600;">Ghi chú</th>
+                        <tr style="background:#eaf2ff;color:#111827;">
+                            <th style="padding:10px 12px;border:1px solid #d1d5db;text-align:left;font-weight:700;">SKU</th>
+                            <th style="padding:10px 12px;border:1px solid #d1d5db;text-align:left;font-weight:700;">Sản phẩm</th>
+                            <th style="padding:10px 12px;border:1px solid #d1d5db;text-align:right;font-weight:700;">Số lượng</th>
+                            <th style="padding:10px 12px;border:1px solid #d1d5db;text-align:right;font-weight:700;">Đơn giá dự kiến</th>
+                            <th style="padding:10px 12px;border:1px solid #d1d5db;text-align:left;font-weight:700;">Ghi chú</th>
                         </tr>
                     </thead>
                     <tbody>%s</tbody>
@@ -222,19 +216,62 @@ public class EmailService {
                 purchaseRequest.getCode(),
                 branchName,
                 requestedBy,
-                expectedDate,
                 rows,
                 formatCurrency(purchaseRequest.getTotalAmount())
         );
 
-        String cta = "Xem chi tiết đơn hàng →";
-        String htmlContent = buildEmailTemplate("Phiếu Yêu Cầu Mua Hàng", body, cta);
+        String htmlContent = buildPurchaseRequestEmailTemplate("Phiếu yêu cầu mua gửi nhà cung cấp", body);
         sendEmail(supplierEmail, subject, htmlContent);
     }
 
     // ─────────────────────────────────────────────────────────────────────────
     // Shared email layout builder
     // ─────────────────────────────────────────────────────────────────────────
+
+    private String buildPurchaseRequestEmailTemplate(String headerTitle, String bodyHtml) {
+        return """
+                <!DOCTYPE html>
+                <html lang="vi">
+                <head>
+                    <meta charset="UTF-8"/>
+                    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+                    <title>AgriShrimp</title>
+                </head>
+                <body style="margin:0;padding:0;background-color:#ffffff;font-family:'Segoe UI',Arial,sans-serif;color:#111827;">
+                    <table width="100%%" cellpadding="0" cellspacing="0" style="width:100%%;background:#ffffff;">
+                        <tr>
+                            <td style="padding:28px 20px;">
+                                <table width="1120" cellpadding="0" cellspacing="0" style="max-width:1120px;width:100%%;margin:0 auto;background:#ffffff;border:1px solid #d1d5db;border-collapse:collapse;">
+                                    <tr>
+                                        <td style="padding:22px 24px;border-bottom:3px solid #1e40af;">
+                                            <h1 style="margin:0;font-size:22px;font-weight:700;color:#1d4ed8;line-height:1.3;">
+                                                %s
+                                            </h1>
+                                        </td>
+                                    </tr>
+                                    <tr>
+                                        <td style="padding:24px;">
+                                            %s
+                                        </td>
+                                    </tr>
+                                    <tr>
+                                        <td style="padding:16px 24px 22px;border-top:1px solid #d1d5db;">
+                                            <p style="margin:0;font-size:12px;color:#6b7280;line-height:1.6;">
+                                                AgriShrimp - He thong quan ly nong san thong minh.
+                                            </p>
+                                            <p style="margin:4px 0 0;font-size:12px;color:#6b7280;line-height:1.6;">
+                                                Day la email tu dong tu he thong AgriShrimp.
+                                            </p>
+                                        </td>
+                                    </tr>
+                                </table>
+                            </td>
+                        </tr>
+                    </table>
+                </body>
+                </html>
+                """.formatted(headerTitle, bodyHtml);
+    }
 
     private String buildEmailTemplate(String headerTitle, String bodyHtml, String ctaText) {
         return """
@@ -328,8 +365,9 @@ public class EmailService {
                     .html(htmlContent)
                     .build();
 
-            resend.emails().send(params);
-            log.info("Email sent via Resend to {}", toEmail);
+            CreateEmailResponse response = resend.emails().send(params);
+            String emailId = response != null ? response.getId() : "unknown";
+            log.info("Email sent via Resend to {} (id={})", toEmail, emailId);
 
         } catch (ResendException e) {
             log.error("Resend failed for {}: {}", toEmail, e.getMessage());
