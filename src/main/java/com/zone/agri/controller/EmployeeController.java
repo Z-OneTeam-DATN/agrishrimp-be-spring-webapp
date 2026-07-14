@@ -5,7 +5,6 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.web.PageableDefault;
 import org.springframework.http.HttpStatus;
-import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -15,18 +14,13 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
-import org.springframework.web.multipart.MultipartFile;
 
 import com.zone.agri.dto.request.employee.EmployeeCreateRequest;
 import com.zone.agri.dto.request.employee.EmployeeStatusUpdateRequest;
 import com.zone.agri.dto.response.employee.EmployeeResponse;
-import com.zone.agri.dto.response.employee.OcrCccdResponse;
-import com.zone.agri.exception.BadRequestException;
 import com.zone.agri.security.annotation.RequirePermission;
 import com.zone.agri.service.EmployeeService;
-import com.zone.agri.service.OcrService;
 
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -50,7 +44,6 @@ import lombok.extern.slf4j.Slf4j;
 public class EmployeeController {
 
         private final EmployeeService employeeService;
-        private final OcrService ocrService;
 
         /**
          * Get paginated employee list with filters
@@ -208,50 +201,4 @@ public class EmployeeController {
                 return ResponseEntity.ok(result);
         }
 
-        /**
-         * Lookup citizen info by CCCD
-         * Endpoint: GET /api/employees/lookup-citizen/{citizenId}
-         */
-        @GetMapping("/lookup-citizen/{citizenId}")
-        @SecurityRequirement(name = "bearerAuth")
-        @RequirePermission({ "STAFF_CREATE", "STAFF_UPDATE" })
-        @Operation(summary = "Tra cứu thông tin từ CCCD", description = "Tra cứu thông tin nhân viên (địa chỉ, ngày sinh) từ số CCCD trong hệ thống", responses = {
-                        @ApiResponse(responseCode = "200", description = "Tìm thấy thông tin"),
-                        @ApiResponse(responseCode = "404", description = "Không tìm thấy CCCD này")
-        })
-        public ResponseEntity<?> lookupByCitizenId(
-                        @Parameter(description = "Số CCCD (12 chữ số)", example = "012345678901") @PathVariable String citizenId) {
-                log.info("Looking up citizen ID: {}", citizenId);
-                var response = employeeService.lookupByCitizenId(citizenId);
-                return ResponseEntity.ok(response);
-        }
-
-        /**
-         * Extract CCCD information from uploaded image using OCR
-         * Endpoint: POST /api/employees/ocr-cccd
-         */
-        @PostMapping(value = "/ocr-cccd", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-        @SecurityRequirement(name = "bearerAuth")
-        @RequirePermission("STAFF_CREATE")
-        @Operation(summary = "OCR trích xuất thông tin từ ảnh CCCD", description = "Upload ảnh mặt trước CCCD để tự động trích xuất thông tin (họ tên, ngày sinh, giới tính, địa chỉ)", responses = {
-                        @ApiResponse(responseCode = "200", description = "OCR thành công", content = @Content(schema = @Schema(implementation = OcrCccdResponse.class))),
-                        @ApiResponse(responseCode = "400", description = "Ảnh không hợp lệ"),
-                        @ApiResponse(responseCode = "500", description = "Lỗi xử lý OCR")
-        })
-        public ResponseEntity<OcrCccdResponse> extractCccdFromImage(
-                        @Parameter(description = "Ảnh mặt trước CCCD (PNG, JPG, JPEG)") @RequestParam("image") MultipartFile image) {
-
-                if (image.isEmpty()) {
-                        throw new BadRequestException("Vui lòng chọn ảnh CCCD để tải lên.");
-                }
-
-                String contentType = image.getContentType();
-                if (contentType == null || !contentType.startsWith("image/")) {
-                        throw new BadRequestException("File tải lên phải là ảnh hợp lệ (PNG, JPG, JPEG, WEBP).");
-                }
-
-                log.info("Processing OCR for CCCD image: {}", image.getOriginalFilename());
-                OcrCccdResponse result = ocrService.extractCccdInfo(image);
-                return ResponseEntity.ok(result);
-        }
 }

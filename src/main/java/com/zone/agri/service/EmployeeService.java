@@ -19,7 +19,6 @@ import org.springframework.transaction.annotation.Transactional;
 import com.zone.agri.common.AuthUtils;
 import com.zone.agri.common.RoleUtils;
 import com.zone.agri.dto.request.employee.EmployeeCreateRequest;
-import com.zone.agri.dto.response.citizen.CitizenLookupResponse;
 import com.zone.agri.dto.response.employee.EmployeeResponse;
 import com.zone.agri.dto.response.user.UserDetail;
 import com.zone.agri.entity.Branch;
@@ -330,18 +329,6 @@ public class EmployeeService {
                         .displayName(user.getRole().getDisplayName())
                         .slug(user.getRole().getSlug())
                         .build() : null)
-                .build();
-    }
-
-    public CitizenLookupResponse lookupByCitizenId(String citizenId) {
-        User user = userRepository.findByCitizenId(citizenId)
-                .orElseThrow(() -> new NotFoundException("Không tìm thấy thông tin CCCD này trong hệ thống"));
-
-        return CitizenLookupResponse.builder()
-                .fullName(user.getFullName())
-                .dateOfBirth(user.getDateOfBirth())
-                .gender(user.getGender() != null ? user.getGender().name() : null)
-                .address(user.getAddressDetail())
                 .build();
     }
 
