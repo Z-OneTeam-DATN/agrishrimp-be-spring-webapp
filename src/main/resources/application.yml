@@ -37,3 +37,11 @@ transfer:
 vietqr:
   client-id: ${VIETQR_CLIENT_ID:}
   api-key: ${VIETQR_API_KEY:}
+
+fpt:
+  ai:
+    vlm:
+      base-url: ${FPT_AI_VLM_BASE_URL:https://mkp-api.fptcloud.com}
+      chat-completions-path: ${FPT_AI_VLM_CHAT_COMPLETIONS_PATH:/chat/completions}
+      api-key: ${FPT_AI_VLM_API_KEY:}
+      model: ${FPT_AI_VLM_MODEL:}

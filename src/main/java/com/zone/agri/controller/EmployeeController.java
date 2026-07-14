@@ -4,6 +4,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.web.PageableDefault;
+import org.springframework.http.MediaType;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PatchMapping;
@@ -16,11 +17,14 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.multipart.MultipartFile;
 
 import com.zone.agri.dto.request.employee.EmployeeCreateRequest;
 import com.zone.agri.dto.request.employee.EmployeeStatusUpdateRequest;
+import com.zone.agri.dto.response.employee.EmployeeCitizenIdOcrResponse;
 import com.zone.agri.dto.response.employee.EmployeeResponse;
 import com.zone.agri.security.annotation.RequirePermission;
+import com.zone.agri.service.EmployeeCitizenIdOcrService;
 import com.zone.agri.service.EmployeeService;
 
 import io.swagger.v3.oas.annotations.Operation;
@@ -45,6 +49,7 @@ import lombok.extern.slf4j.Slf4j;
 public class EmployeeController {
 
         private final EmployeeService employeeService;
+        private final EmployeeCitizenIdOcrService employeeCitizenIdOcrService;
 
         /**
          * Get paginated employee list with filters
@@ -110,6 +115,18 @@ public class EmployeeController {
                 log.info("Received request to create employee: {}", request.getEmail());
                 EmployeeResponse response = employeeService.createEmployee(request);
                 return ResponseEntity.status(HttpStatus.CREATED).body(response);
+        }
+
+        @PostMapping(value = "/ocr-citizen-id", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+        @SecurityRequirement(name = "bearerAuth")
+        @RequirePermission({ "STAFF_CREATE", "STAFF_UPDATE" })
+        @Operation(summary = "OCR CCCD/CMT để gợi ý điền form nhân viên", description = "Nhận ảnh mặt trước CCCD/CMT, gọi FPT AI Reader và trả về các trường đã chuẩn hóa để frontend tự điền.", responses = {
+                        @ApiResponse(responseCode = "200", description = "Nhận diện thành công", content = @Content(schema = @Schema(implementation = EmployeeCitizenIdOcrResponse.class))),
+                        @ApiResponse(responseCode = "400", description = "Ảnh không hợp lệ hoặc không nhận diện được")
+        })
+        public ResponseEntity<EmployeeCitizenIdOcrResponse> ocrCitizenId(
+                        @RequestParam("image") MultipartFile image) {
+                return ResponseEntity.ok(employeeCitizenIdOcrService.extractCitizenIdInfo(image));
         }
 
         /**
