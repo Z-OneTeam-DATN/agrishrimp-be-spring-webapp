@@ -31,30 +31,34 @@ public interface UserRepository extends JpaRepository<User, Long> {
 
         boolean existsByCitizenId(String citizenId);
 
-        @Query("SELECT u FROM User u WHERE " +
+        @Query("SELECT DISTINCT u FROM User u LEFT JOIN u.role r LEFT JOIN r.permissions p WHERE " +
                         "(:keyword IS NULL OR LOWER(u.fullName) LIKE LOWER(CONCAT('%', :keyword, '%')) OR u.email LIKE LOWER(CONCAT('%', :keyword, '%')) OR u.phoneNumber LIKE CONCAT('%', :keyword, '%') OR u.citizenId LIKE CONCAT('%', :keyword, '%')) AND "
                         +
                         "(:roleId IS NULL OR u.role.id = :roleId) AND " +
                         "(:branchId IS NULL OR u.branch.id = :branchId) AND " +
+                        "(:permissionCode IS NULL OR p.code = :permissionCode) AND " +
                         "(:status IS NULL OR u.status = :status)")
         Page<User> findAllWithFilter(
                         @Param("keyword") String keyword,
                         @Param("roleId") Long roleId,
                         @Param("branchId") Long branchId,
+                        @Param("permissionCode") String permissionCode,
                         @Param("status") com.zone.agri.entity.enums.UserStatus status,
                         Pageable pageable);
 
-        @Query("SELECT u FROM User u WHERE " +
+        @Query("SELECT DISTINCT u FROM User u LEFT JOIN u.role r LEFT JOIN r.permissions p WHERE " +
                         "u.role.slug <> 'USER' AND " +
                         "(:keyword IS NULL OR LOWER(u.fullName) LIKE LOWER(CONCAT('%', :keyword, '%')) OR u.email LIKE LOWER(CONCAT('%', :keyword, '%')) OR u.phoneNumber LIKE CONCAT('%', :keyword, '%') OR u.citizenId LIKE CONCAT('%', :keyword, '%')) AND "
                         +
                         "(:roleId IS NULL OR u.role.id = :roleId) AND " +
                         "(:branchId IS NULL OR u.branch.id = :branchId) AND " +
+                        "(:permissionCode IS NULL OR p.code = :permissionCode) AND " +
                         "(:status IS NULL OR u.status = :status)")
         Page<User> findAllEmployeesWithFilter(
                         @Param("keyword") String keyword,
                         @Param("roleId") Long roleId,
                         @Param("branchId") Long branchId,
+                        @Param("permissionCode") String permissionCode,
                         @Param("status") com.zone.agri.entity.enums.UserStatus status,
                         Pageable pageable);
 

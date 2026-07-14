@@ -29,6 +29,9 @@ public class InventorySearchResponse {
     private String unit;
     private Long supplierId;
     private String supplierName;
+    private Long receiptId;
+    private String receiptCode;
+    private LocalDateTime receiptDate;
     private String branchName;
 
     public InventorySearchResponse(

@@ -26,6 +26,7 @@ import java.util.stream.Collectors;
 public class PurchaseRequestService {
     private final PurchaseRequestRepository purchaseRequestRepository;
     private final PurchaseRequestItemRepository purchaseRequestItemRepository;
+    private final InventoryNoteRepository inventoryNoteRepository;
     private final SupplierRepository supplierRepository;
     private final SupplierProductCatalogRepository supplierProductCatalogRepository;
     private final BranchRepository branchRepository;
@@ -372,22 +373,11 @@ public class PurchaseRequestService {
     }
 
     @Transactional
-    public PurchaseRequestResponse markPreparing(Long id) {
-        PurchaseRequest pr = findOrThrow(id);
-        warehouseContext.assertAccess(pr.getBranch().getId());
-        if (pr.getStatus() != PurchaseRequestStatus.SUPPLIER_CONFIRMED) {
-            throw new BadRequestException("Chi co the cap nhat chuan bi hang sau khi nha cung cap xac nhan.");
-        }
-        pr.setStatus(PurchaseRequestStatus.PREPARING);
-        return mapToResponseShallow(purchaseRequestRepository.save(pr));
-    }
-
-    @Transactional
     public PurchaseRequestResponse markDelivering(Long id) {
         PurchaseRequest pr = findOrThrow(id);
         warehouseContext.assertAccess(pr.getBranch().getId());
-        if (pr.getStatus() != PurchaseRequestStatus.PREPARING) {
-            throw new BadRequestException("Chi co the cap nhat dang giao sau khi nha cung cap dang chuan bi hang.");
+        if (pr.getStatus() != PurchaseRequestStatus.SUPPLIER_CONFIRMED) {
+            throw new BadRequestException("Chi co the chuyen sang cho giao hang sau khi NCC da xac nhan.");
         }
         pr.setStatus(PurchaseRequestStatus.DELIVERING);
         return mapToResponseShallow(purchaseRequestRepository.save(pr));
@@ -403,7 +393,6 @@ public class PurchaseRequestService {
                 PurchaseRequestStatus.APPROVED,
                 PurchaseRequestStatus.SENT_TO_SUPPLIER,
                 PurchaseRequestStatus.SUPPLIER_CONFIRMED,
-                PurchaseRequestStatus.PREPARING,
                 PurchaseRequestStatus.DELIVERING
         );
         if (!cancellableStatuses.contains(pr.getStatus())) {
@@ -556,8 +545,9 @@ public class PurchaseRequestService {
 
         // Lấy danh sách phiếu nhập liên kết
         List<PurchaseRequestResponse.GoodsReceiptSummary> receiptSummaries = new ArrayList<>();
-        if (pr.getGoodsReceipts() != null) {
-            receiptSummaries = pr.getGoodsReceipts().stream()
+        List<InventoryNote> goodsReceipts = inventoryNoteRepository.findGoodsReceiptsByPurchaseRequestId(pr.getId());
+        if (goodsReceipts != null) {
+            receiptSummaries = goodsReceipts.stream()
                     .map(note -> {
                         int totalDelivered = 0;
                         int totalAccepted = 0;
@@ -616,6 +606,9 @@ public class PurchaseRequestService {
 
     // Mapping nhanh cho danh sách (không load items + receipts chi tiết)
     private PurchaseRequestResponse mapToResponseShallow(PurchaseRequest pr) {
+        long totalReceiptCount = purchaseRequestRepository.countGoodsReceiptsByPrId(pr.getId());
+        long completedReceiptCount = purchaseRequestRepository.countCompletedGoodsReceiptsByPrId(pr.getId());
+
         return PurchaseRequestResponse.builder()
                 .id(pr.getId())
                 .code(pr.getCode())
@@ -632,6 +625,8 @@ public class PurchaseRequestService {
                 .createdByName(pr.getCreatedBy() != null ? pr.getCreatedBy().getFullName() : "")
                 .totalAmount(Objects.requireNonNullElse(pr.getTotalAmount(), BigDecimal.ZERO))
                 .note(pr.getNote())
+                .totalReceiptCount(totalReceiptCount)
+                .completedReceiptCount(completedReceiptCount)
                 .build();
     }
 
