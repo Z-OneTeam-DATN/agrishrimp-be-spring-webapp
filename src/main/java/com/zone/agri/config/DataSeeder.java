@@ -182,7 +182,7 @@ public class DataSeeder implements CommandLineRunner {
                 PermissionGroup.COMMUNICATION,
                 mCustomerAdvisor);
 
-        Role superAdminRole = saveRole("SUPER_ADMIN", "Siêu quản trị", true, Set.of(
+        Set<Permission> superAdminPermissions = Set.of(
                 aDashV, aWspaceV,
                 aRptSale, aRptInv, aRptFin,
                 aUserV, aUserC, aUserU, aUserD,
@@ -204,60 +204,19 @@ public class DataSeeder implements CommandLineRunner {
                 aBlogV, aBlogC, aBlogE, aBlogD,
                 aSetV, aSetU,
                 aChatV, aChatM,
-                aCustomerAdvisorUse));
+                aCustomerAdvisorUse);
 
-        Role adminRole = saveRole("ADMIN", "Quản trị viên", true, Set.of(
-                aDashV, aWspaceV,
-                aRptSale, aRptInv, aRptFin,
-                aUserV, aUserC, aUserU, aUserD,
-                aRoleV, aRoleC, aRoleU, aRoleD,
-                aBranchV, aBranchC, aBranchU, aBranchD,
-                aProdV, aProdC, aProdU, aProdD,
-                aCatV, aCatC, aCatU, aCatD,
-                aAttrV, aAttrC, aAttrU, aAttrD,
-                aImpV, aImpC, aImpA, aImpU, aImpX, aImpD,
-                aExpV, aExpC, aExpA, aExpU, aExpX, aExpD,
-                aTrfV, aTrfC, aTrfA, aTrfU, aTrfX, aTrfD,
-                aChkV, aChkC, aChkA, aChkU, aChkX, aChkD,
-                aPurchaseRequestV, aPurchaseRequestC, aPurchaseRequestU, aPurchaseRequestA, aPurchaseRequestD,
-                aCusV, aCusC, aCusU, aCusD,
-                aVouV, aVouC, aVouU, aVouD,
-                aSupV, aSupC, aSupU, aSupD,
-                aOrdV, aOrdC, aOrdU, aOrdD, aOrdCnf, aOrdShip, aOrdX, aOrdDone, aOrdRefund, aOrdExport,
-                aBannerV, aBannerC, aBannerE, aBannerD,
-                aBlogV, aBlogC, aBlogE, aBlogD,
-                aSetV, aSetU,
-                aChatV, aChatM,
-                aCustomerAdvisorUse));
+        Role superAdminRole = saveRole("SUPER_ADMIN", "Siêu quản trị", true, superAdminPermissions);
 
-        saveRole("MANAGER", "Quản lý chi nhánh & kho", false, Set.of(
-                aDashV, aWspaceV,
-                aRptSale, aRptInv, aRptFin,
-                aUserV, aUserC, aUserU, aUserD,
-                aBranchV,
-                aProdV, aCatV, aAttrV, aSupV,
-                aImpV, aImpC, aImpA, aImpU, aImpX, aImpD,
-                aExpV, aExpC, aExpA, aExpU, aExpX, aExpD,
-                aTrfV, aTrfC, aTrfA, aTrfU, aTrfX, aTrfD,
-                aChkV, aChkC, aChkA, aChkU, aChkX, aChkD,
-                aPurchaseRequestV, aPurchaseRequestC, aPurchaseRequestU, aPurchaseRequestA, aPurchaseRequestD,
-                aCusV, aCusC, aCusU, aCusD,
-                aVouV, aVouC, aVouU,
-                aOrdV, aOrdC, aOrdU, aOrdCnf, aOrdShip, aOrdX, aOrdDone, aOrdExport,
-                aChatV, aChatM));
-
-        Set<Permission> customerPermissions = Set.of(aOrdV, aOrdC, aOrdX);
-        saveRole("USER", "Người dùng", false, customerPermissions);
-
-        ensureUser("admin@agrishrimp.vn", "Admin", "0901000001", "123456", adminRole, UserStatus.ACTIVE);
-        ensureUser("superadmin@agrishrimp.vn", "Super Admin", "0901000002", "123456", superAdminRole, UserStatus.ACTIVE);
+        // Chỉ bootstrap 1 tài khoản gốc để đăng nhập lần đầu; các vai trò khác
+        // sẽ được quản trị viên tự tạo trong màn quản lý vai trò.
         ensureUser(
-                "bot@agrishrimp.vn",
-                "AgriShrimp Bot",
-                "0900000000",
-                "bot_disabled_bootstrap",
+                "superadmin@agrishrimp.vn",
+                "Super Admin",
+                "0901000001",
+                "123456",
                 superAdminRole,
-                UserStatus.INACTIVE);
+                UserStatus.ACTIVE);
 
         if (hasExistingRoles) {
             log.info(">>> ĐỒNG BỘ DỮ LIỆU NỀN TẢNG HOÀN TẤT.");
@@ -322,10 +281,8 @@ public class DataSeeder implements CommandLineRunner {
                     existingUser.setStatus(status);
                     existingUser.setRole(role);
                     existingUser.setProvider(AuthProvider.LOCAL);
-                    existingUser.setGender("bot@agrishrimp.vn".equals(email) ? Gender.OTHER : Gender.MALE);
-                    existingUser.setDateOfBirth("bot@agrishrimp.vn".equals(email)
-                            ? LocalDate.of(2000, 1, 1)
-                            : LocalDate.of(1985, 3, 15));
+                    existingUser.setGender(Gender.MALE);
+                    existingUser.setDateOfBirth(LocalDate.of(1985, 3, 15));
                     return userRepository.save(existingUser);
                 })
                 .orElseGet(() -> userRepository.save(User.builder()
@@ -335,10 +292,8 @@ public class DataSeeder implements CommandLineRunner {
                         .passwordHash(passwordEncoder.encode(rawPassword))
                         .status(status)
                         .role(role)
-                        .gender("bot@agrishrimp.vn".equals(email) ? Gender.OTHER : Gender.MALE)
-                        .dateOfBirth("bot@agrishrimp.vn".equals(email)
-                                ? LocalDate.of(2000, 1, 1)
-                                : LocalDate.of(1985, 3, 15))
+                        .gender(Gender.MALE)
+                        .dateOfBirth(LocalDate.of(1985, 3, 15))
                         .provider(AuthProvider.LOCAL)
                         .build()));
     }
