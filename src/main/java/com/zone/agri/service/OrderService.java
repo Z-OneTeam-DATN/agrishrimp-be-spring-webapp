@@ -54,6 +54,7 @@ public class OrderService {
     private final SubOrderRepository subOrderRepository;
     private final SubOrderItemRepository subOrderItemRepository;
     private final InventoryTransactionRepository transactionRepository;
+    private final InventoryCheckGuardService inventoryCheckGuardService;
 
     private final UserAddressRepository userAddressRepository;
     private final ReviewRepository reviewRepository;
@@ -1137,6 +1138,12 @@ public class OrderService {
                     ProductVariant variant = variantRepository.findById(item.getProductVariantId())
                             .orElseThrow(() -> new NotFoundException("Sản phẩm không tồn tại"));
 
+                    inventoryCheckGuardService.assertStockMutationAllowed(
+                            subDraft.getBranchId(),
+                            List.of(item.getProductVariantId()),
+                            "xác nhận đơn hàng"
+                    );
+
                     int targetToDeduct = Objects.requireNonNullElse(item.getAllocatedQuantity(), item.getQuantity());
                     int originallyMissing = Objects.requireNonNullElse(item.getMissingQuantity(), 0);
                     int actuallyDeducted = 0;
@@ -1551,6 +1558,11 @@ public class OrderService {
             }
 
             Inventory inventory = saleTransaction.getInventory();
+            inventoryCheckGuardService.assertStockMutationAllowed(
+                    inventory.getBranch() != null ? inventory.getBranch().getId() : null,
+                    inventory.getProductVariant() != null ? List.of(inventory.getProductVariant().getId()) : List.of(),
+                    "hoàn kho chứng từ"
+            );
             int currentQty = Objects.requireNonNullElse(inventory.getQuantity(), 0);
             int newQty = currentQty + quantityToRelease;
             inventory.setQuantity(newQty);
@@ -1669,6 +1681,12 @@ public class OrderService {
         for (CheckoutItemRequest itemReq : req.getItems()) {
             ProductVariant variant = variantRepository.findById(itemReq.getVariantId())
                     .orElseThrow(() -> new NotFoundException("Sản phẩm không tồn tại"));
+
+            inventoryCheckGuardService.assertStockMutationAllowed(
+                    selectedBranch.getId(),
+                    List.of(variant.getId()),
+                    "xác nhận xuất kho"
+            );
 
             // LOGIC TRỪ KHO THEO LÔ (FIFO)
             int remainingToDeduct = itemReq.getQuantity();

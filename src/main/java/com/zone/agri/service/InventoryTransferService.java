@@ -410,8 +410,11 @@ public class InventoryTransferService {
     public void approveAndShip(Long transferId) {
         InventoryTransfer transfer = transferRepo.findByIdWithDetails(transferId)
                 .orElseThrow(() -> new RuntimeException("Không tìm thấy phiếu điều chuyển"));
-        inventoryCheckGuardService.assertNoOpenCheckForBranch(transfer.getFromBranch().getId(), "xuat dieu chuyen");
-        inventoryCheckGuardService.assertNoOpenCheckForBranch(transfer.getToBranch().getId(), "xuat dieu chuyen");
+        inventoryCheckGuardService.assertStockMutationAllowed(
+                transfer.getFromBranch().getId(),
+                transfer.getDetails().stream().map(detail -> detail.getProductVariant().getId()).toList(),
+                "xuất hàng điều chuyển"
+        );
 
         if (transfer.getStatus() != InventoryTransferStatus.APPROVED) {
             throw new RuntimeException("Chỉ có thể xuất kho phiếu đã được duyệt (APPROVED)!");
@@ -476,8 +479,6 @@ public class InventoryTransferService {
     public void startInspection(Long transferId) {
         InventoryTransfer transfer = transferRepo.findById(transferId)
                 .orElseThrow(() -> new RuntimeException("Không tìm thấy phiếu điều chuyển"));
-        inventoryCheckGuardService.assertNoOpenCheckForBranch(transfer.getFromBranch().getId(), "kiem tra dieu chuyen");
-        inventoryCheckGuardService.assertNoOpenCheckForBranch(transfer.getToBranch().getId(), "kiem tra dieu chuyen");
 
         if (transfer.getStatus() != InventoryTransferStatus.SHIPPING) {
             throw new RuntimeException(
@@ -498,8 +499,11 @@ public class InventoryTransferService {
     public void receiveTransfer(Long id, List<TransferQCRequest> qcItems) {
         InventoryTransfer transfer = transferRepo.findByIdWithDetails(id)
                 .orElseThrow(() -> new RuntimeException("Không tìm thấy phiếu điều chuyển"));
-        inventoryCheckGuardService.assertNoOpenCheckForBranch(transfer.getFromBranch().getId(), "nhan dieu chuyen");
-        inventoryCheckGuardService.assertNoOpenCheckForBranch(transfer.getToBranch().getId(), "nhan dieu chuyen");
+        inventoryCheckGuardService.assertStockMutationAllowed(
+                transfer.getToBranch().getId(),
+                transfer.getDetails().stream().map(detail -> detail.getProductVariant().getId()).toList(),
+                "nhận hàng điều chuyển"
+        );
 
         // Hỗ trợ cả SHIPPING (skip bước INSPECTING) lẫn INSPECTING (đúng flow mới)
         if (transfer.getStatus() != InventoryTransferStatus.INSPECTING

@@ -46,6 +46,34 @@ public class SchemaUpdateConfig implements BeanPostProcessor {
                     "ALTER TABLE inventory_notes MODIFY COLUMN type ENUM('IMPORT','EXPORT','CHECK')");
 
             executeSql(stmt,
+                    "Patch inventory_notes adds check_scope_type",
+                    "ALTER TABLE inventory_notes ADD COLUMN check_scope_type VARCHAR(50) NULL");
+
+            executeSql(stmt,
+                    "Patch inventory_notes adds check_started_at",
+                    "ALTER TABLE inventory_notes ADD COLUMN check_started_at DATETIME NULL");
+
+            executeSql(stmt,
+                    "Patch inventory_notes adds check_recount_reason",
+                    "ALTER TABLE inventory_notes ADD COLUMN check_recount_reason TEXT NULL");
+
+            executeSql(stmt,
+                    "Patch inventory_notes adds check_cancel_reason",
+                    "ALTER TABLE inventory_notes ADD COLUMN check_cancel_reason TEXT NULL");
+
+            executeSql(stmt,
+                    "Patch inventory_notes adds check_cancelled_at",
+                    "ALTER TABLE inventory_notes ADD COLUMN check_cancelled_at DATETIME NULL");
+
+            executeSql(stmt,
+                    "Patch inventory_notes widens check_workflow_status",
+                    "ALTER TABLE inventory_notes MODIFY COLUMN check_workflow_status VARCHAR(50) NULL");
+
+            executeSql(stmt,
+                    "Backfill inventory_notes.check_scope_type for legacy check notes",
+                    "UPDATE inventory_notes SET check_scope_type = 'FULL_WAREHOUSE' WHERE type = 'CHECK' AND (check_scope_type IS NULL OR TRIM(check_scope_type) = '')");
+
+            executeSql(stmt,
                     "Patch sub_orders.status length to 40",
                     "ALTER TABLE sub_orders MODIFY COLUMN status VARCHAR(40)");
 

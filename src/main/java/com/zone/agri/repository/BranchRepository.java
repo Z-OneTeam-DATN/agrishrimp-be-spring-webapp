@@ -2,7 +2,9 @@ package com.zone.agri.repository;
 
 import com.zone.agri.entity.Branch;
 import com.zone.agri.entity.enums.BranchStatus;
+import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
@@ -38,6 +40,10 @@ public interface BranchRepository extends JpaRepository<Branch, Long> {
 
     @Query("SELECT b FROM Branch b WHERE b.name = :name")
     Optional<Branch> findByName(@Param("name") String name);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT b FROM Branch b WHERE b.id = :id")
+    Optional<Branch> findByIdForUpdate(@Param("id") Long id);
 
     List<Branch> findByStatusAndDistrictId(BranchStatus status, Integer districtId);
 

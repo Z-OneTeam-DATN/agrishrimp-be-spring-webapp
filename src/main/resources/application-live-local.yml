@@ -20,6 +20,6 @@ spring:
 app:
   startup:
     schema-patches:
-      enabled: false
+      enabled: true
     seed-data:
       enabled: false

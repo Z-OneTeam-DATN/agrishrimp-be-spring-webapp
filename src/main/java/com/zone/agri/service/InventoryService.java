@@ -151,7 +151,6 @@ public class InventoryService {
         InventoryNote note = noteRepository.findByIdWithDetails(id)
                 .orElseThrow(() -> new NotFoundException("Khong tim thay phieu ID: " + id));
         warehouseContext.assertAccess(note.getBranch().getId());
-        inventoryCheckGuardService.assertNoOpenCheckForBranch(note.getBranch().getId(), "duyet phieu nhap kho");
 
         if (note.getStatus() != InventoryNoteStatus.PENDING) {
             throw new BadRequestException("Chi co the duyet phieu dang o trang thai Cho duyet (PENDING).");
@@ -182,7 +181,11 @@ public class InventoryService {
                 .orElseThrow(() -> new NotFoundException("Khong tim thay phieu ID: " + id));
         warehouseContext.assertAccess(note.getBranch().getId());
 
-        inventoryCheckGuardService.assertNoOpenCheckForBranch(note.getBranch().getId(), "chot phieu nhap kho");
+        inventoryCheckGuardService.assertStockMutationAllowed(
+                note.getBranch().getId(),
+                note.getDetails().stream().map(detail -> detail.getProductVariant().getId()).toList(),
+                "xac nhan nhap kho"
+        );
         if (note.getStatus() != InventoryNoteStatus.APPROVED) {
             throw new BadRequestException("Phieu phai o trang thai Da duyet moi co the hoan tat nhap kho.");
         }

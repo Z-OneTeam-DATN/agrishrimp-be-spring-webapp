@@ -5,6 +5,7 @@ import com.zone.agri.dto.request.inventory.ExportNoteRequest;
 import com.zone.agri.dto.response.inventory.InventoryNoteDetailResponse;
 import com.zone.agri.dto.response.inventory.InventoryNoteResponse;
 import com.zone.agri.entity.*;
+import com.zone.agri.entity.enums.InventoryCheckScopeType;
 import com.zone.agri.entity.enums.InventoryCheckWorkflowStatus;
 import com.zone.agri.entity.enums.InventoryNoteStatus;
 import com.zone.agri.entity.enums.InventoryNoteType;
@@ -69,7 +70,6 @@ public class InventoryNoteService {
     @Transactional
     public InventoryNoteResponse createExportCommand(ExportNoteRequest request) {
         assertReturnExportRequest(request);
-        inventoryCheckGuardService.assertNoOpenCheckForBranch(request.getBranchId(), "tạo lệnh xuất kho");
         InventoryNote note = new InventoryNote();
         note.setCode(request.getCode() != null ? request.getCode() : "LXK-" + System.currentTimeMillis());
         note.setType(InventoryNoteType.EXPORT);
@@ -96,10 +96,8 @@ public class InventoryNoteService {
 
     @Transactional
     public InventoryNoteResponse approveExportCommand(Long id) {
-        // freeze branch inventory when a stock count is open
         InventoryNote note = inventoryNoteRepository.findByIdWithDetails(id)
                 .orElseThrow(() -> new NotFoundException("Không tìm thấy lệnh xuất ID: " + id));
-        inventoryCheckGuardService.assertNoOpenCheckForBranch(note.getBranch().getId(), "duyệt lệnh xuất kho");
         if (note.getStatus() != InventoryNoteStatus.PENDING) {
             throw new BadRequestException("Chỉ có thể duyệt lệnh xuất đang chờ xử lý.");
         }
@@ -119,7 +117,11 @@ public class InventoryNoteService {
                 .orElseThrow(() -> new NotFoundException("Khong tim thay lenh xuat ID: " + id));
 
         warehouseContext.assertAccess(note.getBranch().getId());
-        inventoryCheckGuardService.assertNoOpenCheckForBranch(note.getBranch().getId(), "chot phieu xuat tra NCC");
+        inventoryCheckGuardService.assertStockMutationAllowed(
+                note.getBranch().getId(),
+                note.getDetails().stream().map(detail -> detail.getProductVariant().getId()).toList(),
+                "xác nhận xuất kho"
+        );
 
         if (note.getStatus() == InventoryNoteStatus.COMPLETED) {
             throw new BadRequestException("Lenh xuat tra nay da hoan thanh truoc do.");
@@ -325,7 +327,6 @@ public class InventoryNoteService {
     public InventoryNoteResponse createCheckCommand(CheckNoteRequest request) {
         // branch access and freeze validation are applied before snapshot starts
         warehouseContext.assertAccess(request.getBranchId());
-        inventoryCheckGuardService.assertNoOpenCheckForBranch(request.getBranchId(), "khởi tạo phiếu kiểm kê");
         Branch branch = branchRepository.findById(request.getBranchId())
                 .orElseThrow(() -> new NotFoundException("Không tìm thấy chi nhánh ID: " + request.getBranchId()));
 
@@ -340,6 +341,7 @@ public class InventoryNoteService {
         
         // Cập nhật thông tin kiểm kho mới
         note.setCheckType(request.getType());
+        note.setCheckScopeType(resolveScopeType(request));
         note.setCheckDate(request.getCheckDate() != null ? request.getCheckDate() : LocalDateTime.now());
         note.setCheckedBy(request.getCheckedBy());
         
@@ -375,7 +377,7 @@ public class InventoryNoteService {
                     .build());
         }
         note.setDetails(details);
-        note.setCheckWorkflowStatus(resolveCheckWorkflowStatus(request.getDetails(), false));
+        note.setCheckWorkflowStatus(InventoryCheckWorkflowStatus.DRAFT);
         note.setTotalAmount(BigDecimal.ZERO);
         note.setPaymentAmount(BigDecimal.ZERO);
         note.setDebtAmount(BigDecimal.ZERO);
@@ -386,6 +388,50 @@ public class InventoryNoteService {
     @Transactional
     public InventoryNoteResponse completeCheckCommand(Long id) {
         return approveCheckAdjustment(id);
+    }
+
+    @Transactional
+    public InventoryNoteResponse startCheckCommand(Long id) {
+        InventoryNote note = inventoryNoteRepository.findByIdWithDetailsForUpdate(id)
+                .orElseThrow(() -> new NotFoundException("Không tìm thấy phiếu kiểm kê."));
+        warehouseContext.assertAccess(note.getBranch().getId());
+        Branch branch = branchRepository.findByIdForUpdate(note.getBranch().getId())
+                .orElseThrow(() -> new NotFoundException("Không tìm thấy chi nhánh."));
+
+        if (note.getType() != InventoryNoteType.CHECK) {
+            throw new BadRequestException("Phiếu này không phải phiếu kiểm kê.");
+        }
+        if (canonicalStatus(note) != InventoryCheckWorkflowStatus.DRAFT) {
+            throw new BadRequestException("Chỉ có thể bắt đầu phiếu kiểm kê đang ở trạng thái nháp.");
+        }
+        if (note.getDetails() == null || note.getDetails().isEmpty()) {
+            throw new BadRequestException("Phiếu kiểm kê phải có ít nhất một sản phẩm trước khi bắt đầu.");
+        }
+
+        inventoryCheckGuardService.assertCheckCanStart(
+                branch.getId(),
+                note.getCheckScopeType(),
+                extractVariantIds(note.getDetails()),
+                note.getId()
+        );
+
+        for (InventoryNoteDetail detail : note.getDetails()) {
+            detail.setQuantity(resolveSystemQuantity(branch, detail.getProductVariant(), detail.getBatchNumber(), detail.getPrice()));
+            detail.setQuantityReal(null);
+            detail.setQuantityRejected(null);
+        }
+
+        note.setCheckStartedAt(LocalDateTime.now());
+        note.setCheckSubmittedAt(null);
+        note.setCheckApprovedAt(null);
+        note.setCheckApprovedBy(null);
+        note.setCheckRecountReason(null);
+        note.setCheckCancelReason(null);
+        note.setCheckCancelledAt(null);
+        note.setCheckWorkflowStatus(InventoryCheckWorkflowStatus.COUNTING);
+        note.setStatus(InventoryNoteStatus.PENDING);
+
+        return mapToResponse(inventoryNoteRepository.save(note));
     }
 
     @Transactional(readOnly = true)
@@ -401,53 +447,48 @@ public class InventoryNoteService {
         if (note.getType() != InventoryNoteType.CHECK) {
             throw new BadRequestException("Phieu nay khong phai phieu kiem ke.");
         }
-        if (note.getCheckWorkflowStatus() == InventoryCheckWorkflowStatus.WAITING_FOR_ADJUSTMENT_APPROVAL
-                || note.getCheckWorkflowStatus() == InventoryCheckWorkflowStatus.COUNTING_COMPLETED
+
+        InventoryCheckWorkflowStatus workflowStatus = canonicalStatus(note);
+        if (workflowStatus == InventoryCheckWorkflowStatus.PENDING_APPROVAL
+                || workflowStatus == InventoryCheckWorkflowStatus.COMPLETED
+                || workflowStatus == InventoryCheckWorkflowStatus.CANCELLED
                 || note.getStatus() == InventoryNoteStatus.COMPLETED) {
             throw new BadRequestException("Phieu kiem ke da gui duyet hoac hoan tat, khong the chinh sua.");
         }
-        if (!Objects.equals(note.getBranch().getId(), request.getBranchId())) {
-            throw new BadRequestException("Khong the thay doi chi nhanh sau khi da tao phieu kiem ke.");
-        }
-        Branch branch = note.getBranch();
-        note.setBranch(branch);
-        note.setNote(request.getNote());
-        note.setCheckType(request.getType());
-        note.setCheckDate(request.getCheckDate() != null ? request.getCheckDate() : LocalDateTime.now());
-        note.setCheckedBy(request.getCheckedBy());
-        note.setCreatedBy(getCurrentUser());
-        note.getDetails().clear();
-        inventoryNoteDetailRepository.flush();
-        List<InventoryNoteDetail> details = new ArrayList<>();
-        for (CheckNoteRequest.CheckNoteDetailRequest detailReq : request.getDetails()) {
-            ProductVariant variant = productVariantRepository.findById(detailReq.getProductVariantId())
-                    .orElseThrow(() -> new NotFoundException("S???n ph???m kh??ng t???n t???i: " + detailReq.getProductVariantId()));
-            Integer systemQty;
-            if (detailReq.getSystemQuantity() != null) {
-                systemQty = detailReq.getSystemQuantity();
-            } else if (detailReq.getQuantity() != null) {
-                systemQty = detailReq.getQuantity();
-            } else {
-                Optional<Inventory> existingBatch = inventoryRepository.findExactBatch(branch, variant, detailReq.getBatchNumber(), detailReq.getImportPrice());
-                systemQty = existingBatch.map(Inventory::getQuantity).orElse(0);
+
+        if (workflowStatus == InventoryCheckWorkflowStatus.DRAFT) {
+            if (!Objects.equals(note.getBranch().getId(), request.getBranchId())) {
+                throw new BadRequestException("Khong the thay doi chi nhanh sau khi da tao phieu kiem ke.");
             }
-            details.add(InventoryNoteDetail.builder()
-                    .inventoryNote(note)
-                    .productVariant(variant)
-                    .quantity(systemQty)
-                    .quantityReal(detailReq.getQuantityReal())
-                    .quantityRejected(detailReq.getQuantityRejected())
-                    .batchNumber(detailReq.getBatchNumber())
-                    .price(detailReq.getImportPrice())
-                    .note(detailReq.getNote())
-                    .build());
+
+            Branch branch = note.getBranch();
+            note.setBranch(branch);
+            note.setNote(request.getNote());
+            note.setCheckType(request.getType());
+            note.setCheckScopeType(resolveScopeType(request));
+            note.setCheckDate(request.getCheckDate() != null ? request.getCheckDate() : LocalDateTime.now());
+            note.setCheckedBy(request.getCheckedBy());
+            note.setCreatedBy(getCurrentUser());
+            note.getDetails().clear();
+            inventoryNoteDetailRepository.flush();
+            note.getDetails().addAll(buildCheckDetails(note, branch, request.getDetails(), false));
+            note.setStatus(InventoryNoteStatus.PENDING);
+            note.setCheckWorkflowStatus(InventoryCheckWorkflowStatus.DRAFT);
+            note.setCheckStartedAt(null);
+            note.setCheckSubmittedAt(null);
+            note.setCheckApprovedAt(null);
+            note.setCheckApprovedBy(null);
+            note.setCheckRecountReason(null);
+            note.setCheckCancelReason(null);
+            note.setCheckCancelledAt(null);
+        } else if (workflowStatus == InventoryCheckWorkflowStatus.COUNTING
+                || workflowStatus == InventoryCheckWorkflowStatus.RECOUNT_REQUIRED) {
+            applyCountingResults(note, request);
+            note.setNote(request.getNote());
+            note.setCheckedBy(request.getCheckedBy());
+            note.setCheckDate(request.getCheckDate() != null ? request.getCheckDate() : note.getCheckDate());
         }
-        note.getDetails().addAll(details);
-        note.setStatus(InventoryNoteStatus.PENDING);
-        note.setCheckWorkflowStatus(resolveCheckWorkflowStatus(request.getDetails(), false));
-        note.setCheckSubmittedAt(null);
-        note.setCheckApprovedAt(null);
-        note.setCheckApprovedBy(null);
+
         return mapToResponse(inventoryNoteRepository.save(note));
     }
 
@@ -465,7 +506,7 @@ public class InventoryNoteService {
 
     @Transactional(readOnly = true)
     public InventoryNoteResponse getCheckCommandById(Long id) {
-        return inventoryNoteRepository.findById(id)
+        return inventoryNoteRepository.findByIdWithDetails(id)
                 .map(this::mapToResponse)
                 .orElseThrow(() -> new NotFoundException("Không tìm thấy lệnh kiểm kho."));
     }
@@ -763,8 +804,8 @@ public class InventoryNoteService {
             throw new BadRequestException("Đây không phải là phiếu kiểm kho.");
         }
 
-        if (note.getStatus() == InventoryNoteStatus.COMPLETED) {
-            throw new BadRequestException("Phiếu kiểm kho đã hoàn thành không được phép xóa.");
+        if (canonicalStatus(note) != InventoryCheckWorkflowStatus.DRAFT) {
+            throw new BadRequestException("Chỉ cho phép xóa phiếu kiểm kê đang ở trạng thái nháp.");
         }
         inventoryNoteRepository.delete(note);
     }
@@ -772,28 +813,71 @@ public class InventoryNoteService {
     @Transactional
     public InventoryNoteResponse submitCheckForApproval(Long id) {
         InventoryNote note = inventoryNoteRepository.findByIdWithDetails(id)
-                .orElseThrow(() -> new NotFoundException("KhĂ´ng tĂ¬m tháº¥y lá»‡nh kiá»ƒm kho."));
+                .orElseThrow(() -> new NotFoundException("Không tìm thấy lệnh kiểm kho."));
         warehouseContext.assertAccess(note.getBranch().getId());
 
         if (note.getType() != InventoryNoteType.CHECK) {
             throw new BadRequestException("Phiếu này không phải phiếu kiểm kê.");
         }
-        if (note.getCheckWorkflowStatus() == InventoryCheckWorkflowStatus.COUNTING_COMPLETED) {
-            throw new BadRequestException("Phiếu kiểm kê đã hoàn tất.");
+        InventoryCheckWorkflowStatus workflowStatus = canonicalStatus(note);
+        if (workflowStatus != InventoryCheckWorkflowStatus.COUNTING
+                && workflowStatus != InventoryCheckWorkflowStatus.RECOUNT_REQUIRED) {
+            throw new BadRequestException("Phiếu kiểm kê phải ở trạng thái đang kiểm kê hoặc yêu cầu kiểm lại.");
         }
         if (note.getDetails() == null || note.getDetails().isEmpty()) {
             throw new BadRequestException("Phiếu kiểm kê chưa có dữ liệu snapshot.");
         }
 
-        boolean hasActualCount = note.getDetails().stream().allMatch(detail -> detail.getQuantityReal() != null);
-        if (!hasActualCount) {
-            throw new BadRequestException("Vui lòng nhập đủ số lượng thực tế trước khi gửi duyệt.");
-        }
+        validateCheckSubmission(note);
 
-        note.setCheckWorkflowStatus(InventoryCheckWorkflowStatus.WAITING_FOR_ADJUSTMENT_APPROVAL);
+        note.setCheckWorkflowStatus(InventoryCheckWorkflowStatus.PENDING_APPROVAL);
         note.setCheckSubmittedAt(LocalDateTime.now());
         note.setStatus(InventoryNoteStatus.APPROVED);
+        note.setCheckRecountReason(null);
 
+        return mapToResponse(inventoryNoteRepository.save(note));
+    }
+
+    @Transactional
+    public InventoryNoteResponse requestCheckRecount(Long id, String reason) {
+        InventoryNote note = inventoryNoteRepository.findByIdWithDetails(id)
+                .orElseThrow(() -> new NotFoundException("Không tìm thấy phiếu kiểm kê."));
+        warehouseContext.assertAccess(note.getBranch().getId());
+
+        if (canonicalStatus(note) != InventoryCheckWorkflowStatus.PENDING_APPROVAL) {
+            throw new BadRequestException("Chỉ có thể yêu cầu kiểm lại ở trạng thái chờ duyệt.");
+        }
+        if (reason == null || reason.isBlank()) {
+            throw new BadRequestException("Vui lòng nhập lý do kiểm lại.");
+        }
+
+        note.setCheckWorkflowStatus(InventoryCheckWorkflowStatus.RECOUNT_REQUIRED);
+        note.setCheckRecountReason(reason.trim());
+        note.setStatus(InventoryNoteStatus.PENDING);
+        return mapToResponse(inventoryNoteRepository.save(note));
+    }
+
+    @Transactional
+    public InventoryNoteResponse cancelCheck(Long id, String reason) {
+        InventoryNote note = inventoryNoteRepository.findByIdWithDetails(id)
+                .orElseThrow(() -> new NotFoundException("Không tìm thấy phiếu kiểm kê."));
+        warehouseContext.assertAccess(note.getBranch().getId());
+
+        InventoryCheckWorkflowStatus workflowStatus = canonicalStatus(note);
+        if (workflowStatus == InventoryCheckWorkflowStatus.COMPLETED) {
+            throw new BadRequestException("Phiếu kiểm kê đã hoàn tất thì không thể hủy.");
+        }
+        if (workflowStatus == InventoryCheckWorkflowStatus.CANCELLED) {
+            throw new BadRequestException("Phiếu kiểm kê này đã bị hủy.");
+        }
+        if (workflowStatus != InventoryCheckWorkflowStatus.DRAFT && (reason == null || reason.isBlank())) {
+            throw new BadRequestException("Vui lòng nhập lý do hủy phiếu kiểm kê.");
+        }
+
+        note.setCheckWorkflowStatus(InventoryCheckWorkflowStatus.CANCELLED);
+        note.setCheckCancelReason(reason != null ? reason.trim() : null);
+        note.setCheckCancelledAt(LocalDateTime.now());
+        note.setStatus(InventoryNoteStatus.CANCELLED);
         return mapToResponse(inventoryNoteRepository.save(note));
     }
 
@@ -801,14 +885,11 @@ public class InventoryNoteService {
     public InventoryNoteResponse approveCheckAdjustment(Long id) {
         User approver = getCurrentUser();
         InventoryNote note = inventoryNoteRepository.findByIdWithDetails(id)
-                .orElseThrow(() -> new NotFoundException("KhĂ´ng tĂ¬m tháº¥y lá»‡nh kiá»ƒm kho ID: " + id));
+                .orElseThrow(() -> new NotFoundException("Không tìm thấy lệnh kiểm kho ID: " + id));
         warehouseContext.assertAccess(note.getBranch().getId());
 
-        if (note.getCheckWorkflowStatus() == InventoryCheckWorkflowStatus.COUNTING_COMPLETED) {
-            throw new BadRequestException("Lệnh kiểm kho này đã hoàn thành.");
-        }
-        if (note.getCheckWorkflowStatus() != InventoryCheckWorkflowStatus.WAITING_FOR_ADJUSTMENT_APPROVAL) {
-            throw new BadRequestException("Phiếu kiểm kê phải ở trạng thái chờ duyệt cân bằng.");
+        if (canonicalStatus(note) != InventoryCheckWorkflowStatus.PENDING_APPROVAL) {
+            throw new BadRequestException("Phiếu kiểm kê phải ở trạng thái chờ duyệt.");
         }
 
         Branch branch = note.getBranch();
@@ -817,7 +898,8 @@ public class InventoryNoteService {
             ProductVariant variant = detail.getProductVariant();
             String batchNum = detail.getBatchNumber();
             BigDecimal importPrice = detail.getPrice();
-            int actualQty = Objects.requireNonNullElse(detail.getQuantityReal(), 0);
+            int actualQty = Math.max(0, Objects.requireNonNullElse(detail.getQuantityReal(), 0)
+                    - Objects.requireNonNullElse(detail.getQuantityRejected(), 0));
             int actualDefectiveQty = Objects.requireNonNullElse(detail.getQuantityRejected(), 0);
 
             Optional<Inventory> batchOpt = inventoryRepository.findExactBatchWithLock(branch, variant, batchNum, importPrice);
@@ -880,24 +962,145 @@ public class InventoryNoteService {
         }
 
         note.setStatus(InventoryNoteStatus.COMPLETED);
-        note.setCheckWorkflowStatus(InventoryCheckWorkflowStatus.COUNTING_COMPLETED);
+        note.setCheckWorkflowStatus(InventoryCheckWorkflowStatus.COMPLETED);
         note.setCheckApprovedAt(LocalDateTime.now());
         note.setCheckApprovedBy(approver);
         return mapToResponse(inventoryNoteRepository.save(note));
     }
 
-    private InventoryCheckWorkflowStatus resolveCheckWorkflowStatus(
-            List<CheckNoteRequest.CheckNoteDetailRequest> details,
-            boolean submittedForApproval
-    ) {
-        if (submittedForApproval) {
-            return InventoryCheckWorkflowStatus.WAITING_FOR_ADJUSTMENT_APPROVAL;
+    private InventoryCheckScopeType resolveScopeType(CheckNoteRequest request) {
+        if (request == null || request.getScopeType() == null || request.getScopeType().isBlank()) {
+            return InventoryCheckScopeType.FULL_WAREHOUSE;
         }
-        boolean hasActualCount = details != null
-                && details.stream().anyMatch(detail -> detail.getQuantityReal() != null);
-        return hasActualCount
-                ? InventoryCheckWorkflowStatus.COUNTING_IN_PROGRESS
-                : InventoryCheckWorkflowStatus.COUNTING_INIT;
+
+        try {
+            return InventoryCheckScopeType.valueOf(request.getScopeType().trim().toUpperCase(Locale.ROOT));
+        } catch (IllegalArgumentException ex) {
+            throw new BadRequestException("Phạm vi kiểm kê không hợp lệ.");
+        }
+    }
+
+    private InventoryCheckWorkflowStatus canonicalStatus(InventoryNote note) {
+        return note.getCheckWorkflowStatus() != null
+                ? note.getCheckWorkflowStatus().toCanonical()
+                : InventoryCheckWorkflowStatus.DRAFT;
+    }
+
+    private List<InventoryNoteDetail> buildCheckDetails(
+            InventoryNote note,
+            Branch branch,
+            List<CheckNoteRequest.CheckNoteDetailRequest> requestDetails,
+            boolean preserveCountResult
+    ) {
+        List<InventoryNoteDetail> details = new ArrayList<>();
+        if (requestDetails == null) {
+            return details;
+        }
+
+        for (CheckNoteRequest.CheckNoteDetailRequest detailReq : requestDetails) {
+            ProductVariant variant = productVariantRepository.findById(detailReq.getProductVariantId())
+                    .orElseThrow(() -> new NotFoundException("Sản phẩm không tồn tại: " + detailReq.getProductVariantId()));
+
+            Integer systemQty = detailReq.getSystemQuantity() != null
+                    ? detailReq.getSystemQuantity()
+                    : detailReq.getQuantity();
+            if (systemQty == null && preserveCountResult) {
+                systemQty = resolveSystemQuantity(branch, variant, detailReq.getBatchNumber(), detailReq.getImportPrice());
+            }
+
+            details.add(InventoryNoteDetail.builder()
+                    .inventoryNote(note)
+                    .productVariant(variant)
+                    .quantity(systemQty)
+                    .quantityReal(preserveCountResult ? detailReq.getQuantityReal() : null)
+                    .quantityRejected(preserveCountResult ? detailReq.getQuantityRejected() : null)
+                    .batchNumber(detailReq.getBatchNumber())
+                    .price(detailReq.getImportPrice())
+                    .note(detailReq.getNote())
+                    .build());
+        }
+
+        return details;
+    }
+
+    private Integer resolveSystemQuantity(Branch branch, ProductVariant variant, String batchNumber, BigDecimal importPrice) {
+        return inventoryRepository.findExactBatch(branch, variant, batchNumber, importPrice)
+                .map(Inventory::getQuantity)
+                .orElse(0);
+    }
+
+    private Set<Long> extractVariantIds(List<InventoryNoteDetail> details) {
+        if (details == null) {
+            return Set.of();
+        }
+
+        return details.stream()
+                .map(InventoryNoteDetail::getProductVariant)
+                .filter(Objects::nonNull)
+                .map(ProductVariant::getId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+    }
+
+    private void applyCountingResults(InventoryNote note, CheckNoteRequest request) {
+        if (request.getDetails() == null) {
+            throw new BadRequestException("Phiếu kiểm kê không có dữ liệu sản phẩm.");
+        }
+
+        Map<String, InventoryNoteDetail> existingByKey = note.getDetails().stream()
+                .collect(Collectors.toMap(this::detailKey, detail -> detail, (left, right) -> left, LinkedHashMap::new));
+
+        Map<String, CheckNoteRequest.CheckNoteDetailRequest> requestByKey = request.getDetails().stream()
+                .collect(Collectors.toMap(this::detailKey, detail -> detail, (left, right) -> left, LinkedHashMap::new));
+
+        if (!existingByKey.keySet().equals(requestByKey.keySet())) {
+            throw new BadRequestException("Không thể thay đổi danh sách sản phẩm sau khi đã bắt đầu kiểm kê.");
+        }
+
+        for (Map.Entry<String, InventoryNoteDetail> entry : existingByKey.entrySet()) {
+            InventoryNoteDetail detail = entry.getValue();
+            CheckNoteRequest.CheckNoteDetailRequest requestDetail = requestByKey.get(entry.getKey());
+            detail.setQuantityReal(requestDetail.getQuantityReal());
+            detail.setQuantityRejected(requestDetail.getQuantityRejected());
+            detail.setNote(requestDetail.getNote());
+        }
+    }
+
+    private String detailKey(CheckNoteRequest.CheckNoteDetailRequest detail) {
+        return detail.getProductVariantId() + "|" + Objects.toString(detail.getBatchNumber(), "") + "|"
+                + Objects.toString(detail.getImportPrice(), "");
+    }
+
+    private String detailKey(InventoryNoteDetail detail) {
+        Long variantId = detail.getProductVariant() != null ? detail.getProductVariant().getId() : null;
+        return variantId + "|" + Objects.toString(detail.getBatchNumber(), "") + "|"
+                + Objects.toString(detail.getPrice(), "");
+    }
+
+    private void validateCheckSubmission(InventoryNote note) {
+        for (InventoryNoteDetail detail : note.getDetails()) {
+            Integer realQty = detail.getQuantityReal();
+            Integer rejectedQty = Objects.requireNonNullElse(detail.getQuantityRejected(), 0);
+            Integer snapshotQty = Objects.requireNonNullElse(detail.getQuantity(), 0);
+
+            if (realQty == null) {
+                throw new BadRequestException("Vui lòng nhập đủ số lượng thực tế trước khi gửi duyệt.");
+            }
+            if (realQty < 0) {
+                throw new BadRequestException("Số lượng thực tế không được âm.");
+            }
+            if (rejectedQty < 0) {
+                throw new BadRequestException("Số lượng hư hỏng không được âm.");
+            }
+            if (rejectedQty > realQty) {
+                throw new BadRequestException("Số lượng hư hỏng không được lớn hơn số lượng thực tế.");
+            }
+
+            int diffQty = realQty - snapshotQty;
+            if ((diffQty != 0 || rejectedQty > 0) && (detail.getNote() == null || detail.getNote().isBlank())) {
+                throw new BadRequestException("Các dòng có chênh lệch hoặc hư hỏng phải nhập ghi chú hoặc nguyên nhân.");
+            }
+        }
     }
 
     // ==========================================
@@ -932,12 +1135,19 @@ public class InventoryNoteService {
                 .debtAmount(Objects.requireNonNullElse(entity.getDebtAmount(), BigDecimal.ZERO))
                 // Các trường thông tin kiểm kho mới
                 .type(entity.getCheckType())
+                .scopeType(entity.getCheckScopeType() != null
+                        ? entity.getCheckScopeType().name()
+                        : InventoryCheckScopeType.FULL_WAREHOUSE.name())
                 .checkDate(entity.getCheckDate())
                 .checkedBy(entity.getCheckedBy())
-                .checkWorkflowStatus(entity.getCheckWorkflowStatus() != null ? entity.getCheckWorkflowStatus().name() : null)
+                .checkWorkflowStatus(canonicalStatus(entity).name())
+                .checkStartedAt(entity.getCheckStartedAt())
                 .checkSubmittedAt(entity.getCheckSubmittedAt())
                 .checkApprovedAt(entity.getCheckApprovedAt())
                 .checkApprovedByName(entity.getCheckApprovedBy() != null ? entity.getCheckApprovedBy().getFullName() : null)
+                .checkRecountReason(entity.getCheckRecountReason())
+                .checkCancelReason(entity.getCheckCancelReason())
+                .checkCancelledAt(entity.getCheckCancelledAt())
                 .createdAt(entity.getCreatedAt())
                 .entryDate(entity.getEntryDate() != null ? entity.getEntryDate().format(DateTimeFormatter.ISO_LOCAL_DATE) : "")
                 .branchId(entity.getBranch() != null ? entity.getBranch().getId() : null)

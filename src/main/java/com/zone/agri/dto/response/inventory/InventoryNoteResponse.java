@@ -16,7 +16,7 @@ import java.util.List;
 public class InventoryNoteResponse {
     private Long id;
     private String code;
-    private String noteType; // Đổi từ type -> noteType (IMPORT/EXPORT/CHECK)
+    private String noteType;
     private String exportType;
     private String status;
     private String reason;
@@ -25,13 +25,18 @@ public class InventoryNoteResponse {
     private BigDecimal totalAmount;
     private BigDecimal paymentAmount;
     private BigDecimal debtAmount;
-    private String type; // Đây là check type (PERIODIC/UNEXPECTED/YEAR_END)
+    private String type;
+    private String scopeType;
     private LocalDateTime checkDate;
     private String checkedBy;
     private String checkWorkflowStatus;
+    private LocalDateTime checkStartedAt;
     private LocalDateTime checkSubmittedAt;
     private LocalDateTime checkApprovedAt;
     private String checkApprovedByName;
+    private String checkRecountReason;
+    private String checkCancelReason;
+    private LocalDateTime checkCancelledAt;
     private String entryDate;
     private LocalDateTime createdAt;
 
@@ -47,9 +52,9 @@ public class InventoryNoteResponse {
 
     private String displayPartnerName;
     private String creatorName;
-    private String createdByName; // Bổ sung theo yêu cầu API mới
+    private String createdByName;
 
-    private String shippingAddress; // Bổ sung để khớp form
+    private String shippingAddress;
 
     private List<InventoryNoteDetailResponse> details;
 }

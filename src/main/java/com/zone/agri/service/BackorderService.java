@@ -36,6 +36,7 @@ public class BackorderService {
     private final OrderRepository orderRepository;
     private final InventoryRepository inventoryRepository;
     private final InventoryTransactionRepository transactionRepository;
+    private final InventoryCheckGuardService inventoryCheckGuardService;
 
     @Transactional
     public void fulfillBackordersOnStockReceive(Long branchId, Long productVariantId, int newQuantityAdded) {
@@ -95,6 +96,12 @@ public class BackorderService {
     }
 
     private void deductInventoryForBackorder(SubOrder subOrder, Long productVariantId, int quantityToDeduct) {
+        inventoryCheckGuardService.assertStockMutationAllowed(
+                subOrder.getBranch().getId(),
+                List.of(productVariantId),
+                "cấp bù backorder"
+        );
+
         int remainingToDeduct = quantityToDeduct;
         List<Inventory> batches = inventoryRepository.findForUpdateFIFO(subOrder.getBranch().getId(), productVariantId);
 

@@ -1,5 +1,6 @@
 package com.zone.agri.entity;
 
+import com.zone.agri.entity.enums.InventoryCheckScopeType;
 import com.zone.agri.entity.enums.InventoryCheckWorkflowStatus;
 import com.zone.agri.entity.enums.InventoryNoteStatus;
 import com.zone.agri.entity.enums.InventoryNoteType;
@@ -75,14 +76,30 @@ public class InventoryNote {
     String checkedBy;
 
     @Enumerated(EnumType.STRING)
+    @Column(name = "check_scope_type", length = 50)
+    InventoryCheckScopeType checkScopeType;
+
+    @Enumerated(EnumType.STRING)
     @Column(name = "check_workflow_status", length = 50)
     InventoryCheckWorkflowStatus checkWorkflowStatus;
+
+    @Column(name = "check_started_at")
+    LocalDateTime checkStartedAt;
 
     @Column(name = "check_submitted_at")
     LocalDateTime checkSubmittedAt;
 
     @Column(name = "check_approved_at")
     LocalDateTime checkApprovedAt;
+
+    @Column(name = "check_recount_reason", columnDefinition = "TEXT")
+    String checkRecountReason;
+
+    @Column(name = "check_cancel_reason", columnDefinition = "TEXT")
+    String checkCancelReason;
+
+    @Column(name = "check_cancelled_at")
+    LocalDateTime checkCancelledAt;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "check_approved_by")

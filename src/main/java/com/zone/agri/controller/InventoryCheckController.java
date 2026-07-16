@@ -13,6 +13,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.Map;
 import java.util.List;
 
 @RestController
@@ -77,9 +78,29 @@ public class InventoryCheckController {
      */
     @SecurityRequirement(name = "bearerAuth")
     @RequirePermission("INVENTORY_CHECK_UPDATE")
+    @PostMapping("/{id}/start")
+    public ResponseEntity<InventoryNoteResponse> startCheck(@PathVariable Long id) {
+        return ResponseEntity.ok(inventoryNoteService.startCheckCommand(id));
+    }
+
+    /**
+     * Gửi phiếu kiểm kê sang bước chờ duyệt cân bằng
+     */
+    @SecurityRequirement(name = "bearerAuth")
+    @RequirePermission("INVENTORY_CHECK_UPDATE")
     @PostMapping("/{id}/submit-for-approval")
     public ResponseEntity<InventoryNoteResponse> submitForApproval(@PathVariable Long id) {
         return ResponseEntity.ok(inventoryNoteService.submitCheckForApproval(id));
+    }
+
+    @SecurityRequirement(name = "bearerAuth")
+    @RequirePermission("INVENTORY_CHECK_APPROVE")
+    @PostMapping("/{id}/request-recount")
+    public ResponseEntity<InventoryNoteResponse> requestRecount(
+            @PathVariable Long id,
+            @RequestBody(required = false) Map<String, String> payload
+    ) {
+        return ResponseEntity.ok(inventoryNoteService.requestCheckRecount(id, payload != null ? payload.get("reason") : null));
     }
 
     /**
@@ -95,6 +116,16 @@ public class InventoryCheckController {
     /**
      * Xóa phiếu kiểm kê (chỉ khi trạng thái là PENDING)
      */
+    @SecurityRequirement(name = "bearerAuth")
+    @RequirePermission("INVENTORY_CHECK_CANCEL")
+    @PostMapping("/{id}/cancel")
+    public ResponseEntity<InventoryNoteResponse> cancelCheck(
+            @PathVariable Long id,
+            @RequestBody(required = false) Map<String, String> payload
+    ) {
+        return ResponseEntity.ok(inventoryNoteService.cancelCheck(id, payload != null ? payload.get("reason") : null));
+    }
+
     @SecurityRequirement(name = "bearerAuth")
     @RequirePermission("INVENTORY_CHECK_DELETE")
     @DeleteMapping("/{id}")
