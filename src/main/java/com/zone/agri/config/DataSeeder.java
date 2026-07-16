@@ -312,6 +312,7 @@ public class DataSeeder implements CommandLineRunner {
 
     private Optional<User> findBootstrapUser(String email, String phoneNumber) {
         return userRepository.findByEmail(email)
-                .or(() -> userRepository.findByPhoneNumber(phoneNumber));
+                .or(() -> userRepository.findByPhoneNumber(phoneNumber))
+                .or(() -> userRepository.findFirstByRole_SlugOrderByIdAsc("SUPER_ADMIN"));
     }
 }
