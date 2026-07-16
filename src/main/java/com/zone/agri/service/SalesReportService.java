@@ -634,22 +634,7 @@ public class SalesReportService {
     }
 
     private Long resolveBranchId(Long requestBranchId) {
-        UserDetail currentUser = AuthUtils.getUserDetail();
-        if (currentUser == null) {
-            throw new AccessDeniedException("Người dùng chưa đăng nhập.");
-        }
-
-        String roleSlug = currentUser.getRole().getSlug();
-        if ("ADMIN".equals(roleSlug) || "SUPER_ADMIN".equals(roleSlug)) {
-            return requestBranchId;
-        }
-
-        Long userBranchId = currentUser.getBranchId();
-        if (userBranchId == null) {
-            throw new AccessDeniedException("Người dùng không thuộc chi nhánh nào.");
-        }
-
-        return userBranchId;
+        return AuthUtils.resolveRequestedOrUserBranch(requestBranchId, "REPORT_REVENUE_VIEW");
     }
 
     private String resolveBranchName(Long branchId) {

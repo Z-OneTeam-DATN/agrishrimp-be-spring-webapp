@@ -55,14 +55,6 @@ public class PermissionAspect {
                 .map(GrantedAuthority::getAuthority)
                 .collect(Collectors.toSet());
 
-        boolean isSystemAdmin = userAuthorities.stream()
-                .anyMatch(authority -> "ROLE_SUPER_ADMIN".equalsIgnoreCase(authority)
-                        || "ROLE_ADMIN".equalsIgnoreCase(authority)
-                        || "ROLE_ADMINISTRATOR".equalsIgnoreCase(authority));
-        if (isSystemAdmin) {
-            return;
-        }
-
         // 4. Kiểm tra OR logic — có ít nhất một permission là đủ
         boolean hasPermission = Arrays.stream(requiredCodes)
                 .anyMatch(userAuthorities::contains);

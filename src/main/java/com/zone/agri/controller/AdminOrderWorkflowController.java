@@ -37,8 +37,7 @@ public class AdminOrderWorkflowController {
 
     private void verifyAdminAccess() {
         User user = getCurrentUser();
-        String roleSlug = user.getRole() != null ? user.getRole().getSlug() : "";
-        if (!"ADMIN".equals(roleSlug) && !"SUPER_ADMIN".equals(roleSlug)) {
+        if (user.getBranch() != null) {
             throw new Forbidden("Tai khoan nay khong duoc phep thao tac don hang toan he thong.");
         }
     }

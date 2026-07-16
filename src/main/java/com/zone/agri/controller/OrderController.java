@@ -55,8 +55,7 @@ public class OrderController {
     // Hàm kiểm tra chặn không cho Chi nhánh gọi API của Admin
     private void verifyAdminAccess() {
         User user = getCurrentUser();
-        String roleSlug = user.getRole() != null ? user.getRole().getSlug() : "";
-        if (!"ADMIN".equals(roleSlug) && !"SUPER_ADMIN".equals(roleSlug)) {
+        if (user.getBranch() != null) {
             throw new com.zone.agri.exception.Forbidden("Tài khoản chi nhánh không được phép xem/thao tác toàn bộ đơn hàng hệ thống. Vui lòng sử dụng chức năng dành cho chi nhánh!");
         }
     }

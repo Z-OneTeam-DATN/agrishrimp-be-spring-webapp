@@ -149,12 +149,24 @@ public class DataSeeder implements CommandLineRunner {
         Permission aChkX = pAct("Hủy phiếu kiểm kê", "INVENTORY_CHECK_CANCEL", PermissionGroup.INVENTORY, mChk);
         Permission aChkD = pAct("Xóa phiếu kiểm kê", "INVENTORY_CHECK_DELETE", PermissionGroup.INVENTORY, mChk);
 
-        Permission mPr = pMod("Yêu cầu nhập NCC", "PURCHASE_REQUEST", PermissionGroup.INVENTORY);
-        Permission aPrV = pAct("Xem yêu cầu nhập NCC", "PURCHASE_REQUEST_VIEW", PermissionGroup.INVENTORY, mPr);
-        Permission aPrC = pAct("Tạo yêu cầu nhập NCC", "PURCHASE_REQUEST_CREATE", PermissionGroup.INVENTORY, mPr);
-        Permission aPrU = pAct("Sửa yêu cầu nhập NCC", "PURCHASE_REQUEST_UPDATE", PermissionGroup.INVENTORY, mPr);
-        Permission aPrA = pAct("Duyệt yêu cầu nhập NCC", "PURCHASE_REQUEST_APPROVE", PermissionGroup.INVENTORY, mPr);
-        Permission aPrD = pAct("Xóa yêu cầu nhập NCC", "PURCHASE_REQUEST_DELETE", PermissionGroup.INVENTORY, mPr);
+        Permission mPurchaseRequest = pMod("Yêu cầu mua nhà cung cấp", "PURCHASE_REQUEST", PermissionGroup.INVENTORY);
+        Permission aPurchaseRequestV = pAct("Xem yêu cầu mua", "PURCHASE_REQUEST_VIEW", PermissionGroup.INVENTORY, mPurchaseRequest);
+        Permission aPurchaseRequestC = pAct("Tạo yêu cầu mua", "PURCHASE_REQUEST_CREATE", PermissionGroup.INVENTORY, mPurchaseRequest);
+        Permission aPurchaseRequestU = pAct("Sửa yêu cầu mua", "PURCHASE_REQUEST_UPDATE", PermissionGroup.INVENTORY, mPurchaseRequest);
+        Permission aPurchaseRequestA = pAct("Duyệt yêu cầu mua", "PURCHASE_REQUEST_APPROVE", PermissionGroup.INVENTORY, mPurchaseRequest);
+        Permission aPurchaseRequestD = pAct("Xóa yêu cầu mua", "PURCHASE_REQUEST_DELETE", PermissionGroup.INVENTORY, mPurchaseRequest);
+
+        Permission mBanner = pMod("Quản lý banner", "BANNER", PermissionGroup.SETTING);
+        Permission aBannerV = pAct("Xem banner", "BANNER_VIEW", PermissionGroup.SETTING, mBanner);
+        Permission aBannerC = pAct("Tạo banner", "BANNER_CREATE", PermissionGroup.SETTING, mBanner);
+        Permission aBannerE = pAct("Sửa banner", "BANNER_EDIT", PermissionGroup.SETTING, mBanner);
+        Permission aBannerD = pAct("Xóa banner", "BANNER_DELETE", PermissionGroup.SETTING, mBanner);
+
+        Permission mBlog = pMod("Quản lý blog", "BLOG", PermissionGroup.SETTING);
+        Permission aBlogV = pAct("Xem blog", "BLOG_VIEW", PermissionGroup.SETTING, mBlog);
+        Permission aBlogC = pAct("Tạo blog", "BLOG_CREATE", PermissionGroup.SETTING, mBlog);
+        Permission aBlogE = pAct("Sửa blog", "BLOG_EDIT", PermissionGroup.SETTING, mBlog);
+        Permission aBlogD = pAct("Xóa blog", "BLOG_DELETE", PermissionGroup.SETTING, mBlog);
 
         Permission mSet = pMod("Cài đặt hệ thống", "SETTING", PermissionGroup.SETTING);
         Permission aSetV = pAct("Xem cài đặt", "SETTING_VIEW", PermissionGroup.SETTING, mSet);
@@ -163,6 +175,12 @@ public class DataSeeder implements CommandLineRunner {
         Permission mChat = pMod("Chat với khách hàng", "CHAT", PermissionGroup.COMMUNICATION);
         Permission aChatV = pAct("Xem hội thoại chat", "CHAT_VIEW", PermissionGroup.COMMUNICATION, mChat);
         Permission aChatM = pAct("Quản lý chat (ghim, phân công)", "CHAT_MANAGE", PermissionGroup.COMMUNICATION, mChat);
+        Permission mCustomerAdvisor = pMod("Tư vấn khách hàng", "CUSTOMER_ADVISOR", PermissionGroup.COMMUNICATION);
+        Permission aCustomerAdvisorUse = pAct(
+                "Sử dụng workspace tư vấn khách hàng",
+                "CUSTOMER_ADVISOR_USE",
+                PermissionGroup.COMMUNICATION,
+                mCustomerAdvisor);
 
         Role superAdminRole = saveRole("SUPER_ADMIN", "Siêu quản trị", true, Set.of(
                 aDashV, aWspaceV,
@@ -177,13 +195,16 @@ public class DataSeeder implements CommandLineRunner {
                 aExpV, aExpC, aExpA, aExpU, aExpX, aExpD,
                 aTrfV, aTrfC, aTrfA, aTrfU, aTrfX, aTrfD,
                 aChkV, aChkC, aChkA, aChkU, aChkX, aChkD,
-                aPrV, aPrC, aPrU, aPrA, aPrD,
+                aPurchaseRequestV, aPurchaseRequestC, aPurchaseRequestU, aPurchaseRequestA, aPurchaseRequestD,
                 aCusV, aCusC, aCusU, aCusD,
                 aVouV, aVouC, aVouU, aVouD,
                 aSupV, aSupC, aSupU, aSupD,
                 aOrdV, aOrdC, aOrdU, aOrdD, aOrdCnf, aOrdShip, aOrdX, aOrdDone, aOrdRefund, aOrdExport,
+                aBannerV, aBannerC, aBannerE, aBannerD,
+                aBlogV, aBlogC, aBlogE, aBlogD,
                 aSetV, aSetU,
-                aChatV, aChatM));
+                aChatV, aChatM,
+                aCustomerAdvisorUse));
 
         Role adminRole = saveRole("ADMIN", "Quản trị viên", true, Set.of(
                 aDashV, aWspaceV,
@@ -198,13 +219,16 @@ public class DataSeeder implements CommandLineRunner {
                 aExpV, aExpC, aExpA, aExpU, aExpX, aExpD,
                 aTrfV, aTrfC, aTrfA, aTrfU, aTrfX, aTrfD,
                 aChkV, aChkC, aChkA, aChkU, aChkX, aChkD,
-                aPrV, aPrC, aPrU, aPrA, aPrD,
+                aPurchaseRequestV, aPurchaseRequestC, aPurchaseRequestU, aPurchaseRequestA, aPurchaseRequestD,
                 aCusV, aCusC, aCusU, aCusD,
                 aVouV, aVouC, aVouU, aVouD,
                 aSupV, aSupC, aSupU, aSupD,
                 aOrdV, aOrdC, aOrdU, aOrdD, aOrdCnf, aOrdShip, aOrdX, aOrdDone, aOrdRefund, aOrdExport,
+                aBannerV, aBannerC, aBannerE, aBannerD,
+                aBlogV, aBlogC, aBlogE, aBlogD,
                 aSetV, aSetU,
-                aChatV, aChatM));
+                aChatV, aChatM,
+                aCustomerAdvisorUse));
 
         saveRole("MANAGER", "Quản lý chi nhánh & kho", false, Set.of(
                 aDashV, aWspaceV,
@@ -212,11 +236,11 @@ public class DataSeeder implements CommandLineRunner {
                 aUserV, aUserC, aUserU, aUserD,
                 aBranchV,
                 aProdV, aCatV, aAttrV, aSupV,
-                aImpV, aImpC, aImpU, aImpX, aImpD,
-                aExpV, aExpC, aExpU, aExpX, aExpD,
-                aTrfV, aTrfC, aTrfU, aTrfX, aTrfD,
-                aChkV, aChkC, aChkU, aChkX, aChkD,
-                aPrV, aPrC, aPrU, aPrD,
+                aImpV, aImpC, aImpA, aImpU, aImpX, aImpD,
+                aExpV, aExpC, aExpA, aExpU, aExpX, aExpD,
+                aTrfV, aTrfC, aTrfA, aTrfU, aTrfX, aTrfD,
+                aChkV, aChkC, aChkA, aChkU, aChkX, aChkD,
+                aPurchaseRequestV, aPurchaseRequestC, aPurchaseRequestU, aPurchaseRequestA, aPurchaseRequestD,
                 aCusV, aCusC, aCusU, aCusD,
                 aVouV, aVouC, aVouU,
                 aOrdV, aOrdC, aOrdU, aOrdCnf, aOrdShip, aOrdX, aOrdDone, aOrdExport,
