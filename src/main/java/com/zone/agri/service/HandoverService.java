@@ -35,6 +35,7 @@ public class HandoverService {
     private final UserRepository userRepository;
     private final BranchRepository branchRepository;
     private final OrderStatusSyncService orderStatusSyncService;
+    private final OrderInventoryReservationService orderInventoryReservationService;
 
     @Transactional
     public Handover createHandover(Long userId, Long branchId, HandoverCreateRequest request) {
@@ -90,6 +91,9 @@ public class HandoverService {
         Handover savedHandover = handoverRepository.save(handover);
 
         for (SubOrder subOrder : subOrders) {
+            orderInventoryReservationService.shipReservedInventory(
+                    orderInventoryReservationService.buildSubOrderReferenceCode(subOrder),
+                    "Xuat kho khi ban giao van chuyen cho phan don " + subOrder.getOrder().getCode());
             subOrder.setHandover(savedHandover);
             subOrder.setStatus(OrderStatus.SHIPPING);
             subOrderRepository.save(subOrder);

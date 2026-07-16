@@ -25,11 +25,10 @@ public class AdminOrderWorkflowService {
             OrderStatus.RETURNED);
 
     private static final Set<OrderStatus> SHIPPABLE_MASTER_STATUSES = EnumSet.of(
-            OrderStatus.CONFIRMED,
-            OrderStatus.PROCESSING,
             OrderStatus.READY_FOR_PICKUP);
 
     private final OrderRepository orderRepository;
+    private final OrderInventoryReservationService orderInventoryReservationService;
 
     @Transactional
     public void approvePackingAndShip(Long orderId) {
@@ -43,7 +42,7 @@ public class AdminOrderWorkflowService {
 
         if (!SHIPPABLE_MASTER_STATUSES.contains(currentStatus)) {
             throw new BadRequestException(
-                    "Admin chi co the duyet dong goi va chuyen van chuyen cho don da xac nhan, dang xu ly hoac cho lay hang.");
+                    "Admin chi co the chuyen don sang dang giao khi don dang o trang thai cho ban giao.");
         }
 
         List<SubOrder> activeSubOrders = order.getSubOrders() == null
@@ -57,6 +56,9 @@ public class AdminOrderWorkflowService {
                     "Don nay dang chay theo luong chi nhanh. Vui long ban giao bang phieu handover thay vi chuyen thang sang SHIPPING.");
         }
 
+        orderInventoryReservationService.shipReservedInventory(
+                orderInventoryReservationService.buildOrderReferenceCode(order),
+                "Xuat kho don hang " + order.getCode() + " khi admin chuyen sang giao hang");
         order.setStatus(OrderStatus.SHIPPING);
         orderRepository.save(order);
     }

@@ -1,5 +1,6 @@
 package com.zone.agri.controller;
 
+import com.zone.agri.common.RoleUtils;
 import com.zone.agri.entity.User;
 import com.zone.agri.exception.Forbidden;
 import com.zone.agri.exception.SignInRequiredException;
@@ -38,7 +39,7 @@ public class AdminOrderWorkflowController {
     private void verifyAdminAccess() {
         User user = getCurrentUser();
         String roleSlug = user.getRole() != null ? user.getRole().getSlug() : "";
-        if (!"ADMIN".equals(roleSlug) && !"SUPER_ADMIN".equals(roleSlug)) {
+        if (!RoleUtils.isAdminLikeRole(roleSlug)) {
             throw new Forbidden("Tai khoan nay khong duoc phep thao tac don hang toan he thong.");
         }
     }
@@ -49,6 +50,6 @@ public class AdminOrderWorkflowController {
         verifyAdminAccess();
         adminOrderWorkflowService.approvePackingAndShip(id);
         return ResponseEntity.ok(Map.of(
-                "message", "Da duyet dong goi va chuyen don sang dang giao"));
+                "message", "Da chuyen don tu cho ban giao sang dang giao"));
     }
 }

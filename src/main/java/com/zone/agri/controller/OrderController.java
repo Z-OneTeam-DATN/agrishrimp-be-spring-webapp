@@ -1,5 +1,6 @@
 package com.zone.agri.controller;
 
+import com.zone.agri.common.RoleUtils;
 import com.zone.agri.dto.request.order.*;
 import com.zone.agri.dto.response.order.*;
 import com.zone.agri.entity.Order;
@@ -56,7 +57,7 @@ public class OrderController {
     private void verifyAdminAccess() {
         User user = getCurrentUser();
         String roleSlug = user.getRole() != null ? user.getRole().getSlug() : "";
-        if (!"ADMIN".equals(roleSlug) && !"SUPER_ADMIN".equals(roleSlug)) {
+        if (!RoleUtils.isAdminLikeRole(roleSlug)) {
             throw new com.zone.agri.exception.Forbidden("Tài khoản chi nhánh không được phép xem/thao tác toàn bộ đơn hàng hệ thống. Vui lòng sử dụng chức năng dành cho chi nhánh!");
         }
     }
@@ -136,7 +137,7 @@ public class OrderController {
     @RequirePermission("ORDER_VIEW")
     @GetMapping("/admin/all")
     public ResponseEntity<Page<OrderResponse>> getAllOrders(
-            @RequestParam(required = false) OrderStatus status,
+            @RequestParam(required = false) String status,
             @RequestParam(required = false) String search,
             @PageableDefault(size = 10, sort = "createdAt", direction = Sort.Direction.DESC) Pageable pageable) {
         verifyAdminAccess();

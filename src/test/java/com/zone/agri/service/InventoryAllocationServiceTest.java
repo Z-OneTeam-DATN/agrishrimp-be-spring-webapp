@@ -352,6 +352,37 @@ class InventoryAllocationServiceTest {
         assertThat(outOfStock.getAvailableQty()).isZero();
     }
 
+    @Test
+    void allocate_case_h_reservedQuantityReducesPreparedAvailability() {
+        List<CartItemDto> cart = List.of(
+                new CartItemDto(101L, 5)
+        );
+
+        Map<Long, Map<Long, List<Inventory>>> matrix = new HashMap<>();
+        Map<Long, List<Inventory>> b1Stock = new HashMap<>();
+        Inventory reservedBatch = createBatch(1L, branch1, varA, 10, 100000);
+        reservedBatch.setReservedQuantity(7);
+        b1Stock.put(101L, new ArrayList<>(List.of(reservedBatch)));
+        matrix.put(1L, b1Stock);
+
+        List<BranchWithRealDistance> branches = List.of(
+                new BranchWithRealDistance(branch1, 2.5, 300, 5.0)
+        );
+
+        AllocationResult result = allocationService.allocate(cart, variantMap, branches, matrix);
+
+        assertThat(result.subOrders()).hasSize(1);
+        OrderItemDto item = findItem(result.subOrders().get(0), 101L);
+        assertThat(item.getAllocatedQuantity()).isEqualTo(3);
+        assertThat(item.getMissingQuantity()).isEqualTo(2);
+
+        assertThat(result.outOfStockItems()).singleElement().satisfies(outOfStock -> {
+            assertThat(outOfStock.getProductVariantId()).isEqualTo(101L);
+            assertThat(outOfStock.getRequestedQty()).isEqualTo(2);
+            assertThat(outOfStock.getAvailableQty()).isZero();
+        });
+    }
+
     private OrderItemDto findItem(SubOrderDraftDto subOrder, Long variantId) {
         return subOrder.getItems().stream()
                 .filter(item -> variantId.equals(item.getProductVariantId()))

@@ -7,6 +7,7 @@ import com.zone.agri.entity.AttributeValue;
 import com.zone.agri.entity.enums.AttributeStatus;
 import com.zone.agri.exception.ConflictException;
 import com.zone.agri.repository.AttributeRepository;
+import com.zone.agri.repository.AttributeValueRepository;
 import com.zone.agri.repository.SKUAttributeValueRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -16,8 +17,12 @@ import org.springframework.transaction.annotation.Transactional;
 import java.text.Normalizer;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.LinkedHashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 @Service
@@ -27,6 +32,7 @@ public class AttributeService {
     private static final int ATTRIBUTE_CODE_MAX_LENGTH = 50;
 
     private final AttributeRepository repository;
+    private final AttributeValueRepository attributeValueRepository;
     private final SKUAttributeValueRepository skuAttributeValueRepository;
 
     @Transactional(readOnly = true)
@@ -53,6 +59,13 @@ public class AttributeService {
     public AttributeDTO create(AttributeDTO dto) {
         dto.setCode(resolveAttributeCode(dto.getCode(), dto.getName(), null, null));
 
+        List<String> sanitizedValues = sanitizeDistinctValues(dto.getValues());
+        if (sanitizedValues.isEmpty()) {
+            throw new ConflictException("Thuoc tinh phai co it nhat 1 gia tri!", true);
+        }
+        validateNoCrossAttributeValueConflict(sanitizedValues, null);
+        dto.setValues(sanitizedValues);
+
         Attribute attr = new Attribute();
         mapToEntity(attr, dto);
         return toDTO(repository.save(attr));
@@ -65,20 +78,22 @@ public class AttributeService {
 
         dto.setCode(resolveAttributeCode(dto.getCode(), dto.getName(), id, attr.getCode()));
 
-        List<String> newValues = dto.getValues() != null ? dto.getValues().stream()
-                .map(String::trim)
-                .filter(s -> !s.isEmpty())
-                .distinct()
-                .collect(Collectors.toList())
-                : new ArrayList<>();
+        List<String> newValues = sanitizeDistinctValues(dto.getValues());
 
         if (newValues.isEmpty()) {
             throw new ConflictException("Thuoc tinh phai co it nhat 1 gia tri!", true);
         }
 
+        validateNoCrossAttributeValueConflict(newValues, id);
+        dto.setValues(newValues);
+
+        Set<String> newValueKeys = newValues.stream()
+                .map(this::normalizeAttributeValueForCompare)
+                .collect(Collectors.toSet());
+
         List<AttributeValue> valuesToRemove = attr.getAttributeValues() != null
                 ? attr.getAttributeValues().stream()
-                .filter(av -> !newValues.contains(av.getValue()))
+                .filter(av -> !newValueKeys.contains(normalizeAttributeValueForCompare(av.getValue())))
                 .collect(Collectors.toList())
                 : Collections.emptyList();
 
@@ -220,24 +235,107 @@ public class AttributeService {
             entity.setAttributeValues(new ArrayList<>());
         }
 
-        List<String> newValues = dto.getValues() != null ? dto.getValues().stream()
-                .map(String::trim)
-                .filter(s -> !s.isEmpty())
-                .distinct()
-                .collect(Collectors.toList())
-                : new ArrayList<>();
+        List<String> newValues = sanitizeDistinctValues(dto.getValues());
+        Map<String, AttributeValue> existingValuesByKey = entity.getAttributeValues().stream()
+                .filter(attributeValue -> hasText(attributeValue.getValue()))
+                .collect(Collectors.toMap(
+                        attributeValue -> normalizeAttributeValueForCompare(attributeValue.getValue()),
+                        attributeValue -> attributeValue,
+                        (current, ignored) -> current,
+                        LinkedHashMap::new
+                ));
 
-        List<String> existingValues = entity.getAttributeValues().stream()
-                .map(AttributeValue::getValue)
-                .collect(Collectors.toList());
+        Set<String> requestedValueKeys = new HashSet<>();
 
         for (String val : newValues) {
-            if (!existingValues.contains(val)) {
-                entity.getAttributeValues().add(AttributeValue.builder()
-                        .attribute(entity)
-                        .value(val)
-                        .build());
+            String compareKey = normalizeAttributeValueForCompare(val);
+            requestedValueKeys.add(compareKey);
+
+            AttributeValue existingValue = existingValuesByKey.get(compareKey);
+            if (existingValue != null) {
+                existingValue.setValue(val);
+                continue;
             }
+
+            entity.getAttributeValues().add(AttributeValue.builder()
+                    .attribute(entity)
+                    .value(val)
+                    .build());
         }
+
+        entity.getAttributeValues().removeIf(attributeValue -> {
+            String compareKey = normalizeAttributeValueForCompare(attributeValue.getValue());
+            return compareKey.isEmpty() || !requestedValueKeys.contains(compareKey);
+        });
+    }
+
+    private List<String> sanitizeDistinctValues(List<String> values) {
+        if (values == null) {
+            return new ArrayList<>();
+        }
+
+        Map<String, String> normalizedValueMap = new LinkedHashMap<>();
+
+        for (String rawValue : values) {
+            if (rawValue == null) {
+                continue;
+            }
+
+            String sanitizedValue = rawValue.trim().replaceAll("\\s+", " ");
+            String compareKey = normalizeAttributeValueForCompare(sanitizedValue);
+            if (compareKey.isEmpty() || normalizedValueMap.containsKey(compareKey)) {
+                continue;
+            }
+
+            normalizedValueMap.put(compareKey, sanitizedValue);
+        }
+
+        return new ArrayList<>(normalizedValueMap.values());
+    }
+
+    private void validateNoCrossAttributeValueConflict(List<String> values, Long currentAttributeId) {
+        if (values == null || values.isEmpty()) {
+            return;
+        }
+
+        Map<String, String> requestedValuesByKey = values.stream()
+                .collect(Collectors.toMap(
+                        this::normalizeAttributeValueForCompare,
+                        value -> value,
+                        (current, ignored) -> current,
+                        LinkedHashMap::new
+                ));
+
+        List<AttributeValue> existingValues = attributeValueRepository
+                .findAllWithAttributeExcludingAttributeId(currentAttributeId);
+
+        for (AttributeValue attributeValue : existingValues) {
+            String compareKey = normalizeAttributeValueForCompare(attributeValue.getValue());
+            if (!requestedValuesByKey.containsKey(compareKey)) {
+                continue;
+            }
+
+            Attribute parentAttribute = attributeValue.getAttribute();
+            String attributeName = parentAttribute != null && hasText(parentAttribute.getName())
+                    ? parentAttribute.getName().trim()
+                    : "thuoc tinh khac";
+
+            throw new ConflictException(
+                    "Gia tri '" + requestedValuesByKey.get(compareKey)
+                            + "' da ton tai o thuoc tinh '" + attributeName
+                            + "' (khong phan biet hoa thuong).",
+                    true
+            );
+        }
+    }
+
+    private String normalizeAttributeValueForCompare(String value) {
+        if (value == null) {
+            return "";
+        }
+
+        return value.trim()
+                .replaceAll("\\s+", " ")
+                .toLowerCase(Locale.forLanguageTag("vi-VN"));
     }
 }

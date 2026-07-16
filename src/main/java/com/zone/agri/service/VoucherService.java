@@ -76,13 +76,13 @@ public class VoucherService {
         return normalized.isBlank() ? null : normalized;
     }
 
-    private void validateBusinessRules(VoucherRequest request) {
+    private void validateBusinessRules(VoucherRequest request, boolean allowPastEndDate) {
         if (request.getEndDate().isEqual(request.getStartDate())
                 || request.getEndDate().isBefore(request.getStartDate())) {
             throw new BadRequestException("Ngày kết thúc không được nhỏ hơn ngày bắt đầu.");
         }
 
-        if (request.getEndDate().isBefore(LocalDateTime.now())) {
+        if (!allowPastEndDate && request.getEndDate().isBefore(LocalDateTime.now())) {
             throw new BadRequestException("Ngày kết thúc không được ở trong quá khứ.");
         }
 
@@ -120,7 +120,7 @@ public class VoucherService {
             throw new ConflictException("Mã voucher '" + request.getCode() + "' đã tồn tại!");
         }
         
-        validateBusinessRules(request);
+        validateBusinessRules(request, false);
 
         Voucher voucher = new Voucher();
         mapToEntity(voucher, request, normalizedCode);
@@ -138,7 +138,10 @@ public class VoucherService {
             throw new ConflictException("Mã voucher '" + request.getCode() + "' đã tồn tại!");
         }
         
-        validateBusinessRules(request);
+        boolean allowPastEndDate = voucher.getEndDate() != null
+                && voucher.getEndDate().isBefore(LocalDateTime.now());
+
+        validateBusinessRules(request, allowPastEndDate);
 
         mapToEntity(voucher, request, normalizedCode);
         return convertToResponse(voucherRepository.save(voucher));

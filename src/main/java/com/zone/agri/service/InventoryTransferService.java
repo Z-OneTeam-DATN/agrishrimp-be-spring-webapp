@@ -265,7 +265,12 @@ public class InventoryTransferService {
     public List<InventoryTransfer> createReplenishmentTransfersForSubOrder(SubOrder subOrder) {
         subOrder = subOrderRepo.findByIdWithItems(subOrder.getId())
                 .orElseThrow(() -> new RuntimeException("Khong tim thay phan don can dieu chuyen bo sung"));
-        if (subOrder.getStatus() != OrderStatus.AWAITING_REPLENISHMENT) {
+        boolean hasMissingItems = subOrder.getItems() != null
+                && subOrder.getItems().stream()
+                        .anyMatch(item -> Objects.requireNonNullElse(item.getMissingQuantity(), 0) > 0);
+        if (!hasMissingItems
+                || (subOrder.getStatus() != OrderStatus.PENDING
+                        && subOrder.getStatus() != OrderStatus.AWAITING_REPLENISHMENT)) {
             throw new RuntimeException("Chỉ có thể tạo điều chuyển bổ sung cho phần đơn đang chờ điều chuyển");
         }
 

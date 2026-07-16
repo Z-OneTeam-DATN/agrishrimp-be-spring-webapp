@@ -19,7 +19,11 @@ public interface SubOrderItemRepository extends JpaRepository<SubOrderItem, Long
             JOIN FETCH so.order o
             JOIN FETCH soi.productVariant pv
             WHERE so.branch.id = :branchId
-              AND so.status = com.zone.agri.entity.enums.OrderStatus.AWAITING_REPLENISHMENT
+              AND so.status NOT IN (
+                  com.zone.agri.entity.enums.OrderStatus.CANCELLED,
+                  com.zone.agri.entity.enums.OrderStatus.RETURNED,
+                  com.zone.agri.entity.enums.OrderStatus.COMPLETED
+              )
               AND pv.id = :productVariantId
               AND COALESCE(soi.missingQuantity, 0) > 0
             ORDER BY so.createdAt ASC, soi.id ASC
@@ -40,7 +44,11 @@ public interface SubOrderItemRepository extends JpaRepository<SubOrderItem, Long
             JOIN soi.subOrder so
             JOIN soi.productVariant pv
             JOIN pv.product p
-            WHERE so.status = com.zone.agri.entity.enums.OrderStatus.AWAITING_REPLENISHMENT
+            WHERE so.status NOT IN (
+                com.zone.agri.entity.enums.OrderStatus.CANCELLED,
+                com.zone.agri.entity.enums.OrderStatus.RETURNED,
+                com.zone.agri.entity.enums.OrderStatus.COMPLETED
+            )
               AND COALESCE(soi.missingQuantity, 0) > 0
             GROUP BY pv.id, pv.sku, p.name, pv.customSpecs
             ORDER BY SUM(COALESCE(soi.missingQuantity, 0)) DESC, pv.id ASC

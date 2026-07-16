@@ -67,9 +67,15 @@ public class InventoryAllocationService {
             return new AllocationResult(subOrders, outOfStockItems);
         }
 
-        List<BranchWithRealDistance> sellableBranches = branchesSortedByDist.stream()
+        List<BranchWithRealDistance> preferredBranches = branchesSortedByDist.stream()
                 .filter(candidate -> !isWarehouse(candidate.branch()))
                 .toList();
+
+        List<BranchWithRealDistance> sellableBranches = !preferredBranches.isEmpty()
+                ? preferredBranches
+                : branchesSortedByDist.stream()
+                        .filter(candidate -> candidate.branch() != null)
+                        .toList();
 
         if (sellableBranches.isEmpty()) {
             return new AllocationResult(subOrders, outOfStockItems);
@@ -113,7 +119,7 @@ public class InventoryAllocationService {
             Iterator<Inventory> batchIterator = batches.iterator();
             while (batchIterator.hasNext() && requested > 0) {
                 Inventory batch = batchIterator.next();
-                int availableInBatch = Objects.requireNonNullElse(batch.getQuantity(), 0);
+                int availableInBatch = availableForSale(batch);
                 if (availableInBatch <= 0) {
                     continue;
                 }
@@ -185,6 +191,7 @@ public class InventoryAllocationService {
                 .id(inventory.getId())
                 .quantity(inventory.getQuantity())
                 .defectiveQuantity(inventory.getDefectiveQuantity())
+                .reservedQuantity(inventory.getReservedQuantity())
                 .batchNumber(inventory.getBatchNumber())
                 .importPrice(inventory.getImportPrice())
                 .expiryDate(inventory.getExpiryDate())
@@ -262,7 +269,7 @@ public class InventoryAllocationService {
         for (CartItemDto item : cart) {
             int totalAvailable = branchBatches.getOrDefault(item.getProductVariantId(), Collections.emptyList())
                     .stream()
-                    .mapToInt(inv -> Objects.requireNonNullElse(inv.getQuantity(), 0))
+                    .mapToInt(this::availableForSale)
                     .sum();
             if (totalAvailable < item.getQuantity()) {
                 return false;
@@ -278,7 +285,7 @@ public class InventoryAllocationService {
         for (CartItemDto item : cart) {
             int totalAvailable = branchBatches.getOrDefault(item.getProductVariantId(), Collections.emptyList())
                     .stream()
-                    .mapToInt(inv -> Objects.requireNonNullElse(inv.getQuantity(), 0))
+                    .mapToInt(this::availableForSale)
                     .sum();
             totalAllocatable += Math.min(totalAvailable, Objects.requireNonNullElse(item.getQuantity(), 0));
         }
@@ -302,7 +309,17 @@ public class InventoryAllocationService {
         return matrix.entrySet().stream()
                 .filter(entry -> allowedBranchIds.contains(entry.getKey()))
                 .flatMap(entry -> entry.getValue().getOrDefault(variantId, Collections.emptyList()).stream())
-                .mapToInt(inv -> Objects.requireNonNullElse(inv.getQuantity(), 0))
+                .mapToInt(this::availableForSale)
                 .sum();
+    }
+
+    private int availableForSale(Inventory inventory) {
+        if (inventory == null) {
+            return 0;
+        }
+
+        int quantity = Objects.requireNonNullElse(inventory.getQuantity(), 0);
+        int reserved = Objects.requireNonNullElse(inventory.getReservedQuantity(), 0);
+        return Math.max(0, quantity - reserved);
     }
 }

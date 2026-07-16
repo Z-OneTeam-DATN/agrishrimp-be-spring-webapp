@@ -72,6 +72,7 @@ class FinancialServiceTest {
         setAuthenticatedUser("ADMIN", 99L);
 
         when(orderRepository.findLegacyFinancialOrders(
+                eq(LocalDateTime.of(2026, 5, 1, 0, 0)),
                 eq(LocalDateTime.of(2026, 5, 31, 23, 59, 59)),
                 eq(12L)))
                 .thenReturn(List.of(
@@ -95,6 +96,7 @@ class FinancialServiceTest {
                                 null)));
 
         when(subOrderRepository.findFinancialSubOrders(
+                eq(LocalDateTime.of(2026, 5, 1, 0, 0)),
                 eq(LocalDateTime.of(2026, 5, 31, 23, 59, 59)),
                 eq(12L)))
                 .thenReturn(List.of(
@@ -158,9 +160,11 @@ class FinancialServiceTest {
         assertThat(response.getNetProfit()).isEqualByComparingTo("-475");
 
         verify(orderRepository).findLegacyFinancialOrders(
+                LocalDateTime.of(2026, 5, 1, 0, 0),
                 LocalDateTime.of(2026, 5, 31, 23, 59, 59),
                 12L);
         verify(subOrderRepository).findFinancialSubOrders(
+                LocalDateTime.of(2026, 5, 1, 0, 0),
                 LocalDateTime.of(2026, 5, 31, 23, 59, 59),
                 12L);
     }
@@ -347,10 +351,12 @@ class FinancialServiceTest {
         setAuthenticatedUser("STAFF", 5L);
 
         when(orderRepository.findLegacyFinancialOrders(
+                eq(LocalDateTime.of(2026, 5, 1, 0, 0)),
                 eq(LocalDateTime.of(2026, 5, 31, 23, 59, 59)),
                 eq(5L)))
                 .thenReturn(List.of());
         when(subOrderRepository.findFinancialSubOrders(
+                eq(LocalDateTime.of(2026, 5, 1, 0, 0)),
                 eq(LocalDateTime.of(2026, 5, 31, 23, 59, 59)),
                 eq(5L)))
                 .thenReturn(List.of());
@@ -362,9 +368,11 @@ class FinancialServiceTest {
 
         assertThat(response.getNetRevenue()).isEqualByComparingTo("0");
         verify(orderRepository).findLegacyFinancialOrders(
+                LocalDateTime.of(2026, 5, 1, 0, 0),
                 LocalDateTime.of(2026, 5, 31, 23, 59, 59),
                 5L);
         verify(subOrderRepository).findFinancialSubOrders(
+                LocalDateTime.of(2026, 5, 1, 0, 0),
                 LocalDateTime.of(2026, 5, 31, 23, 59, 59),
                 5L);
     }
