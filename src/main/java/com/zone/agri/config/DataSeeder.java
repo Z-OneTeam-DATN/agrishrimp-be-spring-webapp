@@ -13,6 +13,7 @@ import com.zone.agri.repository.RoleRepository;
 import com.zone.agri.repository.UserRepository;
 import java.time.LocalDate;
 import java.util.HashSet;
+import java.util.Optional;
 import java.util.Set;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -274,10 +275,21 @@ public class DataSeeder implements CommandLineRunner {
             String rawPassword,
             Role role,
             UserStatus status) {
-        userRepository.findByEmail(email)
+        findBootstrapUser(email, phoneNumber)
                 .map(existingUser -> {
                     existingUser.setFullName(fullName);
-                    existingUser.setPhoneNumber(phoneNumber);
+                    if (!userRepository.existsByEmailAndIdNot(email, existingUser.getId())) {
+                        existingUser.setEmail(email);
+                    } else {
+                        log.warn("Seeder giữ nguyên email hiện tại cho user id={} vì email {} đang thuộc user khác",
+                                existingUser.getId(), email);
+                    }
+                    if (!userRepository.existsByPhoneNumberAndIdNot(phoneNumber, existingUser.getId())) {
+                        existingUser.setPhoneNumber(phoneNumber);
+                    } else {
+                        log.warn("Seeder giữ nguyên số điện thoại hiện tại cho user id={} vì số {} đang thuộc user khác",
+                                existingUser.getId(), phoneNumber);
+                    }
                     existingUser.setStatus(status);
                     existingUser.setRole(role);
                     existingUser.setProvider(AuthProvider.LOCAL);
@@ -296,5 +308,10 @@ public class DataSeeder implements CommandLineRunner {
                         .dateOfBirth(LocalDate.of(1985, 3, 15))
                         .provider(AuthProvider.LOCAL)
                         .build()));
+    }
+
+    private Optional<User> findBootstrapUser(String email, String phoneNumber) {
+        return userRepository.findByEmail(email)
+                .or(() -> userRepository.findByPhoneNumber(phoneNumber));
     }
 }
