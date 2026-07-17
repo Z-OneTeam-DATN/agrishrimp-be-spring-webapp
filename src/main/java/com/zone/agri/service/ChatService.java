@@ -67,6 +67,13 @@ public class ChatService {
     }
 
     @Transactional(readOnly = true)
+    public ConversationResponse getConversationById(Long conversationId) {
+        Conversation conv = conversationRepository.findById(conversationId)
+                .orElseThrow(() -> new RuntimeException("Conversation not found: " + conversationId));
+        return toConversationResponse(conv);
+    }
+
+    @Transactional(readOnly = true)
     public List<ChatMessageResponse> getMessages(Long conversationId) {
         return chatMessageRepository.findByConversationId(conversationId)
                 .stream()
