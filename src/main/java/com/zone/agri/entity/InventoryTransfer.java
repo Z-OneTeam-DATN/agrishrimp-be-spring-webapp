@@ -72,6 +72,18 @@ public class InventoryTransfer {
     @Column(name = "created_at")
     LocalDateTime createdAt;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "created_by_user_id")
+    @ToString.Exclude
+    @EqualsAndHashCode.Exclude
+    User createdBy;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "created_by_branch_id")
+    @ToString.Exclude
+    @EqualsAndHashCode.Exclude
+    Branch createdByBranch;
+
     // --- NGHIỆP VỤ BÁN NỘI BỘ (INTERNAL_SALE) ---
 
     /**
@@ -109,6 +121,63 @@ public class InventoryTransfer {
      */
     @Column(name = "dest_payable_amount", precision = 38, scale = 2)
     BigDecimal destPayableAmount;
+
+    @Column(name = "paid_amount", precision = 38, scale = 2)
+    BigDecimal paidAmount;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "source_confirmed_by_user_id")
+    @ToString.Exclude
+    @EqualsAndHashCode.Exclude
+    User sourceConfirmedBy;
+
+    @Column(name = "source_confirmed_at")
+    LocalDateTime sourceConfirmedAt;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "approved_by_user_id")
+    @ToString.Exclude
+    @EqualsAndHashCode.Exclude
+    User approvedBy;
+
+    @Column(name = "approved_at")
+    LocalDateTime approvedAt;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "shipped_by_user_id")
+    @ToString.Exclude
+    @EqualsAndHashCode.Exclude
+    User shippedBy;
+
+    @Column(name = "shipped_at")
+    LocalDateTime shippedAt;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "inspection_started_by_user_id")
+    @ToString.Exclude
+    @EqualsAndHashCode.Exclude
+    User inspectionStartedBy;
+
+    @Column(name = "inspection_started_at")
+    LocalDateTime inspectionStartedAt;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "received_by_user_id")
+    @ToString.Exclude
+    @EqualsAndHashCode.Exclude
+    User receivedBy;
+
+    @Column(name = "received_at")
+    LocalDateTime receivedAt;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "settled_by_user_id")
+    @ToString.Exclude
+    @EqualsAndHashCode.Exclude
+    User settledBy;
+
+    @Column(name = "settled_at")
+    LocalDateTime settledAt;
 
     // --- KHÓA NGOẠI ---
 

@@ -6,15 +6,14 @@ import com.zone.agri.entity.enums.OrderStatus;
 import com.zone.agri.exception.NotFoundException;
 import com.zone.agri.repository.SubOrderItemRepository;
 import com.zone.agri.repository.SubOrderRepository;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.context.annotation.Lazy;
-import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
-
 import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.annotation.Lazy;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 @Service
 @Slf4j
@@ -22,16 +21,19 @@ public class BackorderService {
 
     private final SubOrderItemRepository subOrderItemRepository;
     private final SubOrderRepository subOrderRepository;
+    private final InventoryCheckGuardService inventoryCheckGuardService;
     private final OrderInventoryReservationService orderInventoryReservationService;
     private final OrderStatusSyncService orderStatusSyncService;
 
     public BackorderService(
             SubOrderItemRepository subOrderItemRepository,
             SubOrderRepository subOrderRepository,
+            InventoryCheckGuardService inventoryCheckGuardService,
             OrderInventoryReservationService orderInventoryReservationService,
             @Lazy OrderStatusSyncService orderStatusSyncService) {
         this.subOrderItemRepository = subOrderItemRepository;
         this.subOrderRepository = subOrderRepository;
+        this.inventoryCheckGuardService = inventoryCheckGuardService;
         this.orderInventoryReservationService = orderInventoryReservationService;
         this.orderStatusSyncService = orderStatusSyncService;
     }
@@ -42,7 +44,8 @@ public class BackorderService {
             return;
         }
 
-        List<SubOrderItem> waitingItems = subOrderItemRepository.findBackorderItemsForFulfillment(branchId,
+        List<SubOrderItem> waitingItems = subOrderItemRepository.findBackorderItemsForFulfillment(
+                branchId,
                 productVariantId);
         if (waitingItems.isEmpty()) {
             return;
@@ -63,11 +66,15 @@ public class BackorderService {
             }
 
             int qtyToFulfill = Math.min(missingQty, availableToAllocate);
+            inventoryCheckGuardService.assertStockMutationAllowed(
+                    item.getSubOrder().getBranch().getId(),
+                    List.of(item.getProductVariant().getId()),
+                    "cap bu backorder");
             orderInventoryReservationService.reserveInventory(
                     item.getSubOrder().getBranch().getId(),
                     item.getProductVariant().getId(),
                     qtyToFulfill,
-                    orderInventoryReservationService.buildSubOrderReferenceCode(item.getSubOrder()),
+                    buildSubOrderReferenceCode(item.getSubOrder()),
                     "Giu hang bo sung cho phan don " + item.getSubOrder().getOrder().getCode());
 
             item.setAllocatedQuantity(Objects.requireNonNullElse(item.getAllocatedQuantity(), 0) + qtyToFulfill);
@@ -96,5 +103,9 @@ public class BackorderService {
         }
 
         affectedOrderIds.forEach(orderStatusSyncService::syncMasterOrderStatus);
+    }
+
+    private String buildSubOrderReferenceCode(SubOrder subOrder) {
+        return subOrder.getOrder().getCode() + "-SUB-" + subOrder.getId();
     }
 }

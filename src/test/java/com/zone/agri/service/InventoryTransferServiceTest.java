@@ -2,37 +2,63 @@ package com.zone.agri.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.when;
 
+import com.zone.agri.common.AuthUtils;
+import com.zone.agri.common.WarehouseContext;
+import com.zone.agri.dto.request.transfer.TransferItemRequest;
+import com.zone.agri.dto.request.transfer.TransferQCRequest;
+import com.zone.agri.dto.request.transfer.TransferRequest;
+import com.zone.agri.dto.request.transfer.TransferSettlementRequest;
+import com.zone.agri.dto.response.transfer.TransferDetailResponse;
+import com.zone.agri.dto.response.user.UserDetail;
+import com.zone.agri.entity.Branch;
+import com.zone.agri.entity.Inventory;
+import com.zone.agri.entity.InventoryTransaction;
+import com.zone.agri.entity.InventoryTransfer;
+import com.zone.agri.entity.Order;
+import com.zone.agri.entity.Product;
+import com.zone.agri.entity.ProductVariant;
+import com.zone.agri.entity.SubOrder;
+import com.zone.agri.entity.SubOrderItem;
+import com.zone.agri.entity.User;
+import com.zone.agri.entity.enums.InventoryTransferStatus;
+import com.zone.agri.entity.enums.OrderStatus;
+import com.zone.agri.entity.enums.TransactionType;
+import com.zone.agri.entity.enums.TransferBusinessType;
+import com.zone.agri.entity.enums.TransferSettlementStatus;
+import com.zone.agri.repository.BranchRepository;
+import com.zone.agri.repository.InventoryRepository;
+import com.zone.agri.repository.InventoryTransactionRepository;
+import com.zone.agri.repository.InventoryTransferDetailRepository;
+import com.zone.agri.repository.InventoryTransferRepository;
+import com.zone.agri.repository.ProductVariantRepository;
+import com.zone.agri.repository.SubOrderRepository;
+import com.zone.agri.repository.UserRepository;
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
-
+import java.util.function.Supplier;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.MockedStatic;
 import org.mockito.junit.jupiter.MockitoExtension;
-
-import com.zone.agri.common.WarehouseContext;
-import com.zone.agri.entity.Branch;
-import com.zone.agri.entity.Inventory;
-import com.zone.agri.entity.InventoryTransfer;
-import com.zone.agri.entity.Order;
-import com.zone.agri.entity.ProductVariant;
-import com.zone.agri.entity.SubOrder;
-import com.zone.agri.entity.SubOrderItem;
-import com.zone.agri.entity.enums.InventoryTransferStatus;
-import com.zone.agri.entity.enums.OrderStatus;
-import com.zone.agri.repository.BranchRepository;
-import com.zone.agri.repository.InventoryRepository;
-import com.zone.agri.repository.InventoryTransactionRepository;
-import com.zone.agri.repository.InventoryTransferRepository;
-import com.zone.agri.repository.ProductVariantRepository;
-import com.zone.agri.repository.SubOrderRepository;
+import org.mockito.junit.jupiter.MockitoSettings;
+import org.mockito.quality.Strictness;
 
 @ExtendWith(MockitoExtension.class)
+@MockitoSettings(strictness = Strictness.LENIENT)
 class InventoryTransferServiceTest {
 
     @Mock
@@ -54,10 +80,13 @@ class InventoryTransferServiceTest {
     private SubOrderRepository subOrderRepo;
 
     @Mock
+    private UserRepository userRepo;
+
+    @Mock
     private BackorderService backorderService;
 
     @Mock
-    private com.zone.agri.repository.InventoryTransferDetailRepository transferDetailRepo;
+    private InventoryTransferDetailRepository transferDetailRepo;
 
     @Mock
     private WarehouseContext warehouseContext;
@@ -65,40 +94,101 @@ class InventoryTransferServiceTest {
     @Mock
     private InventoryCheckGuardService inventoryCheckGuardService;
 
+    @Mock
+    private SettingService settingService;
+
     @InjectMocks
     private InventoryTransferService inventoryTransferService;
 
     private Branch warehouse;
+    private Branch sourceBranch;
     private Branch destinationBranch;
+    private Branch defectBranch;
     private ProductVariant variant;
+    private User requesterUser;
+    private User sourceUser;
+    private User approverUser;
+    private User receiverUser;
     private SubOrder replenishmentSubOrder;
+    private Map<Long, User> usersById;
+    private List<InventoryTransaction> savedTransactions;
+    private List<Inventory> savedInventories;
 
     @BeforeEach
     void setUp() {
         warehouse = Branch.builder()
-                .name("ArgiShrimp Kho Tổng")
+                .branchCode("MAIN_WH")
+                .branchType("WAREHOUSE")
+                .name("Kho Tong")
                 .build();
         setId(warehouse, 1L, "id");
         warehouse.setLat(10.10);
         warehouse.setLng(105.70);
 
-        destinationBranch = Branch.builder()
-                .name("ArgiShrimp Chi Nhanh Can Tho")
+        sourceBranch = Branch.builder()
+                .branchCode("CN-HCM")
+                .branchType("STORE")
+                .name("Chi Nhanh HCM")
                 .build();
-        setId(destinationBranch, 2L, "id");
+        setId(sourceBranch, 2L, "id");
+        sourceBranch.setLat(10.76);
+        sourceBranch.setLng(106.67);
+
+        destinationBranch = Branch.builder()
+                .branchCode("CN-CT")
+                .branchType("STORE")
+                .name("Chi Nhanh Can Tho")
+                .build();
+        setId(destinationBranch, 3L, "id");
         destinationBranch.setLat(10.03);
         destinationBranch.setLng(105.78);
 
+        defectBranch = Branch.builder()
+                .branchCode("SYSTEM_DEFECT")
+                .branchType("WAREHOUSE")
+                .name("Kho Rui Ro")
+                .build();
+        setId(defectBranch, 99L, "id");
+
         variant = ProductVariant.builder()
-                .sku("SP260404-479-V1")
+                .sku("SKU-TEST-01")
+                .product(Product.builder().name("San Pham Test").build())
                 .build();
         setId(variant, 10L, "id");
+
+        requesterUser = User.builder()
+                .fullName("Nguoi Tao Phieu")
+                .branch(destinationBranch)
+                .passwordHash("secret")
+                .build();
+        setId(requesterUser, 100L, "id");
+
+        sourceUser = User.builder()
+                .fullName("Nguoi Xac Nhan Nguon")
+                .branch(sourceBranch)
+                .passwordHash("secret")
+                .build();
+        setId(sourceUser, 101L, "id");
+
+        approverUser = User.builder()
+                .fullName("Nguoi Duyet")
+                .branch(null)
+                .passwordHash("secret")
+                .build();
+        setId(approverUser, 102L, "id");
+
+        receiverUser = User.builder()
+                .fullName("Nguoi Nhan Hang")
+                .branch(destinationBranch)
+                .passwordHash("secret")
+                .build();
+        setId(receiverUser, 103L, "id");
 
         Order order = Order.builder()
                 .code("ORDTEST001")
                 .status(OrderStatus.AWAITING_REPLENISHMENT)
                 .build();
-        setId(order, 100L, "id");
+        setId(order, 1000L, "id");
 
         replenishmentSubOrder = SubOrder.builder()
                 .status(OrderStatus.AWAITING_REPLENISHMENT)
@@ -112,22 +202,70 @@ class InventoryTransferServiceTest {
                         .build()))
                 .build();
         setId(replenishmentSubOrder, 34L, "id");
+
+        usersById = new HashMap<>();
+        usersById.put(requesterUser.getId(), requesterUser);
+        usersById.put(sourceUser.getId(), sourceUser);
+        usersById.put(approverUser.getId(), approverUser);
+        usersById.put(receiverUser.getId(), receiverUser);
+
+        savedTransactions = new ArrayList<>();
+        savedInventories = new ArrayList<>();
+
+        when(userRepo.findById(anyLong()))
+                .thenAnswer(invocation -> Optional.ofNullable(usersById.get(invocation.getArgument(0))));
+        when(branchRepo.findById(warehouse.getId())).thenReturn(Optional.of(warehouse));
+        when(branchRepo.findById(sourceBranch.getId())).thenReturn(Optional.of(sourceBranch));
+        when(branchRepo.findById(destinationBranch.getId())).thenReturn(Optional.of(destinationBranch));
+        when(branchRepo.findByBranchCode("SYSTEM_DEFECT")).thenReturn(Optional.of(defectBranch));
+        when(branchRepo.findAll()).thenReturn(List.of(warehouse, sourceBranch, destinationBranch));
+        when(variantRepo.findBySku(variant.getSku())).thenReturn(Optional.of(variant));
+        when(settingService.getProfitMarginRaw()).thenReturn("30");
+        when(settingService.calculateSellingPrice(any(BigDecimal.class)))
+                .thenAnswer(invocation -> ((BigDecimal) invocation.getArgument(0))
+                        .multiply(new BigDecimal("1.30"))
+                        .setScale(2, BigDecimal.ROUND_HALF_UP));
+        when(transferRepo.save(any(InventoryTransfer.class)))
+                .thenAnswer(invocation -> {
+                    InventoryTransfer transfer = invocation.getArgument(0);
+                    if (transfer.getId() == null) {
+                        setId(transfer, 500L, "id");
+                    }
+                    return transfer;
+                });
+        when(inventoryRepo.save(any(Inventory.class)))
+                .thenAnswer(invocation -> {
+                    Inventory inventory = invocation.getArgument(0);
+                    savedInventories.add(inventory);
+                    return inventory;
+                });
+        when(transactionRepo.save(any(InventoryTransaction.class)))
+                .thenAnswer(invocation -> {
+                    InventoryTransaction transaction = invocation.getArgument(0);
+                    savedTransactions.add(transaction);
+                    return transaction;
+                });
+        when(transactionRepo.findByReferenceCodeAndType(anyString(), eq(TransactionType.TRANSFER_OUT)))
+                .thenAnswer(invocation -> {
+                    String referenceCode = invocation.getArgument(0);
+                    return savedTransactions.stream()
+                            .filter(tx -> tx.getType() == TransactionType.TRANSFER_OUT
+                                    && referenceCode.equals(tx.getReferenceCode()))
+                            .toList();
+                });
+        when(warehouseContext.resolveWarehouseId()).thenReturn(null);
     }
 
     @Test
     void createReplenishmentTransfersForSubOrder_createsPendingTransferWithoutBlockingOnStockCheck() {
         when(subOrderRepo.findByIdWithItems(34L)).thenReturn(Optional.of(replenishmentSubOrder));
         when(transferRepo.findByReferenceCodeAndStatusInOrderByCreatedAtDesc(any(), any())).thenReturn(List.of());
-        when(branchRepo.findAll()).thenReturn(List.of(warehouse, destinationBranch));
-        when(branchRepo.findById(1L)).thenReturn(Optional.of(warehouse));
-        when(branchRepo.findById(2L)).thenReturn(Optional.of(destinationBranch));
-        when(variantRepo.findBySku("SP260404-479-V1")).thenReturn(Optional.of(variant));
         when(inventoryRepo.findByProductVariantId(10L)).thenReturn(List.of());
         when(transferRepo.countTotalTransfers()).thenReturn(3L);
-        when(transferRepo.save(any(InventoryTransfer.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
-        List<InventoryTransfer> transfers = inventoryTransferService
-                .createReplenishmentTransfersForSubOrder(replenishmentSubOrder);
+        List<InventoryTransfer> transfers = callAs(
+                requesterUser,
+                () -> inventoryTransferService.createReplenishmentTransfersForSubOrder(replenishmentSubOrder));
 
         assertThat(transfers).hasSize(1);
         InventoryTransfer transfer = transfers.get(0);
@@ -137,7 +275,7 @@ class InventoryTransferServiceTest {
         assertThat(transfer.getReferenceCode()).isEqualTo("ORDTEST001-SUB-34");
         assertThat(transfer.getDescription()).contains("ORDTEST001");
         assertThat(transfer.getFromBranch().getId()).isEqualTo(1L);
-        assertThat(transfer.getToBranch().getId()).isEqualTo(2L);
+        assertThat(transfer.getToBranch().getId()).isEqualTo(3L);
         assertThat(transfer.getTotalQuantity()).isEqualTo(2);
         assertThat(transfer.getDetails()).hasSize(1);
         assertThat(transfer.getDetails().get(0).getQuantityRequested()).isEqualTo(2);
@@ -145,44 +283,301 @@ class InventoryTransferServiceTest {
 
     @Test
     void createReplenishmentTransfersForSubOrder_usesOtherBranchesBeforeWarehouseFallback() {
-        Branch sourceBranch = Branch.builder()
-                .name("ArgiShrimp Chi Nhanh Soc Trang")
+        Branch supplyingBranch = Branch.builder()
+                .branchCode("CN-ST")
+                .branchType("STORE")
+                .name("Chi Nhanh Soc Trang")
                 .build();
-        setId(sourceBranch, 3L, "id");
-        sourceBranch.setLat(9.60);
-        sourceBranch.setLng(105.97);
+        setId(supplyingBranch, 4L, "id");
+        supplyingBranch.setLat(9.60);
+        supplyingBranch.setLng(105.97);
 
         replenishmentSubOrder.getItems().get(0).setMissingQuantity(5);
 
         when(subOrderRepo.findByIdWithItems(34L)).thenReturn(Optional.of(replenishmentSubOrder));
         when(transferRepo.findByReferenceCodeAndStatusInOrderByCreatedAtDesc(any(), any())).thenReturn(List.of());
-        when(branchRepo.findAll()).thenReturn(List.of(warehouse, destinationBranch, sourceBranch));
-        when(branchRepo.findById(1L)).thenReturn(Optional.of(warehouse));
-        when(branchRepo.findById(2L)).thenReturn(Optional.of(destinationBranch));
-        when(branchRepo.findById(3L)).thenReturn(Optional.of(sourceBranch));
-        when(variantRepo.findBySku("SP260404-479-V1")).thenReturn(Optional.of(variant));
-        when(inventoryRepo.findByProductVariantId(10L)).thenReturn(List.of(
-                createInventory(sourceBranch, variant, 3),
+        when(branchRepo.findAll()).thenReturn(List.of(warehouse, sourceBranch, destinationBranch, supplyingBranch));
+        when(branchRepo.findById(supplyingBranch.getId())).thenReturn(Optional.of(supplyingBranch));
+        when(inventoryRepo.findByProductVariantId(variant.getId())).thenReturn(List.of(
+                createInventory(supplyingBranch, variant, 3),
                 createInventory(warehouse, variant, 0)));
         when(transferRepo.countTotalTransfers()).thenReturn(10L, 11L);
-        when(transferRepo.save(any(InventoryTransfer.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
-        List<InventoryTransfer> transfers = inventoryTransferService
-                .createReplenishmentTransfersForSubOrder(replenishmentSubOrder);
+        List<InventoryTransfer> transfers = callAs(
+                requesterUser,
+                () -> inventoryTransferService.createReplenishmentTransfersForSubOrder(replenishmentSubOrder));
 
         assertThat(transfers).hasSize(2);
 
         InventoryTransfer branchTransfer = transfers.stream()
-                .filter(transfer -> transfer.getFromBranch().getId().equals(3L))
+                .filter(transfer -> transfer.getFromBranch().getId().equals(supplyingBranch.getId()))
                 .findFirst()
                 .orElseThrow();
         InventoryTransfer warehouseTransfer = transfers.stream()
-                .filter(transfer -> transfer.getFromBranch().getId().equals(1L))
+                .filter(transfer -> transfer.getFromBranch().getId().equals(warehouse.getId()))
                 .findFirst()
                 .orElseThrow();
 
         assertThat(branchTransfer.getTotalQuantity()).isEqualTo(3);
         assertThat(warehouseTransfer.getTotalQuantity()).isEqualTo(2);
+    }
+
+    @Test
+    void stockTransfer_happyPath_canCreateApproveShipInspectAndReceive() {
+        Inventory sourceBatch = Inventory.builder()
+                .id(700L)
+                .branch(warehouse)
+                .productVariant(variant)
+                .batchNumber("BATCH-WH-01")
+                .importPrice(new BigDecimal("100"))
+                .quantity(10)
+                .reservedQuantity(0)
+                .defectiveQuantity(0)
+                .build();
+
+        TransferRequest request = buildRequest(
+                warehouse.getId(),
+                destinationBranch.getId(),
+                TransferBusinessType.STOCK_TRANSFER,
+                4,
+                null);
+
+        when(transferRepo.countTotalTransfers()).thenReturn(10L);
+        when(inventoryRepo.findByProductVariantId(variant.getId())).thenReturn(List.of(sourceBatch));
+
+        InventoryTransfer transfer = callAs(requesterUser, () -> inventoryTransferService.createTransfer(request));
+        when(transferRepo.findByIdWithDetails(transfer.getId())).thenReturn(Optional.of(transfer));
+        when(inventoryRepo.findForUpdateFIFO(warehouse.getId(), variant.getId())).thenReturn(List.of(sourceBatch));
+        when(inventoryRepo.findExactBatchWithLock(any(Branch.class), eq(variant), anyString(), any(BigDecimal.class)))
+                .thenReturn(Optional.empty());
+
+        assertThat(transfer.getStatus()).isEqualTo(InventoryTransferStatus.PENDING);
+        assertThat(transfer.getCreatedBy()).isEqualTo(requesterUser);
+        assertThat(transfer.getCreatedByBranch()).isEqualTo(destinationBranch);
+
+        runAs(approverUser, () -> inventoryTransferService.approveTransfer(transfer.getId()));
+        assertThat(transfer.getStatus()).isEqualTo(InventoryTransferStatus.APPROVED);
+        assertThat(sourceBatch.getReservedQuantity()).isEqualTo(4);
+
+        runAs(approverUser, () -> inventoryTransferService.approveAndShip(transfer.getId()));
+        assertThat(transfer.getStatus()).isEqualTo(InventoryTransferStatus.SHIPPING);
+        assertThat(sourceBatch.getQuantity()).isEqualTo(6);
+        assertThat(sourceBatch.getReservedQuantity()).isZero();
+
+        runAs(receiverUser, () -> inventoryTransferService.startInspection(transfer.getId()));
+        assertThat(transfer.getStatus()).isEqualTo(InventoryTransferStatus.INSPECTING);
+
+        runAs(receiverUser, () -> inventoryTransferService.receiveTransfer(
+                transfer.getId(),
+                List.of(TransferQCRequest.builder()
+                        .variantId(variant.getId())
+                        .quantityReal(4)
+                        .quantityAccepted(4)
+                        .quantityRejected(0)
+                        .note("")
+                        .build())));
+
+        assertThat(transfer.getStatus()).isEqualTo(InventoryTransferStatus.COMPLETED);
+        assertThat(transfer.getSettlementStatus()).isNull();
+        assertThat(transfer.getTransferAmount()).isNull();
+        assertThat(savedTransactions)
+                .anyMatch(tx -> tx.getType() == TransactionType.TRANSFER_OUT
+                        && tx.getReferenceCode().equals(transfer.getTransferCode())
+                        && tx.getQuantityChange() == -4);
+        assertThat(savedInventories)
+                .anyMatch(inv -> inv.getBranch() == destinationBranch
+                        && inv.getProductVariant() == variant
+                        && inv.getQuantity() == 4);
+    }
+
+    @Test
+    void internalSale_happyPath_completesAndSettlesBasedOnAcceptedQuantity() {
+        Inventory sourceBatch = Inventory.builder()
+                .id(701L)
+                .branch(sourceBranch)
+                .productVariant(variant)
+                .batchNumber("BATCH-CN-01")
+                .importPrice(new BigDecimal("100"))
+                .quantity(5)
+                .reservedQuantity(0)
+                .defectiveQuantity(0)
+                .build();
+
+        TransferRequest request = buildRequest(
+                sourceBranch.getId(),
+                destinationBranch.getId(),
+                TransferBusinessType.INTERNAL_SALE,
+                5,
+                new BigDecimal("140"));
+
+        when(transferRepo.countTotalTransfers()).thenReturn(20L);
+        when(inventoryRepo.findByProductVariantId(variant.getId())).thenReturn(List.of(sourceBatch));
+
+        InventoryTransfer transfer = callAs(requesterUser, () -> inventoryTransferService.createTransfer(request));
+        when(transferRepo.findByIdWithDetails(transfer.getId())).thenReturn(Optional.of(transfer));
+        when(inventoryRepo.findForUpdateFIFO(sourceBranch.getId(), variant.getId())).thenReturn(List.of(sourceBatch));
+        when(inventoryRepo.findExactBatchWithLock(any(Branch.class), eq(variant), anyString(), any(BigDecimal.class)))
+                .thenReturn(Optional.empty());
+
+        assertThat(transfer.getTransferBusinessType()).isEqualTo(TransferBusinessType.INTERNAL_SALE);
+        assertThat(transfer.getTransferAmount()).isEqualByComparingTo("700");
+        assertThat(transfer.getSettlementStatus()).isEqualTo(TransferSettlementStatus.UNPAID);
+
+        runAs(sourceUser, () -> inventoryTransferService.sourceConfirm(transfer.getId()));
+        assertThat(transfer.getStatus()).isEqualTo(InventoryTransferStatus.SOURCE_CONFIRMED);
+        assertThat(transfer.getSourceConfirmedBy()).isEqualTo(sourceUser);
+        assertThat(sourceBatch.getReservedQuantity()).isEqualTo(5);
+
+        runAs(approverUser, () -> inventoryTransferService.approveTransfer(transfer.getId()));
+        assertThat(transfer.getStatus()).isEqualTo(InventoryTransferStatus.APPROVED);
+        assertThat(transfer.getApprovedBy()).isEqualTo(approverUser);
+
+        runAs(approverUser, () -> inventoryTransferService.approveAndShip(transfer.getId()));
+        assertThat(transfer.getStatus()).isEqualTo(InventoryTransferStatus.SHIPPING);
+        assertThat(sourceBatch.getQuantity()).isZero();
+        assertThat(sourceBatch.getReservedQuantity()).isZero();
+
+        runAs(receiverUser, () -> inventoryTransferService.startInspection(transfer.getId()));
+        assertThat(transfer.getStatus()).isEqualTo(InventoryTransferStatus.INSPECTING);
+
+        runAs(receiverUser, () -> inventoryTransferService.receiveTransfer(
+                transfer.getId(),
+                List.of(TransferQCRequest.builder()
+                        .variantId(variant.getId())
+                        .quantityReal(5)
+                        .quantityAccepted(3)
+                        .quantityRejected(2)
+                        .note("2 san pham loi")
+                        .build())));
+
+        assertThat(transfer.getStatus()).isEqualTo(InventoryTransferStatus.COMPLETED);
+        assertThat(transfer.getTransferAmount()).isEqualByComparingTo("420");
+        assertThat(transfer.getSourceReceivableAmount()).isEqualByComparingTo("420");
+        assertThat(transfer.getDestPayableAmount()).isEqualByComparingTo("420");
+        assertThat(transfer.getPaidAmount()).isEqualByComparingTo("0");
+        assertThat(transfer.getSettlementStatus()).isEqualTo(TransferSettlementStatus.UNPAID);
+        assertThat(savedInventories)
+                .anyMatch(inv -> inv.getBranch() == destinationBranch
+                        && inv.getProductVariant() == variant
+                        && inv.getQuantity() == 3
+                        && inv.getImportPrice().compareTo(new BigDecimal("140")) == 0);
+        assertThat(savedInventories)
+                .anyMatch(inv -> inv.getBranch() == defectBranch
+                        && inv.getProductVariant() == variant
+                        && inv.getDefectiveQuantity() == 2
+                        && inv.getImportPrice().compareTo(new BigDecimal("140")) == 0);
+
+        TransferSettlementRequest partialSettlement = new TransferSettlementRequest();
+        partialSettlement.setAmount(new BigDecimal("140"));
+        TransferDetailResponse partialResponse = callAs(
+                approverUser,
+                () -> inventoryTransferService.settleInternalPayment(transfer.getId(), partialSettlement));
+
+        assertThat(partialResponse.getPaidAmount()).isEqualByComparingTo("140");
+        assertThat(partialResponse.getOutstandingAmount()).isEqualByComparingTo("280");
+        assertThat(partialResponse.getSettlementStatus()).isEqualTo(TransferSettlementStatus.PARTIAL);
+
+        TransferSettlementRequest finalSettlement = new TransferSettlementRequest();
+        finalSettlement.setAmount(new BigDecimal("280"));
+        TransferDetailResponse finalResponse = callAs(
+                approverUser,
+                () -> inventoryTransferService.settleInternalPayment(transfer.getId(), finalSettlement));
+
+        assertThat(finalResponse.getPaidAmount()).isEqualByComparingTo("420");
+        assertThat(finalResponse.getOutstandingAmount()).isEqualByComparingTo("0");
+        assertThat(finalResponse.getSettlementStatus()).isEqualTo(TransferSettlementStatus.PAID);
+    }
+
+    @Test
+    void pendingTransfer_canUpdateAndCancelBeforeApproval() {
+        Inventory sourceBatch = Inventory.builder()
+                .id(702L)
+                .branch(warehouse)
+                .productVariant(variant)
+                .batchNumber("BATCH-WH-02")
+                .importPrice(new BigDecimal("90"))
+                .quantity(20)
+                .reservedQuantity(0)
+                .defectiveQuantity(0)
+                .build();
+
+        TransferRequest createRequest = buildRequest(
+                warehouse.getId(),
+                destinationBranch.getId(),
+                TransferBusinessType.STOCK_TRANSFER,
+                3,
+                null);
+
+        when(transferRepo.countTotalTransfers()).thenReturn(30L);
+        when(inventoryRepo.findByProductVariantId(variant.getId())).thenReturn(List.of(sourceBatch));
+
+        InventoryTransfer transfer = callAs(requesterUser, () -> inventoryTransferService.createTransfer(createRequest));
+        when(transferRepo.findByIdWithDetails(transfer.getId())).thenReturn(Optional.of(transfer));
+        when(transferRepo.findById(transfer.getId())).thenReturn(Optional.of(transfer));
+
+        TransferRequest updateRequest = buildRequest(
+                warehouse.getId(),
+                destinationBranch.getId(),
+                TransferBusinessType.STOCK_TRANSFER,
+                2,
+                null);
+        updateRequest.setDescription("Cap nhat lai so luong");
+
+        TransferDetailResponse updated = inventoryTransferService.updateTransfer(transfer.getId(), updateRequest);
+
+        assertThat(updated.getStatus()).isEqualTo(InventoryTransferStatus.PENDING);
+        assertThat(updated.getTotalQuantity()).isEqualTo(2);
+        assertThat(updated.getDescription()).isEqualTo("Cap nhat lai so luong");
+
+        inventoryTransferService.cancelTransfer(transfer.getId());
+        assertThat(transfer.getStatus()).isEqualTo(InventoryTransferStatus.CANCELLED);
+    }
+
+    private TransferRequest buildRequest(
+            Long fromBranchId,
+            Long toBranchId,
+            TransferBusinessType businessType,
+            int quantity,
+            BigDecimal unitTransferPrice) {
+        TransferItemRequest item = new TransferItemRequest();
+        item.setSku(variant.getSku());
+        item.setQuantity(quantity);
+        item.setItemNote("Test item");
+        item.setUnitTransferPrice(unitTransferPrice);
+
+        TransferRequest request = new TransferRequest();
+        request.setFromBranchId(fromBranchId);
+        request.setToBranchId(toBranchId);
+        request.setTransferType(businessType == TransferBusinessType.INTERNAL_SALE ? "INTERNAL" : "BETWEEN_WAREHOUSES");
+        request.setTransferBusinessType(businessType.name());
+        request.setDescription("Test transfer");
+        request.setTransporter("Tai xe A");
+        request.setVehicle("Xe tai");
+        request.setDispatchOrder("LENH-001");
+        request.setReferenceCode("REF-001");
+        request.setPriority("NORMAL");
+        request.setTransferDate(LocalDateTime.now());
+        request.setDeadline(LocalDateTime.now().plusDays(1));
+        request.setItems(List.of(item));
+        return request;
+    }
+
+    private void runAs(User user, Runnable action) {
+        callAs(user, () -> {
+            action.run();
+            return null;
+        });
+    }
+
+    private <T> T callAs(User user, Supplier<T> supplier) {
+        try (MockedStatic<AuthUtils> authUtilsMock = mockStatic(AuthUtils.class)) {
+            authUtilsMock.when(AuthUtils::getUserDetail).thenReturn(UserDetail.builder()
+                    .id(user.getId())
+                    .fullName(user.getFullName())
+                    .branchId(user.getBranch() != null ? user.getBranch().getId() : null)
+                    .build());
+            return supplier.get();
+        }
     }
 
     private Inventory createInventory(Branch branch, ProductVariant productVariant, int quantity) {

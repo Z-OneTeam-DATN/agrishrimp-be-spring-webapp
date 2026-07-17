@@ -58,6 +58,7 @@ public class OrderService {
     private final SubOrderRepository subOrderRepository;
     private final SubOrderItemRepository subOrderItemRepository;
     private final InventoryTransactionRepository transactionRepository;
+    private final InventoryCheckGuardService inventoryCheckGuardService;
 
     private final UserAddressRepository userAddressRepository;
     private final ReviewRepository reviewRepository;
@@ -1558,6 +1559,12 @@ public class OrderService {
                     ProductVariant variant = variantRepository.findById(item.getProductVariantId())
                             .orElseThrow(() -> new NotFoundException("Sáº£n pháº©m khĂ´ng tá»“n táº¡i"));
 
+                    inventoryCheckGuardService.assertStockMutationAllowed(
+                            subDraft.getBranchId(),
+                            List.of(item.getProductVariantId()),
+                            "xac nhan don hang"
+                    );
+
                     int requestedQuantity = Objects.requireNonNullElse(item.getQuantity(), 0);
                     int allocatedQuantity = Objects.requireNonNullElse(item.getAllocatedQuantity(), 0);
 
@@ -2131,6 +2138,11 @@ public class OrderService {
             }
 
             Inventory inventory = saleTransaction.getInventory();
+            inventoryCheckGuardService.assertStockMutationAllowed(
+                    inventory.getBranch() != null ? inventory.getBranch().getId() : null,
+                    inventory.getProductVariant() != null ? List.of(inventory.getProductVariant().getId()) : List.of(),
+                    "hoàn kho chứng từ"
+            );
             int currentQty = Objects.requireNonNullElse(inventory.getQuantity(), 0);
             int newQty = currentQty + quantityToRelease;
             inventory.setQuantity(newQty);
@@ -2300,7 +2312,13 @@ public class OrderService {
             ProductVariant variant = variantRepository.findById(itemReq.getVariantId())
                     .orElseThrow(() -> new NotFoundException("Sáº£n pháº©m khĂ´ng tá»“n táº¡i"));
 
-            // LOGIC TRá»ª KHO THEO LĂ” (FIFO)
+            inventoryCheckGuardService.assertStockMutationAllowed(
+                    selectedBranch.getId(),
+                    List.of(variant.getId()),
+                    "xac nhan xuat kho"
+            );
+
+            // LOGIC TRỪ KHO THEO LÔ (FIFO)
             int remainingToDeduct = itemReq.getQuantity();
             List<Inventory> batches = inventoryRepository.findForUpdateFIFO(selectedBranch.getId(), variant.getId());
 
