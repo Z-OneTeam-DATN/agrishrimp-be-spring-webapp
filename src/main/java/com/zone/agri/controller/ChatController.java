@@ -61,6 +61,13 @@ public class ChatController {
         return ResponseEntity.ok(chatService.getAllConversations(page, size));
     }
 
+    @Operation(summary = "Lấy thông tin một conversation theo ID (dành cho shop/admin)")
+    @GetMapping("/conversations/{id}")
+    @RequirePermission({"CHAT_VIEW", "CUSTOMER_ADVISOR_USE"})
+    public ResponseEntity<ConversationResponse> getConversationById(@PathVariable Long id) {
+        return ResponseEntity.ok(chatService.getConversationById(id));
+    }
+
     @Operation(summary = "Lấy lịch sử tin nhắn của conversation")
     @GetMapping("/conversations/{id}/messages")
     public ResponseEntity<List<ChatMessageResponse>> getMessages(@PathVariable Long id) {
