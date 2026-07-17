@@ -92,6 +92,18 @@ public class UserService {
         return mapUserToResponse(savedUser); // Trả về DTO mới nhất
     }
 
+    @Transactional
+    public UserResponse updateAvatarUrl(String contact, String avatarUrl) {
+        User user = userRepository.findByEmail(contact)
+                .or(() -> userRepository.findByPhoneNumber(contact))
+                .orElseThrow(() -> new NotFoundException("Không tìm thấy người dùng"));
+
+        user.setAvatarUrl(avatarUrl);
+        User savedUser = userRepository.save(user);
+        log.info("User {} cập nhật avatarUrl thành công: {}", contact, avatarUrl);
+        return mapUserToResponse(savedUser);
+    }
+
     /**
      * ✅ THÊM MỚI: Đổi mật khẩu cá nhân
      */
