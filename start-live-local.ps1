@@ -209,11 +209,12 @@ if (-not $reuseExistingTunnel -and -not $SkipTunnelSetup) {
     try {
         Write-Step "Ensuring remote DB and Redis proxy containers"
         $remoteProxyCommand = @"
-docker rm -f agri-db-proxy agri-redis-proxy >/dev/null 2>&1 || true
-docker run -d --name agri-db-proxy --network agrishrimp-net -p 127.0.0.1:${remoteMysqlProxyPort}:${remoteMysqlProxyPort} alpine/socat TCP-LISTEN:${remoteMysqlProxyPort},fork,reuseaddr TCP:db:3306 >/dev/null
-docker run -d --name agri-redis-proxy --network agrishrimp-net -p 127.0.0.1:${remoteRedisProxyPort}:${remoteRedisProxyPort} alpine/socat TCP-LISTEN:${remoteRedisProxyPort},fork,reuseaddr TCP:agrishrimp-redis:6379 >/dev/null
+docker rm -f agri-db-proxy agri-redis-proxy || true
+docker run -d --name agri-db-proxy --network agrishrimp-net -p 127.0.0.1:${remoteMysqlProxyPort}:${remoteMysqlProxyPort} alpine/socat TCP-LISTEN:${remoteMysqlProxyPort},fork,reuseaddr TCP4:agrishrimp-db:3306
+docker run -d --name agri-redis-proxy --network agrishrimp-net -p 127.0.0.1:${remoteRedisProxyPort}:${remoteRedisProxyPort} alpine/socat TCP-LISTEN:${remoteRedisProxyPort},fork,reuseaddr TCP4:agrishrimp-redis:6379
 echo REMOTE_PROXY_READY
 "@
+        $remoteProxyCommand = $remoteProxyCommand -replace "`r", ""
         & $sshpassPath -f $passwordFile `
             $sshPath `
             @sshOptions `
