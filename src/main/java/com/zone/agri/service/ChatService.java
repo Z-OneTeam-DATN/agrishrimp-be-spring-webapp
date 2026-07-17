@@ -9,10 +9,8 @@ import com.zone.agri.entity.enums.ConversationStatus;
 import com.zone.agri.entity.enums.MessageType;
 import com.zone.agri.entity.enums.NotificationType;
 import com.zone.agri.common.CloudinaryService;
-import com.zone.agri.dto.ai.AiChatResponse;
-import com.zone.agri.dto.request.ai.AiDoctorChatRequest;
 import com.zone.agri.repository.*;
-import com.zone.agri.service.ai.AiKnowledgeService;
+
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.multipart.MultipartFile;
@@ -41,7 +39,6 @@ public class ChatService {
     private final SimpMessagingTemplate messagingTemplate;
     private final NotificationService notificationService;
     private final CloudinaryService cloudinaryService;
-    private final AiKnowledgeService aiKnowledgeService;
 
     @Transactional
     public ConversationResponse getOrCreateConversation(Long customerId) {
@@ -264,50 +261,6 @@ public class ChatService {
         });
     }
 
-    private void sendBotAutoReply(Long convId, String customerMessage) {
-        try {
-            User botUser = userRepository.findByEmail("bot@agrishrimp.vn").orElse(null);
-            if (botUser == null) return;
-
-            AiChatResponse aiResp = aiKnowledgeService.answerChat(
-                    AiDoctorChatRequest.builder()
-                            .message(customerMessage)
-                            .sessionId("chat_" + convId)
-                            .build(),
-                    null,
-                    "CUSTOMER_CHAT_AUTO_REPLY",
-                    false);
-
-            String reply = aiResp != null && aiResp.isSuccess() ? aiResp.getReply() : null;
-            if (reply == null || reply.isBlank()) return;
-
-            Conversation conv = conversationRepository.findById(convId).orElse(null);
-            if (conv == null) return;
-
-            ChatMessage botMsg = ChatMessage.builder()
-                    .conversation(conv)
-                    .sender(botUser)
-                    .content(reply)
-                    .messageType(MessageType.TEXT)
-                    .isRead(false)
-                    .build();
-            botMsg = chatMessageRepository.save(botMsg);
-
-            conv.setLastMessage(reply);
-            conv.setLastMessageAt(LocalDateTime.now());
-            conv.setUnreadByCustomer(conv.getUnreadByCustomer() + 1);
-            conversationRepository.save(conv);
-
-            ChatMessageResponse botResponse = toMessageResponse(botMsg);
-            String customerPrincipalBot = conv.getCustomer().getEmail() != null
-                    ? conv.getCustomer().getEmail()
-                    : conv.getCustomer().getPhoneNumber();
-            messagingTemplate.convertAndSendToUser(customerPrincipalBot, "/queue/messages", botResponse);
-            messagingTemplate.convertAndSend("/topic/shop-messages", botResponse);
-        } catch (Exception e) {
-            log.warn("[ChatBot] Auto-reply failed for conv {}: {}", convId, e.getMessage());
-        }
-    }
 
     public void broadcastTyping(Long senderId, Long conversationId) {
         conversationRepository.findById(conversationId).ifPresent(conv -> {
