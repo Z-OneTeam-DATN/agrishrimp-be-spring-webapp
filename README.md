@@ -1,6 +1,6 @@
 # 🦐 AgriShrimp Backend API
 
-![Java 21](https://img.shields.io/badge/Java-21-007396?logo=openjdk&logoColor=white)
+![Java 25](https://img.shields.io/badge/Java-25-007396?logo=openjdk&logoColor=white)
 ![Spring Boot 3.5](https://img.shields.io/badge/Spring_Boot-3.5-6DB33F?logo=springboot&logoColor=white)
 ![MySQL](https://img.shields.io/badge/MySQL-8-4479A1?logo=mysql&logoColor=white)
 ![Redis](https://img.shields.io/badge/Redis-Cache-DC382D?logo=redis&logoColor=white)
@@ -14,7 +14,7 @@ AgriShrimp Backend is a Spring Boot API for a shrimp farming operations and agri
 | --- | --- |
 | Role | Central backend API for storefront, admin, and mini app |
 | Domain | Agri-commerce / shrimp farming operations |
-| Core stack | Java 21, Spring Boot 3.5, Spring Security, Spring Data JPA, MySQL, Redis |
+| Core stack | Java 25, Spring Boot 3.5, Spring Security, Spring Data JPA, MySQL, Redis |
 | External integrations | Cloudinary, PayOS, GHN, Google Login, Zalo Mini App, TrackAsia, OpenRouteService |
 | API docs | `/swagger-ui/index.html` |
 | Health check | `/actuator/health` |
@@ -73,7 +73,7 @@ Full endpoint documentation is available at `http://localhost:8004/swagger-ui/in
 
 ## 🛠️ Tech Stack
 
-- Language: Java 21
+- Language: Java 25
 - Framework: Spring Boot 3.5.5
 - Security: Spring Security, JWT
 - Persistence: Spring Data JPA, Hibernate, MySQL
@@ -87,7 +87,7 @@ Full endpoint documentation is available at `http://localhost:8004/swagger-ui/in
 
 ### Requirements
 
-- JDK 21
+- JDK 25
 - Docker + Docker Compose
 - Maven Wrapper already included in the repository
 

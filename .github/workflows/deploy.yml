@@ -17,7 +17,7 @@ env:
   REGISTRY: ghcr.io
   IMAGE_NAME: z-oneteam-datn/agrishrimp-be-spring-webapp
   APP_PORT: 8004
-  JAVA_VERSION: '21'
+  JAVA_VERSION: '25'
 
 jobs:
   # ─────────────────────────────────────────────
