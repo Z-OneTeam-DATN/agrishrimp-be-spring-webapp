@@ -95,6 +95,9 @@ public class OrderService {
     @Value("${order.payment-expiry-minutes:15}")
     private long paymentExpiryMinutes;
 
+    @Value("${order.auto-approve-minutes:5}")
+    private long autoApproveMinutes;
+
     private record PreparedQuote(
             List<CartItemDto> cartItems,
             List<SubOrderDraftDto> subOrders,
@@ -208,14 +211,18 @@ public class OrderService {
         if (!order.getUser().getId().equals(userId)) {
             throw new BadRequestException("Báº¡n khĂ´ng cĂ³ quyá»n há»§y Ä‘Æ¡n hĂ ng nĂ y");
         }
-        if (order.getStatus() == OrderStatus.CANCELLED || order.getStatus() == OrderStatus.COMPLETED
-                || order.getStatus() == OrderStatus.RETURNED) {
+        OrderStatus currentStatus = order.getStatus();
+        if (currentStatus == OrderStatus.CANCELLED || currentStatus == OrderStatus.COMPLETED
+                || currentStatus == OrderStatus.RETURNED) {
             throw new BadRequestException("ÄÆ¡n hĂ ng Ä‘Ă£ Ä‘Ă³ng, khĂ´ng thá»ƒ há»§y");
         }
-        if (order.getStatus() == OrderStatus.SHIPPING) {
+        if (currentStatus == OrderStatus.SHIPPING) {
             throw new BadRequestException("ÄÆ¡n hĂ ng Ä‘ang giao, khĂ´ng thá»ƒ há»§y");
         }
 
+        if (!canCustomerCancelOrder(currentStatus)) {
+            throw new BadRequestException("Đơn hàng đã được xác nhận hoặc đang xử lý, không thể hủy");
+        }
         releaseAllocatedInventoryForOrder(order);
         voucherService.restoreVoucherForOrder(order);
         LocalDateTime cancelledAt = LocalDateTime.now();
@@ -597,6 +604,10 @@ public class OrderService {
         }
     }
 
+    private boolean canCustomerCancelOrder(OrderStatus status) {
+        return status == OrderStatus.PENDING || status == OrderStatus.AWAITING_PAYMENT;
+    }
+
     @Transactional
     public void expireUnpaidPaymentOrders() {
         LocalDateTime cutoff = LocalDateTime.now().minusMinutes(Math.max(1, paymentExpiryMinutes));
@@ -642,29 +653,33 @@ public class OrderService {
 
     @Transactional
     public void autoApproveEligibleOrders() {
-        List<Order> eligibleOrders = orderRepository.findOrdersReadyForAutoApproval(LocalDateTime.now());
+        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime fallbackCutoff = now.minusMinutes(Math.max(1, autoApproveMinutes));
 
+        List<Order> eligibleOrders = new ArrayList<>(orderRepository.findOrdersReadyForAutoApproval(now));
+        List<Order> pendingFallbackOrders = orderRepository.findByStatusAndCreatedAtBefore(OrderStatus.PENDING, fallbackCutoff)
+                .stream()
+                .filter(order -> order.getAutoApproveAt() == null)
+                .toList();
+
+        Map<Long, Order> candidatesById = new LinkedHashMap<>();
         for (Order order : eligibleOrders) {
-            if (!isEligibleForAutoApproval(order)) {
+            if (order.getId() != null) {
+                candidatesById.put(order.getId(), order);
+            }
+        }
+        for (Order order : pendingFallbackOrders) {
+            if (order.getId() != null) {
+                candidatesById.putIfAbsent(order.getId(), order);
+            }
+        }
+
+        for (Order order : candidatesById.values()) {
+            if (!isEligibleForAutoApproval(order, now) && !shouldFallbackAutoApprove(order, now)) {
                 continue;
             }
 
-            LocalDateTime changedAt = LocalDateTime.now();
-            applyOrderStatus(order, OrderStatus.CONFIRMED, changedAt);
-            order.setFulfillmentStatus(FulfillmentStatus.PREPARING);
-            order.setAutoApproveAt(null);
-
-            if (order.getSubOrders() != null) {
-                List<SubOrder> confirmedSubOrders = order.getSubOrders().stream()
-                        .filter(subOrder -> subOrder.getStatus() == OrderStatus.PENDING)
-                        .peek(subOrder -> applySubOrderStatus(subOrder, OrderStatus.CONFIRMED, changedAt))
-                        .toList();
-                if (!confirmedSubOrders.isEmpty()) {
-                    subOrderRepository.saveAll(confirmedSubOrders);
-                }
-            }
-
-            orderRepository.save(order);
+            confirmOrderAutomatically(order, now);
         }
     }
 
@@ -951,6 +966,8 @@ public class OrderService {
                 .totalAmount(order.getTotalAmount() != null ? order.getTotalAmount() : BigDecimal.ZERO)
                 .shippingFee(order.getTotalShippingFee() != null ? order.getTotalShippingFee() : BigDecimal.ZERO)
                 .totalShippingFee(order.getTotalShippingFee() != null ? order.getTotalShippingFee() : BigDecimal.ZERO)
+                .voucherCode(order.getVoucher() != null ? order.getVoucher().getCode() : null)
+                .discountAmount(order.getDiscountAmount() != null ? order.getDiscountAmount() : BigDecimal.ZERO)
                 .finalAmount(order.getFinalAmount() != null ? order.getFinalAmount() : BigDecimal.ZERO)
                 .paymentMethod(order.getPaymentMethod() != null ? order.getPaymentMethod().name() : "")
                 .paymentStatus(resolvePaymentStatus(order))
@@ -1138,16 +1155,45 @@ public class OrderService {
                 || PaymentStatus.UNPAID.equals(order.getPaymentStatus());
     }
 
-    private boolean isEligibleForAutoApproval(Order order) {
+    private boolean isEligibleForAutoApproval(Order order, LocalDateTime now) {
+        if (!isEligibleForAutoApprovalBase(order)) {
+            return false;
+        }
+
+        if (order.getAutoApproveAt() == null || order.getAutoApproveAt().isAfter(now)) {
+            return false;
+        }
+
+        return true;
+    }
+
+    private boolean shouldFallbackAutoApprove(Order order, LocalDateTime now) {
+        if (!isEligibleForAutoApprovalBase(order)) {
+            return false;
+        }
+
+        if (order.getAutoApproveAt() != null) {
+            return false;
+        }
+
+        if (!PaymentMethod.COD.equals(order.getPaymentMethod()) && !PaymentMethod.CASH.equals(order.getPaymentMethod())) {
+            return false;
+        }
+
+        if (order.getCreatedAt() == null) {
+            return false;
+        }
+
+        LocalDateTime fallbackReadyAt = order.getCreatedAt().plusMinutes(Math.max(1, autoApproveMinutes));
+        return !fallbackReadyAt.isAfter(now);
+    }
+
+    private boolean isEligibleForAutoApprovalBase(Order order) {
         if (order == null || order.getStatus() != OrderStatus.PENDING) {
             return false;
         }
 
         if (Boolean.TRUE.equals(order.getAutoApprovalPaused())) {
-            return false;
-        }
-
-        if (order.getAutoApproveAt() == null || order.getAutoApproveAt().isAfter(LocalDateTime.now())) {
             return false;
         }
 
@@ -1161,6 +1207,24 @@ public class OrderService {
         }
 
         return PaymentStatus.UNPAID.equals(order.getPaymentStatus()) || PaymentStatus.PAID.equals(order.getPaymentStatus());
+    }
+
+    private void confirmOrderAutomatically(Order order, LocalDateTime changedAt) {
+        applyOrderStatus(order, OrderStatus.CONFIRMED, changedAt);
+        order.setFulfillmentStatus(FulfillmentStatus.PREPARING);
+        order.setAutoApproveAt(null);
+
+        if (order.getSubOrders() != null) {
+            List<SubOrder> confirmedSubOrders = order.getSubOrders().stream()
+                    .filter(subOrder -> subOrder.getStatus() == OrderStatus.PENDING)
+                    .peek(subOrder -> applySubOrderStatus(subOrder, OrderStatus.CONFIRMED, changedAt))
+                    .toList();
+            if (!confirmedSubOrders.isEmpty()) {
+                subOrderRepository.saveAll(confirmedSubOrders);
+            }
+        }
+
+        orderRepository.save(order);
     }
 
     private OrderItemResponse mapItemToResponse(OrderItem item) {
@@ -1890,7 +1954,7 @@ public class OrderService {
     private LocalDateTime resolveInitialAutoApproveAt(PaymentMethod paymentMethod, StockStatus stockStatus) {
         if ((PaymentMethod.COD.equals(paymentMethod) || PaymentMethod.CASH.equals(paymentMethod))
                 && stockStatus == StockStatus.FULLY_AVAILABLE) {
-            return LocalDateTime.now().plusMinutes(5);
+            return LocalDateTime.now().plusMinutes(Math.max(1, autoApproveMinutes));
         }
 
         return null;

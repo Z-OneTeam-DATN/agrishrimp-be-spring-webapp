@@ -6,6 +6,8 @@ import com.zone.agri.dto.response.ChatMessageResponse;
 import com.zone.agri.dto.response.ConversationResponse;
 import com.zone.agri.entity.User;
 import com.zone.agri.exception.SignInRequiredException;
+import com.zone.agri.entity.StickerPack;
+import com.zone.agri.repository.StickerPackRepository;
 import com.zone.agri.repository.UserRepository;
 import com.zone.agri.security.annotation.RequirePermission;
 import com.zone.agri.service.ChatService;
@@ -35,6 +37,7 @@ public class ChatController {
 
     private final ChatService chatService;
     private final UserRepository userRepository;
+    private final StickerPackRepository stickerPackRepository;
 
     private User getCurrentUser() {
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
@@ -136,6 +139,12 @@ public class ChatController {
         User user = getCurrentUser();
         chatService.markAsRead(id, user.getId());
         return ResponseEntity.ok().build();
+    }
+
+    @Operation(summary = "Lấy danh sách tất cả sticker packs cùng stickers")
+    @GetMapping("/stickers")
+    public ResponseEntity<List<StickerPack>> getStickers() {
+        return ResponseEntity.ok(stickerPackRepository.findAll());
     }
 
     // ===== WebSocket handlers =====

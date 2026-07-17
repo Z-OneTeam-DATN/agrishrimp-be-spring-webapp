@@ -297,6 +297,32 @@ public class SchemaUpdateConfig implements BeanPostProcessor {
                             ('DEBT_WEIGHT_VALUE', '0.5', 'Trọng số giá trị nợ trong điểm ưu tiên thanh toán')
                             """);
 
+            executeSql(stmt,
+                    "Create sticker_packs table",
+                    "CREATE TABLE IF NOT EXISTS sticker_packs (" +
+                    "id BIGINT AUTO_INCREMENT PRIMARY KEY, " +
+                    "name VARCHAR(100) NOT NULL, " +
+                    "icon_url VARCHAR(255), " +
+                    "created_at DATETIME, " +
+                    "updated_at DATETIME, " +
+                    "created_by_user_id BIGINT, " +
+                    "updated_by_user_id BIGINT" +
+                    ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+            executeSql(stmt,
+                    "Create stickers table",
+                    "CREATE TABLE IF NOT EXISTS stickers (" +
+                    "id BIGINT AUTO_INCREMENT PRIMARY KEY, " +
+                    "pack_id BIGINT NOT NULL, " +
+                    "url VARCHAR(255) NOT NULL, " +
+                    "label VARCHAR(100), " +
+                    "created_at DATETIME, " +
+                    "updated_at DATETIME, " +
+                    "created_by_user_id BIGINT, " +
+                    "updated_by_user_id BIGINT, " +
+                    "FOREIGN KEY (pack_id) REFERENCES sticker_packs(id) ON DELETE CASCADE" +
+                    ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
             log.info("All schema patches executed successfully.");
         } catch (Exception e) {
             log.error("Failed to run database schema patches", e);
