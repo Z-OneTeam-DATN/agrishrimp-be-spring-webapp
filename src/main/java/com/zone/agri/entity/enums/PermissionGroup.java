@@ -11,5 +11,6 @@ public enum PermissionGroup {
     PARTNER,
     SHIPPING,
     SETTING,
-    COMMUNICATION
+    COMMUNICATION,
+    AI_KNOWLEDGE
 }
