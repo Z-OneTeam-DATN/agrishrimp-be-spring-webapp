@@ -100,6 +100,7 @@ public class ChatService {
 
         conv.setLastMessage(request.getContent());
         conv.setLastMessageAt(LocalDateTime.now());
+        conv.setStatus(ConversationStatus.OPEN);
         Long customerId = conv.getCustomer().getId();
         boolean senderIsCustomer = senderId.equals(customerId);
         if (senderIsCustomer) {
@@ -171,6 +172,7 @@ public class ChatService {
         conv.setLastMessage("[Sản phẩm ghim] " + product.getName());
         conv.setLastMessageAt(LocalDateTime.now());
         conv.setUnreadByCustomer(conv.getUnreadByCustomer() + 1);
+        conv.setStatus(ConversationStatus.OPEN);
         conversationRepository.save(conv);
 
         ChatMessageResponse response = toMessageResponse(msg);
@@ -214,6 +216,7 @@ public class ChatService {
 
         conv.setLastMessage("[Hình ảnh]");
         conv.setLastMessageAt(LocalDateTime.now());
+        conv.setStatus(ConversationStatus.OPEN);
         Long customerId = conv.getCustomer().getId();
         boolean senderIsCustomer = senderId.equals(customerId);
         if (senderIsCustomer) {
