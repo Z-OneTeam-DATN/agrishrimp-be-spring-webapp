@@ -35,7 +35,7 @@ public class CloudinaryService {
                 file.getBytes(),
                 ObjectUtils.asMap(
                     "folder",        fullFolder,
-                    "resource_type", "image"
+                    "resource_type", "auto"
                 )
             );
             String secureUrl = (String) result.get("secure_url");

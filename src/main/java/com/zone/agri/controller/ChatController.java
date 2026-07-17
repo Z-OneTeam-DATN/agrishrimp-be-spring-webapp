@@ -105,6 +105,22 @@ public class ChatController {
         return ResponseEntity.ok(chatService.assignStaff(id, staffId));
     }
 
+    @Operation(summary = "Cập nhật trạng thái conversation")
+    @PutMapping("/conversations/{id}/status")
+    @RequirePermission("CHAT_MANAGE")
+    public ResponseEntity<ConversationResponse> updateStatus(
+            @PathVariable Long id,
+            @RequestParam com.zone.agri.entity.enums.ConversationStatus status) {
+        return ResponseEntity.ok(chatService.updateStatus(id, status));
+    }
+
+    @Operation(summary = "Đánh dấu conversation là chưa đọc")
+    @PutMapping("/conversations/{id}/unread")
+    @RequirePermission("CHAT_MANAGE")
+    public ResponseEntity<ConversationResponse> markAsUnread(@PathVariable Long id) {
+        return ResponseEntity.ok(chatService.markAsUnread(id));
+    }
+
     @Operation(summary = "Gửi ảnh vào conversation")
     @PostMapping("/conversations/{id}/send-image")
     public ResponseEntity<ChatMessageResponse> sendImage(
