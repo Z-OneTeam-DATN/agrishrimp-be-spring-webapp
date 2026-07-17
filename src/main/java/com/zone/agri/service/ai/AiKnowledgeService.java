@@ -200,25 +200,113 @@ public class AiKnowledgeService {
     public AiDiseaseKnowledgeResponse createDiseaseKnowledge(AiDiseaseKnowledgeRequest request) {
         AiDiseaseKnowledge entity = AiDiseaseKnowledge.builder().build();
         applyDiseaseKnowledge(entity, request, true);
+        AiDiseaseKnowledge saved = diseaseKnowledgeRepository.save(entity);
+        syncKeywordAnswerSetFromDisease(saved);
         evictApprovedSnapshot();
-        return toDiseaseKnowledgeResponse(diseaseKnowledgeRepository.save(entity));
+        return toDiseaseKnowledgeResponse(saved);
     }
 
     @Transactional
     public AiDiseaseKnowledgeResponse updateDiseaseKnowledge(Long id, AiDiseaseKnowledgeRequest request) {
         AiDiseaseKnowledge entity = diseaseKnowledgeRepository.findById(id)
                 .orElseThrow(() -> notFound("Không tìm thấy tri thức bệnh với ID: " + id));
+        String previousCode = entity.getCode();
         applyDiseaseKnowledge(entity, request, false);
+        AiDiseaseKnowledge saved = diseaseKnowledgeRepository.save(entity);
+        if (!Objects.equals(previousCode, saved.getCode())) {
+            keywordAnswerSetRepository.findByCode(derivedKeywordCodeForDisease(previousCode))
+                    .ifPresent(keywordAnswerSetRepository::delete);
+        }
+        syncKeywordAnswerSetFromDisease(saved);
         evictApprovedSnapshot();
-        return toDiseaseKnowledgeResponse(diseaseKnowledgeRepository.save(entity));
+        return toDiseaseKnowledgeResponse(saved);
     }
 
     @Transactional
     public void deleteDiseaseKnowledge(Long id) {
         AiDiseaseKnowledge entity = diseaseKnowledgeRepository.findById(id)
                 .orElseThrow(() -> notFound("Không tìm thấy tri thức bệnh với ID: " + id));
+        keywordAnswerSetRepository.findByCode(derivedKeywordCodeForDisease(entity.getCode()))
+                .ifPresent(keywordAnswerSetRepository::delete);
         diseaseKnowledgeRepository.delete(entity);
         evictApprovedSnapshot();
+    }
+
+    /**
+     * Chỉ tài khoản có quyền AI_KNOWLEDGE_APPROVE mới gọi được (xem AiKnowledgeController).
+     * Duyệt xong bệnh mới thực sự được AI Doctor dùng để trả lời.
+     */
+    @Transactional
+    public AiDiseaseKnowledgeResponse approveDiseaseKnowledge(Long id) {
+        AiDiseaseKnowledge entity = diseaseKnowledgeRepository.findById(id)
+                .orElseThrow(() -> notFound("Không tìm thấy tri thức bệnh với ID: " + id));
+        entity.setStatus(AiKnowledgeStatus.APPROVED);
+        AiDiseaseKnowledge saved = diseaseKnowledgeRepository.save(entity);
+        syncKeywordAnswerSetFromDisease(saved);
+        evictApprovedSnapshot();
+        return toDiseaseKnowledgeResponse(saved);
+    }
+
+    @Transactional
+    public AiDiseaseKnowledgeResponse rejectDiseaseKnowledge(Long id) {
+        AiDiseaseKnowledge entity = diseaseKnowledgeRepository.findById(id)
+                .orElseThrow(() -> notFound("Không tìm thấy tri thức bệnh với ID: " + id));
+        entity.setStatus(AiKnowledgeStatus.DRAFT);
+        AiDiseaseKnowledge saved = diseaseKnowledgeRepository.save(entity);
+        syncKeywordAnswerSetFromDisease(saved);
+        evictApprovedSnapshot();
+        return toDiseaseKnowledgeResponse(saved);
+    }
+
+    /**
+     * Kỹ sư chỉ nhập tri thức bệnh (phác đồ); bộ từ khóa & câu trả lời dùng cho chat
+     * được suy ra tự động từ đây thay vì bắt kỹ sư soạn riêng một bản ghi FAQ.
+     */
+    private void syncKeywordAnswerSetFromDisease(AiDiseaseKnowledge disease) {
+        String derivedCode = derivedKeywordCodeForDisease(disease.getCode());
+        AiKeywordAnswerSet entity = keywordAnswerSetRepository.findByCode(derivedCode)
+                .orElseGet(() -> AiKeywordAnswerSet.builder().build());
+
+        PreparedDisease prepared = new PreparedDisease(
+                disease,
+                disease.getCategory(),
+                prepareKeywords(disease.getNameVi(), disease.getAliasesRaw(), disease.getSymptomKeywordsRaw()));
+
+        entity.setCode(derivedCode);
+        entity.setName(disease.getNameVi());
+        entity.setCategory(disease.getCategory());
+        entity.setKeywordsRaw(buildDiseaseDerivedKeywords(disease));
+        entity.setAnswerHtml(buildDiseaseAnswerHtml(prepared));
+        entity.setEnabled(defaultBoolean(disease.getEnabled(), true));
+        entity.setMatchThreshold(clampThreshold(entity.getMatchThreshold(), 0.35D));
+        entity.setPriority(defaultInt(disease.getPriority(), 0));
+        entity.setCanonical(defaultBoolean(disease.getCanonical(), false));
+        entity.setStatus(disease.getStatus() != null ? disease.getStatus() : AiKnowledgeStatus.DRAFT);
+        keywordAnswerSetRepository.save(entity);
+    }
+
+    private String derivedKeywordCodeForDisease(String diseaseCode) {
+        return "DISEASE_" + diseaseCode;
+    }
+
+    private String buildDiseaseDerivedKeywords(AiDiseaseKnowledge disease) {
+        LinkedHashSet<String> keywords = new LinkedHashSet<>();
+        if (trimToNull(disease.getAliasesRaw()) != null) {
+            keywords.addAll(Arrays.stream(disease.getAliasesRaw().split(","))
+                    .map(String::trim)
+                    .filter(part -> !part.isBlank())
+                    .toList());
+        }
+        if (trimToNull(disease.getSymptomKeywordsRaw()) != null) {
+            keywords.addAll(Arrays.stream(disease.getSymptomKeywordsRaw().split(","))
+                    .map(String::trim)
+                    .filter(part -> !part.isBlank())
+                    .toList());
+        }
+        if (keywords.isEmpty()) {
+            keywords.add(disease.getNameVi());
+        }
+        return String.join(", ", keywords);
     }
 
     @Transactional(readOnly = true)
@@ -594,7 +682,10 @@ public class AiKnowledgeService {
         entity.setEnabled(defaultBoolean(request.getEnabled(), true));
         entity.setPriority(defaultInt(request.getPriority(), 0));
         entity.setCanonical(defaultBoolean(request.getCanonical(), false));
-        entity.setStatus(request.getStatus() != null ? request.getStatus() : AiKnowledgeStatus.DRAFT);
+        // Kỹ sư không được tự duyệt: mọi lần tạo/sửa qua đường này chỉ có thể vào DRAFT/IN_REVIEW/DISABLED.
+        // Chuyển sang APPROVED bắt buộc phải qua approveDiseaseKnowledge() (quyền AI_KNOWLEDGE_APPROVE).
+        AiKnowledgeStatus requestedStatus = request.getStatus() != null ? request.getStatus() : AiKnowledgeStatus.DRAFT;
+        entity.setStatus(requestedStatus == AiKnowledgeStatus.APPROVED ? AiKnowledgeStatus.IN_REVIEW : requestedStatus);
     }
 
     private AiKnowledgeCategory resolveCategory(Long categoryId) {
