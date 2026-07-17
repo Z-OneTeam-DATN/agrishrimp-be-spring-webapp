@@ -67,7 +67,7 @@ Swagger is grouped for easier review:
 - `Public APIs`: `/api/auth/**`, `/api/public/**`, `/api/external/**`
 - `Core System`: `/api/users/**`, `/api/roles/**`, `/api/branches/**`, `/api/files/**`
 - `Business Operations`: `/api/products/**`, `/api/categories/**`, `/api/suppliers/**`, `/api/customers/**`, `/api/attributes/**`
-- `Mini App`: `/api/miniapp/**`
+- `AI Doctor`: `/api/ai-doctor/**`
 
 Full endpoint documentation is available at `http://localhost:8004/swagger-ui/index.html` after the application starts.
 
@@ -179,6 +179,7 @@ Important environment variables include:
 - `SPRING_DATA_REDIS_HOST`, `SPRING_DATA_REDIS_PORT`
 - `SECURITY_JWT_SECRET_KEY`
 - `APP_CORS_ALLOWED_ORIGINS`, `APP_WEB_BASE_URL`, `APP_SERVER_URL`
+- `RESEND_API_KEY`, `RESEND_FROM_EMAIL`, `RESEND_FROM_NAME`
 - `CLOUDINARY_*`
 - `PAYOS_*`
 - `GHN_*`
@@ -187,6 +188,7 @@ Important environment variables include:
 Notes:
 
 - Do not commit real secrets to Git.
+- `EmailService` currently sends mail through Resend, so make sure the `RESEND_*` variables exist in `.env` for Docker/VPS or `.env.local` for direct local runs.
 - External integrations require their matching environment variables to be fully functional.
 
 ## ✅ Testing & Operations

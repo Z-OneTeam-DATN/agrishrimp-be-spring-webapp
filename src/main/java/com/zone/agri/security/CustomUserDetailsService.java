@@ -52,7 +52,7 @@ public class CustomUserDetailsService implements UserDetailsService {
 
         // 4. Xử lý trạng thái tài khoản
         boolean enabled = (user.getStatus() == UserStatus.ACTIVE);
-        boolean accountNonLocked = (user.getStatus() != UserStatus.BANNED);
+        boolean accountNonLocked = true;
 
         return new CustomUserDetail(username, user.getPasswordHash(), enabled, accountNonLocked, userDetailDto, authorities);
     }

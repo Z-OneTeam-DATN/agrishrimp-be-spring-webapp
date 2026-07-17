@@ -60,7 +60,7 @@ async function seedCategories() {
   const parentId = parent?.data?.id ?? parent?.id;
   console.log(`  ✅ Parent: "Thuốc & Chế phẩm thủy sản" → id=${parentId}`);
 
-  // Sub-categories — tên phải chứa keyword khớp MiniAppDiseaseProductMapping
+  // Sub-categories — tên phải chứa keyword khớp AiDoctorDiseaseProductMapping
   const subs = [
     "Kháng sinh thủy sản",
     "Men vi sinh / Probiotic",

@@ -25,10 +25,13 @@ public class MeController {
     public ResponseEntity<MePermissionsResponse> getMyPermissions() {
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
         CustomUserDetail principal = (CustomUserDetail) auth.getPrincipal();
+        String roleAuthority = principal.getUserDetail().getRole() != null
+                ? "ROLE_" + principal.getUserDetail().getRole().getSlug()
+                : null;
 
         List<String> permissions = auth.getAuthorities().stream()
                 .map(a -> a.getAuthority())
-                .filter(code -> !code.startsWith("ROLE_"))
+                .filter(code -> roleAuthority == null || !roleAuthority.equals(code))
                 .sorted()
                 .toList();
 

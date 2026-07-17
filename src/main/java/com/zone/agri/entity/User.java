@@ -2,6 +2,7 @@ package com.zone.agri.entity;
 
 import com.fasterxml.jackson.annotation.JsonBackReference;
 import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.zone.agri.converter.UserStatusConverter;
 import com.zone.agri.entity.enums.AuthProvider;
 import com.zone.agri.entity.enums.Gender;
 import com.zone.agri.entity.enums.UserStatus;
@@ -58,8 +59,8 @@ public class User extends BaseEntity {
     @Column(columnDefinition = "TINYINT")
     private Gender gender;
 
-    @Enumerated(EnumType.STRING)
-    @Column(columnDefinition = "ENUM('ACTIVE', 'INACTIVE', 'BANNED', 'UNVERIFIED')")
+    @Convert(converter = UserStatusConverter.class)
+    @Column(length = 20)
     private UserStatus status;
 
     @Column(name = "deleted_at")

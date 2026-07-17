@@ -521,10 +521,17 @@ public class InventoryService {
                             inv.getBatchNumber()
                     );
                     
-                    var originalDetail = importDetails.isEmpty() ? Optional.<InventoryNoteDetail>empty() : Optional.of(importDetails.get(0));
+                    var originalDetail = importDetails.stream()
+                            .filter(d -> d.getInventoryNote().getSupplier() != null &&
+                                    d.getInventoryNote().getSupplier().getId().equals(supplierId))
+                            .findFirst();
 
                     Integer originalPlannedQty = originalDetail.map(d -> d.getQuantity()).orElse(0);
                     String originalReason = originalDetail.map(d -> d.getNote()).orElse("Hàng lỗi chờ xử lý");
+
+                    Long receiptId = originalDetail.map(d -> d.getInventoryNote().getId()).orElse(null);
+                    String receiptCode = originalDetail.map(d -> d.getInventoryNote().getCode()).orElse(null);
+                    LocalDateTime receiptDate = originalDetail.map(d -> d.getInventoryNote().getCreatedAt()).orElse(null);
 
                     return com.zone.agri.dto.response.inventory.InventorySearchResponse.builder()
                             .variantId(variant.getId())
@@ -540,6 +547,11 @@ public class InventoryService {
                             .expiryDate(inv.getExpiryDate())
                             .imageUrl(variant.getImageUrl())
                             .unit("Cái")
+                            .supplierId(supplierId)
+                            .receiptId(receiptId)
+                            .receiptCode(receiptCode)
+                            .receiptDate(receiptDate)
+                            .branchName(inv.getBranch() != null ? inv.getBranch().getName() : null)
                             .build();
                 })
                 .collect(Collectors.toList());
@@ -616,7 +628,9 @@ public class InventoryService {
         if (entity.getDetails() != null) {
             itemResponses = entity.getDetails().stream().map(d -> {
                 ProductVariant variant = d.getProductVariant();
-                return InventoryReceiptResponse.ItemResponse.builder()
+                    return InventoryReceiptResponse.ItemResponse.builder()
+                        .productVariantId(variant != null ? variant.getId() : null)
+                        .variantId(variant != null ? variant.getId() : null)
                         .productCode(variant != null ? variant.getSku() : "")
                         .productName(variant != null && variant.getProduct() != null ? variant.getProduct().getName() : "")
                         .quantity(Objects.requireNonNullElse(d.getQuantity(), 0))
@@ -644,6 +658,7 @@ public class InventoryService {
                 .purchaseRequestCode(entity.getPurchaseRequest() != null ? entity.getPurchaseRequest().getCode() : null)
                 .supplierName(entity.getSupplier() != null ? entity.getSupplier().getName() : "")
                 .supplierCode(entity.getSupplier() != null ? entity.getSupplier().getCode() : "")
+                .branchId(entity.getBranch() != null ? entity.getBranch().getId() : null)
                 .branchName(entity.getBranch() != null ? entity.getBranch().getName() : "N/A")
                 .totalAmount(totalAmount)
                 .paymentAmount(paymentAmount)

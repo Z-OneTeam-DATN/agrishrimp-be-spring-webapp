@@ -1,6 +1,6 @@
 # =============================================================
 # docker-compose.prod.yml — VPS Production Stack
-# Vị trí trên VPS: <repo>/infra/docker-compose.prod.yml
+# Vị trí trên VPS: <repo>/docker-compose.prod.yml
 #
 # Services trong scope:
 #   ✅ webapp        (agrishrimp-web,    port 3004)
@@ -10,7 +10,7 @@
 #   ✅ redis         (Redis 7)
 #
 # Excluded (NOT deployed):
-#   ❌ minizalo      — pending Zalo platform approval
+#   ❌ legacy mini app service — removed from current web-first deployment
 #   ✅ ai-diagnosis  (agrishrimp-ai-diagnosis, internal port 8000)
 # =============================================================
 
@@ -111,7 +111,7 @@ services:
     ports:
       - "127.0.0.1:8004:8004"    # bind localhost only — Nginx sẽ proxy
     env_file:
-      - ../.env                  # file secrets đặt ở root repo, KHÔNG commit git
+      - ./.env                   # file secrets đặt cạnh docker-compose.prod.yml, KHÔNG commit git
     environment:
       SPRING_PROFILES_ACTIVE: prod
       SERVER_PORT: 8004
@@ -206,7 +206,7 @@ services:
 # ─────────────────────────────────────────────────────
 # EXCLUDED SERVICES — do NOT uncomment until ready
 # ─────────────────────────────────────────────────────
-# minizalo:        ❌ excluded — pending Zalo platform approval
+# legacy-miniapp:  ❌ excluded — no longer used in web-first deployment
 
 networks:
   agrishrimp-net:

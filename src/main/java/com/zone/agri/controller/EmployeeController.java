@@ -4,9 +4,10 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.web.PageableDefault;
-import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -19,12 +20,12 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
 import com.zone.agri.dto.request.employee.EmployeeCreateRequest;
+import com.zone.agri.dto.request.employee.EmployeeStatusUpdateRequest;
+import com.zone.agri.dto.response.employee.EmployeeCitizenIdOcrResponse;
 import com.zone.agri.dto.response.employee.EmployeeResponse;
-import com.zone.agri.dto.response.employee.OcrCccdResponse;
-import com.zone.agri.exception.BadRequestException;
 import com.zone.agri.security.annotation.RequirePermission;
+import com.zone.agri.service.EmployeeCitizenIdOcrService;
 import com.zone.agri.service.EmployeeService;
-import com.zone.agri.service.OcrService;
 
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -48,7 +49,7 @@ import lombok.extern.slf4j.Slf4j;
 public class EmployeeController {
 
         private final EmployeeService employeeService;
-        private final OcrService ocrService;
+        private final EmployeeCitizenIdOcrService employeeCitizenIdOcrService;
 
         /**
          * Get paginated employee list with filters
@@ -68,12 +69,14 @@ public class EmployeeController {
 
                         @Parameter(description = "Lọc theo ID vai trò", example = "2") @RequestParam(required = false) Long roleId,
 
-                        @Parameter(description = "Lọc theo trạng thái (ACTIVE, INACTIVE, BANNED)", example = "ACTIVE") @RequestParam(required = false) String status,
+                        @Parameter(description = "Lọc theo trạng thái (ACTIVE, INACTIVE)", example = "ACTIVE") @RequestParam(required = false) String status,
+
+                        @Parameter(description = "Loc theo ma quyen", example = "BRANCH_VIEW") @RequestParam(required = false) String permissionCode,
 
                         @Parameter(hidden = true) @PageableDefault(size = 10, sort = "createdAt", direction = Sort.Direction.DESC) Pageable pageable) {
 
                 Page<EmployeeResponse> employees = employeeService.getEmployees(
-                                keyword, branchId, roleId, status, pageable);
+                                keyword, branchId, roleId, permissionCode, status, pageable);
                 return ResponseEntity.ok(employees);
         }
 
@@ -116,6 +119,18 @@ public class EmployeeController {
                 return ResponseEntity.status(HttpStatus.CREATED).body(response);
         }
 
+        @PostMapping(value = "/ocr-citizen-id", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+        @SecurityRequirement(name = "bearerAuth")
+        @RequirePermission({ "STAFF_CREATE", "STAFF_UPDATE" })
+        @Operation(summary = "OCR CCCD/CMT để gợi ý điền form nhân viên", description = "Nhận ảnh mặt trước CCCD/CMT, gọi FPT AI Reader và trả về các trường đã chuẩn hóa để frontend tự điền.", responses = {
+                        @ApiResponse(responseCode = "200", description = "Nhận diện thành công", content = @Content(schema = @Schema(implementation = EmployeeCitizenIdOcrResponse.class))),
+                        @ApiResponse(responseCode = "400", description = "Ảnh không hợp lệ hoặc không nhận diện được")
+        })
+        public ResponseEntity<EmployeeCitizenIdOcrResponse> ocrCitizenId(
+                        @RequestParam("image") MultipartFile image) {
+                return ResponseEntity.ok(employeeCitizenIdOcrService.extractCitizenIdInfo(image));
+        }
+
         /**
          * Update employee
          * Endpoint: PUT /api/employees/{id}
@@ -137,22 +152,54 @@ public class EmployeeController {
                 return ResponseEntity.ok(employeeService.updateEmployee(id, request));
         }
 
+        @PatchMapping("/{id}/status")
+        @SecurityRequirement(name = "bearerAuth")
+        @RequirePermission("STAFF_DELETE")
+        @Operation(summary = "Cập nhật trạng thái nhân viên", description = "Cập nhật trạng thái tài khoản nhân viên giữa ACTIVE và INACTIVE.", responses = {
+                        @ApiResponse(responseCode = "200", description = "Cập nhật trạng thái thành công"),
+                        @ApiResponse(responseCode = "400", description = "Trạng thái không hợp lệ"),
+                        @ApiResponse(responseCode = "403", description = "Không được phép cập nhật nhân viên hệ thống"),
+                        @ApiResponse(responseCode = "404", description = "Không tìm thấy nhân viên")
+        })
+        public ResponseEntity<Void> updateEmployeeStatus(
+                        @PathVariable Long id,
+                        @Valid @RequestBody EmployeeStatusUpdateRequest request) {
+                log.info("Updating employee status ID: {} -> {}", id, request.getStatus());
+                employeeService.updateEmployeeStatus(id, request.getStatus());
+                return ResponseEntity.ok().build();
+        }
+
         /**
-         * Delete employee
+         * Toggle employee status
          * Endpoint: DELETE /api/employees/{id}
          */
         @DeleteMapping("/{id}")
         @SecurityRequirement(name = "bearerAuth")
         @RequirePermission("STAFF_DELETE")
-        @Operation(summary = "Xóa nhân viên", description = "Xóa (soft delete) nhân viên khỏi hệ thống. Không thể xóa nhân viên có vai trò hệ thống.", responses = {
-                        @ApiResponse(responseCode = "204", description = "Xóa thành công"),
-                        @ApiResponse(responseCode = "403", description = "Không được phép xóa nhân viên hệ thống"),
+        @Operation(summary = "Tạm khóa hoặc mở lại nhân viên", description = "Đảo trạng thái tài khoản nhân viên giữa ACTIVE và INACTIVE. Không thể thao tác với nhân viên có vai trò hệ thống.", responses = {
+                        @ApiResponse(responseCode = "204", description = "Cập nhật trạng thái thành công"),
+                        @ApiResponse(responseCode = "403", description = "Không được phép thao tác với nhân viên hệ thống"),
                         @ApiResponse(responseCode = "404", description = "Không tìm thấy nhân viên")
         })
         @SecurityRequirement(name = "bearerAuth")
         public ResponseEntity<Void> deleteEmployee(@PathVariable Long id) {
-                log.info("Deleting employee ID: {}", id);
+                log.info("Toggling employee status ID: {}", id);
                 employeeService.deleteEmployee(id);
+                return ResponseEntity.noContent().build();
+        }
+
+        @DeleteMapping("/{id}/permanent")
+        @SecurityRequirement(name = "bearerAuth")
+        @RequirePermission("STAFF_DELETE")
+        @Operation(summary = "Xóa vĩnh viễn nhân viên", description = "Chỉ xóa được nhân viên chưa phát sinh dữ liệu trong hệ thống. Nếu đã phát sinh dữ liệu, hãy dùng tạm khóa.", responses = {
+                        @ApiResponse(responseCode = "204", description = "Xóa vĩnh viễn thành công"),
+                        @ApiResponse(responseCode = "400", description = "Nhân viên đã phát sinh dữ liệu nên không thể xóa"),
+                        @ApiResponse(responseCode = "403", description = "Không được phép xóa nhân viên hệ thống"),
+                        @ApiResponse(responseCode = "404", description = "Không tìm thấy nhân viên")
+        })
+        public ResponseEntity<Void> permanentlyDeleteEmployee(@PathVariable Long id) {
+                log.info("Permanently deleting employee ID: {}", id);
+                employeeService.permanentlyDeleteEmployee(id);
                 return ResponseEntity.noContent().build();
         }
 
@@ -174,50 +221,4 @@ public class EmployeeController {
                 return ResponseEntity.ok(result);
         }
 
-        /**
-         * Lookup citizen info by CCCD
-         * Endpoint: GET /api/employees/lookup-citizen/{citizenId}
-         */
-        @GetMapping("/lookup-citizen/{citizenId}")
-        @SecurityRequirement(name = "bearerAuth")
-        @RequirePermission({ "STAFF_CREATE", "STAFF_UPDATE" })
-        @Operation(summary = "Tra cứu thông tin từ CCCD", description = "Tra cứu thông tin nhân viên (địa chỉ, ngày sinh) từ số CCCD trong hệ thống", responses = {
-                        @ApiResponse(responseCode = "200", description = "Tìm thấy thông tin"),
-                        @ApiResponse(responseCode = "404", description = "Không tìm thấy CCCD này")
-        })
-        public ResponseEntity<?> lookupByCitizenId(
-                        @Parameter(description = "Số CCCD (12 chữ số)", example = "012345678901") @PathVariable String citizenId) {
-                log.info("Looking up citizen ID: {}", citizenId);
-                var response = employeeService.lookupByCitizenId(citizenId);
-                return ResponseEntity.ok(response);
-        }
-
-        /**
-         * Extract CCCD information from uploaded image using OCR
-         * Endpoint: POST /api/employees/ocr-cccd
-         */
-        @PostMapping(value = "/ocr-cccd", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-        @SecurityRequirement(name = "bearerAuth")
-        @RequirePermission("STAFF_CREATE")
-        @Operation(summary = "OCR trích xuất thông tin từ ảnh CCCD", description = "Upload ảnh mặt trước CCCD để tự động trích xuất thông tin (họ tên, ngày sinh, giới tính, địa chỉ)", responses = {
-                        @ApiResponse(responseCode = "200", description = "OCR thành công", content = @Content(schema = @Schema(implementation = OcrCccdResponse.class))),
-                        @ApiResponse(responseCode = "400", description = "Ảnh không hợp lệ"),
-                        @ApiResponse(responseCode = "500", description = "Lỗi xử lý OCR")
-        })
-        public ResponseEntity<OcrCccdResponse> extractCccdFromImage(
-                        @Parameter(description = "Ảnh mặt trước CCCD (PNG, JPG, JPEG)") @RequestParam("image") MultipartFile image) {
-
-                if (image.isEmpty()) {
-                        throw new BadRequestException("Vui lòng chọn ảnh CCCD để tải lên.");
-                }
-
-                String contentType = image.getContentType();
-                if (contentType == null || !contentType.startsWith("image/")) {
-                        throw new BadRequestException("File tải lên phải là ảnh hợp lệ (PNG, JPG, JPEG, WEBP).");
-                }
-
-                log.info("Processing OCR for CCCD image: {}", image.getOriginalFilename());
-                OcrCccdResponse result = ocrService.extractCccdInfo(image);
-                return ResponseEntity.ok(result);
-        }
 }

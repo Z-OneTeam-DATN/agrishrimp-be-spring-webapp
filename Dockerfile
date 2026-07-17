@@ -14,12 +14,6 @@ RUN mvn clean package -DskipTests
 FROM eclipse-temurin:21-jre-jammy
 WORKDIR /app
 
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-vie \
-    && rm -rf /var/lib/apt/lists/*
-
-ENV TESSDATA_PREFIX=/usr/share/tesseract-ocr/5/tessdata
-
 # Copy the built JAR
 COPY --from=build /app/target/*.jar app.jar
 

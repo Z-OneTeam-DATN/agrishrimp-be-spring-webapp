@@ -1,9 +1,17 @@
 package com.zone.agri.service;
 
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
+import java.util.regex.Pattern;
 
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -11,7 +19,6 @@ import org.springframework.transaction.annotation.Transactional;
 import com.zone.agri.common.AuthUtils;
 import com.zone.agri.common.RoleUtils;
 import com.zone.agri.dto.request.employee.EmployeeCreateRequest;
-import com.zone.agri.dto.response.citizen.CitizenLookupResponse;
 import com.zone.agri.dto.response.employee.EmployeeResponse;
 import com.zone.agri.dto.response.user.UserDetail;
 import com.zone.agri.entity.Branch;
@@ -40,8 +47,11 @@ public class EmployeeService {
     private final RoleRepository roleRepository;
     private final PasswordEncoder passwordEncoder;
     private final EmailService emailService;
+    private final JdbcTemplate jdbcTemplate;
 
     private static final String DEFAULT_PASSWORD = "123456"; // Mật khẩu mặc định
+    private static final Set<String> EMPLOYEE_STATUSES = Set.of(UserStatus.ACTIVE.name(), UserStatus.INACTIVE.name());
+    private static final Pattern SAFE_SQL_IDENTIFIER = Pattern.compile("^[A-Za-z0-9_]+$");
 
     @Transactional
     public EmployeeResponse createEmployee(EmployeeCreateRequest request) {
@@ -92,11 +102,12 @@ public class EmployeeService {
             return UserStatus.ACTIVE;
         }
 
-        try {
-            return UserStatus.valueOf(status.trim().toUpperCase());
-        } catch (Exception e) {
-            return UserStatus.ACTIVE;
+        String normalizedStatus = status.trim().toUpperCase(Locale.ROOT);
+        if (!EMPLOYEE_STATUSES.contains(normalizedStatus)) {
+            throw new BadRequestException("Trạng thái tài khoản không hợp lệ. Chỉ hỗ trợ ACTIVE hoặc INACTIVE.");
         }
+
+        return UserStatus.valueOf(normalizedStatus);
     }
 
     private void sendEmailSilently(User user, String password) {
@@ -139,7 +150,7 @@ public class EmployeeService {
     }
 
     @Transactional(readOnly = true)
-    public Page<EmployeeResponse> getEmployees(String keyword, Long branchId, Long roleId, String status,
+    public Page<EmployeeResponse> getEmployees(String keyword, Long branchId, Long roleId, String permissionCode, String status,
             Pageable pageable) {
         UserStatus userStatus = null;
         if (status != null && !status.isBlank() && !"all".equalsIgnoreCase(status)) {
@@ -150,7 +161,10 @@ public class EmployeeService {
             }
         }
         String searchKeyword = (keyword == null || keyword.isBlank()) ? null : keyword.trim();
-        return userRepository.findAllEmployeesWithFilter(searchKeyword, roleId, branchId, userStatus, pageable)
+        String normalizedPermissionCode = permissionCode != null && !permissionCode.isBlank()
+                ? permissionCode.trim().toUpperCase()
+                : null;
+        return userRepository.findAllEmployeesWithFilter(searchKeyword, roleId, branchId, normalizedPermissionCode, userStatus, pageable)
                 .map(this::mapToResponse);
     }
 
@@ -263,18 +277,32 @@ public class EmployeeService {
 
     @Transactional
     public void deleteEmployee(Long employeeId) {
-        User employee = userRepository.findById(employeeId)
-                .orElseThrow(() -> new NotFoundException("Không tìm thấy nhân viên với ID: " + employeeId));
-
-        if (employee.getRole() != null && Boolean.TRUE.equals(employee.getRole().getIsSystem())) {
-            throw new Forbidden("Không thể xóa nhân viên có vai trò hệ thống");
-        }
+        User employee = getMutableEmployee(employeeId);
 
         // Toggle status: ACTIVE <-> INACTIVE
         UserStatus currentStatus = employee.getStatus();
         UserStatus newStatus = (currentStatus == UserStatus.ACTIVE) ? UserStatus.INACTIVE : UserStatus.ACTIVE;
         employee.setStatus(newStatus);
         userRepository.save(employee);
+    }
+
+    @Transactional
+    public void updateEmployeeStatus(Long employeeId, String status) {
+        User employee = getMutableEmployee(employeeId);
+        employee.setStatus(parseStatus(status));
+        userRepository.save(employee);
+    }
+
+    @Transactional
+    public void permanentlyDeleteEmployee(Long employeeId) {
+        User employee = getMutableEmployee(employeeId);
+
+        Map<String, Long> blockingReferences = findBlockingReferences(employeeId);
+        if (!blockingReferences.isEmpty()) {
+            throw new BadRequestException(buildDeleteBlockedMessage(blockingReferences));
+        }
+
+        userRepository.delete(employee);
     }
 
     private EmployeeResponse mapToResponse(User user) {
@@ -307,15 +335,129 @@ public class EmployeeService {
                 .build();
     }
 
-    public CitizenLookupResponse lookupByCitizenId(String citizenId) {
-        User user = userRepository.findByCitizenId(citizenId)
-                .orElseThrow(() -> new NotFoundException("Không tìm thấy thông tin CCCD này trong hệ thống"));
+    private User getMutableEmployee(Long employeeId) {
+        User employee = userRepository.findById(employeeId)
+                .orElseThrow(() -> new NotFoundException("Không tìm thấy nhân viên với ID: " + employeeId));
 
-        return CitizenLookupResponse.builder()
-                .fullName(user.getFullName())
-                .dateOfBirth(user.getDateOfBirth())
-                .gender(user.getGender() != null ? user.getGender().name() : null)
-                .address(user.getAddressDetail())
-                .build();
+        if (employee.getRole() != null && Boolean.TRUE.equals(employee.getRole().getIsSystem())) {
+            throw new Forbidden("Không thể thao tác với nhân viên có vai trò hệ thống");
+        }
+
+        return employee;
+    }
+
+    private Map<String, Long> findBlockingReferences(Long employeeId) {
+        try {
+            String schemaName = jdbcTemplate.queryForObject("SELECT DATABASE()", String.class);
+            if (schemaName == null || schemaName.isBlank()) {
+                throw new IllegalStateException("Database schema is empty");
+            }
+
+            List<TableColumnRef> candidates = new ArrayList<>();
+            candidates.addAll(loadForeignKeyReferences(schemaName));
+            candidates.addAll(loadAuditAndLegacyReferences(schemaName));
+
+            Map<String, Long> referencesByTable = new LinkedHashMap<>();
+            for (TableColumnRef reference : candidates) {
+                if (!isSafeIdentifier(reference.tableName()) || !isSafeIdentifier(reference.columnName())) {
+                    continue;
+                }
+
+                Long count = jdbcTemplate.queryForObject(
+                        "SELECT COUNT(*) FROM `" + reference.tableName() + "` WHERE `" + reference.columnName() + "` = ?",
+                        Long.class,
+                        employeeId);
+
+                if (count != null && count > 0) {
+                    referencesByTable.merge(reference.tableName(), count, Long::sum);
+                }
+            }
+
+            return referencesByTable;
+        } catch (Exception ex) {
+            log.error("Khong the kiem tra phat sinh du lieu cho nhan vien {}", employeeId, ex);
+            throw new BadRequestException(
+                    "Không thể xác minh dữ liệu phát sinh của nhân viên này. Vui lòng thử lại sau hoặc dùng tạm khóa.");
+        }
+    }
+
+    private List<TableColumnRef> loadForeignKeyReferences(String schemaName) {
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList("""
+                SELECT DISTINCT table_name, column_name
+                FROM information_schema.key_column_usage
+                WHERE table_schema = ?
+                  AND referenced_table_name = 'users'
+                  AND referenced_column_name = 'id'
+                  AND table_name <> 'users'
+                """, schemaName);
+
+        return mapToReferences(rows);
+    }
+
+    private List<TableColumnRef> loadAuditAndLegacyReferences(String schemaName) {
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList("""
+                SELECT DISTINCT table_name, column_name
+                FROM information_schema.columns
+                WHERE table_schema = ?
+                  AND table_name <> 'users'
+                  AND (
+                    column_name IN ('created_by_user_id', 'updated_by_user_id', 'sender_id', 'receiver_id', 'assigned_staff_id', 'staff_assigned_id', 'author_id')
+                    OR column_name = 'user_id'
+                    OR column_name LIKE '%\\_user_id' ESCAPE '\\'
+                    OR column_name LIKE '%\\_staff_id' ESCAPE '\\'
+                  )
+                """, schemaName);
+
+        return mapToReferences(rows);
+    }
+
+    private List<TableColumnRef> mapToReferences(List<Map<String, Object>> rows) {
+        Map<String, TableColumnRef> uniqueReferences = new LinkedHashMap<>();
+        for (Map<String, Object> row : rows) {
+            String tableName = String.valueOf(row.get("table_name"));
+            String columnName = String.valueOf(row.get("column_name"));
+            uniqueReferences.putIfAbsent(tableName + "." + columnName, new TableColumnRef(tableName, columnName));
+        }
+        return new ArrayList<>(uniqueReferences.values());
+    }
+
+    private boolean isSafeIdentifier(String identifier) {
+        return identifier != null && SAFE_SQL_IDENTIFIER.matcher(identifier).matches();
+    }
+
+    private String buildDeleteBlockedMessage(Map<String, Long> references) {
+        List<String> samples = references.entrySet().stream()
+                .sorted((left, right) -> Long.compare(right.getValue(), left.getValue()))
+                .limit(5)
+                .map(entry -> humanizeTableName(entry.getKey()) + " (" + entry.getValue() + ")")
+                .toList();
+
+        return "Không thể xóa nhân viên này vì tài khoản đã phát sinh dữ liệu trong hệ thống: "
+                + String.join(", ", samples)
+                + ". Vui lòng dùng tạm khóa thay vì xóa.";
+    }
+
+    private String humanizeTableName(String tableName) {
+        return switch (tableName) {
+            case "blog_posts" -> "bài viết";
+            case "cart_items" -> "giỏ hàng";
+            case "chat_messages" -> "tin nhắn";
+            case "conversations" -> "hội thoại";
+            case "customers" -> "khách hàng phụ trách";
+            case "inventory_transfers" -> "phiếu điều chuyển";
+            case "mini_app_diagnosis_history", "mini_app_diagnosis_histories" -> "lịch sử chẩn đoán";
+            case "notifications" -> "thông báo";
+            case "orders" -> "đơn hàng";
+            case "push_subscriptions" -> "thiết bị nhận thông báo";
+            case "reviews" -> "đánh giá";
+            case "supplier_product_catalog" -> "catalog nhà cung cấp";
+            case "suppliers" -> "nhà cung cấp";
+            case "user_addresses" -> "địa chỉ người dùng";
+            case "user_vouchers" -> "voucher người dùng";
+            default -> tableName.replace('_', ' ');
+        };
+    }
+
+    private record TableColumnRef(String tableName, String columnName) {
     }
 }

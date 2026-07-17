@@ -776,27 +776,20 @@ public class ProductService {
 
     public ProductVariantResponse mapVariantToResponse(ProductVariant variant, User currentUser, BigDecimal multiplier,
             String roundingRule, List<Inventory> allInventories) {
-        // Tránh lỗi NullPointerException khi role null
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-        boolean hasExportPermission = auth != null && auth.getAuthorities().stream()
-                .anyMatch(a -> a.getAuthority().equals("EXPORT_CREATE") || a.getAuthority().equals("TRANSFER_CREATE"));
-
-        Role currentRole = currentUser != null ? currentUser.getRole() : null;
-        String roleSlug = (currentRole != null && currentRole.getSlug() != null)
-                ? currentRole.getSlug().toUpperCase()
-                : "";
-        boolean isAdmin = "ADMIN".equals(roleSlug)
-                || (currentRole != null && currentRole.getId() != null && currentRole.getId() == 1L)
-                || (currentRole != null && currentRole.getDisplayName() != null
-                        && "QUẢN TRỊ VIÊN".equalsIgnoreCase(currentRole.getDisplayName()));
-        boolean isManager = "MANAGER".equals(roleSlug) || "BRANCH_MANAGER".equals(roleSlug);
-
-        boolean canSeeImportPrice = isAdmin || isManager || hasExportPermission;
+        Set<String> authorities = auth == null
+                ? Set.of()
+                : auth.getAuthorities().stream()
+                        .map(a -> a.getAuthority())
+                        .collect(Collectors.toSet());
+        boolean canSeeImportPrice = authorities.contains("REPORT_FINANCE_VIEW")
+                || authorities.contains("IMPORT_VIEW")
+                || authorities.contains("EXPORT_CREATE")
+                || authorities.contains("TRANSFER_CREATE")
+                || authorities.contains("PURCHASE_REQUEST_VIEW");
 
         Branch currentBranch = currentUser != null ? currentUser.getBranch() : null;
-
-        // Chỉ Admin mới được thấy tồn kho/lô hàng của tất cả chi nhánh.
-        boolean canSeeAllBranches = isAdmin;
+        boolean canSeeAllBranches = currentBranch == null;
 
         List<Inventory> validBatches = allInventories.stream()
                 .filter(inv -> inv.getQuantity() != null && inv.getQuantity() > 0)

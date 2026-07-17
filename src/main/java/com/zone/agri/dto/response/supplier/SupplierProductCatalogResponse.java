@@ -22,6 +22,7 @@ public class SupplierProductCatalogResponse {
     private Long productId;
     private String productName;
     private String productSlug;
+    private String imageUrl;
     private String brandName;
     private String origin;
     private String categoryName;
@@ -54,6 +55,17 @@ public class SupplierProductCatalogResponse {
                 .productSlug(catalog.getProductVariant() != null && catalog.getProductVariant().getProduct() != null
                         ? catalog.getProductVariant().getProduct().getSlug()
                         : null)
+                .imageUrl(catalog.getProductVariant() != null && catalog.getProductVariant().getImageUrl() != null
+                        ? catalog.getProductVariant().getImageUrl()
+                        : catalog.getProductVariant() != null
+                                && catalog.getProductVariant().getProduct() != null
+                                && catalog.getProductVariant().getProduct().getProductImages() != null
+                                ? catalog.getProductVariant().getProduct().getProductImages().stream()
+                                        .map(productImage -> productImage.getImageUrl())
+                                        .filter(imageUrl -> imageUrl != null && !imageUrl.isBlank())
+                                        .findFirst()
+                                        .orElse(null)
+                                : null)
                 .brandName(catalog.getProductVariant() != null && catalog.getProductVariant().getProduct() != null
                         && catalog.getProductVariant().getProduct().getBrand() != null
                         ? catalog.getProductVariant().getProduct().getBrand().getName()

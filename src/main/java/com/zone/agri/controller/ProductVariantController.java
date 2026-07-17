@@ -21,7 +21,7 @@ public class ProductVariantController {
     private final ProductVariantService variantService;
 
     @Operation(summary = "Báo cáo sản phẩm dưới định mức (Low Stock Report)")
-    @RequirePermission("REPORT_VIEW")
+    @RequirePermission("REPORT_INVENTORY_VIEW")
     @GetMapping("/low-stock")
     public ResponseEntity<List<LowStockReportResponse>> getLowStockReport(
             @RequestParam(required = false) Long branchId) {

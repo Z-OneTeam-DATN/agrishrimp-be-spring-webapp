@@ -58,10 +58,11 @@ public class UserController {
             @RequestParam(required = false) String keyword,
             @RequestParam(required = false) Long roleId,
             @RequestParam(required = false) Long branchId,
+            @RequestParam(required = false) String permissionCode,
             @RequestParam(required = false, defaultValue = "all") String status,
             @PageableDefault(size = 10, sort = "id", direction = Sort.Direction.DESC) Pageable pageable
     ) {
-        return ResponseEntity.ok(userService.getUsers(keyword, roleId, branchId, status, pageable));
+        return ResponseEntity.ok(userService.getUsers(keyword, roleId, branchId, permissionCode, status, pageable));
     }
 
     @GetMapping("/{id}")

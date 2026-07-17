@@ -7,6 +7,7 @@ import com.zone.agri.dto.response.ConversationResponse;
 import com.zone.agri.entity.User;
 import com.zone.agri.exception.SignInRequiredException;
 import com.zone.agri.repository.UserRepository;
+import com.zone.agri.security.annotation.RequirePermission;
 import com.zone.agri.service.ChatService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
@@ -53,6 +54,7 @@ public class ChatController {
 
     @Operation(summary = "Lấy danh sách tất cả conversations (dành cho shop/admin)")
     @GetMapping("/conversations")
+    @RequirePermission({"CHAT_VIEW", "CUSTOMER_ADVISOR_USE"})
     public ResponseEntity<Page<ConversationResponse>> getAllConversations(
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
@@ -79,6 +81,7 @@ public class ChatController {
 
     @Operation(summary = "Người bán ghim sản phẩm vào conversation")
     @PostMapping("/conversations/{id}/pin-product")
+    @RequirePermission("CHAT_MANAGE")
     public ResponseEntity<ChatMessageResponse> pinProduct(
             @PathVariable Long id,
             @RequestBody PinProductRequest request) {
@@ -88,6 +91,7 @@ public class ChatController {
 
     @Operation(summary = "Phân công nhân viên phụ trách conversation")
     @PutMapping("/conversations/{id}/assign")
+    @RequirePermission("CHAT_MANAGE")
     public ResponseEntity<ConversationResponse> assignStaff(
             @PathVariable Long id,
             @RequestParam(required = false) Long staffId) {

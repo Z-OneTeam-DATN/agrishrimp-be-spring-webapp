@@ -223,6 +223,19 @@ public interface InventoryNoteRepository extends JpaRepository<InventoryNote, Lo
             @Param("excludeNoteId") Long excludeNoteId
     );
 
+    @Query("""
+        SELECT DISTINCT note
+        FROM InventoryNote note
+        LEFT JOIN FETCH note.details detail
+        LEFT JOIN FETCH detail.productVariant
+        LEFT JOIN FETCH note.createdBy
+        WHERE note.purchaseRequest.id = :purchaseRequestId
+        ORDER BY note.createdAt ASC
+    """)
+    List<InventoryNote> findGoodsReceiptsByPurchaseRequestId(
+            @Param("purchaseRequestId") Long purchaseRequestId
+    );
+
     boolean existsBySupplierId(Long supplierId);
 
     @Query("SELECT COUNT(n) FROM InventoryNote n " +

@@ -1,12 +1,12 @@
 package com.zone.agri.controller;
 
 import com.zone.agri.dto.response.dashboard.*;
+import com.zone.agri.security.annotation.RequirePermission;
 import com.zone.agri.service.DashboardService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
-import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -15,7 +15,7 @@ import java.util.List;
 @RequestMapping("/api/admin/dashboard")
 @RequiredArgsConstructor
 @Tag(name = "Dashboard API", description = "API cho trang quản trị - Thống kê")
-@PreAuthorize("hasAnyRole('ADMIN', 'MANAGER', 'SUPER_ADMIN')")
+@RequirePermission("DASHBOARD_VIEW")
 public class DashboardController {
 
     private final DashboardService dashboardService;

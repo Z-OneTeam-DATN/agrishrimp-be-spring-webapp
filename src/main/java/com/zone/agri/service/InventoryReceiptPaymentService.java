@@ -6,14 +6,12 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Objects;
 
-import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.zone.agri.common.AuthUtils;
 import com.zone.agri.dto.request.inventory.ReceiptPaymentRequest;
 import com.zone.agri.dto.response.inventory.ReceiptPaymentResponse;
-import com.zone.agri.dto.response.user.UserDetail;
 import com.zone.agri.entity.InventoryNote;
 import com.zone.agri.entity.InventoryReceiptPayment;
 import com.zone.agri.entity.User;
@@ -132,30 +130,7 @@ public class InventoryReceiptPaymentService {
     }
 
     private Long resolveBranchId(Long requestBranchId) {
-        UserDetail currentUser = AuthUtils.getUserDetail();
-        if (currentUser == null) {
-            throw new AccessDeniedException("Người dùng chưa đăng nhập.");
-        }
-
-        String roleSlug = normalizeRoleSlug(currentUser);
-        if ("ADMIN".equals(roleSlug) || "SUPER_ADMIN".equals(roleSlug)) {
-            return requestBranchId;
-        }
-
-        Long userBranchId = currentUser.getBranchId();
-        if (userBranchId == null) {
-            throw new AccessDeniedException("Người dùng không thuộc chi nhánh nào.");
-        }
-
-        return userBranchId;
-    }
-
-    private String normalizeRoleSlug(UserDetail userDetail) {
-        if (userDetail.getRole() == null || userDetail.getRole().getSlug() == null) {
-            return "";
-        }
-        String slug = userDetail.getRole().getSlug().trim().toUpperCase();
-        return slug.startsWith("ROLE_") ? slug.substring(5) : slug;
+        return AuthUtils.resolveRequestedOrUserBranch(requestBranchId, "REPORT_FINANCE_VIEW");
     }
 
     private ReceiptPaymentResponse mapToResponse(InventoryReceiptPayment payment) {

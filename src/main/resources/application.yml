@@ -33,19 +33,15 @@ transfer:
     # thì gộp hàng vào phiếu đó thay vì tạo mới (tránh nhiều phiếu trùng tuyến nhiều ngày).
     merge-open-hours: ${TRANSFER_MERGE_OPEN_HOURS:24}
 
-# OCR Configuration
-ocr:
-  remote:
-    enabled: ${OCR_REMOTE_ENABLED:false}
-    base-url: ${OCR_REMOTE_BASE_URL:http://ai-visual-search:5001}
-    path: ${OCR_REMOTE_PATH:/ocr/cccd}
-  tesseract:
-    language: ${OCR_TESSERACT_LANGUAGE:vie}
-    data-path: ${OCR_TESSERACT_DATA_PATH:/usr/share/tesseract-ocr/5/tessdata}
-  max-file-size-bytes: ${OCR_MAX_FILE_SIZE_BYTES:5242880}
-  max-image-width: ${OCR_MAX_IMAGE_WIDTH:1800}
-
 # VietQR API Configuration
 vietqr:
   client-id: ${VIETQR_CLIENT_ID:}
   api-key: ${VIETQR_API_KEY:}
+
+fpt:
+  ai:
+    vlm:
+      base-url: ${FPT_AI_VLM_BASE_URL:https://mkp-api.fptcloud.com}
+      chat-completions-path: ${FPT_AI_VLM_CHAT_COMPLETIONS_PATH:/chat/completions}
+      api-key: ${FPT_AI_VLM_API_KEY:}
+      model: ${FPT_AI_VLM_MODEL:}

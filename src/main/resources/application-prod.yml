@@ -156,10 +156,3 @@ logging:
     com.zone.agri: INFO
     com.zone.agri.logging: ${LOGGING_LEVEL_COM_ZONE_AGRI_LOGGING:WARN}
 
-# 16. CẤU HÌNH OCR (GOOGLE VISION)
-ocr:
-  tesseract:
-    language: ${OCR_TESSERACT_LANGUAGE:vie}
-    data-path: ${OCR_TESSERACT_DATA_PATH:/usr/share/tesseract-ocr/5/tessdata}
-  max-file-size-bytes: ${OCR_MAX_FILE_SIZE_BYTES:5242880}
-  max-image-width: ${OCR_MAX_IMAGE_WIDTH:1800}
