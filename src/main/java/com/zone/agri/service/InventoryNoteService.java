@@ -23,6 +23,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.stream.Collectors;
@@ -45,10 +46,10 @@ public class InventoryNoteService {
     private User getCurrentUser() {
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
         if (auth == null || !auth.isAuthenticated() || "anonymousUser".equals(auth.getPrincipal())) {
-            throw new SignInRequiredException("Vui lòng đăng nhập để thực hiện thao tác này");
+            throw new SignInRequiredException("Vui lÄ‚Â²ng Ă„â€˜Ă„Æ’ng nhĂ¡ÂºÂ­p Ă„â€˜Ă¡Â»Æ’ thĂ¡Â»Â±c hiĂ¡Â»â€¡n thao tÄ‚Â¡c nÄ‚Â y");
         }
         return userRepository.findByEmail(auth.getName())
-                .orElseThrow(() -> new SignInRequiredException("Tài khoản không tồn tại"));
+                .orElseThrow(() -> new SignInRequiredException("TÄ‚Â i khoĂ¡ÂºÂ£n khÄ‚Â´ng tĂ¡Â»â€œn tĂ¡ÂºÂ¡i"));
     }
 
     private boolean hasAuthority(String authority) {
@@ -65,7 +66,7 @@ public class InventoryNoteService {
     }
 
     // ==========================================
-    // 1. TẠO LỆNH XUẤT (TRẠNG THÁI PENDING - CHƯA TRỪ KHO)
+    // 1. TĂ¡ÂºÂ O LĂ¡Â»â€ NH XUĂ¡ÂºÂ¤T (TRĂ¡ÂºÂ NG THÄ‚ÂI PENDING - CHĂ†Â¯A TRĂ¡Â»Âª KHO)
     // ==========================================
     @Transactional
     public InventoryNoteResponse createExportCommand(ExportNoteRequest request) {
@@ -75,7 +76,7 @@ public class InventoryNoteService {
         note.setType(InventoryNoteType.EXPORT);
         note.setStatus(InventoryNoteStatus.PENDING);
         note.setCreatedAt(LocalDateTime.now());
-        note.setCreatedBy(getCurrentUser()); // Tự động gán người tạo từ Token
+        note.setCreatedBy(getCurrentUser()); // TĂ¡Â»Â± Ă„â€˜Ă¡Â»â„¢ng gÄ‚Â¡n ngĂ†Â°Ă¡Â»Âi tĂ¡ÂºÂ¡o tĂ¡Â»Â« Token
 
         updateNoteMetadata(note, request);
         
@@ -97,9 +98,9 @@ public class InventoryNoteService {
     @Transactional
     public InventoryNoteResponse approveExportCommand(Long id) {
         InventoryNote note = inventoryNoteRepository.findByIdWithDetails(id)
-                .orElseThrow(() -> new NotFoundException("Không tìm thấy lệnh xuất ID: " + id));
+                .orElseThrow(() -> new NotFoundException("KhÄ‚Â´ng tÄ‚Â¬m thĂ¡ÂºÂ¥y lĂ¡Â»â€¡nh xuĂ¡ÂºÂ¥t ID: " + id));
         if (note.getStatus() != InventoryNoteStatus.PENDING) {
-            throw new BadRequestException("Chỉ có thể duyệt lệnh xuất đang chờ xử lý.");
+            throw new BadRequestException("ChĂ¡Â»â€° cÄ‚Â³ thĂ¡Â»Æ’ duyĂ¡Â»â€¡t lĂ¡Â»â€¡nh xuĂ¡ÂºÂ¥t Ă„â€˜ang chĂ¡Â»Â xĂ¡Â»Â­ lÄ‚Â½.");
         }
         note.setStatus(InventoryNoteStatus.APPROVED);
         note = inventoryNoteRepository.save(note);
@@ -109,7 +110,7 @@ public class InventoryNoteService {
     }
 
     // ==========================================
-    // 2. CHỐT PHIẾU XUẤT (CẬP NHẬT TỒN KHO - CÓ KIỂM ĐẾM)
+    // 2. CHĂ¡Â»ÂT PHIĂ¡ÂºÂ¾U XUĂ¡ÂºÂ¤T (CĂ¡ÂºÂ¬P NHĂ¡ÂºÂ¬T TĂ¡Â»â€™N KHO - CÄ‚â€œ KIĂ¡Â»â€M Ă„ÂĂ¡ÂºÂ¾M)
     // ==========================================
     @Transactional
     public InventoryNoteResponse completeExportCommand(Long id) {
@@ -120,7 +121,7 @@ public class InventoryNoteService {
         inventoryCheckGuardService.assertStockMutationAllowed(
                 note.getBranch().getId(),
                 note.getDetails().stream().map(detail -> detail.getProductVariant().getId()).toList(),
-                "xác nhận xuất kho"
+                "xÄ‚Â¡c nhĂ¡ÂºÂ­n xuĂ¡ÂºÂ¥t kho"
         );
 
         if (note.getStatus() == InventoryNoteStatus.COMPLETED) {
@@ -211,43 +212,43 @@ public class InventoryNoteService {
     }
 
     // ==========================================
-    // 2b. TẠO PHIẾU XUẤT TRẢ NCC TỪ PHIẾU NHẬP (Quy trình 3 – Hướng 1)
+    // 2b. TĂ¡ÂºÂ O PHIĂ¡ÂºÂ¾U XUĂ¡ÂºÂ¤T TRĂ¡ÂºÂ¢ NCC TĂ¡Â»Âª PHIĂ¡ÂºÂ¾U NHĂ¡ÂºÂ¬P (Quy trÄ‚Â¬nh 3 Ă¢â‚¬â€œ HĂ†Â°Ă¡Â»â€ºng 1)
     // ==========================================
 
     /**
-     * Tạo Phiếu xuất trả NCC trực tiếp từ một Phiếu nhập đã COMPLETED.
+     * TĂ¡ÂºÂ¡o PhiĂ¡ÂºÂ¿u xuĂ¡ÂºÂ¥t trĂ¡ÂºÂ£ NCC trĂ¡Â»Â±c tiĂ¡ÂºÂ¿p tĂ¡Â»Â« mĂ¡Â»â„¢t PhiĂ¡ÂºÂ¿u nhĂ¡ÂºÂ­p Ă„â€˜Ä‚Â£ COMPLETED.
      * <p>
-     * Quy tắc:
-     * - Chỉ hoạt động khi GR ở trạng thái COMPLETED và có ít nhất 1 dòng hàng lỗi (quantityRejected > 0).
-     * - Tự động điền NCC và danh sách hàng lỗi từ GR.
-     * - Đơn giá trả bị khóa bằng đúng đơn giá nhập của GR (chống gian lận).
-     * - Số lượng trả mặc định = số lượng lỗi trên GR, có thể giảm xuống nhưng không tăng quá.
+     * Quy tĂ¡ÂºÂ¯c:
+     * - ChĂ¡Â»â€° hoĂ¡ÂºÂ¡t Ă„â€˜Ă¡Â»â„¢ng khi GR Ă¡Â»Å¸ trĂ¡ÂºÂ¡ng thÄ‚Â¡i COMPLETED vÄ‚Â  cÄ‚Â³ Ä‚Â­t nhĂ¡ÂºÂ¥t 1 dÄ‚Â²ng hÄ‚Â ng lĂ¡Â»â€”i (quantityRejected > 0).
+     * - TĂ¡Â»Â± Ă„â€˜Ă¡Â»â„¢ng Ă„â€˜iĂ¡Â»Ân NCC vÄ‚Â  danh sÄ‚Â¡ch hÄ‚Â ng lĂ¡Â»â€”i tĂ¡Â»Â« GR.
+     * - Ă„ÂĂ†Â¡n giÄ‚Â¡ trĂ¡ÂºÂ£ bĂ¡Â»â€¹ khÄ‚Â³a bĂ¡ÂºÂ±ng Ă„â€˜Ä‚Âºng Ă„â€˜Ă†Â¡n giÄ‚Â¡ nhĂ¡ÂºÂ­p cĂ¡Â»Â§a GR (chĂ¡Â»â€˜ng gian lĂ¡ÂºÂ­n).
+     * - SĂ¡Â»â€˜ lĂ†Â°Ă¡Â»Â£ng trĂ¡ÂºÂ£ mĂ¡ÂºÂ·c Ă„â€˜Ă¡Â»â€¹nh = sĂ¡Â»â€˜ lĂ†Â°Ă¡Â»Â£ng lĂ¡Â»â€”i trÄ‚Âªn GR, cÄ‚Â³ thĂ¡Â»Æ’ giĂ¡ÂºÂ£m xuĂ¡Â»â€˜ng nhĂ†Â°ng khÄ‚Â´ng tĂ„Æ’ng quÄ‚Â¡.
      */
     @Transactional
     public InventoryNoteResponse createReturnFromGR(Long grId) {
         InventoryNote gr = inventoryNoteRepository.findByIdWithDetails(grId)
-                .orElseThrow(() -> new NotFoundException("Không tìm thấy Phiếu nhập ID: " + grId));
+                .orElseThrow(() -> new NotFoundException("KhÄ‚Â´ng tÄ‚Â¬m thĂ¡ÂºÂ¥y PhiĂ¡ÂºÂ¿u nhĂ¡ÂºÂ­p ID: " + grId));
 
         if (gr.getType() != InventoryNoteType.IMPORT) {
-            throw new BadRequestException("Chỉ có thể tạo phiếu xuất trả từ Phiếu nhập kho (IMPORT).");
+            throw new BadRequestException("ChĂ¡Â»â€° cÄ‚Â³ thĂ¡Â»Æ’ tĂ¡ÂºÂ¡o phiĂ¡ÂºÂ¿u xuĂ¡ÂºÂ¥t trĂ¡ÂºÂ£ tĂ¡Â»Â« PhiĂ¡ÂºÂ¿u nhĂ¡ÂºÂ­p kho (IMPORT).");
         }
         if (gr.getStatus() != InventoryNoteStatus.COMPLETED) {
-            throw new BadRequestException("Phiếu nhập phải ở trạng thái COMPLETED mới có thể tạo phiếu xuất trả.");
+            throw new BadRequestException("PhiĂ¡ÂºÂ¿u nhĂ¡ÂºÂ­p phĂ¡ÂºÂ£i Ă¡Â»Å¸ trĂ¡ÂºÂ¡ng thÄ‚Â¡i COMPLETED mĂ¡Â»â€ºi cÄ‚Â³ thĂ¡Â»Æ’ tĂ¡ÂºÂ¡o phiĂ¡ÂºÂ¿u xuĂ¡ÂºÂ¥t trĂ¡ÂºÂ£.");
         }
         if (gr.getSupplier() == null) {
-            throw new BadRequestException("Phiếu nhập không có thông tin nhà cung cấp.");
+            throw new BadRequestException("PhiĂ¡ÂºÂ¿u nhĂ¡ÂºÂ­p khÄ‚Â´ng cÄ‚Â³ thÄ‚Â´ng tin nhÄ‚Â  cung cĂ¡ÂºÂ¥p.");
         }
 
-        // Lấy các dòng có hàng lỗi
+        // LĂ¡ÂºÂ¥y cÄ‚Â¡c dÄ‚Â²ng cÄ‚Â³ hÄ‚Â ng lĂ¡Â»â€”i
         List<InventoryNoteDetail> defectiveDetails = gr.getDetails().stream()
                 .filter(d -> d.getQuantityRejected() != null && d.getQuantityRejected() > 0)
                 .collect(java.util.stream.Collectors.toList());
 
         if (defectiveDetails.isEmpty()) {
-            throw new BadRequestException("Phiếu nhập không có hàng lỗi nào để tạo phiếu xuất trả.");
+            throw new BadRequestException("PhiĂ¡ÂºÂ¿u nhĂ¡ÂºÂ­p khÄ‚Â´ng cÄ‚Â³ hÄ‚Â ng lĂ¡Â»â€”i nÄ‚Â o Ă„â€˜Ă¡Â»Æ’ tĂ¡ÂºÂ¡o phiĂ¡ÂºÂ¿u xuĂ¡ÂºÂ¥t trĂ¡ÂºÂ£.");
         }
 
-        // Kiểm tra tồn kho lỗi thực tế (đề phòng đã xuất trả trước đó)
+        // KiĂ¡Â»Æ’m tra tĂ¡Â»â€œn kho lĂ¡Â»â€”i thĂ¡Â»Â±c tĂ¡ÂºÂ¿ (Ă„â€˜Ă¡Â»Â phÄ‚Â²ng Ă„â€˜Ä‚Â£ xuĂ¡ÂºÂ¥t trĂ¡ÂºÂ£ trĂ†Â°Ă¡Â»â€ºc Ă„â€˜Ä‚Â³)
         for (InventoryNoteDetail d : defectiveDetails) {
             if (d.getBatchNumber() == null || d.getBatchNumber().isBlank()) {
                 d.setQuantityRejected(0);
@@ -256,21 +257,21 @@ public class InventoryNoteService {
             Long defectiveStock = inventoryRepository.sumDefectiveQuantityByBranchAndVariantAndBatch(
                     gr.getBranch().getId(), d.getProductVariant().getId(), d.getBatchNumber());
             if (defectiveStock == null || defectiveStock < d.getQuantityRejected()) {
-                // Không throw, chỉ cảnh báo bằng cách điều chỉnh số lượng còn lại
+                // KhÄ‚Â´ng throw, chĂ¡Â»â€° cĂ¡ÂºÂ£nh bÄ‚Â¡o bĂ¡ÂºÂ±ng cÄ‚Â¡ch Ă„â€˜iĂ¡Â»Âu chĂ¡Â»â€°nh sĂ¡Â»â€˜ lĂ†Â°Ă¡Â»Â£ng cÄ‚Â²n lĂ¡ÂºÂ¡i
                 d.setQuantityRejected(defectiveStock != null ? defectiveStock.intValue() : 0);
             }
         }
 
-        // Lọc lại sau khi điều chỉnh
+        // LĂ¡Â»Âc lĂ¡ÂºÂ¡i sau khi Ă„â€˜iĂ¡Â»Âu chĂ¡Â»â€°nh
         defectiveDetails = defectiveDetails.stream()
                 .filter(d -> d.getQuantityRejected() != null && d.getQuantityRejected() > 0)
                 .collect(java.util.stream.Collectors.toList());
 
         if (defectiveDetails.isEmpty()) {
-            throw new BadRequestException("Tồn kho lỗi của NCC này đã hết hoặc đã xuất trả hết trước đó.");
+            throw new BadRequestException("TĂ¡Â»â€œn kho lĂ¡Â»â€”i cĂ¡Â»Â§a NCC nÄ‚Â y Ă„â€˜Ä‚Â£ hĂ¡ÂºÂ¿t hoĂ¡ÂºÂ·c Ă„â€˜Ä‚Â£ xuĂ¡ÂºÂ¥t trĂ¡ÂºÂ£ hĂ¡ÂºÂ¿t trĂ†Â°Ă¡Â»â€ºc Ă„â€˜Ä‚Â³.");
         }
 
-        // Tạo phiếu xuất trả
+        // TĂ¡ÂºÂ¡o phiĂ¡ÂºÂ¿u xuĂ¡ÂºÂ¥t trĂ¡ÂºÂ£
         String returnCode = "PXT-" + System.currentTimeMillis();
         InventoryNote returnNote = new InventoryNote();
         returnNote.setCode(returnCode);
@@ -281,15 +282,15 @@ public class InventoryNoteService {
         returnNote.setBranch(gr.getBranch());
         returnNote.setSupplier(gr.getSupplier());
         returnNote.setPartnerBranch(null);
-        // Đánh dấu là phiếu RETURN để logic xuất kho biết dùng kho lỗi
-        returnNote.setReason("RETURN | Tạo từ Phiếu nhập: " + gr.getCode() + " | NCC: " + gr.getSupplier().getName());
-        returnNote.setNote("Xuất trả hàng lỗi từ phiếu nhập " + gr.getCode());
+        // Ă„ÂÄ‚Â¡nh dĂ¡ÂºÂ¥u lÄ‚Â  phiĂ¡ÂºÂ¿u RETURN Ă„â€˜Ă¡Â»Æ’ logic xuĂ¡ÂºÂ¥t kho biĂ¡ÂºÂ¿t dÄ‚Â¹ng kho lĂ¡Â»â€”i
+        returnNote.setReason("RETURN | TĂ¡ÂºÂ¡o tĂ¡Â»Â« PhiĂ¡ÂºÂ¿u nhĂ¡ÂºÂ­p: " + gr.getCode() + " | NCC: " + gr.getSupplier().getName());
+        returnNote.setNote("XuĂ¡ÂºÂ¥t trĂ¡ÂºÂ£ hÄ‚Â ng lĂ¡Â»â€”i tĂ¡Â»Â« phiĂ¡ÂºÂ¿u nhĂ¡ÂºÂ­p " + gr.getCode());
 
         BigDecimal totalReturn = BigDecimal.ZERO;
         List<InventoryNoteDetail> returnDetails = new ArrayList<>();
 
         for (InventoryNoteDetail grDetail : defectiveDetails) {
-            // ĐƠN GIÁ KHÓA CỨNG = đơn giá nhập của GR (không cho người dùng sửa)
+            // Ă„ÂĂ†Â N GIÄ‚Â KHÄ‚â€œA CĂ¡Â»Â¨NG = Ă„â€˜Ă†Â¡n giÄ‚Â¡ nhĂ¡ÂºÂ­p cĂ¡Â»Â§a GR (khÄ‚Â´ng cho ngĂ†Â°Ă¡Â»Âi dÄ‚Â¹ng sĂ¡Â»Â­a)
             BigDecimal lockedPrice = Objects.requireNonNullElse(grDetail.getPrice(), BigDecimal.ZERO);
             int returnQty = grDetail.getQuantityRejected();
 
@@ -302,7 +303,7 @@ public class InventoryNoteService {
                     .price(lockedPrice)
                     .batchNumber(grDetail.getBatchNumber())
                     .expiryDate(grDetail.getExpiryDate())
-                    .note("Lô hàng lỗi từ GR " + gr.getCode())
+                    .note("LÄ‚Â´ hÄ‚Â ng lĂ¡Â»â€”i tĂ¡Â»Â« GR " + gr.getCode())
                     .build();
 
             returnDetails.add(returnDetail);
@@ -311,8 +312,8 @@ public class InventoryNoteService {
 
         returnNote.setDetails(returnDetails);
         returnNote.setTotalAmount(totalReturn);
-        // Phiếu xuất trả tạo ra một khoản ghi nhận âm (credit) với NCC
-        // debtAmount âm = giảm nợ NCC
+        // PhiĂ¡ÂºÂ¿u xuĂ¡ÂºÂ¥t trĂ¡ÂºÂ£ tĂ¡ÂºÂ¡o ra mĂ¡Â»â„¢t khoĂ¡ÂºÂ£n ghi nhĂ¡ÂºÂ­n Ä‚Â¢m (credit) vĂ¡Â»â€ºi NCC
+        // debtAmount Ä‚Â¢m = giĂ¡ÂºÂ£m nĂ¡Â»Â£ NCC
         returnNote.setDebtAmount(totalReturn.negate());
         returnNote.setPaymentAmount(BigDecimal.ZERO);
 
@@ -320,7 +321,7 @@ public class InventoryNoteService {
     }
 
     // ==========================================
-    // 3. KIỂM KHO (INVENTORY CHECK)
+    // 3. KIĂ¡Â»â€M KHO (INVENTORY CHECK)
     // ==========================================
 
     @Transactional
@@ -328,10 +329,11 @@ public class InventoryNoteService {
         // branch access and freeze validation are applied before snapshot starts
         warehouseContext.assertAccess(request.getBranchId());
         Branch branch = branchRepository.findById(request.getBranchId())
-                .orElseThrow(() -> new NotFoundException("Không tìm thấy chi nhánh ID: " + request.getBranchId()));
+                .orElseThrow(() -> new NotFoundException("KhÄ‚Â´ng tÄ‚Â¬m thĂ¡ÂºÂ¥y chi nhÄ‚Â¡nh ID: " + request.getBranchId()));
+        assertCheckDraftDetailsPresent(request.getDetails());
 
         InventoryNote note = new InventoryNote();
-        // Cập nhật prefix mã chứng từ thành PKK
+        // CĂ¡ÂºÂ­p nhĂ¡ÂºÂ­t prefix mÄ‚Â£ chĂ¡Â»Â©ng tĂ¡Â»Â« thÄ‚Â nh PKK
         note.setCode(request.getCode() != null ? request.getCode() : "PKK-" + System.currentTimeMillis());
         note.setType(InventoryNoteType.CHECK);
         note.setStatus(InventoryNoteStatus.PENDING);
@@ -339,44 +341,16 @@ public class InventoryNoteService {
         note.setBranch(branch);
         note.setNote(request.getNote());
         
-        // Cập nhật thông tin kiểm kho mới
+        // CĂ¡ÂºÂ­p nhĂ¡ÂºÂ­t thÄ‚Â´ng tin kiĂ¡Â»Æ’m kho mĂ¡Â»â€ºi
         note.setCheckType(request.getType());
         note.setCheckScopeType(resolveScopeType(request));
         note.setCheckDate(request.getCheckDate() != null ? request.getCheckDate() : LocalDateTime.now());
         note.setCheckedBy(request.getCheckedBy());
         
-        // Tự động gán người tạo từ Token (Luôn ưu tiên User thực tế đang login)
+        // TĂ¡Â»Â± Ă„â€˜Ă¡Â»â„¢ng gÄ‚Â¡n ngĂ†Â°Ă¡Â»Âi tĂ¡ÂºÂ¡o tĂ¡Â»Â« Token (LuÄ‚Â´n Ă†Â°u tiÄ‚Âªn User thĂ¡Â»Â±c tĂ¡ÂºÂ¿ Ă„â€˜ang login)
         note.setCreatedBy(getCurrentUser());
 
-        List<InventoryNoteDetail> details = new ArrayList<>();
-        for (CheckNoteRequest.CheckNoteDetailRequest detailReq : request.getDetails()) {
-            ProductVariant variant = productVariantRepository.findById(detailReq.getProductVariantId())
-                    .orElseThrow(() -> new NotFoundException("Sản phẩm không tồn tại: " + detailReq.getProductVariantId()));
-
-            // Nếu FE gửi systemQuantity (số lượng thấy trên màn hình lúc đó) thì dùng luôn, 
-            // ngược lại mới query DB để lấy tồn hiện tại của lô.
-            Integer systemQty;
-            if (detailReq.getSystemQuantity() != null) {
-                systemQty = detailReq.getSystemQuantity();
-            } else if (detailReq.getQuantity() != null) {
-                systemQty = detailReq.getQuantity();
-            } else {
-                Optional<Inventory> existingBatch = inventoryRepository.findExactBatch(branch, variant, detailReq.getBatchNumber(), detailReq.getImportPrice());
-                systemQty = existingBatch.map(Inventory::getQuantity).orElse(0);
-            }
-
-            details.add(InventoryNoteDetail.builder()
-                    .inventoryNote(note)
-                    .productVariant(variant)
-                    .quantity(systemQty) // Số lượng hệ thống (snapshot)
-                    .quantityReal(detailReq.getQuantityReal()) // Số lượng thực tế kiểm thấy (tổng)
-                    .quantityRejected(detailReq.getQuantityRejected()) // Số lượng hàng lỗi
-                    .batchNumber(detailReq.getBatchNumber())
-                    .price(detailReq.getImportPrice())
-                    .note(detailReq.getNote())
-                    .build());
-        }
-        note.setDetails(details);
+        note.setDetails(buildCheckDetails(note, branch, request.getDetails(), false));
         note.setCheckWorkflowStatus(InventoryCheckWorkflowStatus.DRAFT);
         note.setTotalAmount(BigDecimal.ZERO);
         note.setPaymentAmount(BigDecimal.ZERO);
@@ -393,19 +367,19 @@ public class InventoryNoteService {
     @Transactional
     public InventoryNoteResponse startCheckCommand(Long id) {
         InventoryNote note = inventoryNoteRepository.findByIdWithDetailsForUpdate(id)
-                .orElseThrow(() -> new NotFoundException("Không tìm thấy phiếu kiểm kê."));
+                .orElseThrow(() -> new NotFoundException("KhÄ‚Â´ng tÄ‚Â¬m thĂ¡ÂºÂ¥y phiĂ¡ÂºÂ¿u kiĂ¡Â»Æ’m kÄ‚Âª."));
         warehouseContext.assertAccess(note.getBranch().getId());
         Branch branch = branchRepository.findByIdForUpdate(note.getBranch().getId())
-                .orElseThrow(() -> new NotFoundException("Không tìm thấy chi nhánh."));
+                .orElseThrow(() -> new NotFoundException("KhÄ‚Â´ng tÄ‚Â¬m thĂ¡ÂºÂ¥y chi nhÄ‚Â¡nh."));
 
         if (note.getType() != InventoryNoteType.CHECK) {
-            throw new BadRequestException("Phiếu này không phải phiếu kiểm kê.");
+            throw new BadRequestException("PhiĂ¡ÂºÂ¿u nÄ‚Â y khÄ‚Â´ng phĂ¡ÂºÂ£i phiĂ¡ÂºÂ¿u kiĂ¡Â»Æ’m kÄ‚Âª.");
         }
         if (canonicalStatus(note) != InventoryCheckWorkflowStatus.DRAFT) {
-            throw new BadRequestException("Chỉ có thể bắt đầu phiếu kiểm kê đang ở trạng thái nháp.");
+            throw new BadRequestException("ChĂ¡Â»â€° cÄ‚Â³ thĂ¡Â»Æ’ bĂ¡ÂºÂ¯t Ă„â€˜Ă¡ÂºÂ§u phiĂ¡ÂºÂ¿u kiĂ¡Â»Æ’m kÄ‚Âª Ă„â€˜ang Ă¡Â»Å¸ trĂ¡ÂºÂ¡ng thÄ‚Â¡i nhÄ‚Â¡p.");
         }
         if (note.getDetails() == null || note.getDetails().isEmpty()) {
-            throw new BadRequestException("Phiếu kiểm kê phải có ít nhất một sản phẩm trước khi bắt đầu.");
+            throw new BadRequestException("PhiĂ¡ÂºÂ¿u kiĂ¡Â»Æ’m kÄ‚Âª phĂ¡ÂºÂ£i cÄ‚Â³ Ä‚Â­t nhĂ¡ÂºÂ¥t mĂ¡Â»â„¢t sĂ¡ÂºÂ£n phĂ¡ÂºÂ©m trĂ†Â°Ă¡Â»â€ºc khi bĂ¡ÂºÂ¯t Ă„â€˜Ă¡ÂºÂ§u.");
         }
 
         inventoryCheckGuardService.assertCheckCanStart(
@@ -457,11 +431,10 @@ public class InventoryNoteService {
         }
 
         if (workflowStatus == InventoryCheckWorkflowStatus.DRAFT) {
-            if (!Objects.equals(note.getBranch().getId(), request.getBranchId())) {
-                throw new BadRequestException("Khong the thay doi chi nhanh sau khi da tao phieu kiem ke.");
-            }
-
-            Branch branch = note.getBranch();
+            warehouseContext.assertAccess(request.getBranchId());
+            assertCheckDraftDetailsPresent(request.getDetails());
+            Branch branch = branchRepository.findById(request.getBranchId())
+                    .orElseThrow(() -> new NotFoundException("Khong tim thay chi nhanh ID: " + request.getBranchId()));
             note.setBranch(branch);
             note.setNote(request.getNote());
             note.setCheckType(request.getType());
@@ -508,7 +481,7 @@ public class InventoryNoteService {
     public InventoryNoteResponse getCheckCommandById(Long id) {
         return inventoryNoteRepository.findByIdWithDetails(id)
                 .map(this::mapToResponse)
-                .orElseThrow(() -> new NotFoundException("Không tìm thấy lệnh kiểm kho."));
+                .orElseThrow(() -> new NotFoundException("KhÄ‚Â´ng tÄ‚Â¬m thĂ¡ÂºÂ¥y lĂ¡Â»â€¡nh kiĂ¡Â»Æ’m kho."));
     }
 
     private List<InventoryNoteResponse> getNotesByTypeAndStatus(InventoryNoteType type, InventoryNoteStatus status) {
@@ -523,16 +496,16 @@ public class InventoryNoteService {
     }
 
     // ==========================================
-    // CẬP NHẬT LỆNH XUẤT (CHỈ ÁP DỤNG KHI STATUS = PENDING)
+    // CĂ¡ÂºÂ¬P NHĂ¡ÂºÂ¬T LĂ¡Â»â€ NH XUĂ¡ÂºÂ¤T (CHĂ¡Â»Ë† Ä‚ÂP DĂ¡Â»Â¤NG KHI STATUS = PENDING)
     // ==========================================
     @Transactional
     public InventoryNoteResponse updateExportCommand(Long id, ExportNoteRequest request) {
         assertReturnExportRequest(request);
         InventoryNote note = inventoryNoteRepository.findById(id)
-                .orElseThrow(() -> new NotFoundException("Không tìm thấy lệnh xuất."));
+                .orElseThrow(() -> new NotFoundException("KhÄ‚Â´ng tÄ‚Â¬m thĂ¡ÂºÂ¥y lĂ¡Â»â€¡nh xuĂ¡ÂºÂ¥t."));
 
         if (note.getStatus() != InventoryNoteStatus.PENDING) {
-            throw new BadRequestException("Chỉ có thể chỉnh sửa lệnh xuất đang chờ xử lý.");
+            throw new BadRequestException("ChĂ¡Â»â€° cÄ‚Â³ thĂ¡Â»Æ’ chĂ¡Â»â€°nh sĂ¡Â»Â­a lĂ¡Â»â€¡nh xuĂ¡ÂºÂ¥t Ă„â€˜ang chĂ¡Â»Â xĂ¡Â»Â­ lÄ‚Â½.");
         }
 
         updateNoteMetadata(note, request);
@@ -581,9 +554,9 @@ public class InventoryNoteService {
     private void updateNoteMetadata(InventoryNote note, ExportNoteRequest request) {
         note.setDeliverer(request.getSpecificReceiver());
         note.setNote(request.getNote());
-        note.setShippingAddress(request.getShippingAddress()); // Lưu địa chỉ tách biệt
+        note.setShippingAddress(request.getShippingAddress()); // LĂ†Â°u Ă„â€˜Ă¡Â»â€¹a chĂ¡Â»â€° tÄ‚Â¡ch biĂ¡Â»â€¡t
         
-        String fullReason = String.format("Loại: %s | Ref: %s | Đ/c: %s | Lydo: %s",
+        String fullReason = String.format("LoĂ¡ÂºÂ¡i: %s | Ref: %s | Ă„Â/c: %s | Lydo: %s",
                 request.getExportType(), request.getReferenceCode(), request.getShippingAddress(), request.getNote());
         note.setReason(fullReason);
 
@@ -592,18 +565,18 @@ public class InventoryNoteService {
         }
 
         Branch sourceBranch = branchRepository.findById(request.getBranchId())
-                .orElseThrow(() -> new NotFoundException("Không tìm thấy kho xuất"));
+                .orElseThrow(() -> new NotFoundException("KhÄ‚Â´ng tÄ‚Â¬m thĂ¡ÂºÂ¥y kho xuĂ¡ÂºÂ¥t"));
         note.setBranch(sourceBranch);
 
         if (request.getCreatedById() != null) {
             userRepository.findById(request.getCreatedById()).ifPresent(note::setCreatedBy);
         }
 
-        // XỬ LÝ ĐỐI TÁC: NHÀ CUNG CẤP HOẶC CHI NHÁNH NHẬN
+        // XĂ¡Â»Â¬ LÄ‚Â Ă„ÂĂ¡Â»ÂI TÄ‚ÂC: NHÄ‚â‚¬ CUNG CĂ¡ÂºÂ¤P HOĂ¡ÂºÂ¶C CHI NHÄ‚ÂNH NHĂ¡ÂºÂ¬N
         if (request.getSupplierId() != null || "RETURN".equals(request.getExportType())) {
             if (!isWarehouseBranch(sourceBranch)) {
                 throw new BadRequestException(
-                        "Chỉ các chi nhánh loại kho mới được phép thực hiện nghiệp vụ xuất trả nhà cung cấp.");
+                        "ChĂ¡Â»â€° cÄ‚Â¡c chi nhÄ‚Â¡nh loĂ¡ÂºÂ¡i kho mĂ¡Â»â€ºi Ă„â€˜Ă†Â°Ă¡Â»Â£c phÄ‚Â©p thĂ¡Â»Â±c hiĂ¡Â»â€¡n nghiĂ¡Â»â€¡p vĂ¡Â»Â¥ xuĂ¡ÂºÂ¥t trĂ¡ÂºÂ£ nhÄ‚Â  cung cĂ¡ÂºÂ¥p.");
             }
             
             if (request.getSupplierId() != null) {
@@ -611,7 +584,7 @@ public class InventoryNoteService {
                         .orElseThrow(() -> new NotFoundException("Khong tim thay nha cung cap ID: " + request.getSupplierId()));
                 note.setSupplier(supplier);
             } else if (request.getDetails() != null && !request.getDetails().isEmpty()) {
-                // TỰ ĐỘNG TRUY VẾT NCC TỪ LÔ HÀNG ĐẦU TIÊN NẾU FE KHÔNG GỬI SUPPLIER_ID
+                // TĂ¡Â»Â° Ă„ÂĂ¡Â»ËœNG TRUY VĂ¡ÂºÂ¾T NCC TĂ¡Â»Âª LÄ‚â€ HÄ‚â‚¬NG Ă„ÂĂ¡ÂºÂ¦U TIÄ‚ÂN NĂ¡ÂºÂ¾U FE KHÄ‚â€NG GĂ¡Â»Â¬I SUPPLIER_ID
                 String firstBatch = request.getDetails().get(0).getBatchNumber();
                 String firstSku = productVariantRepository.findById(request.getDetails().get(0).getProductVariantId())
                         .map(ProductVariant::getSku).orElse(null);
@@ -629,7 +602,7 @@ public class InventoryNoteService {
             note.setPartnerBranch(branchRepository.findById(request.getTargetBranchId()).orElse(null));
             note.setSupplier(null);
         } else {
-            // Nếu không có cả 2 thì xóa trắng đối tác (ví dụ xuất hủy)
+            // NĂ¡ÂºÂ¿u khÄ‚Â´ng cÄ‚Â³ cĂ¡ÂºÂ£ 2 thÄ‚Â¬ xÄ‚Â³a trĂ¡ÂºÂ¯ng Ă„â€˜Ă¡Â»â€˜i tÄ‚Â¡c (vÄ‚Â­ dĂ¡Â»Â¥ xuĂ¡ÂºÂ¥t hĂ¡Â»Â§y)
             note.setSupplier(null);
             note.setPartnerBranch(null);
         }
@@ -643,11 +616,11 @@ public class InventoryNoteService {
 
         for (ExportNoteRequest.ExportNoteDetailRequest reqDetail : detailRequests) {
             ProductVariant variant = productVariantRepository.findById(reqDetail.getProductVariantId())
-                    .orElseThrow(() -> new NotFoundException("Sản phẩm không tồn tại ID: " + reqDetail.getProductVariantId()));
+                    .orElseThrow(() -> new NotFoundException("SĂ¡ÂºÂ£n phĂ¡ÂºÂ©m khÄ‚Â´ng tĂ¡Â»â€œn tĂ¡ÂºÂ¡i ID: " + reqDetail.getProductVariantId()));
 
             // Check stock availability
             boolean isReturn = note.getSupplier() != null || 
-                              (note.getReason() != null && (note.getReason().contains("RETURN") || note.getReason().contains("Trả NCC")));
+                              (note.getReason() != null && (note.getReason().contains("RETURN") || note.getReason().contains("TrĂ¡ÂºÂ£ NCC")));
             
             int checkStock;
             String errorPool;
@@ -656,11 +629,11 @@ public class InventoryNoteService {
             
             if (isReturn) {
                 if (batchNum == null || batchNum.isBlank()) {
-                    throw new BadRequestException("Xuất trả nhà cung cấp bắt buộc chọn đúng lô hàng lỗi.");
+                    throw new BadRequestException("XuĂ¡ÂºÂ¥t trĂ¡ÂºÂ£ nhÄ‚Â  cung cĂ¡ÂºÂ¥p bĂ¡ÂºÂ¯t buĂ¡Â»â„¢c chĂ¡Â»Ân Ă„â€˜Ä‚Âºng lÄ‚Â´ hÄ‚Â ng lĂ¡Â»â€”i.");
                 }
 
                 if (note.getSupplier() == null) {
-                    throw new BadRequestException("Phiếu xuất trả nhà cung cấp thiếu thông tin nhà cung cấp.");
+                    throw new BadRequestException("PhiĂ¡ÂºÂ¿u xuĂ¡ÂºÂ¥t trĂ¡ÂºÂ£ nhÄ‚Â  cung cĂ¡ÂºÂ¥p thiĂ¡ÂºÂ¿u thÄ‚Â´ng tin nhÄ‚Â  cung cĂ¡ÂºÂ¥p.");
                 }
 
                 originalImportDetails = inventoryNoteDetailRepository.findOriginalImportDetail(
@@ -676,7 +649,7 @@ public class InventoryNoteService {
 
                 if (!matchesOriginalWarehouse) {
                     throw new BadRequestException(String.format(
-                            "Lô %s của sản phẩm %s không thuộc đúng nhà cung cấp hoặc đúng kho nhập hiện tại.",
+                            "LÄ‚Â´ %s cĂ¡Â»Â§a sĂ¡ÂºÂ£n phĂ¡ÂºÂ©m %s khÄ‚Â´ng thuĂ¡Â»â„¢c Ă„â€˜Ä‚Âºng nhÄ‚Â  cung cĂ¡ÂºÂ¥p hoĂ¡ÂºÂ·c Ă„â€˜Ä‚Âºng kho nhĂ¡ÂºÂ­p hiĂ¡Â»â€¡n tĂ¡ÂºÂ¡i.",
                             batchNum,
                             variant.getSku()
                     ));
@@ -685,30 +658,30 @@ public class InventoryNoteService {
                 Long defectiveStockLong;
                 if (batchNum != null && !batchNum.isBlank()) {
                     defectiveStockLong = inventoryRepository.sumDefectiveQuantityByBranchAndVariantAndBatch(note.getBranch().getId(), variant.getId(), batchNum);
-                    errorPool = "kho lỗi (lô " + batchNum + ")";
+                    errorPool = "kho lĂ¡Â»â€”i (lÄ‚Â´ " + batchNum + ")";
                 } else {
                     defectiveStockLong = inventoryRepository.sumDefectiveQuantityByBranchAndVariant(note.getBranch().getId(), variant.getId());
-                    errorPool = "kho lỗi (tổng)";
+                    errorPool = "kho lĂ¡Â»â€”i (tĂ¡Â»â€¢ng)";
                 }
                 checkStock = defectiveStockLong != null ? defectiveStockLong.intValue() : 0;
             } else {
                 Long normalStockLong = inventoryRepository.sumQuantityByBranchAndVariant(note.getBranch().getId(), variant.getId());
                 checkStock = normalStockLong != null ? normalStockLong.intValue() : 0;
-                errorPool = "kho chính";
+                errorPool = "kho chÄ‚Â­nh";
             }
             
             if (checkStock < reqDetail.getRequestedQuantity()) {
-                // Lấy chi tiết tất cả các dòng có hàng lỗi của biến thể này tại chi nhánh
+                // LĂ¡ÂºÂ¥y chi tiĂ¡ÂºÂ¿t tĂ¡ÂºÂ¥t cĂ¡ÂºÂ£ cÄ‚Â¡c dÄ‚Â²ng cÄ‚Â³ hÄ‚Â ng lĂ¡Â»â€”i cĂ¡Â»Â§a biĂ¡ÂºÂ¿n thĂ¡Â»Æ’ nÄ‚Â y tĂ¡ÂºÂ¡i chi nhÄ‚Â¡nh
                 List<Inventory> allDefectiveInBranch = inventoryRepository.findAllByBranchIdAndDefectiveQuantityGreaterThan(note.getBranch().getId(), 0);
                 String availableBatches = allDefectiveInBranch.stream()
                         .filter(i -> i.getProductVariant().getId().equals(variant.getId()))
-                        .map(i -> (i.getBatchNumber() == null ? "TRỐNG" : i.getBatchNumber()) + ":" + i.getDefectiveQuantity())
+                        .map(i -> (i.getBatchNumber() == null ? "TRĂ¡Â»ÂNG" : i.getBatchNumber()) + ":" + i.getDefectiveQuantity())
                         .collect(Collectors.joining(", "));
                 
-                if (availableBatches.isEmpty()) availableBatches = "Không có lô nào có hàng lỗi";
+                if (availableBatches.isEmpty()) availableBatches = "KhÄ‚Â´ng cÄ‚Â³ lÄ‚Â´ nÄ‚Â o cÄ‚Â³ hÄ‚Â ng lĂ¡Â»â€”i";
 
-                throw new BadRequestException(String.format("Sản phẩm %s: Lô %s chỉ còn %d lỗi. Danh sách lô đang có hàng lỗi thực tế trong DB: [%s]. (Yêu cầu: %d)",
-                        variant.getSku(), (batchNum == null ? "TRỐNG" : batchNum), checkStock, availableBatches, reqDetail.getRequestedQuantity()));
+                throw new BadRequestException(String.format("SĂ¡ÂºÂ£n phĂ¡ÂºÂ©m %s: LÄ‚Â´ %s chĂ¡Â»â€° cÄ‚Â²n %d lĂ¡Â»â€”i. Danh sÄ‚Â¡ch lÄ‚Â´ Ă„â€˜ang cÄ‚Â³ hÄ‚Â ng lĂ¡Â»â€”i thĂ¡Â»Â±c tĂ¡ÂºÂ¿ trong DB: [%s]. (YÄ‚Âªu cĂ¡ÂºÂ§u: %d)",
+                        variant.getSku(), (batchNum == null ? "TRĂ¡Â»ÂNG" : batchNum), checkStock, availableBatches, reqDetail.getRequestedQuantity()));
             }
 
             BigDecimal lockedPrice = reqDetail.getPrice() != null ? reqDetail.getPrice() : BigDecimal.ZERO;
@@ -721,18 +694,18 @@ public class InventoryNoteService {
                     .productVariant(variant)
                     .quantityRequested(reqDetail.getRequestedQuantity())
                     .quantityReal(reqDetail.getRequestedQuantity())
-                    .quantity(reqDetail.getPlannedQuantity()) // Lưu số lượng yêu cầu ban đầu vào trường quantity của detail
-                    .quantityRejected(reqDetail.getDefectiveQuantity()) // Lưu số lượng lỗi hiện có
+                    .quantity(reqDetail.getPlannedQuantity()) // LĂ†Â°u sĂ¡Â»â€˜ lĂ†Â°Ă¡Â»Â£ng yÄ‚Âªu cĂ¡ÂºÂ§u ban Ă„â€˜Ă¡ÂºÂ§u vÄ‚Â o trĂ†Â°Ă¡Â»Âng quantity cĂ¡Â»Â§a detail
+                    .quantityRejected(reqDetail.getDefectiveQuantity()) // LĂ†Â°u sĂ¡Â»â€˜ lĂ†Â°Ă¡Â»Â£ng lĂ¡Â»â€”i hiĂ¡Â»â€¡n cÄ‚Â³
                     .batchNumber(reqDetail.getBatchNumber())
                     .price(lockedPrice)
                     .note(reqDetail.getNote())
                     .build();
 
-            // Xử lý hạn dùng nếu có gửi lên
+            // XĂ¡Â»Â­ lÄ‚Â½ hĂ¡ÂºÂ¡n dÄ‚Â¹ng nĂ¡ÂºÂ¿u cÄ‚Â³ gĂ¡Â»Â­i lÄ‚Âªn
             if (reqDetail.getExpiryDate() != null && !reqDetail.getExpiryDate().isBlank()) {
                 try {
-                    detail.setExpiryDate(LocalDate.parse(reqDetail.getExpiryDate()).atStartOfDay());
-                } catch (Exception e) { /* Bỏ qua lỗi format ngày */ }
+                    detail.setExpiryDate(parseExpiryDate(reqDetail.getExpiryDate()));
+                } catch (Exception e) { /* BĂ¡Â»Â qua lĂ¡Â»â€”i format ngÄ‚Â y */ }
             }
 
             details.add(detail);
@@ -752,7 +725,7 @@ public class InventoryNoteService {
     }
 
     // ==========================================
-    // 3. LẤY DANH SÁCH
+    // 3. LĂ¡ÂºÂ¤Y DANH SÄ‚ÂCH
     // ==========================================
     @Transactional(readOnly = true)
     public List<InventoryNoteResponse> getAllExportCommands() {
@@ -782,15 +755,15 @@ public class InventoryNoteService {
     }
 
     // ==========================================
-    // 4. XÓA PHIẾU
+    // 4. XÄ‚â€œA PHIĂ¡ÂºÂ¾U
     // ==========================================
     @Transactional
     public void deleteExportCommand(Long id) {
         InventoryNote note = inventoryNoteRepository.findById(id)
-                .orElseThrow(() -> new NotFoundException("Không tìm thấy phiếu xuất."));
+                .orElseThrow(() -> new NotFoundException("KhÄ‚Â´ng tÄ‚Â¬m thĂ¡ÂºÂ¥y phiĂ¡ÂºÂ¿u xuĂ¡ÂºÂ¥t."));
         
         if (note.getStatus() != InventoryNoteStatus.PENDING) {
-            throw new BadRequestException("Chỉ được phép xóa phiếu ở trạng thái CHỜ DUYỆT. Các phiếu đã duyệt hoặc đã xuất kho không thể xóa.");
+            throw new BadRequestException("ChĂ¡Â»â€° Ă„â€˜Ă†Â°Ă¡Â»Â£c phÄ‚Â©p xÄ‚Â³a phiĂ¡ÂºÂ¿u Ă¡Â»Å¸ trĂ¡ÂºÂ¡ng thÄ‚Â¡i CHĂ¡Â»Å“ DUYĂ¡Â»â€ T. CÄ‚Â¡c phiĂ¡ÂºÂ¿u Ă„â€˜Ä‚Â£ duyĂ¡Â»â€¡t hoĂ¡ÂºÂ·c Ă„â€˜Ä‚Â£ xuĂ¡ÂºÂ¥t kho khÄ‚Â´ng thĂ¡Â»Æ’ xÄ‚Â³a.");
         }
         inventoryNoteRepository.delete(note);
     }
@@ -798,14 +771,15 @@ public class InventoryNoteService {
     @Transactional
     public void deleteCheckNote(Long id) {
         InventoryNote note = inventoryNoteRepository.findById(id)
-                .orElseThrow(() -> new NotFoundException("Không tìm thấy phiếu kiểm kho."));
+                .orElseThrow(() -> new NotFoundException("KhÄ‚Â´ng tÄ‚Â¬m thĂ¡ÂºÂ¥y phiĂ¡ÂºÂ¿u kiĂ¡Â»Æ’m kho."));
 
         if (note.getType() != InventoryNoteType.CHECK) {
-            throw new BadRequestException("Đây không phải là phiếu kiểm kho.");
+            throw new BadRequestException("Ă„ÂÄ‚Â¢y khÄ‚Â´ng phĂ¡ÂºÂ£i lÄ‚Â  phiĂ¡ÂºÂ¿u kiĂ¡Â»Æ’m kho.");
         }
 
-        if (canonicalStatus(note) != InventoryCheckWorkflowStatus.DRAFT) {
-            throw new BadRequestException("Chỉ cho phép xóa phiếu kiểm kê đang ở trạng thái nháp.");
+        InventoryCheckWorkflowStatus workflowStatus = canonicalStatus(note);
+        if (workflowStatus == InventoryCheckWorkflowStatus.COMPLETED) {
+            throw new BadRequestException("Chá»‰ cho phĂ©p xĂ³a phiáº¿u kiá»ƒm kĂª chÆ°a Ä‘Æ°á»£c duyá»‡t cĂ¢n báº±ng.");
         }
         inventoryNoteRepository.delete(note);
     }
@@ -813,19 +787,19 @@ public class InventoryNoteService {
     @Transactional
     public InventoryNoteResponse submitCheckForApproval(Long id) {
         InventoryNote note = inventoryNoteRepository.findByIdWithDetails(id)
-                .orElseThrow(() -> new NotFoundException("Không tìm thấy lệnh kiểm kho."));
+                .orElseThrow(() -> new NotFoundException("KhÄ‚Â´ng tÄ‚Â¬m thĂ¡ÂºÂ¥y lĂ¡Â»â€¡nh kiĂ¡Â»Æ’m kho."));
         warehouseContext.assertAccess(note.getBranch().getId());
 
         if (note.getType() != InventoryNoteType.CHECK) {
-            throw new BadRequestException("Phiếu này không phải phiếu kiểm kê.");
+            throw new BadRequestException("PhiĂ¡ÂºÂ¿u nÄ‚Â y khÄ‚Â´ng phĂ¡ÂºÂ£i phiĂ¡ÂºÂ¿u kiĂ¡Â»Æ’m kÄ‚Âª.");
         }
         InventoryCheckWorkflowStatus workflowStatus = canonicalStatus(note);
         if (workflowStatus != InventoryCheckWorkflowStatus.COUNTING
                 && workflowStatus != InventoryCheckWorkflowStatus.RECOUNT_REQUIRED) {
-            throw new BadRequestException("Phiếu kiểm kê phải ở trạng thái đang kiểm kê hoặc yêu cầu kiểm lại.");
+            throw new BadRequestException("PhiĂ¡ÂºÂ¿u kiĂ¡Â»Æ’m kÄ‚Âª phĂ¡ÂºÂ£i Ă¡Â»Å¸ trĂ¡ÂºÂ¡ng thÄ‚Â¡i Ă„â€˜ang kiĂ¡Â»Æ’m kÄ‚Âª hoĂ¡ÂºÂ·c yÄ‚Âªu cĂ¡ÂºÂ§u kiĂ¡Â»Æ’m lĂ¡ÂºÂ¡i.");
         }
         if (note.getDetails() == null || note.getDetails().isEmpty()) {
-            throw new BadRequestException("Phiếu kiểm kê chưa có dữ liệu snapshot.");
+            throw new BadRequestException("PhiĂ¡ÂºÂ¿u kiĂ¡Â»Æ’m kÄ‚Âª chĂ†Â°a cÄ‚Â³ dĂ¡Â»Â¯ liĂ¡Â»â€¡u snapshot.");
         }
 
         validateCheckSubmission(note);
@@ -841,14 +815,14 @@ public class InventoryNoteService {
     @Transactional
     public InventoryNoteResponse requestCheckRecount(Long id, String reason) {
         InventoryNote note = inventoryNoteRepository.findByIdWithDetails(id)
-                .orElseThrow(() -> new NotFoundException("Không tìm thấy phiếu kiểm kê."));
+                .orElseThrow(() -> new NotFoundException("KhÄ‚Â´ng tÄ‚Â¬m thĂ¡ÂºÂ¥y phiĂ¡ÂºÂ¿u kiĂ¡Â»Æ’m kÄ‚Âª."));
         warehouseContext.assertAccess(note.getBranch().getId());
 
         if (canonicalStatus(note) != InventoryCheckWorkflowStatus.PENDING_APPROVAL) {
-            throw new BadRequestException("Chỉ có thể yêu cầu kiểm lại ở trạng thái chờ duyệt.");
+            throw new BadRequestException("ChĂ¡Â»â€° cÄ‚Â³ thĂ¡Â»Æ’ yÄ‚Âªu cĂ¡ÂºÂ§u kiĂ¡Â»Æ’m lĂ¡ÂºÂ¡i Ă¡Â»Å¸ trĂ¡ÂºÂ¡ng thÄ‚Â¡i chĂ¡Â»Â duyĂ¡Â»â€¡t.");
         }
         if (reason == null || reason.isBlank()) {
-            throw new BadRequestException("Vui lòng nhập lý do kiểm lại.");
+            throw new BadRequestException("Vui lÄ‚Â²ng nhĂ¡ÂºÂ­p lÄ‚Â½ do kiĂ¡Â»Æ’m lĂ¡ÂºÂ¡i.");
         }
 
         note.setCheckWorkflowStatus(InventoryCheckWorkflowStatus.RECOUNT_REQUIRED);
@@ -860,18 +834,18 @@ public class InventoryNoteService {
     @Transactional
     public InventoryNoteResponse cancelCheck(Long id, String reason) {
         InventoryNote note = inventoryNoteRepository.findByIdWithDetails(id)
-                .orElseThrow(() -> new NotFoundException("Không tìm thấy phiếu kiểm kê."));
+                .orElseThrow(() -> new NotFoundException("KhÄ‚Â´ng tÄ‚Â¬m thĂ¡ÂºÂ¥y phiĂ¡ÂºÂ¿u kiĂ¡Â»Æ’m kÄ‚Âª."));
         warehouseContext.assertAccess(note.getBranch().getId());
 
         InventoryCheckWorkflowStatus workflowStatus = canonicalStatus(note);
         if (workflowStatus == InventoryCheckWorkflowStatus.COMPLETED) {
-            throw new BadRequestException("Phiếu kiểm kê đã hoàn tất thì không thể hủy.");
+            throw new BadRequestException("PhiĂ¡ÂºÂ¿u kiĂ¡Â»Æ’m kÄ‚Âª Ă„â€˜Ä‚Â£ hoÄ‚Â n tĂ¡ÂºÂ¥t thÄ‚Â¬ khÄ‚Â´ng thĂ¡Â»Æ’ hĂ¡Â»Â§y.");
         }
         if (workflowStatus == InventoryCheckWorkflowStatus.CANCELLED) {
-            throw new BadRequestException("Phiếu kiểm kê này đã bị hủy.");
+            throw new BadRequestException("PhiĂ¡ÂºÂ¿u kiĂ¡Â»Æ’m kÄ‚Âª nÄ‚Â y Ă„â€˜Ä‚Â£ bĂ¡Â»â€¹ hĂ¡Â»Â§y.");
         }
         if (workflowStatus != InventoryCheckWorkflowStatus.DRAFT && (reason == null || reason.isBlank())) {
-            throw new BadRequestException("Vui lòng nhập lý do hủy phiếu kiểm kê.");
+            throw new BadRequestException("Vui lÄ‚Â²ng nhĂ¡ÂºÂ­p lÄ‚Â½ do hĂ¡Â»Â§y phiĂ¡ÂºÂ¿u kiĂ¡Â»Æ’m kÄ‚Âª.");
         }
 
         note.setCheckWorkflowStatus(InventoryCheckWorkflowStatus.CANCELLED);
@@ -885,11 +859,11 @@ public class InventoryNoteService {
     public InventoryNoteResponse approveCheckAdjustment(Long id) {
         User approver = getCurrentUser();
         InventoryNote note = inventoryNoteRepository.findByIdWithDetails(id)
-                .orElseThrow(() -> new NotFoundException("Không tìm thấy lệnh kiểm kho ID: " + id));
+                .orElseThrow(() -> new NotFoundException("KhÄ‚Â´ng tÄ‚Â¬m thĂ¡ÂºÂ¥y lĂ¡Â»â€¡nh kiĂ¡Â»Æ’m kho ID: " + id));
         warehouseContext.assertAccess(note.getBranch().getId());
 
         if (canonicalStatus(note) != InventoryCheckWorkflowStatus.PENDING_APPROVAL) {
-            throw new BadRequestException("Phiếu kiểm kê phải ở trạng thái chờ duyệt.");
+            throw new BadRequestException("PhiĂ¡ÂºÂ¿u kiĂ¡Â»Æ’m kÄ‚Âª phĂ¡ÂºÂ£i Ă¡Â»Å¸ trĂ¡ÂºÂ¡ng thÄ‚Â¡i chĂ¡Â»Â duyĂ¡Â»â€¡t.");
         }
 
         Branch branch = note.getBranch();
@@ -921,7 +895,7 @@ public class InventoryNoteService {
                         .quantityChange(actualQty + actualDefectiveQty)
                         .newBalance(actualQty + actualDefectiveQty)
                         .referenceCode(note.getCode())
-                        .reason("Kiểm kho: Tạo mới lô hàng (Phiếu: " + note.getCode() + ")")
+                        .reason("KiĂ¡Â»Æ’m kho: TĂ¡ÂºÂ¡o mĂ¡Â»â€ºi lÄ‚Â´ hÄ‚Â ng (PhiĂ¡ÂºÂ¿u: " + note.getCode() + ")")
                         .createdAt(LocalDateTime.now())
                         .inventory(newBatch)
                         .inventoryNote(note)
@@ -948,7 +922,7 @@ public class InventoryNoteService {
                             .quantityChange(discrepancyNormal + discrepancyDefective)
                             .newBalance(actualQty + actualDefectiveQty)
                             .referenceCode(note.getCode())
-                            .reason("Kiểm kho: Điều chỉnh chênh lệch (Phiếu: " + note.getCode() + ")")
+                            .reason("KiĂ¡Â»Æ’m kho: Ă„ÂiĂ¡Â»Âu chĂ¡Â»â€°nh chÄ‚Âªnh lĂ¡Â»â€¡ch (PhiĂ¡ÂºÂ¿u: " + note.getCode() + ")")
                             .createdAt(LocalDateTime.now())
                             .inventory(batch)
                             .inventoryNote(note)
@@ -976,7 +950,7 @@ public class InventoryNoteService {
         try {
             return InventoryCheckScopeType.valueOf(request.getScopeType().trim().toUpperCase(Locale.ROOT));
         } catch (IllegalArgumentException ex) {
-            throw new BadRequestException("Phạm vi kiểm kê không hợp lệ.");
+            throw new BadRequestException("PhĂ¡ÂºÂ¡m vi kiĂ¡Â»Æ’m kÄ‚Âª khÄ‚Â´ng hĂ¡Â»Â£p lĂ¡Â»â€¡.");
         }
     }
 
@@ -984,6 +958,12 @@ public class InventoryNoteService {
         return note.getCheckWorkflowStatus() != null
                 ? note.getCheckWorkflowStatus().toCanonical()
                 : InventoryCheckWorkflowStatus.DRAFT;
+    }
+
+    private void assertCheckDraftDetailsPresent(List<CheckNoteRequest.CheckNoteDetailRequest> requestDetails) {
+        if (requestDetails == null || requestDetails.isEmpty()) {
+            throw new BadRequestException("PhiĂ¡ÂºÂ¿u kiĂ¡Â»Æ’m kÄ‚Âª phĂ¡ÂºÂ£i cÄ‚Â³ Ä‚Â­t nhĂ¡ÂºÂ¥t mĂ¡Â»â„¢t sĂ¡ÂºÂ£n phĂ¡ÂºÂ©m.");
+        }
     }
 
     private List<InventoryNoteDetail> buildCheckDetails(
@@ -999,7 +979,7 @@ public class InventoryNoteService {
 
         for (CheckNoteRequest.CheckNoteDetailRequest detailReq : requestDetails) {
             ProductVariant variant = productVariantRepository.findById(detailReq.getProductVariantId())
-                    .orElseThrow(() -> new NotFoundException("Sản phẩm không tồn tại: " + detailReq.getProductVariantId()));
+                    .orElseThrow(() -> new NotFoundException("SĂ¡ÂºÂ£n phĂ¡ÂºÂ©m khÄ‚Â´ng tĂ¡Â»â€œn tĂ¡ÂºÂ¡i: " + detailReq.getProductVariantId()));
 
             Integer systemQty = detailReq.getSystemQuantity() != null
                     ? detailReq.getSystemQuantity()
@@ -1015,6 +995,7 @@ public class InventoryNoteService {
                     .quantityReal(preserveCountResult ? detailReq.getQuantityReal() : null)
                     .quantityRejected(preserveCountResult ? detailReq.getQuantityRejected() : null)
                     .batchNumber(detailReq.getBatchNumber())
+                    .expiryDate(parseExpiryDate(detailReq.getExpiryDate()))
                     .price(detailReq.getImportPrice())
                     .note(detailReq.getNote())
                     .build());
@@ -1027,6 +1008,38 @@ public class InventoryNoteService {
         return inventoryRepository.findExactBatch(branch, variant, batchNumber, importPrice)
                 .map(Inventory::getQuantity)
                 .orElse(0);
+    }
+
+    private LocalDateTime parseExpiryDate(String expiryDate) {
+        if (expiryDate == null || expiryDate.isBlank()) {
+            return null;
+        }
+
+        String normalized = expiryDate.trim();
+
+        try {
+            return LocalDate.parse(normalized).atStartOfDay();
+        } catch (Exception ignored) {
+        }
+
+        try {
+            return LocalDateTime.parse(normalized);
+        } catch (Exception ignored) {
+        }
+
+        try {
+            return OffsetDateTime.parse(normalized).toLocalDateTime();
+        } catch (Exception ignored) {
+        }
+
+        if (normalized.length() >= 10) {
+            try {
+                return LocalDate.parse(normalized.substring(0, 10)).atStartOfDay();
+            } catch (Exception ignored) {
+            }
+        }
+
+        throw new BadRequestException("Han su dung khong hop le: " + expiryDate);
     }
 
     private Set<Long> extractVariantIds(List<InventoryNoteDetail> details) {
@@ -1044,7 +1057,7 @@ public class InventoryNoteService {
 
     private void applyCountingResults(InventoryNote note, CheckNoteRequest request) {
         if (request.getDetails() == null) {
-            throw new BadRequestException("Phiếu kiểm kê không có dữ liệu sản phẩm.");
+            throw new BadRequestException("PhiĂ¡ÂºÂ¿u kiĂ¡Â»Æ’m kÄ‚Âª khÄ‚Â´ng cÄ‚Â³ dĂ¡Â»Â¯ liĂ¡Â»â€¡u sĂ¡ÂºÂ£n phĂ¡ÂºÂ©m.");
         }
 
         Map<String, InventoryNoteDetail> existingByKey = note.getDetails().stream()
@@ -1054,7 +1067,7 @@ public class InventoryNoteService {
                 .collect(Collectors.toMap(this::detailKey, detail -> detail, (left, right) -> left, LinkedHashMap::new));
 
         if (!existingByKey.keySet().equals(requestByKey.keySet())) {
-            throw new BadRequestException("Không thể thay đổi danh sách sản phẩm sau khi đã bắt đầu kiểm kê.");
+            throw new BadRequestException("KhÄ‚Â´ng thĂ¡Â»Æ’ thay Ă„â€˜Ă¡Â»â€¢i danh sÄ‚Â¡ch sĂ¡ÂºÂ£n phĂ¡ÂºÂ©m sau khi Ă„â€˜Ä‚Â£ bĂ¡ÂºÂ¯t Ă„â€˜Ă¡ÂºÂ§u kiĂ¡Â»Æ’m kÄ‚Âª.");
         }
 
         for (Map.Entry<String, InventoryNoteDetail> entry : existingByKey.entrySet()) {
@@ -1068,13 +1081,26 @@ public class InventoryNoteService {
 
     private String detailKey(CheckNoteRequest.CheckNoteDetailRequest detail) {
         return detail.getProductVariantId() + "|" + Objects.toString(detail.getBatchNumber(), "") + "|"
-                + Objects.toString(detail.getImportPrice(), "");
+                + normalizePriceKey(detail.getImportPrice());
     }
 
     private String detailKey(InventoryNoteDetail detail) {
         Long variantId = detail.getProductVariant() != null ? detail.getProductVariant().getId() : null;
         return variantId + "|" + Objects.toString(detail.getBatchNumber(), "") + "|"
-                + Objects.toString(detail.getPrice(), "");
+                + normalizePriceKey(detail.getPrice());
+    }
+
+    private String normalizePriceKey(BigDecimal price) {
+        if (price == null) {
+            return "";
+        }
+
+        BigDecimal normalized = price.stripTrailingZeros();
+        if (normalized.scale() < 0) {
+            normalized = normalized.setScale(0);
+        }
+
+        return normalized.toPlainString();
     }
 
     private void validateCheckSubmission(InventoryNote note) {
@@ -1084,21 +1110,21 @@ public class InventoryNoteService {
             Integer snapshotQty = Objects.requireNonNullElse(detail.getQuantity(), 0);
 
             if (realQty == null) {
-                throw new BadRequestException("Vui lòng nhập đủ số lượng thực tế trước khi gửi duyệt.");
+                throw new BadRequestException("Vui lÄ‚Â²ng nhĂ¡ÂºÂ­p Ă„â€˜Ă¡Â»Â§ sĂ¡Â»â€˜ lĂ†Â°Ă¡Â»Â£ng thĂ¡Â»Â±c tĂ¡ÂºÂ¿ trĂ†Â°Ă¡Â»â€ºc khi gĂ¡Â»Â­i duyĂ¡Â»â€¡t.");
             }
             if (realQty < 0) {
-                throw new BadRequestException("Số lượng thực tế không được âm.");
+                throw new BadRequestException("SĂ¡Â»â€˜ lĂ†Â°Ă¡Â»Â£ng thĂ¡Â»Â±c tĂ¡ÂºÂ¿ khÄ‚Â´ng Ă„â€˜Ă†Â°Ă¡Â»Â£c Ä‚Â¢m.");
             }
             if (rejectedQty < 0) {
-                throw new BadRequestException("Số lượng hư hỏng không được âm.");
+                throw new BadRequestException("SĂ¡Â»â€˜ lĂ†Â°Ă¡Â»Â£ng hĂ†Â° hĂ¡Â»Âng khÄ‚Â´ng Ă„â€˜Ă†Â°Ă¡Â»Â£c Ä‚Â¢m.");
             }
             if (rejectedQty > realQty) {
-                throw new BadRequestException("Số lượng hư hỏng không được lớn hơn số lượng thực tế.");
+                throw new BadRequestException("SĂ¡Â»â€˜ lĂ†Â°Ă¡Â»Â£ng hĂ†Â° hĂ¡Â»Âng khÄ‚Â´ng Ă„â€˜Ă†Â°Ă¡Â»Â£c lĂ¡Â»â€ºn hĂ†Â¡n sĂ¡Â»â€˜ lĂ†Â°Ă¡Â»Â£ng thĂ¡Â»Â±c tĂ¡ÂºÂ¿.");
             }
 
             int diffQty = realQty - snapshotQty;
             if ((diffQty != 0 || rejectedQty > 0) && (detail.getNote() == null || detail.getNote().isBlank())) {
-                throw new BadRequestException("Các dòng có chênh lệch hoặc hư hỏng phải nhập ghi chú hoặc nguyên nhân.");
+                throw new BadRequestException("CÄ‚Â¡c dÄ‚Â²ng cÄ‚Â³ chÄ‚Âªnh lĂ¡Â»â€¡ch hoĂ¡ÂºÂ·c hĂ†Â° hĂ¡Â»Âng phĂ¡ÂºÂ£i nhĂ¡ÂºÂ­p ghi chÄ‚Âº hoĂ¡ÂºÂ·c nguyÄ‚Âªn nhÄ‚Â¢n.");
             }
         }
     }
@@ -1111,14 +1137,14 @@ public class InventoryNoteService {
 
         String partnerName = "N/A";
         if (entity.getPartnerBranch() != null) {
-            partnerName = "[Nội bộ] " + entity.getPartnerBranch().getName();
+            partnerName = "[NĂ¡Â»â„¢i bĂ¡Â»â„¢] " + entity.getPartnerBranch().getName();
         } else if (entity.getSupplier() != null) {
-            partnerName = "[Trả NCC] " + entity.getSupplier().getName();
+            partnerName = "[TrĂ¡ÂºÂ£ NCC] " + entity.getSupplier().getName();
         } else if (entity.getDeliverer() != null && !entity.getDeliverer().isEmpty()) {
             partnerName = entity.getDeliverer();
         }
 
-        String fullName = (entity.getCreatedBy() != null) ? entity.getCreatedBy().getFullName() : "Hệ thống";
+        String fullName = (entity.getCreatedBy() != null) ? entity.getCreatedBy().getFullName() : "HĂ¡Â»â€¡ thĂ¡Â»â€˜ng";
 
         return InventoryNoteResponse.builder()
                 .id(entity.getId())
@@ -1133,7 +1159,7 @@ public class InventoryNoteService {
                 .totalAmount(Objects.requireNonNullElse(entity.getTotalAmount(), BigDecimal.ZERO))
                 .paymentAmount(Objects.requireNonNullElse(entity.getPaymentAmount(), BigDecimal.ZERO))
                 .debtAmount(Objects.requireNonNullElse(entity.getDebtAmount(), BigDecimal.ZERO))
-                // Các trường thông tin kiểm kho mới
+                // CÄ‚Â¡c trĂ†Â°Ă¡Â»Âng thÄ‚Â´ng tin kiĂ¡Â»Æ’m kho mĂ¡Â»â€ºi
                 .type(entity.getCheckType())
                 .scopeType(entity.getCheckScopeType() != null
                         ? entity.getCheckScopeType().name()
@@ -1160,7 +1186,7 @@ public class InventoryNoteService {
                 .displayPartnerName(partnerName)
                 .creatorName(fullName)
                 .createdByName(fullName)
-                .shippingAddress(entity.getShippingAddress()) // Bổ sung địa chỉ
+                .shippingAddress(entity.getShippingAddress()) // BĂ¡Â»â€¢ sung Ă„â€˜Ă¡Â»â€¹a chĂ¡Â»â€°
                 .details(entity.getDetails() != null ? entity.getDetails().stream().map(this::mapDetailToResponse).collect(Collectors.toList()) : new ArrayList<>())
                 .build();
     }
@@ -1173,14 +1199,15 @@ public class InventoryNoteService {
                 .sku(variant != null ? variant.getSku() : "N/A")
                 .productName(variant != null && variant.getProduct() != null ? variant.getProduct().getName() : "N/A")
                 .name(variant != null ? variant.getCustomSpecs() : "N/A")
-                .unit("Cái") // Fallback hardcoded unit
-                .quantity(d.getQuantity())           // Hệ thống (Kiểm kho)
-                .systemQuantity(d.getQuantity())     // Alias cho FE hiển thị
-                .quantityRequested(d.getQuantityRequested()) // Yêu cầu (Expected)
-                .quantityReal(d.getQuantityReal())           // Thực tế (Actual)
-                .quantityAccepted(d.getQuantityAccepted())   // Đạt
-                .quantityRejected(d.getQuantityRejected())   // Lỗi
+                .unit("CÄ‚Â¡i") // Fallback hardcoded unit
+                .quantity(d.getQuantity())           // HĂ¡Â»â€¡ thĂ¡Â»â€˜ng (KiĂ¡Â»Æ’m kho)
+                .systemQuantity(d.getQuantity())     // Alias cho FE hiĂ¡Â»Æ’n thĂ¡Â»â€¹
+                .quantityRequested(d.getQuantityRequested()) // YÄ‚Âªu cĂ¡ÂºÂ§u (Expected)
+                .quantityReal(d.getQuantityReal())           // ThĂ¡Â»Â±c tĂ¡ÂºÂ¿ (Actual)
+                .quantityAccepted(d.getQuantityAccepted())   // Ă„ÂĂ¡ÂºÂ¡t
+                .quantityRejected(d.getQuantityRejected())   // LĂ¡Â»â€”i
                 .batchNumber(d.getBatchNumber())
+                .expiryDate(d.getExpiryDate() != null ? d.getExpiryDate().format(DateTimeFormatter.ISO_LOCAL_DATE) : null)
                 .price(Objects.requireNonNullElse(d.getPrice(), BigDecimal.ZERO))
                 .imageUrl(variant != null ? variant.getImageUrl() : null)
                 .note(d.getNote())
@@ -1191,14 +1218,14 @@ public class InventoryNoteService {
     public InventoryNoteResponse getExportCommandById(Long id) {
         return inventoryNoteRepository.findByIdWithDetails(id)
                 .map(this::mapToResponse)
-                .orElseThrow(() -> new NotFoundException("Không tìm thấy lệnh xuất."));
+                .orElseThrow(() -> new NotFoundException("KhÄ‚Â´ng tÄ‚Â¬m thĂ¡ÂºÂ¥y lĂ¡Â»â€¡nh xuĂ¡ÂºÂ¥t."));
     }
 
     @Transactional(readOnly = true)
     public InventoryNoteResponse getCheckCommandByCode(String code) {
         return inventoryNoteRepository.findByCodeWithDetails(code)
                 .map(this::mapToResponse)
-                .orElseThrow(() -> new NotFoundException("Không tìm thấy lệnh kiểm kho với mã: " + code));
+                .orElseThrow(() -> new NotFoundException("KhÄ‚Â´ng tÄ‚Â¬m thĂ¡ÂºÂ¥y lĂ¡Â»â€¡nh kiĂ¡Â»Æ’m kho vĂ¡Â»â€ºi mÄ‚Â£: " + code));
     }
 }
 

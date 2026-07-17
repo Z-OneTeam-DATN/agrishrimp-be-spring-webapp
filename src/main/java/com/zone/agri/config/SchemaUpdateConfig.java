@@ -8,7 +8,9 @@ import org.springframework.context.annotation.Configuration;
 
 import javax.sql.DataSource;
 import java.sql.Connection;
+import java.sql.ResultSet;
 import java.sql.Statement;
+import java.util.List;
 
 /**
  * Applies idempotent schema patches that Hibernate update mode cannot handle
@@ -92,6 +94,8 @@ public class SchemaUpdateConfig implements BeanPostProcessor {
             executeSql(stmt,
                     "Patch sub_orders adds financial lifecycle timestamps",
                     "ALTER TABLE sub_orders ADD COLUMN received_at DATETIME NULL, ADD COLUMN completed_at DATETIME NULL, ADD COLUMN returned_at DATETIME NULL, ADD COLUMN cancelled_at DATETIME NULL");
+
+            patchInventoryTransfers(conn, stmt);
 
             executeSql(stmt,
                     "Backfill lifecycle timestamps for existing orders",
@@ -281,6 +285,237 @@ public class SchemaUpdateConfig implements BeanPostProcessor {
         } catch (Exception e) {
             log.error("Failed to run database schema patches", e);
         }
+    }
+
+    private void patchInventoryTransfers(Connection conn, Statement stmt) {
+        String tableName = "inventory_transfers";
+        if (!tableExists(conn, tableName)) {
+            log.info("Skip inventory transfer schema patch because table '{}' does not exist yet.", tableName);
+            return;
+        }
+
+        ensureColumnWithLegacyBackfill(conn, stmt, tableName,
+                "created_by_user_id",
+                "BIGINT NULL",
+                List.of("created_by"));
+
+        ensureColumnWithLegacyBackfill(conn, stmt, tableName,
+                "created_by_branch_id",
+                "BIGINT NULL",
+                List.of("created_by_branch", "branch_id"));
+
+        ensureColumnWithLegacyBackfill(conn, stmt, tableName,
+                "transfer_business_type",
+                "VARCHAR(30) NULL",
+                List.of("business_type"));
+
+        ensureColumnWithLegacyBackfill(conn, stmt, tableName,
+                "transfer_amount",
+                "DECIMAL(38,2) NULL",
+                List.of("total_transfer_amount", "amount"));
+
+        ensureColumnWithLegacyBackfill(conn, stmt, tableName,
+                "settlement_status",
+                "VARCHAR(20) NULL",
+                List.of("payment_status"));
+
+        ensureColumnWithLegacyBackfill(conn, stmt, tableName,
+                "source_receivable_amount",
+                "DECIMAL(38,2) NULL",
+                List.of("receivable_amount", "source_amount_receivable"));
+
+        ensureColumnWithLegacyBackfill(conn, stmt, tableName,
+                "dest_payable_amount",
+                "DECIMAL(38,2) NULL",
+                List.of("payable_amount", "destination_payable_amount", "dest_amount_payable"));
+
+        ensureColumnWithLegacyBackfill(conn, stmt, tableName,
+                "paid_amount",
+                "DECIMAL(38,2) NULL",
+                List.of("amount_paid"));
+
+        ensureColumnWithLegacyBackfill(conn, stmt, tableName,
+                "source_confirmed_by_user_id",
+                "BIGINT NULL",
+                List.of("source_confirmed_by", "confirmed_by"));
+
+        ensureColumnWithLegacyBackfill(conn, stmt, tableName,
+                "source_confirmed_at",
+                "DATETIME NULL",
+                List.of("source_confirmed_time", "confirmed_at", "source_confirmed_date"));
+
+        ensureColumnWithLegacyBackfill(conn, stmt, tableName,
+                "approved_by_user_id",
+                "BIGINT NULL",
+                List.of("approved_by"));
+
+        ensureColumnWithLegacyBackfill(conn, stmt, tableName,
+                "approved_at",
+                "DATETIME NULL",
+                List.of("approval_at", "approved_date"));
+
+        ensureColumnWithLegacyBackfill(conn, stmt, tableName,
+                "shipped_by_user_id",
+                "BIGINT NULL",
+                List.of("shipped_by"));
+
+        ensureColumnWithLegacyBackfill(conn, stmt, tableName,
+                "shipped_at",
+                "DATETIME NULL",
+                List.of("shipping_at", "shipped_date"));
+
+        ensureColumnWithLegacyBackfill(conn, stmt, tableName,
+                "inspection_started_by_user_id",
+                "BIGINT NULL",
+                List.of("inspection_started_by", "checked_by", "inspected_by"));
+
+        ensureColumnWithLegacyBackfill(conn, stmt, tableName,
+                "inspection_started_at",
+                "DATETIME NULL",
+                List.of("inspection_started_time", "inspection_started_date", "checked_at", "inspected_at"));
+
+        ensureColumnWithLegacyBackfill(conn, stmt, tableName,
+                "received_by_user_id",
+                "BIGINT NULL",
+                List.of("received_by"));
+
+        ensureColumnWithLegacyBackfill(conn, stmt, tableName,
+                "received_at",
+                "DATETIME NULL",
+                List.of("received_date"));
+
+        ensureColumnWithLegacyBackfill(conn, stmt, tableName,
+                "settled_by_user_id",
+                "BIGINT NULL",
+                List.of("settled_by", "paid_by"));
+
+        ensureColumnWithLegacyBackfill(conn, stmt, tableName,
+                "settled_at",
+                "DATETIME NULL",
+                List.of("settlement_at", "paid_at", "settled_date"));
+
+        executeSql(stmt,
+                "Backfill inventory_transfers.transfer_business_type to STOCK_TRANSFER",
+                """
+                        UPDATE inventory_transfers
+                        SET transfer_business_type = 'STOCK_TRANSFER'
+                        WHERE transfer_business_type IS NULL OR TRIM(transfer_business_type) = ''
+                        """);
+
+        addForeignKeyIfMissing(conn, stmt, tableName, "created_by_user_id", "users", "id", "fk_inventory_transfers_created_by_user");
+        addForeignKeyIfMissing(conn, stmt, tableName, "created_by_branch_id", "branches", "id", "fk_inventory_transfers_created_by_branch");
+        addForeignKeyIfMissing(conn, stmt, tableName, "source_confirmed_by_user_id", "users", "id", "fk_inventory_transfers_source_confirmed_by_user");
+        addForeignKeyIfMissing(conn, stmt, tableName, "approved_by_user_id", "users", "id", "fk_inventory_transfers_approved_by_user");
+        addForeignKeyIfMissing(conn, stmt, tableName, "shipped_by_user_id", "users", "id", "fk_inventory_transfers_shipped_by_user");
+        addForeignKeyIfMissing(conn, stmt, tableName, "inspection_started_by_user_id", "users", "id", "fk_inventory_transfers_inspection_started_by_user");
+        addForeignKeyIfMissing(conn, stmt, tableName, "received_by_user_id", "users", "id", "fk_inventory_transfers_received_by_user");
+        addForeignKeyIfMissing(conn, stmt, tableName, "settled_by_user_id", "users", "id", "fk_inventory_transfers_settled_by_user");
+    }
+
+    private void ensureColumnWithLegacyBackfill(
+            Connection conn,
+            Statement stmt,
+            String tableName,
+            String targetColumn,
+            String columnDefinition,
+            List<String> legacyColumns) {
+        if (!columnExists(conn, tableName, targetColumn)) {
+            executeSql(stmt,
+                    "Patch " + tableName + " adds " + targetColumn,
+                    "ALTER TABLE " + tableName + " ADD COLUMN " + targetColumn + " " + columnDefinition);
+        }
+
+        for (String legacyColumn : legacyColumns) {
+            if (!columnExists(conn, tableName, targetColumn)) {
+                return;
+            }
+            if (!columnExists(conn, tableName, legacyColumn)) {
+                continue;
+            }
+            executeSql(stmt,
+                    "Backfill " + tableName + "." + targetColumn + " from " + legacyColumn,
+                    "UPDATE " + tableName + " SET " + targetColumn + " = COALESCE(" + targetColumn + ", " + legacyColumn + ")");
+            return;
+        }
+    }
+
+    private boolean tableExists(Connection conn, String tableName) {
+        String sql = """
+                SELECT 1
+                FROM information_schema.TABLES
+                WHERE TABLE_SCHEMA = DATABASE()
+                  AND TABLE_NAME = ?
+                """;
+        try (var ps = conn.prepareStatement(sql)) {
+            ps.setString(1, tableName);
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next();
+            }
+        } catch (Exception e) {
+            log.debug("Failed checking table {} existence: {}", tableName, e.getMessage());
+            return false;
+        }
+    }
+
+    private boolean columnExists(Connection conn, String tableName, String columnName) {
+        String sql = """
+                SELECT 1
+                FROM information_schema.COLUMNS
+                WHERE TABLE_SCHEMA = DATABASE()
+                  AND TABLE_NAME = ?
+                  AND COLUMN_NAME = ?
+                """;
+        try (var ps = conn.prepareStatement(sql)) {
+            ps.setString(1, tableName);
+            ps.setString(2, columnName);
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next();
+            }
+        } catch (Exception e) {
+            log.debug("Failed checking column {}.{} existence: {}", tableName, columnName, e.getMessage());
+            return false;
+        }
+    }
+
+    private boolean foreignKeyExists(Connection conn, String tableName, String constraintName) {
+        String sql = """
+                SELECT 1
+                FROM information_schema.TABLE_CONSTRAINTS
+                WHERE TABLE_SCHEMA = DATABASE()
+                  AND TABLE_NAME = ?
+                  AND CONSTRAINT_NAME = ?
+                  AND CONSTRAINT_TYPE = 'FOREIGN KEY'
+                """;
+        try (var ps = conn.prepareStatement(sql)) {
+            ps.setString(1, tableName);
+            ps.setString(2, constraintName);
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next();
+            }
+        } catch (Exception e) {
+            log.debug("Failed checking foreign key {} on {}: {}", constraintName, tableName, e.getMessage());
+            return false;
+        }
+    }
+
+    private void addForeignKeyIfMissing(
+            Connection conn,
+            Statement stmt,
+            String tableName,
+            String columnName,
+            String referencedTable,
+            String referencedColumn,
+            String constraintName) {
+        if (!columnExists(conn, tableName, columnName) || foreignKeyExists(conn, tableName, constraintName)) {
+            return;
+        }
+
+        executeSql(stmt,
+                "Patch " + tableName + " adds foreign key " + constraintName,
+                "ALTER TABLE " + tableName
+                        + " ADD CONSTRAINT " + constraintName
+                        + " FOREIGN KEY (" + columnName + ") REFERENCES "
+                        + referencedTable + "(" + referencedColumn + ")");
     }
 
     private void dropForeignKeyIfExists(Statement stmt, String tableName, String columnName) {

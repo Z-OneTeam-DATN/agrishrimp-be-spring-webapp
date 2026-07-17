@@ -30,7 +30,7 @@ public class InventoryCheckController {
      * Nếu có ID trong request thì cập nhật, ngược lại tạo mới.
      */
     @SecurityRequirement(name = "bearerAuth")
-    @RequirePermission("INVENTORY_CHECK_CREATE")
+    @RequirePermission({"INVENTORY_CHECK_CREATE", "INVENTORY_CHECK_UPDATE"})
     @PostMapping
     public ResponseEntity<InventoryNoteResponse> saveOrUpdate(@Valid @RequestBody CheckNoteRequest request) {
         if (request.getId() != null) {
@@ -53,7 +53,14 @@ public class InventoryCheckController {
      * C. API Danh sách (GET /inventory-checks)
      */
     @SecurityRequirement(name = "bearerAuth")
-    @RequirePermission("INVENTORY_CHECK_VIEW")
+    @RequirePermission({
+            "INVENTORY_CHECK_VIEW",
+            "INVENTORY_CHECK_CREATE",
+            "INVENTORY_CHECK_UPDATE",
+            "INVENTORY_CHECK_APPROVE",
+            "INVENTORY_CHECK_CANCEL",
+            "INVENTORY_CHECK_DELETE"
+    })
     @GetMapping
     public ResponseEntity<List<InventoryNoteResponse>> getAll() {
         return ResponseEntity.ok(inventoryNoteService.getAllCheckNotes());
@@ -64,7 +71,14 @@ public class InventoryCheckController {
      * Hỗ trợ tìm theo Code (PKK-XXXX) hoặc ID (số)
      */
     @SecurityRequirement(name = "bearerAuth")
-    @RequirePermission("INVENTORY_CHECK_VIEW")
+    @RequirePermission({
+            "INVENTORY_CHECK_VIEW",
+            "INVENTORY_CHECK_CREATE",
+            "INVENTORY_CHECK_UPDATE",
+            "INVENTORY_CHECK_APPROVE",
+            "INVENTORY_CHECK_CANCEL",
+            "INVENTORY_CHECK_DELETE"
+    })
     @GetMapping("/{codeOrId}")
     public ResponseEntity<InventoryNoteResponse> getByCodeOrId(@PathVariable String codeOrId) {
         if (codeOrId.matches("^\\d+$")) {
@@ -138,7 +152,7 @@ public class InventoryCheckController {
      * Tìm kiếm sản phẩm để kiểm kho
      */
     @SecurityRequirement(name = "bearerAuth")
-    @RequirePermission("INVENTORY_CHECK_CREATE")
+    @RequirePermission({"INVENTORY_CHECK_CREATE", "INVENTORY_CHECK_UPDATE"})
     @GetMapping("/search-products")
     public ResponseEntity<List<InventorySearchResponse>> searchProducts(
             @RequestParam(required = false) String keyword,

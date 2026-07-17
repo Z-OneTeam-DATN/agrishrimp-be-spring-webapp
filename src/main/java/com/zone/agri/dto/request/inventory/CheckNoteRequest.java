@@ -31,6 +31,7 @@ public class CheckNoteRequest {
         private Long productVariantId;
 
         private String batchNumber;
+        private String expiryDate;
         private Integer quantityReal;
         private Integer quantityRejected;
         private Integer quantity;

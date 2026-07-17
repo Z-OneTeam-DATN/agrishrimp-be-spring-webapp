@@ -91,6 +91,26 @@ public interface InventoryTransferRepository extends JpaRepository<InventoryTran
       @Param("statuses") Collection<InventoryTransferStatus> statuses,
       @Param("skus") Collection<String> skus);
 
+  @Query("""
+      SELECT t.id,
+             t.transferCode,
+             t.status,
+             tb.name,
+             COALESCE(SUM(COALESCE(d.quantityRequested, d.quantity)), 0)
+      FROM InventoryTransfer t
+      JOIN t.toBranch tb
+      JOIN t.details d
+      WHERE t.fromBranch.id = :fromBranchId
+        AND t.status IN :statuses
+        AND d.productVariant.id = :variantId
+      GROUP BY t.id, t.transferCode, t.status, tb.name
+      ORDER BY t.createdAt ASC
+      """)
+  List<Object[]> findReservationHolderSummaries(
+      @Param("fromBranchId") Long fromBranchId,
+      @Param("variantId") Long variantId,
+      @Param("statuses") Collection<InventoryTransferStatus> statuses);
+
   /**
    * Tìm phiếu điều chuyển ORDER_REPLENISHMENT đang PENDING cho cùng tuyến
    * (fromBranch → toBranch) được tạo trong khoảng thời gian merge-open-hours.
@@ -109,10 +129,20 @@ public interface InventoryTransferRepository extends JpaRepository<InventoryTran
       @Param("cutoffTime") LocalDateTime cutoffTime);
 
   // Tìm phiếu điều chuyển theo ID với eager load cho branches và details
-  @Query("SELECT t FROM InventoryTransfer t " +
+  @Query("SELECT DISTINCT t FROM InventoryTransfer t " +
       "JOIN FETCH t.fromBranch " +
       "JOIN FETCH t.toBranch " +
-      "LEFT JOIN FETCH t.details " +
+      "LEFT JOIN FETCH t.createdBy " +
+      "LEFT JOIN FETCH t.createdByBranch " +
+      "LEFT JOIN FETCH t.sourceConfirmedBy " +
+      "LEFT JOIN FETCH t.approvedBy " +
+      "LEFT JOIN FETCH t.shippedBy " +
+      "LEFT JOIN FETCH t.inspectionStartedBy " +
+      "LEFT JOIN FETCH t.receivedBy " +
+      "LEFT JOIN FETCH t.settledBy " +
+      "LEFT JOIN FETCH t.details d " +
+      "LEFT JOIN FETCH d.productVariant pv " +
+      "LEFT JOIN FETCH pv.product " +
       "WHERE t.id = :id")
   Optional<InventoryTransfer> findByIdWithDetails(@Param("id") Long id);
 }

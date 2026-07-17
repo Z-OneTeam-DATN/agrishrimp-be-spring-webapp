@@ -17,6 +17,8 @@ import com.zone.agri.repository.InventoryRepository;
 import com.zone.agri.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -33,6 +35,8 @@ import java.util.stream.Collectors;
 @Slf4j
 public class BranchService {
 
+    private static final String BRANCH_VIEW_AUTHORITY = "BRANCH_VIEW";
+
     private final BranchRepository branchRepository;
     private final UserRepository userRepository;
     private final InventoryRepository inventoryRepository;
@@ -46,7 +50,7 @@ public class BranchService {
         }
 
         List<Branch> branches;
-        if (isAdminLike(currentUser)) {
+        if (canViewAllBranches(currentUser)) {
             branches = branchRepository.findAll();
         } else if (currentUser.getBranchId() == null) {
             branches = List.of();
@@ -234,10 +238,10 @@ public class BranchService {
         if (currentUser == null) {
             return List.of();
         }
-        if (!isAdminLike(currentUser) && currentUser.getBranchId() == null) {
+        if (!canViewAllBranches(currentUser) && currentUser.getBranchId() == null) {
             return List.of();
         }
-        Long scopedBranchId = !isAdminLike(currentUser)
+        Long scopedBranchId = !canViewAllBranches(currentUser)
                 ? currentUser.getBranchId()
                 : null;
 
@@ -264,7 +268,7 @@ public class BranchService {
      */
     private void ensureCurrentUserCanViewBranch(Long branchId) {
         UserDetail currentUser = AuthUtils.getUserDetail();
-        if (currentUser == null || isAdminLike(currentUser)) {
+        if (currentUser == null || canViewAllBranches(currentUser)) {
             return;
         }
         if (currentUser.getBranchId() == null || !currentUser.getBranchId().equals(branchId)) {
@@ -272,9 +276,21 @@ public class BranchService {
         }
     }
 
+    private boolean canViewAllBranches(UserDetail currentUser) {
+        return isAdminLike(currentUser) || hasAuthority(BRANCH_VIEW_AUTHORITY);
+    }
+
     private boolean isAdminLike(UserDetail currentUser) {
         return currentUser.getRole() != null
                 && RoleUtils.isAdminLikeRole(currentUser.getRole().getSlug());
+    }
+
+    private boolean hasAuthority(String authority) {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        return authentication != null
+                && authentication.getAuthorities() != null
+                && authentication.getAuthorities().stream()
+                .anyMatch(grantedAuthority -> authority.equalsIgnoreCase(grantedAuthority.getAuthority()));
     }
 
     private void geocodeBranchSilently(Branch branch, BranchDTO dto) {
