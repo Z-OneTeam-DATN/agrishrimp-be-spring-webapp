@@ -82,15 +82,27 @@ public class CloudinaryService {
      * @return secure_url của ảnh sau khi upload
      */
     public String uploadImage(String imageData, String folder) {
+        return uploadImage(imageData, folder, null);
+    }
+
+    /**
+     * Upload ảnh từ URL hoặc chuỗi base64 lên Cloudinary với tên định danh cụ thể.
+     *
+     * @param imageData URL hoặc chuỗi base64 (data:image/...)
+     * @param folder Folder con bên trong defaultFolder
+     * @param publicId Tên định danh của file ảnh (nếu có)
+     * @return secure_url của ảnh sau khi upload
+     */
+    public String uploadImage(String imageData, String folder, String publicId) {
         try {
             String fullFolder = defaultFolder + (folder != null ? "/" + folder : "");
-            Map<?, ?> result = cloudinary.uploader().upload(
-                imageData,
-                ObjectUtils.asMap(
-                    "folder",        fullFolder,
-                    "resource_type", "image"
-                )
-            );
+            java.util.Map<String, Object> options = new java.util.HashMap<>();
+            options.put("folder", fullFolder);
+            options.put("resource_type", "image");
+            if (publicId != null && !publicId.isBlank()) {
+                options.put("public_id", publicId);
+            }
+            Map<?, ?> result = cloudinary.uploader().upload(imageData, options);
             String secureUrl = (String) result.get("secure_url");
             log.info("Uploaded image (url/base64) to Cloudinary: {}", result.get("public_id"));
             return secureUrl;

@@ -143,16 +143,18 @@ public class ProductService {
             }
         }
 
-        return productRepository.findAllWithFilter(keyword, categoryId, status).stream()
-                .map(this::convertToResponse)
-                .collect(Collectors.toList());
+        List<Product> products = productRepository.findAllWithFilter(keyword, categoryId, status);
+        Map<Long, Long> soldCountMap = buildSoldCountMap(products.stream().map(Product::getId).toList());
+
+        return convertToResponseList(products, soldCountMap);
     }
 
     @Transactional(readOnly = true)
     public List<ProductResponse> getAll() {
-        return productRepository.findAllWithDetails().stream()
-                .map(this::convertToResponse)
-                .collect(Collectors.toList());
+        List<Product> products = productRepository.findAllWithDetails();
+        Map<Long, Long> soldCountMap = buildSoldCountMap(products.stream().map(Product::getId).toList());
+
+        return convertToResponseList(products, soldCountMap);
     }
 
     @Transactional(readOnly = true)
@@ -662,6 +664,27 @@ public class ProductService {
         return convertToResponse(product, buildSoldCountMap(List.of(product.getId())));
     }
 
+    private List<ProductResponse> convertToResponseList(List<Product> products, Map<Long, Long> soldCountMap) {
+        if (products == null || products.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        return products.stream()
+                .map(product -> convertToResponse(product, soldCountMap))
+                .collect(Collectors.toList());
+    }
+
+    private List<ProductVariant> getActiveDisplayVariants(Product product) {
+        if (product == null || product.getVariants() == null) {
+            return Collections.emptyList();
+        }
+
+        return product.getVariants().stream()
+                .filter(variant -> variant.getStatus() == VariantStatus.ACTIVE)
+                .filter(this::hasOnlyActiveAttributes)
+                .collect(Collectors.toList());
+    }
+
     private ProductResponse convertToResponse(Product product, Map<Long, Long> soldCountMap) {
         User currentUser = getCurrentUser();
 
@@ -1012,8 +1035,7 @@ public class ProductService {
         Map<Long, Long> soldCountMap = buildSoldCountMap(
                 products.stream().map(Product::getId).toList());
 
-        return products.stream()
-                .map(product -> convertToResponse(product, soldCountMap))
+        return convertToResponseList(products, soldCountMap).stream()
                 .filter(p -> p.getInventory() != null && p.getInventory() > 0)
                 .collect(Collectors.toList());
     }
@@ -1024,8 +1046,7 @@ public class ProductService {
         Map<Long, Long> soldCountMap = buildSoldCountMap(
                 products.stream().map(Product::getId).toList());
 
-        return products.stream()
-                .map(product -> convertToResponse(product, soldCountMap))
+        return convertToResponseList(products, soldCountMap).stream()
                 .filter(p -> p.getInventory() != null && p.getInventory() > 0)
                 .limit(limit)
                 .collect(Collectors.toList());
@@ -1066,8 +1087,7 @@ public class ProductService {
         List<Product> products = productRepository.findPublicByIds(productIds);
         Map<Long, Long> soldCountMap = buildSoldCountMap(productIds);
 
-        return products.stream()
-                .map(product -> convertToResponse(product, soldCountMap))
+        return convertToResponseList(products, soldCountMap).stream()
                 .filter(p -> p.getInventory() != null && p.getInventory() > 0)
                 .collect(Collectors.toList());
     }
@@ -1091,8 +1111,7 @@ public class ProductService {
         List<Product> products = productRepository.findPublicByIds(productIds);
         Map<Long, Long> soldCountMap = buildSoldCountMap(productIds);
 
-        return products.stream()
-                .map(product -> convertToResponse(product, soldCountMap))
+        return convertToResponseList(products, soldCountMap).stream()
                 .filter(p -> p.getInventory() != null && p.getInventory() > 0)
                 .collect(Collectors.toList());
     }
@@ -1150,10 +1169,12 @@ public class ProductService {
         Map<Long, Product> productsById = productRepository.findPublicByIds(productIds).stream()
                 .collect(Collectors.toMap(Product::getId, product -> product));
 
-        List<ProductResponse> productResponses = productIds.stream()
+        List<Product> orderedProducts = productIds.stream()
                 .map(productsById::get)
                 .filter(Objects::nonNull)
-                .map(product -> convertToResponse(product, soldCountMap))
+                .collect(Collectors.toList());
+
+        List<ProductResponse> productResponses = convertToResponseList(orderedProducts, soldCountMap).stream()
                 .map(p -> applyPublicListVariantFilters(p, minPrice, maxPrice, packagingValueIdList, packagingValues))
                 .filter(p -> p.getVariants() != null && !p.getVariants().isEmpty())
                 .collect(Collectors.toList());

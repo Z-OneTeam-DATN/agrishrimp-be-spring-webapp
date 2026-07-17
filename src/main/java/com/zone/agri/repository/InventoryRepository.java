@@ -208,6 +208,10 @@ public interface InventoryRepository extends JpaRepository<Inventory, Long> {
                         @Param("branchId") Long branchId,
                         @Param("variantId") Long variantId);
 
+        @Lock(LockModeType.PESSIMISTIC_WRITE)
+        @Query("SELECT i FROM Inventory i WHERE i.id = :id")
+        Optional<Inventory> findByIdForUpdate(@Param("id") Long id);
+
         default Optional<Inventory> findByBranchAndProductVariant(Branch branch, ProductVariant variant) {
                 return aggregateInventoryList(rawFindByBranchAndProductVariant(branch, variant));
         }

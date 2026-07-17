@@ -162,12 +162,19 @@ public interface SubOrderRepository extends JpaRepository<SubOrder, Long> {
             JOIN s.order o
             WHERE (:branchId IS NULL OR s.branch.id = :branchId)
               AND (
-                   (s.receivedAt IS NOT NULL AND s.receivedAt <= :endDate)
-                   OR (s.completedAt IS NOT NULL AND s.completedAt <= :endDate)
-                   OR (s.returnedAt IS NOT NULL AND s.returnedAt <= :endDate)
+                   (
+                       CASE
+                           WHEN s.receivedAt IS NULL THEN s.completedAt
+                           WHEN s.completedAt IS NULL THEN s.receivedAt
+                           WHEN s.receivedAt <= s.completedAt THEN s.receivedAt
+                           ELSE s.completedAt
+                       END
+                   ) BETWEEN :startDate AND :endDate
+                   OR (s.returnedAt IS NOT NULL AND s.returnedAt BETWEEN :startDate AND :endDate)
               )
             """)
-    List<FinancialSubOrderProjection> findFinancialSubOrders(@Param("endDate") LocalDateTime endDate,
+    List<FinancialSubOrderProjection> findFinancialSubOrders(@Param("startDate") LocalDateTime startDate,
+                                                             @Param("endDate") LocalDateTime endDate,
                                                              @Param("branchId") Long branchId);
 
     interface SubOrderAmountProjection {

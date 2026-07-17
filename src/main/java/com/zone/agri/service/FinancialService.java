@@ -56,7 +56,7 @@ public class FinancialService {
         Set<String> recognizedReferenceCodes = new LinkedHashSet<>();
 
         List<OrderRepository.LegacyFinancialOrderProjection> legacyOrders = orderRepository
-                .findLegacyFinancialOrders(end, finalBranchId);
+                .findLegacyFinancialOrders(start, end, finalBranchId);
         for (OrderRepository.LegacyFinancialOrderProjection order : legacyOrders) {
             processFinancialFlow(
                     getSafeBigDecimal(order.getProductAmount()),
@@ -72,7 +72,7 @@ public class FinancialService {
         }
 
         List<SubOrderRepository.FinancialSubOrderProjection> subOrders = subOrderRepository
-                .findFinancialSubOrders(end, finalBranchId);
+                .findFinancialSubOrders(start, end, finalBranchId);
         for (SubOrderRepository.FinancialSubOrderProjection subOrder : subOrders) {
             BigDecimal allocatedDiscount = allocateDiscount(
                     getSafeBigDecimal(subOrder.getSubtotal()),

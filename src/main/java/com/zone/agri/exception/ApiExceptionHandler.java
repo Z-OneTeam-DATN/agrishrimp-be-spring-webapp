@@ -1,6 +1,7 @@
 package com.zone.agri.exception;
 
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import lombok.extern.slf4j.Slf4j;
@@ -42,11 +43,21 @@ public class ApiExceptionHandler {
   }
 
   @ExceptionHandler(ConflictException.class)
-  public ResponseEntity<ErrorDetail> handleConflictException(ConflictException ex,
+  public ResponseEntity<Map<String, Object>> handleConflictException(ConflictException ex,
       WebRequest request) {
     String message = ex.getMessage();
-    ErrorDetail errorVm = new ErrorDetail(HttpStatus.CONFLICT.toString(), "Conflict", message);
-    return ResponseEntity.status(HttpStatus.CONFLICT).body(errorVm);
+    Map<String, Object> payload = new LinkedHashMap<>();
+    payload.put("statusCode", HttpStatus.CONFLICT.toString());
+    payload.put("title", "Conflict");
+    payload.put("detail", message);
+    payload.put("message", message);
+    if (ex.getCode() != null && !ex.getCode().isBlank()) {
+      payload.put("code", ex.getCode());
+    }
+    if (ex.getPayload() != null && !ex.getPayload().isEmpty()) {
+      payload.putAll(ex.getPayload());
+    }
+    return ResponseEntity.status(HttpStatus.CONFLICT).body(payload);
   }
 
   @ExceptionHandler(RateLimitException.class)

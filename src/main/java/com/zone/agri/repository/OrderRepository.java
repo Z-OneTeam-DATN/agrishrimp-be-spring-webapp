@@ -77,6 +77,17 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
 
        List<Order> findByStatusAndCreatedAtBefore(OrderStatus status, LocalDateTime createdAt);
 
+       @Query("""
+              SELECT o
+              FROM Order o
+              WHERE o.status = com.zone.agri.entity.enums.OrderStatus.PENDING
+                AND o.autoApproveAt IS NOT NULL
+                AND o.autoApproveAt <= :now
+                AND (o.autoApprovalPaused IS NULL OR o.autoApprovalPaused = false)
+              ORDER BY o.autoApproveAt ASC
+              """)
+       List<Order> findOrdersReadyForAutoApproval(@Param("now") LocalDateTime now);
+
        List<Order> findByUserIdAndStatusOrderByCreatedAtDesc(Long userId, OrderStatus status);
 
        List<Order> findByStatusOrderByCreatedAtDesc(OrderStatus status);
@@ -223,12 +234,19 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
                      WHERE o.subOrders IS EMPTY
                        AND (:branchId IS NULL OR o.branch.id = :branchId)
                        AND (
-                            (o.receivedAt IS NOT NULL AND o.receivedAt <= :endDate)
-                            OR (o.completedAt IS NOT NULL AND o.completedAt <= :endDate)
-                            OR (o.returnedAt IS NOT NULL AND o.returnedAt <= :endDate)
+                            (
+                                CASE
+                                    WHEN o.receivedAt IS NULL THEN o.completedAt
+                                    WHEN o.completedAt IS NULL THEN o.receivedAt
+                                    WHEN o.receivedAt <= o.completedAt THEN o.receivedAt
+                                    ELSE o.completedAt
+                                END
+                            ) BETWEEN :startDate AND :endDate
+                            OR (o.returnedAt IS NOT NULL AND o.returnedAt BETWEEN :startDate AND :endDate)
                        )
                      """)
        List<LegacyFinancialOrderProjection> findLegacyFinancialOrders(
+                      @Param("startDate") LocalDateTime startDate,
                       @Param("endDate") LocalDateTime endDate,
                       @Param("branchId") Long branchId);
 

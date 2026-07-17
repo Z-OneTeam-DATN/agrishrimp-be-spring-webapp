@@ -1,6 +1,7 @@
 package com.zone.agri.entity;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.persistence.*;
 import lombok.*;
 import lombok.experimental.FieldDefaults;
@@ -53,4 +54,9 @@ public class UserAddress {
     @JsonIgnore
     @EqualsAndHashCode.Exclude
     User user;
+
+    @JsonProperty("wardCode")
+    public String getWardCode() {
+        return wardId;
+    }
 }

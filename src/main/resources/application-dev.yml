@@ -9,6 +9,8 @@ management:
   health:
     mail:
       enabled: ${MANAGEMENT_HEALTH_MAIL_ENABLED:false}
+    redis:
+      enabled: ${MANAGEMENT_HEALTH_REDIS_ENABLED:false}
 
 spring:
   config:

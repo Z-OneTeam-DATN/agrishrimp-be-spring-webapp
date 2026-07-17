@@ -27,6 +27,11 @@ public class OrderResponse {
     private String paymentMethod;
     private String paymentStatus;
     private String status;
+    private String legacyStatus;
+    private String fulfillmentStatus;
+    private String stockStatus;
+    private LocalDateTime autoApproveAt;
+    private Boolean autoApprovalPaused;
     private String branchName;
     private String branchPhone;
     private String branchAddress;

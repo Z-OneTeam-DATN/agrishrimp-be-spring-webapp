@@ -1,8 +1,10 @@
 package com.zone.agri.entity;
 
+import com.zone.agri.entity.enums.FulfillmentStatus;
 import com.zone.agri.entity.enums.OrderStatus;
 import com.zone.agri.entity.enums.PaymentMethod;
 import com.zone.agri.entity.enums.PaymentStatus;
+import com.zone.agri.entity.enums.StockStatus;
 import jakarta.persistence.*;
 import lombok.*;
 import lombok.experimental.FieldDefaults;
@@ -44,12 +46,33 @@ public class Order {
     PaymentMethod paymentMethod;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "payment_status", columnDefinition = "ENUM('UNPAID', 'PAID')")
+    @Column(name = "payment_status", columnDefinition = "ENUM('UNPAID', 'PENDING', 'PENDING_VERIFICATION', 'PARTIALLY_PAID', 'PAID', 'FAILED', 'EXPIRED', 'REFUND_PENDING', 'REFUNDED')")
     PaymentStatus paymentStatus;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "status", columnDefinition = "ENUM('PENDING', 'AWAITING_PAYMENT', 'AWAITING_REPLENISHMENT', 'CONFIRMED', 'PROCESSING', 'READY_FOR_PICKUP', 'SHIPPING', 'RECEIVED', 'COMPLETED', 'CANCELLED', 'RETURNED')")
     OrderStatus status;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "fulfillment_status", length = 40)
+    FulfillmentStatus fulfillmentStatus;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "stock_status", length = 40)
+    StockStatus stockStatus;
+
+    @Column(name = "auto_approve_at")
+    LocalDateTime autoApproveAt;
+
+    @Column(name = "auto_approval_paused")
+    Boolean autoApprovalPaused;
+
+    @Column(name = "delivery_address_id")
+    Long deliveryAddressId;
+
+    @Version
+    @Column(name = "version")
+    Integer version;
 
     @Column(name = "created_at")
     LocalDateTime createdAt;
