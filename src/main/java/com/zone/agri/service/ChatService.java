@@ -323,6 +323,22 @@ public class ChatService {
         return toConversationResponse(conversationRepository.save(conv));
     }
 
+    @Transactional
+    public ConversationResponse updateStatus(Long conversationId, com.zone.agri.entity.enums.ConversationStatus status) {
+        Conversation conv = conversationRepository.findById(conversationId)
+                .orElseThrow(() -> new RuntimeException("Conversation not found"));
+        conv.setStatus(status);
+        return toConversationResponse(conversationRepository.save(conv));
+    }
+
+    @Transactional
+    public ConversationResponse markAsUnread(Long conversationId) {
+        Conversation conv = conversationRepository.findById(conversationId)
+                .orElseThrow(() -> new RuntimeException("Conversation not found"));
+        conv.setUnreadByShop(1);
+        return toConversationResponse(conversationRepository.save(conv));
+    }
+
     private ConversationResponse toConversationResponse(Conversation c) {
         User customer = c.getCustomer();
         User assigned = c.getAssignedStaff();
