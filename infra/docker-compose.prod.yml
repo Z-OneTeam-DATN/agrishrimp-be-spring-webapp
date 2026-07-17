@@ -101,7 +101,7 @@ services:
       start_period: 90s    # CLIP model cần ~60-90s để load lần đầu
 
   # ─────────────────────────────────────────────────────
-  # BACKEND — Spring Boot 3 / Java 21
+  # BACKEND — Spring Boot 3 / Java 25
   # Port 8004 — expose ra host, Nginx proxy từ api.agrishrimp.io.vn
   # ─────────────────────────────────────────────────────
   api:

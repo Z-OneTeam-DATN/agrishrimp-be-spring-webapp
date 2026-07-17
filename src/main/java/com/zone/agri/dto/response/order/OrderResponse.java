@@ -2,6 +2,7 @@ package com.zone.agri.dto.response.order;
 
 import lombok.Builder;
 import lombok.Data;
+
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -15,13 +16,15 @@ public class OrderResponse {
     private String customerName;
     private String customerPhone;
     private String receiverName;
-    /** SĐT người nhận (từ UserAddress) — khác customerPhone (SĐT tài khoản) */
+    /** SDT người nhận (từ UserAddress), khác customerPhone của tài khoản */
     private String receiverPhone;
-    /** Tiền hàng (chưa cộng phí ship) */
+    /** Tiền hàng chưa cộng phí ship */
     private BigDecimal totalAmount;
     /** Phí vận chuyển */
     private BigDecimal shippingFee;
     private BigDecimal totalShippingFee;
+    private String voucherCode;
+    private BigDecimal discountAmount;
     /** Tổng thanh toán = totalAmount + shippingFee - discount */
     private BigDecimal finalAmount;
     private String paymentMethod;
