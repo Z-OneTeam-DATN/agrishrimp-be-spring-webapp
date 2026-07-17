@@ -246,7 +246,19 @@ public class ChatService {
             if (readerId.equals(conv.getCustomer().getId())) {
                 conv.setUnreadByCustomer(0);
             } else {
+                // Admin/Staff read: set unreadByShop to 0, then notify customer
                 conv.setUnreadByShop(0);
+                conversationRepository.save(conv);
+
+                // Send READ_RECEIPT event to customer so their tick turns to double-check
+                String customerPrincipal = conv.getCustomer().getEmail() != null
+                        ? conv.getCustomer().getEmail()
+                        : conv.getCustomer().getPhoneNumber();
+                java.util.Map<String, Object> readEvent = new java.util.HashMap<>();
+                readEvent.put("type", "READ_RECEIPT");
+                readEvent.put("conversationId", conversationId);
+                messagingTemplate.convertAndSendToUser(customerPrincipal, "/queue/messages", readEvent);
+                return;
             }
             conversationRepository.save(conv);
         });
