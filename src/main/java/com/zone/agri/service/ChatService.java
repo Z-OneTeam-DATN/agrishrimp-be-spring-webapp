@@ -100,6 +100,7 @@ public class ChatService {
 
         conv.setLastMessage(request.getContent());
         conv.setLastMessageAt(LocalDateTime.now());
+        conv.setLastSenderId(senderId);
         conv.setStatus(ConversationStatus.OPEN);
         Long customerId = conv.getCustomer().getId();
         boolean senderIsCustomer = senderId.equals(customerId);
@@ -126,13 +127,7 @@ public class ChatService {
         // Notify the other party
         if (senderIsCustomer) {
             messagingTemplate.convertAndSend("/topic/shop-messages", response);
-            // AI auto-reply outside business hours (08:00 – 18:00)
-            int hour = LocalTime.now().getHour();
-            if (hour < 8 || hour >= 18) {
-                Long savedConvId = conv.getId();
-                String customerMsg = request.getContent();
-                CompletableFuture.runAsync(() -> sendBotAutoReply(savedConvId, customerMsg));
-            }
+            // AI auto-reply disabled for customer support chat
         } else {
             notificationService.sendNotification(
                     customerId,
@@ -171,6 +166,7 @@ public class ChatService {
 
         conv.setLastMessage("[Sản phẩm ghim] " + product.getName());
         conv.setLastMessageAt(LocalDateTime.now());
+        conv.setLastSenderId(staffId);
         conv.setUnreadByCustomer(conv.getUnreadByCustomer() + 1);
         conv.setStatus(ConversationStatus.OPEN);
         conversationRepository.save(conv);
@@ -216,6 +212,7 @@ public class ChatService {
 
         conv.setLastMessage("[Hình ảnh]");
         conv.setLastMessageAt(LocalDateTime.now());
+        conv.setLastSenderId(senderId);
         conv.setStatus(ConversationStatus.OPEN);
         Long customerId = conv.getCustomer().getId();
         boolean senderIsCustomer = senderId.equals(customerId);
@@ -365,6 +362,7 @@ public class ChatService {
                 .status(c.getStatus())
                 .lastMessage(c.getLastMessage())
                 .lastMessageAt(c.getLastMessageAt())
+                .lastSenderId(c.getLastSenderId())
                 .unreadByShop(c.getUnreadByShop())
                 .unreadByCustomer(c.getUnreadByCustomer())
                 .assignedStaffId(assigned != null ? assigned.getId() : null)
@@ -399,5 +397,53 @@ public class ChatService {
         }
 
         return builder.build();
+    }
+
+    // Map of conversationId -> Map of userId -> username
+    private static final java.util.concurrent.ConcurrentHashMap<Long, java.util.concurrent.ConcurrentHashMap<Long, String>> activeViewers =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    public void updateViewingStatus(Long userId, String username, Long conversationId, String status) {
+        if ("JOIN".equals(status)) {
+            activeViewers.computeIfAbsent(conversationId, k -> new java.util.concurrent.ConcurrentHashMap<>())
+                    .put(userId, username);
+        } else if ("LEAVE".equals(status)) {
+            java.util.concurrent.ConcurrentHashMap<Long, String> viewers = activeViewers.get(conversationId);
+            if (viewers != null) {
+                viewers.remove(userId);
+                if (viewers.isEmpty()) {
+                    activeViewers.remove(conversationId);
+                }
+            }
+        }
+        broadcastViewers(conversationId);
+    }
+
+    public void broadcastViewers(Long conversationId) {
+        java.util.concurrent.ConcurrentHashMap<Long, String> viewersMap = activeViewers.get(conversationId);
+        List<Map<String, Object>> viewersList = new java.util.ArrayList<>();
+        if (viewersMap != null) {
+            for (Map.Entry<Long, String> entry : viewersMap.entrySet()) {
+                viewersList.add(Map.of("userId", entry.getKey(), "username", entry.getValue()));
+            }
+        }
+        
+        Map<String, Object> event = Map.of(
+                "conversationId", conversationId,
+                "viewers", viewersList
+        );
+        messagingTemplate.convertAndSend("/topic/shop-viewers", event);
+    }
+
+    public void removeUserFromAllConversations(String email) {
+        userRepository.findByEmail(email).ifPresent(user -> {
+            Long userId = user.getId();
+            for (Map.Entry<Long, java.util.concurrent.ConcurrentHashMap<Long, String>> entry : activeViewers.entrySet()) {
+                if (entry.getValue().containsKey(userId)) {
+                    entry.getValue().remove(userId);
+                    broadcastViewers(entry.getKey());
+                }
+            }
+        });
     }
 }

@@ -166,4 +166,20 @@ public class ChatController {
         Long convId = ((Number) convIdObj).longValue();
         chatService.broadcastTyping(user.getId(), convId);
     }
+
+    @MessageMapping("/chat.viewing")
+    public void handleViewing(@Payload Map<String, Object> payload, Principal principal) {
+        if (principal == null) return;
+        User user = userRepository.findByEmail(principal.getName()).orElse(null);
+        if (user == null) return;
+
+        Object convIdObj = payload.get("conversationId");
+        Object statusObj = payload.get("status");
+        if (convIdObj == null || statusObj == null) return;
+
+        Long convId = ((Number) convIdObj).longValue();
+        String status = String.valueOf(statusObj);
+
+        chatService.updateViewingStatus(user.getId(), user.getFullName(), convId, status);
+    }
 }
