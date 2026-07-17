@@ -16,6 +16,7 @@ public class ConversationResponse {
     private ConversationStatus status;
     private String lastMessage;
     private LocalDateTime lastMessageAt;
+    private Long lastSenderId;
     private Integer unreadByShop;
     private Integer unreadByCustomer;
     private Long assignedStaffId;

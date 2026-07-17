@@ -246,6 +246,10 @@ public class SchemaUpdateConfig implements BeanPostProcessor {
                     "ALTER TABLE brands MODIFY COLUMN logo_url TEXT NULL");
 
             executeSql(stmt,
+                    "Patch conversations adds last_sender_id",
+                    "ALTER TABLE conversations ADD COLUMN last_sender_id BIGINT NULL");
+
+            executeSql(stmt,
                     "Seed default cashflow risk settings in system_settings if missing",
                     """
                             INSERT IGNORE INTO system_settings (setting_key, setting_value, description) VALUES
