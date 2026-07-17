@@ -17,4 +17,5 @@ public class AiKnowledgeTreatmentStageResponse {
     private List<String> instructions;
     private List<Long> productIds;
     private List<SuggestedProductResponse> products;
+    private List<String> extraProductNames;
 }

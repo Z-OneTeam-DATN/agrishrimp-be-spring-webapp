@@ -12,4 +12,5 @@ public class TreatmentStageResponse {
     private String stageTitle;
     private List<String> instructions;
     private List<SuggestedProductResponse> products;
+    private List<String> extraProductNames;
 }

@@ -1202,10 +1202,12 @@ public class AiKnowledgeService {
                     }
                     builder.append("</ul>");
                 }
-                if (!defaultList(stage.getProducts()).isEmpty()) {
+                List<String> productLabels = new ArrayList<>();
+                defaultList(stage.getProducts()).forEach(product -> productLabels.add(product.getName()));
+                productLabels.addAll(defaultList(stage.getExtraProductNames()));
+                if (!productLabels.isEmpty()) {
                     builder.append("<div>Sản phẩm: ")
-                            .append(stage.getProducts().stream()
-                                    .map(SuggestedProductResponse::getName)
+                            .append(productLabels.stream()
                                     .map(this::escapeHtml)
                                     .collect(Collectors.joining(", ")))
                             .append("</div>");
@@ -1366,6 +1368,7 @@ public class AiKnowledgeService {
                         .stageTitle(stage.getStageTitle())
                         .instructions(defaultList(stage.getInstructions()))
                         .products(resolveSuggestedProducts(stage.getProductIds()))
+                        .extraProductNames(defaultList(stage.getExtraProductNames()))
                         .build())
                 .toList();
     }
@@ -1378,6 +1381,7 @@ public class AiKnowledgeService {
                         .instructions(defaultList(stage.getInstructions()))
                         .productIds(defaultList(stage.getProductIds()))
                         .products(resolveSuggestedProducts(stage.getProductIds()))
+                        .extraProductNames(defaultList(stage.getExtraProductNames()))
                         .build())
                 .toList();
     }
@@ -1389,6 +1393,7 @@ public class AiKnowledgeService {
                         .instructions(defaultList(stage.getInstructions()))
                         .productIds(defaultList(stage.getProductIds()))
                         .products(resolveSuggestedProducts(stage.getProductIds()))
+                        .extraProductNames(defaultList(stage.getExtraProductNames()))
                         .build())
                 .toList();
     }
@@ -1399,6 +1404,10 @@ public class AiKnowledgeService {
                         .stageTitle(trimToNull(stage.getStageTitle()))
                         .instructions(defaultList(stage.getInstructions()))
                         .productIds(defaultList(stage.getProductIds()))
+                        .extraProductNames(defaultList(stage.getExtraProductNames()).stream()
+                                .map(this::trimToNull)
+                                .filter(Objects::nonNull)
+                                .toList())
                         .build())
                 .toList();
     }
@@ -1676,6 +1685,7 @@ public class AiKnowledgeService {
         private String stageTitle;
         private List<String> instructions;
         private List<Long> productIds;
+        private List<String> extraProductNames;
 
         public String getStageTitle() {
             return stageTitle;
@@ -1687,6 +1697,10 @@ public class AiKnowledgeService {
 
         public List<Long> getProductIds() {
             return productIds;
+        }
+
+        public List<String> getExtraProductNames() {
+            return extraProductNames;
         }
     }
 }

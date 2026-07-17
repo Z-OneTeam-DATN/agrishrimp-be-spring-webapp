@@ -15,4 +15,5 @@ public class AiKnowledgeTreatmentStageRequest {
     private String stageTitle;
     private List<String> instructions;
     private List<Long> productIds;
+    private List<String> extraProductNames;
 }
