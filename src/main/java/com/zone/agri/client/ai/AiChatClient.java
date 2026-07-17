@@ -1,7 +1,7 @@
 package com.zone.agri.client.ai;
 
-import com.zone.agri.dto.miniapp.ai.AiChatRequest;
-import com.zone.agri.dto.miniapp.ai.AiChatResponse;
+import com.zone.agri.dto.ai.AiChatRequest;
+import com.zone.agri.dto.ai.AiChatResponse;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.web.client.RestTemplateBuilder;

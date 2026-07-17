@@ -67,7 +67,7 @@ Swagger is grouped for easier review:
 - `Public APIs`: `/api/auth/**`, `/api/public/**`, `/api/external/**`
 - `Core System`: `/api/users/**`, `/api/roles/**`, `/api/branches/**`, `/api/files/**`
 - `Business Operations`: `/api/products/**`, `/api/categories/**`, `/api/suppliers/**`, `/api/customers/**`, `/api/attributes/**`
-- `Mini App`: `/api/miniapp/**`
+- `AI Doctor`: `/api/ai-doctor/**`
 
 Full endpoint documentation is available at `http://localhost:8004/swagger-ui/index.html` after the application starts.
 

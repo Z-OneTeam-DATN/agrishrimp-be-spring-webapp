@@ -8,11 +8,11 @@ import com.zone.agri.entity.*;
 import com.zone.agri.entity.enums.ConversationStatus;
 import com.zone.agri.entity.enums.MessageType;
 import com.zone.agri.entity.enums.NotificationType;
-import com.zone.agri.client.ai.AiChatClient;
 import com.zone.agri.common.CloudinaryService;
-import com.zone.agri.dto.miniapp.ai.AiChatRequest;
-import com.zone.agri.dto.miniapp.ai.AiChatResponse;
+import com.zone.agri.dto.ai.AiChatResponse;
+import com.zone.agri.dto.request.ai.AiDoctorChatRequest;
 import com.zone.agri.repository.*;
+import com.zone.agri.service.ai.AiKnowledgeService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.multipart.MultipartFile;
@@ -41,7 +41,7 @@ public class ChatService {
     private final SimpMessagingTemplate messagingTemplate;
     private final NotificationService notificationService;
     private final CloudinaryService cloudinaryService;
-    private final AiChatClient aiChatClient;
+    private final AiKnowledgeService aiKnowledgeService;
 
     @Transactional
     public ConversationResponse getOrCreateConversation(Long customerId) {
@@ -250,11 +250,14 @@ public class ChatService {
             User botUser = userRepository.findByEmail("bot@agrishrimp.vn").orElse(null);
             if (botUser == null) return;
 
-            AiChatResponse aiResp = aiChatClient.chat(
-                    AiChatRequest.builder()
+            AiChatResponse aiResp = aiKnowledgeService.answerChat(
+                    AiDoctorChatRequest.builder()
                             .message(customerMessage)
-                            .conversationId("chat_" + convId)
-                            .build());
+                            .sessionId("chat_" + convId)
+                            .build(),
+                    null,
+                    "CUSTOMER_CHAT_AUTO_REPLY",
+                    false);
 
             String reply = aiResp != null && aiResp.isSuccess() ? aiResp.getReply() : null;
             if (reply == null || reply.isBlank()) return;

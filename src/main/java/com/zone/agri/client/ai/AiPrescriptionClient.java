@@ -1,7 +1,7 @@
 package com.zone.agri.client.ai;
 
-import com.zone.agri.dto.miniapp.ai.AiPrescriptionRequest;
-import com.zone.agri.dto.miniapp.ai.AiPrescriptionResponse;
+import com.zone.agri.dto.ai.AiPrescriptionRequest;
+import com.zone.agri.dto.ai.AiPrescriptionResponse;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.web.client.RestTemplateBuilder;

@@ -183,6 +183,20 @@ public class DataSeeder implements CommandLineRunner {
                 PermissionGroup.COMMUNICATION,
                 mCustomerAdvisor);
 
+        Permission mAgronomistWorkspace = pMod("Workspace kỹ sư nông nghiệp", "AGRONOMIST_WORKSPACE", PermissionGroup.AI_KNOWLEDGE);
+        Permission aAgronomistWorkspaceUse = pAct(
+                "Sử dụng workspace kỹ sư nông nghiệp",
+                "AGRONOMIST_WORKSPACE_USE",
+                PermissionGroup.AI_KNOWLEDGE,
+                mAgronomistWorkspace);
+        Permission mAiKnowledge = pMod("Tri thức AI doctor", "AI_KNOWLEDGE", PermissionGroup.AI_KNOWLEDGE);
+        Permission aAiKnowledgeView = pAct("Xem tri thức AI", "AI_KNOWLEDGE_VIEW", PermissionGroup.AI_KNOWLEDGE, mAiKnowledge);
+        Permission aAiKnowledgeCreate = pAct("Tạo tri thức AI", "AI_KNOWLEDGE_CREATE", PermissionGroup.AI_KNOWLEDGE, mAiKnowledge);
+        Permission aAiKnowledgeUpdate = pAct("Cập nhật tri thức AI", "AI_KNOWLEDGE_UPDATE", PermissionGroup.AI_KNOWLEDGE, mAiKnowledge);
+        Permission aAiKnowledgeApprove = pAct("Duyệt tri thức AI", "AI_KNOWLEDGE_APPROVE", PermissionGroup.AI_KNOWLEDGE, mAiKnowledge);
+        Permission aAiImportKnowledge = pAct("Import tri thức AI", "AI_IMPORT_KNOWLEDGE", PermissionGroup.AI_KNOWLEDGE, mAiKnowledge);
+        Permission aAiCaseReview = pAct("Xử lý case AI", "AI_CASE_REVIEW", PermissionGroup.AI_KNOWLEDGE, mAiKnowledge);
+
         Set<Permission> superAdminPermissions = Set.of(
                 aDashV, aWspaceV,
                 aRptSale, aRptInv, aRptFin,
@@ -205,7 +219,10 @@ public class DataSeeder implements CommandLineRunner {
                 aBlogV, aBlogC, aBlogE, aBlogD,
                 aSetV, aSetU,
                 aChatV, aChatM,
-                aCustomerAdvisorUse);
+                aCustomerAdvisorUse,
+                aAgronomistWorkspaceUse,
+                aAiKnowledgeView, aAiKnowledgeCreate, aAiKnowledgeUpdate,
+                aAiKnowledgeApprove, aAiImportKnowledge, aAiCaseReview);
 
         Role superAdminRole = saveRole("SUPER_ADMIN", "Siêu quản trị", true, superAdminPermissions);
 
