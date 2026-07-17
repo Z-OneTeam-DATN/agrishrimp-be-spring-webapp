@@ -135,7 +135,6 @@ image-search:
 ai:
   base-url: ${AI_BASE_URL:}
   predict-path: ${AI_PREDICT_PATH:/ai/predict-image}
-  prescription-path: ${AI_PRESCRIPTION_PATH:/ai/generate-prescription}
 
 zalo:
   app-secret: ${ZALO_APP_SECRET}
