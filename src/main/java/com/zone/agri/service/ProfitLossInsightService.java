@@ -8,201 +8,215 @@ import java.util.ArrayList;
 import java.util.List;
 
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
+import com.zone.agri.dto.response.financial.ProfitLossContributionItemResponse;
 import com.zone.agri.dto.response.financial.ProfitLossInsightResponse;
-import com.zone.agri.dto.response.financial.ProfitLossInsightResponse.ContributionBreakdownItem;
 import com.zone.agri.dto.response.financial.ProfitLossResponse;
 
 import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
 
 @Service
 @RequiredArgsConstructor
-@Slf4j
 public class ProfitLossInsightService {
+
+    private static final String STATUS_SAFE = "SAFE";
+    private static final String STATUS_WARNING = "WARNING";
+    private static final String NO_PREVIOUS_DATA = "NO_PREVIOUS_DATA";
 
     private final FinancialService financialService;
     private final SettingService settingService;
 
-    @Transactional(readOnly = true)
-    public ProfitLossInsightResponse getProfitLossInsights(
-            LocalDate startDate,
-            LocalDate endDate,
-            Long branchId) {
+    public ProfitLossInsightResponse getProfitLossInsights(LocalDate startDate, LocalDate endDate, Long branchId) {
+        LocalDate resolvedEnd = endDate != null ? endDate : LocalDate.now();
+        LocalDate resolvedStart = startDate != null ? startDate : resolvedEnd.withDayOfMonth(1);
 
-        log.info("Calculating profit-loss insights for branchId: {}, startDate: {}, endDate: {}", branchId, startDate, endDate);
-
-        // 1. Calculate current period report
-        ProfitLossResponse currentReport = financialService.getProfitLossReport(startDate, endDate, branchId);
-
-        // 2. Check if we have previous period
-        boolean hasPreviousPeriod = startDate != null && startDate.isAfter(LocalDate.of(2000, 1, 1));
-        ProfitLossResponse previousReport = null;
-
-        if (hasPreviousPeriod) {
-            long days = ChronoUnit.DAYS.between(startDate, endDate);
-            LocalDate prevEnd = startDate.minusDays(1);
-            LocalDate prevStart = prevEnd.minusDays(days);
-            previousReport = financialService.getProfitLossReport(prevStart, prevEnd, branchId);
+        if (resolvedStart.isAfter(resolvedEnd)) {
+            LocalDate swap = resolvedStart;
+            resolvedStart = resolvedEnd;
+            resolvedEnd = swap;
         }
 
-        // 3. Calculate netProfitChangePercent
-        Object netProfitChangePercent;
-        if (previousReport == null) {
-            netProfitChangePercent = "NO_PREVIOUS_DATA";
-        } else {
-            BigDecimal prevNetProfit = previousReport.getNetProfit();
-            BigDecimal currNetProfit = currentReport.getNetProfit();
-            if (prevNetProfit == null || prevNetProfit.compareTo(BigDecimal.ZERO) == 0) {
-                netProfitChangePercent = currNetProfit != null && currNetProfit.compareTo(BigDecimal.ZERO) > 0 ? 100.0 : 0.0;
-            } else {
-                BigDecimal diff = currNetProfit.subtract(prevNetProfit);
-                BigDecimal percent = diff.multiply(BigDecimal.valueOf(100))
-                        .divide(prevNetProfit.abs(), 2, RoundingMode.HALF_UP);
-                netProfitChangePercent = percent.doubleValue();
-            }
-        }
+        ProfitLossResponse current = financialService.getProfitLossReport(resolvedStart, resolvedEnd, branchId);
+        ProfitLossResponse previous = loadPreviousPeriodReport(resolvedStart, resolvedEnd, branchId);
 
-        // 4. Calculate ratio metrics
-        double cogsRatio = 0.0;
-        if (currentReport.getNetRevenue() != null && currentReport.getNetRevenue().compareTo(BigDecimal.ZERO) > 0) {
-            cogsRatio = currentReport.getCogs()
-                    .multiply(BigDecimal.valueOf(100))
-                    .divide(currentReport.getNetRevenue(), 2, RoundingMode.HALF_UP)
-                    .doubleValue();
-        }
+        BigDecimal cogsRatio = calculateRatioPercent(current.getCogs(), current.getNetRevenue());
+        BigDecimal returnRatio = calculateRatioPercent(current.getReturnedGoods(), current.getGrossRevenue());
 
-        double returnRatio = 0.0;
-        if (currentReport.getGrossRevenue() != null && currentReport.getGrossRevenue().compareTo(BigDecimal.ZERO) > 0) {
-            returnRatio = currentReport.getReturnedGoods()
-                    .multiply(BigDecimal.valueOf(100))
-                    .divide(currentReport.getGrossRevenue(), 2, RoundingMode.HALF_UP)
-                    .doubleValue();
-        }
+        String cogsRatioStatus = shouldWarnOnCogsRatio(current, cogsRatio) ? STATUS_WARNING : STATUS_SAFE;
+        String returnRatioStatus = shouldWarnOnReturnRatio(current, returnRatio) ? STATUS_WARNING : STATUS_SAFE;
 
-        // 5. Evaluate thresholds and status
-        BigDecimal cogsThreshold = settingService.getPLCOGSWarningThreshold();
-        BigDecimal returnThreshold = settingService.getPLReturnWarningThreshold();
-
-        String cogsRatioStatus = cogsRatio >= cogsThreshold.doubleValue() ? "WARNING" : "NORMAL";
-        String returnRatioStatus = returnRatio >= returnThreshold.doubleValue() ? "WARNING" : "NORMAL";
-
-        // 6. Build warnings list
-        List<String> warnings = new ArrayList<>();
-        if ("WARNING".equals(cogsRatioStatus)) {
-            warnings.add("Tỷ lệ giá vốn/doanh thu thuần vượt ngưỡng cảnh báo (" + cogsThreshold + "%). Biên lợi nhuận gộp đang bị thu hẹp.");
-        }
-        if ("WARNING".equals(returnRatioStatus)) {
-            warnings.add("Tỷ lệ hàng bán bị trả lại vượt ngưỡng cảnh báo (" + returnThreshold + "%). Cần rà soát chất lượng sản phẩm hoặc dịch vụ.");
-        }
-
-        boolean isNetProfitNegative = currentReport.getNetProfit() != null && currentReport.getNetProfit().compareTo(BigDecimal.ZERO) < 0;
-        if (isNetProfitNegative) {
-            warnings.add("Cửa hàng đang ghi nhận lợi nhuận ròng âm trong kỳ này (" + formatVND(currentReport.getNetProfit()) + "). Cần tối ưu chi phí và tăng doanh số.");
-        }
-
-        // 7. Calculate contributionBreakdown
-        List<ContributionBreakdownItem> breakdown = new ArrayList<>();
-
-        // REVENUE: Gross Revenue
-        breakdown.add(createBreakdownItem(
-                "REVENUE",
-                currentReport.getGrossRevenue(),
-                previousReport != null ? previousReport.getGrossRevenue() : null,
-                "Doanh thu gốc từ tiền hàng (trước chiết khấu và trả lại)"
-        ));
-
-        // COGS: Cost of Goods Sold
-        breakdown.add(createBreakdownItem(
-                "COGS",
-                currentReport.getCogs(),
-                previousReport != null ? previousReport.getCogs() : null,
-                "Giá vốn hàng bán phát sinh trong kỳ"
-        ));
-
-        // SHIPPING: shipping fee collected - shipping fee returned
-        BigDecimal currShip = getSafeBigDecimal(currentReport.getShippingFeeCollected()).subtract(getSafeBigDecimal(currentReport.getShippingFeeReturned()));
-        BigDecimal prevShip = previousReport != null 
-                ? getSafeBigDecimal(previousReport.getShippingFeeCollected()).subtract(getSafeBigDecimal(previousReport.getShippingFeeReturned()))
-                : null;
-        breakdown.add(createBreakdownItem(
-                "SHIPPING",
-                currShip,
-                prevShip,
-                "Thu phí vận chuyển ròng (phí ship thu khách trừ phí ship hoàn trả)"
-        ));
-
-        // DISCOUNT: discount - discount returned
-        BigDecimal currDiscount = getSafeBigDecimal(currentReport.getDiscount()).subtract(getSafeBigDecimal(currentReport.getDiscountReturned()));
-        BigDecimal prevDiscount = previousReport != null 
-                ? getSafeBigDecimal(previousReport.getDiscount()).subtract(getSafeBigDecimal(previousReport.getDiscountReturned()))
-                : null;
-        breakdown.add(createBreakdownItem(
-                "DISCOUNT",
-                currDiscount,
-                prevDiscount,
-                "Tổng tiền chiết khấu giảm giá ròng áp dụng cho đơn hàng"
-        ));
-
-        // RETURNS: returned goods
-        breakdown.add(createBreakdownItem(
-                "RETURNS",
-                currentReport.getReturnedGoods(),
-                previousReport != null ? previousReport.getReturnedGoods() : null,
-                "Tổng giá trị hàng bán bị trả lại từ khách hàng"
-        ));
-
-        List<String> excludedZeroFields = List.of("pointPayment", "shippingFeePaid", "otherIncome", "customerReturnFee", "otherExpenses");
+        List<String> warnings = buildWarnings(current, previous, cogsRatio, cogsRatioStatus, returnRatio, returnRatioStatus);
 
         return ProfitLossInsightResponse.builder()
-                .netProfitChangePercent(netProfitChangePercent)
-                .contributionBreakdown(breakdown)
                 .cogsRatio(cogsRatio)
                 .cogsRatioStatus(cogsRatioStatus)
                 .returnRatio(returnRatio)
                 .returnRatioStatus(returnRatioStatus)
-                .isNetProfitNegative(isNetProfitNegative)
-                .excludedZeroFields(excludedZeroFields)
+                .netProfitChangePercent(formatNetProfitChangePercent(current.getNetProfit(), previous.getNetProfit(), previous))
+                .contributionBreakdown(buildContributionBreakdown(current, previous))
                 .warnings(warnings)
                 .build();
     }
 
-    private ContributionBreakdownItem createBreakdownItem(String factor, BigDecimal currentVal, BigDecimal prevVal, String baseDesc) {
-        BigDecimal change = null;
-        String note;
+    private ProfitLossResponse loadPreviousPeriodReport(LocalDate startDate, LocalDate endDate, Long branchId) {
+        long dayDiff = ChronoUnit.DAYS.between(startDate, endDate);
+        LocalDate previousEnd = startDate.minusDays(1);
+        LocalDate previousStart = previousEnd.minusDays(dayDiff);
+        return financialService.getProfitLossReport(previousStart, previousEnd, branchId);
+    }
 
-        BigDecimal safeCurrent = getSafeBigDecimal(currentVal);
-        
-        if (prevVal != null) {
-            BigDecimal safePrev = getSafeBigDecimal(prevVal);
-            change = safeCurrent.subtract(safePrev);
-            if (change.compareTo(BigDecimal.ZERO) > 0) {
-                note = baseDesc + " tăng " + formatVND(change) + " so với kỳ trước.";
-            } else if (change.compareTo(BigDecimal.ZERO) < 0) {
-                note = baseDesc + " giảm " + formatVND(change.abs()) + " so với kỳ trước.";
-            } else {
-                note = baseDesc + " ổn định so với kỳ trước.";
-            }
-        } else {
-            note = baseDesc + " đạt " + formatVND(safeCurrent) + " trong kỳ.";
-        }
+    private List<ProfitLossContributionItemResponse> buildContributionBreakdown(
+            ProfitLossResponse current,
+            ProfitLossResponse previous) {
+        List<ProfitLossContributionItemResponse> items = new ArrayList<>();
+        items.add(buildItem(
+                "REVENUE",
+                safe(current.getGrossRevenue()),
+                safe(previous.getGrossRevenue()),
+                "Doanh thu goc tien hang duoc ghi nhan trong ky."));
+        items.add(buildItem(
+                "COGS",
+                safe(current.getCogs()),
+                safe(previous.getCogs()),
+                "Gia von hang ban da ghi nhan theo cac don da phat sinh doanh thu."));
+        items.add(buildItem(
+                "SHIPPING",
+                netShippingImpact(current),
+                netShippingImpact(previous),
+                "Tac dong rong tu phi ship thu khach tru phi ship hoan tra."));
+        items.add(buildItem(
+                "DISCOUNT",
+                netDiscountImpact(current),
+                netDiscountImpact(previous),
+                "Tac dong rong tu chiet khau sau khi cong lai phan duoc hoan."));
+        items.add(buildItem(
+                "RETURNS",
+                safe(current.getReturnedGoods()),
+                safe(previous.getReturnedGoods()),
+                "Gia tri hang ban bi tra lai lam giam hieu qua loi nhuan."));
+        return items;
+    }
 
-        return ContributionBreakdownItem.builder()
+    private ProfitLossContributionItemResponse buildItem(
+            String factor,
+            BigDecimal currentValue,
+            BigDecimal previousValue,
+            String note) {
+        return ProfitLossContributionItemResponse.builder()
                 .factor(factor)
-                .currentValue(safeCurrent)
-                .previousValue(prevVal)
-                .changeAmount(change)
+                .currentValue(currentValue)
+                .previousValue(previousValue)
+                .changeAmount(currentValue.subtract(previousValue))
                 .note(note)
                 .build();
     }
 
-    private BigDecimal getSafeBigDecimal(BigDecimal value) {
+    private List<String> buildWarnings(
+            ProfitLossResponse current,
+            ProfitLossResponse previous,
+            BigDecimal cogsRatio,
+            String cogsRatioStatus,
+            BigDecimal returnRatio,
+            String returnRatioStatus) {
+        List<String> warnings = new ArrayList<>();
+
+        if (current.getNetRevenue() == null || current.getNetRevenue().compareTo(BigDecimal.ZERO) <= 0) {
+            warnings.add("Doanh thu thuan khong duong, can kiem tra doanh thu ghi nhan va cac khoan giam tru.");
+        }
+
+        if (STATUS_WARNING.equals(cogsRatioStatus)) {
+            warnings.add(String.format(
+                    "Ty le gia von/doanh thu thuan dang o muc %s%%, vuot nguong canh bao.",
+                    toDisplayNumber(cogsRatio)));
+        }
+
+        if (STATUS_WARNING.equals(returnRatioStatus)) {
+            warnings.add(String.format(
+                    "Ty le hang tra lai dang o muc %s%%, can ra soat chat luong don hang va van hanh giao nhan.",
+                    toDisplayNumber(returnRatio)));
+        }
+
+        if (safe(current.getNetProfit()).compareTo(BigDecimal.ZERO) < 0) {
+            warnings.add("Loi nhuan rong dang am trong ky hien tai.");
+        }
+
+        if (hasBaselineData(previous) && safe(current.getNetProfit()).compareTo(safe(previous.getNetProfit())) < 0) {
+            warnings.add("Loi nhuan rong giam so voi ky truoc.");
+        }
+
+        return warnings;
+    }
+
+    private boolean shouldWarnOnCogsRatio(ProfitLossResponse current, BigDecimal cogsRatio) {
+        if (safe(current.getNetRevenue()).compareTo(BigDecimal.ZERO) <= 0) {
+            return safe(current.getCogs()).compareTo(BigDecimal.ZERO) > 0;
+        }
+        return cogsRatio.compareTo(settingService.getPLCOGSWarningThreshold()) >= 0;
+    }
+
+    private boolean shouldWarnOnReturnRatio(ProfitLossResponse current, BigDecimal returnRatio) {
+        if (safe(current.getGrossRevenue()).compareTo(BigDecimal.ZERO) <= 0) {
+            return safe(current.getReturnedGoods()).compareTo(BigDecimal.ZERO) > 0;
+        }
+        return returnRatio.compareTo(settingService.getPLReturnWarningThreshold()) >= 0;
+    }
+
+    private String formatNetProfitChangePercent(
+            BigDecimal currentNetProfit,
+            BigDecimal previousNetProfit,
+            ProfitLossResponse previous) {
+        BigDecimal current = safe(currentNetProfit);
+        BigDecimal previousValue = safe(previousNetProfit);
+
+        if (!hasBaselineData(previous)) {
+            return NO_PREVIOUS_DATA;
+        }
+
+        if (previousValue.compareTo(BigDecimal.ZERO) == 0) {
+            if (current.compareTo(BigDecimal.ZERO) == 0) {
+                return "0.0";
+            }
+            return current.compareTo(BigDecimal.ZERO) > 0 ? "100.0" : "-100.0";
+        }
+
+        BigDecimal change = current.subtract(previousValue)
+                .multiply(BigDecimal.valueOf(100))
+                .divide(previousValue.abs(), 1, RoundingMode.HALF_UP);
+        return change.stripTrailingZeros().toPlainString();
+    }
+
+    private BigDecimal calculateRatioPercent(BigDecimal numerator, BigDecimal denominator) {
+        BigDecimal safeDenominator = safe(denominator);
+        if (safeDenominator.compareTo(BigDecimal.ZERO) <= 0) {
+            return BigDecimal.ZERO.setScale(1, RoundingMode.HALF_UP);
+        }
+
+        return safe(numerator)
+                .multiply(BigDecimal.valueOf(100))
+                .divide(safeDenominator, 1, RoundingMode.HALF_UP);
+    }
+
+    private BigDecimal netShippingImpact(ProfitLossResponse response) {
+        return safe(response.getShippingFeeCollected()).subtract(safe(response.getShippingFeeReturned()));
+    }
+
+    private BigDecimal netDiscountImpact(ProfitLossResponse response) {
+        return safe(response.getDiscountReturned()).subtract(safe(response.getDiscount()));
+    }
+
+    private boolean hasBaselineData(ProfitLossResponse report) {
+        return safe(report.getGrossRevenue()).compareTo(BigDecimal.ZERO) != 0
+                || safe(report.getReturnedGoods()).compareTo(BigDecimal.ZERO) != 0
+                || safe(report.getNetRevenue()).compareTo(BigDecimal.ZERO) != 0
+                || safe(report.getCogs()).compareTo(BigDecimal.ZERO) != 0
+                || safe(report.getNetProfit()).compareTo(BigDecimal.ZERO) != 0;
+    }
+
+    private BigDecimal safe(BigDecimal value) {
         return value == null ? BigDecimal.ZERO : value;
     }
 
-    private String formatVND(BigDecimal value) {
-        if (value == null) return "0đ";
-        return new java.text.DecimalFormat("#,###đ").format(value);
+    private String toDisplayNumber(BigDecimal value) {
+        return safe(value).setScale(1, RoundingMode.HALF_UP).stripTrailingZeros().toPlainString();
     }
 }

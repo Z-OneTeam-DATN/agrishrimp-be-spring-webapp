@@ -12,7 +12,6 @@ import com.zone.agri.entity.enums.UserStatus;
 import com.zone.agri.repository.*;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.PageRequest;
-import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
@@ -41,19 +40,7 @@ public class DashboardService {
     }
 
     private Long resolveBranchId(Long requestBranchId) {
-        UserDetail currentUser = AuthUtils.getUserDetail();
-        if (currentUser == null) throw new AccessDeniedException("Người dùng chưa đăng nhập.");
-
-        String roleSlug = currentUser.getRole().getSlug();
-        
-        if (roleSlug.equals("ADMIN") || roleSlug.equals("SUPER_ADMIN")) {
-            return requestBranchId;
-        }
-
-        Long userBranchId = currentUser.getBranchId();
-        if (userBranchId == null) throw new AccessDeniedException("Người dùng không thuộc chi nhánh nào.");
-
-        return userBranchId;
+        return AuthUtils.resolveRequestedOrUserBranch(requestBranchId, "DASHBOARD_VIEW");
     }
 
     // 2.1 TỔNG QUAN CHỈ SỐ

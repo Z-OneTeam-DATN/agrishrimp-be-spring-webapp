@@ -122,6 +122,8 @@ class InventoryTransferServiceTest {
                 .name("Kho Tong")
                 .build();
         setId(warehouse, 1L, "id");
+        warehouse.setLat(10.10);
+        warehouse.setLng(105.70);
 
         sourceBranch = Branch.builder()
                 .branchCode("CN-HCM")
@@ -129,6 +131,8 @@ class InventoryTransferServiceTest {
                 .name("Chi Nhanh HCM")
                 .build();
         setId(sourceBranch, 2L, "id");
+        sourceBranch.setLat(10.76);
+        sourceBranch.setLng(106.67);
 
         destinationBranch = Branch.builder()
                 .branchCode("CN-CT")
@@ -136,6 +140,8 @@ class InventoryTransferServiceTest {
                 .name("Chi Nhanh Can Tho")
                 .build();
         setId(destinationBranch, 3L, "id");
+        destinationBranch.setLat(10.03);
+        destinationBranch.setLng(105.78);
 
         defectBranch = Branch.builder()
                 .branchCode("SYSTEM_DEFECT")
@@ -257,8 +263,9 @@ class InventoryTransferServiceTest {
         when(inventoryRepo.findByProductVariantId(10L)).thenReturn(List.of());
         when(transferRepo.countTotalTransfers()).thenReturn(3L);
 
-        List<InventoryTransfer> transfers = inventoryTransferService
-                .createReplenishmentTransfersForSubOrder(replenishmentSubOrder);
+        List<InventoryTransfer> transfers = callAs(
+                requesterUser,
+                () -> inventoryTransferService.createReplenishmentTransfersForSubOrder(replenishmentSubOrder));
 
         assertThat(transfers).hasSize(1);
         InventoryTransfer transfer = transfers.get(0);
@@ -272,6 +279,47 @@ class InventoryTransferServiceTest {
         assertThat(transfer.getTotalQuantity()).isEqualTo(2);
         assertThat(transfer.getDetails()).hasSize(1);
         assertThat(transfer.getDetails().get(0).getQuantityRequested()).isEqualTo(2);
+    }
+
+    @Test
+    void createReplenishmentTransfersForSubOrder_usesOtherBranchesBeforeWarehouseFallback() {
+        Branch supplyingBranch = Branch.builder()
+                .branchCode("CN-ST")
+                .branchType("STORE")
+                .name("Chi Nhanh Soc Trang")
+                .build();
+        setId(supplyingBranch, 4L, "id");
+        supplyingBranch.setLat(9.60);
+        supplyingBranch.setLng(105.97);
+
+        replenishmentSubOrder.getItems().get(0).setMissingQuantity(5);
+
+        when(subOrderRepo.findByIdWithItems(34L)).thenReturn(Optional.of(replenishmentSubOrder));
+        when(transferRepo.findByReferenceCodeAndStatusInOrderByCreatedAtDesc(any(), any())).thenReturn(List.of());
+        when(branchRepo.findAll()).thenReturn(List.of(warehouse, sourceBranch, destinationBranch, supplyingBranch));
+        when(branchRepo.findById(supplyingBranch.getId())).thenReturn(Optional.of(supplyingBranch));
+        when(inventoryRepo.findByProductVariantId(variant.getId())).thenReturn(List.of(
+                createInventory(supplyingBranch, variant, 3),
+                createInventory(warehouse, variant, 0)));
+        when(transferRepo.countTotalTransfers()).thenReturn(10L, 11L);
+
+        List<InventoryTransfer> transfers = callAs(
+                requesterUser,
+                () -> inventoryTransferService.createReplenishmentTransfersForSubOrder(replenishmentSubOrder));
+
+        assertThat(transfers).hasSize(2);
+
+        InventoryTransfer branchTransfer = transfers.stream()
+                .filter(transfer -> transfer.getFromBranch().getId().equals(supplyingBranch.getId()))
+                .findFirst()
+                .orElseThrow();
+        InventoryTransfer warehouseTransfer = transfers.stream()
+                .filter(transfer -> transfer.getFromBranch().getId().equals(warehouse.getId()))
+                .findFirst()
+                .orElseThrow();
+
+        assertThat(branchTransfer.getTotalQuantity()).isEqualTo(3);
+        assertThat(warehouseTransfer.getTotalQuantity()).isEqualTo(2);
     }
 
     @Test
@@ -530,6 +578,14 @@ class InventoryTransferServiceTest {
                     .build());
             return supplier.get();
         }
+    }
+
+    private Inventory createInventory(Branch branch, ProductVariant productVariant, int quantity) {
+        return Inventory.builder()
+                .branch(branch)
+                .productVariant(productVariant)
+                .quantity(quantity)
+                .build();
     }
 
     @SuppressWarnings("SameParameterValue")

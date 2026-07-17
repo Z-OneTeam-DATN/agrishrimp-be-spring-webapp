@@ -5,8 +5,10 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.zone.agri.dto.response.payment.PayOSApiResponse;
 import com.zone.agri.entity.Order;
 import com.zone.agri.entity.SubOrder;
+import com.zone.agri.entity.enums.FulfillmentStatus;
 import com.zone.agri.entity.enums.OrderStatus;
 import com.zone.agri.entity.enums.PaymentStatus;
+import com.zone.agri.entity.enums.StockStatus;
 import com.zone.agri.repository.OrderRepository;
 import com.zone.agri.repository.SubOrderRepository;
 import lombok.RequiredArgsConstructor;
@@ -59,6 +61,9 @@ public class PayOSService {
 
     @Value("${payos.cancel-url}")
     private String cancelUrl;
+
+    @Value("${order.auto-approve-minutes:5}")
+    private long autoApproveMinutes;
 
     private static final String PAYOS_URL = "https://api-merchant.payos.vn/v2/payment-requests";
 
@@ -231,26 +236,34 @@ public class PayOSService {
 
         List<SubOrder> subOrders = subOrderRepository.findByOrderId(order.getId());
         boolean hasAnyMissingItems = false;
-        List<Long> awaitingReplenishmentSubOrderIds = new ArrayList<>();
         for (SubOrder subOrder : subOrders) {
             if (subOrder.getStatus() == OrderStatus.AWAITING_PAYMENT) {
                 boolean hasMissingItems = subOrder.getItems() != null
                         && subOrder.getItems().stream().anyMatch(item -> (item.getMissingQuantity() != null ? item.getMissingQuantity() : 0) > 0);
-                subOrder.setStatus(hasMissingItems ? OrderStatus.AWAITING_REPLENISHMENT : OrderStatus.PROCESSING);
+                subOrder.setStatus(OrderStatus.PENDING);
                 hasAnyMissingItems = hasAnyMissingItems || hasMissingItems;
-                if (hasMissingItems) {
-                    awaitingReplenishmentSubOrderIds.add(subOrder.getId());
-                }
             }
         }
 
         if (order.getStatus() == OrderStatus.AWAITING_PAYMENT) {
-            order.setStatus(hasAnyMissingItems ? OrderStatus.AWAITING_REPLENISHMENT : OrderStatus.PROCESSING);
+            order.setStatus(OrderStatus.PENDING);
+        }
+
+        if (hasAnyMissingItems) {
+            order.setAutoApproveAt(null);
+            if (order.getStockStatus() == null) {
+                order.setStockStatus(StockStatus.PARTIALLY_AVAILABLE);
+            }
+        } else {
+            order.setAutoApproveAt(java.time.LocalDateTime.now().plusMinutes(Math.max(1, autoApproveMinutes)));
+            order.setFulfillmentStatus(FulfillmentStatus.NOT_STARTED);
+            if (order.getStockStatus() == null) {
+                order.setStockStatus(StockStatus.FULLY_AVAILABLE);
+            }
         }
 
         orderRepository.save(order);
         subOrderRepository.saveAll(subOrders);
-        immediateReplenishmentService.scheduleAfterCommit(awaitingReplenishmentSubOrderIds, order.getCode());
     }
 
     private String withOrderParams(String baseUrl, Order order, String status) {

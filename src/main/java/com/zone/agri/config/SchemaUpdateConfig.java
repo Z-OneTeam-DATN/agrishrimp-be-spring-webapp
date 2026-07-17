@@ -40,8 +40,20 @@ public class SchemaUpdateConfig implements BeanPostProcessor {
                     "ALTER TABLE orders MODIFY COLUMN payment_method ENUM('CASH','TRANSFER','COD','PAYOS')");
 
             executeSql(stmt,
+                    "Patch orders.payment_status enum adds workflow payment states",
+                    "ALTER TABLE orders MODIFY COLUMN payment_status ENUM('UNPAID','PENDING','PENDING_VERIFICATION','PARTIALLY_PAID','PAID','FAILED','EXPIRED','REFUND_PENDING','REFUNDED')");
+
+            executeSql(stmt,
                     "Patch orders.status enum adds newer workflow states",
                     "ALTER TABLE orders MODIFY COLUMN status ENUM('PENDING','AWAITING_PAYMENT','AWAITING_REPLENISHMENT','CONFIRMED','PROCESSING','READY_FOR_PICKUP','SHIPPING','RECEIVED','COMPLETED','CANCELLED','RETURNED')");
+
+            executeSql(stmt,
+                    "Patch inventory_transactions.type enum adds order reservation workflow types",
+                    "ALTER TABLE inventory_transactions MODIFY COLUMN type ENUM('IMPORT','ORDER_RESERVE','ORDER_RELEASE','SALE','CANCEL_RELEASE','TRANSFER_OUT','TRANSFER_IN','ADJUSTMENT','RETURN','DAMAGED')");
+
+            executeSql(stmt,
+                    "Patch orders adds workflow state columns",
+                    "ALTER TABLE orders ADD COLUMN fulfillment_status VARCHAR(40) NULL, ADD COLUMN stock_status VARCHAR(40) NULL, ADD COLUMN auto_approve_at DATETIME NULL, ADD COLUMN auto_approval_paused BIT(1) NOT NULL DEFAULT b'0', ADD COLUMN delivery_address_id BIGINT NULL, ADD COLUMN version INT NOT NULL DEFAULT 0");
 
             executeSql(stmt,
                     "Patch inventory_notes.type enum adds CHECK",
@@ -264,6 +276,10 @@ public class SchemaUpdateConfig implements BeanPostProcessor {
             executeSql(stmt,
                     "Patch brands increase logo_url size to TEXT",
                     "ALTER TABLE brands MODIFY COLUMN logo_url TEXT NULL");
+
+            executeSql(stmt,
+                    "Patch conversations adds last_sender_id",
+                    "ALTER TABLE conversations ADD COLUMN last_sender_id BIGINT NULL");
 
             executeSql(stmt,
                     "Seed default cashflow risk settings in system_settings if missing",

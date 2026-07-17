@@ -58,7 +58,7 @@ public class SecurityConfig {
             "/api/v1/public/**",
             "/api/webhooks/**",
             "/api/orders/admin/**",
-            "/api/vouchers/public",
+            "/api/vouchers/public/**",
             "/ws/**",
             "/ws-native",
             "/ws-native/**",

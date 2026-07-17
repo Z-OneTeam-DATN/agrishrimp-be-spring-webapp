@@ -1,5 +1,6 @@
 package com.zone.agri.controller;
 
+import com.zone.agri.common.RoleUtils;
 import com.zone.agri.dto.request.order.*;
 import com.zone.agri.dto.response.order.*;
 import com.zone.agri.entity.Order;
@@ -56,7 +57,7 @@ public class OrderController {
     private void verifyAdminAccess() {
         User user = getCurrentUser();
         String roleSlug = user.getRole() != null ? user.getRole().getSlug() : "";
-        if (!"ADMIN".equals(roleSlug) && !"SUPER_ADMIN".equals(roleSlug)) {
+        if (!RoleUtils.isAdminLikeRole(roleSlug)) {
             throw new com.zone.agri.exception.Forbidden("Tài khoản chi nhánh không được phép xem/thao tác toàn bộ đơn hàng hệ thống. Vui lòng sử dụng chức năng dành cho chi nhánh!");
         }
     }
@@ -136,7 +137,7 @@ public class OrderController {
     @RequirePermission("ORDER_VIEW")
     @GetMapping("/admin/all")
     public ResponseEntity<Page<OrderResponse>> getAllOrders(
-            @RequestParam(required = false) OrderStatus status,
+            @RequestParam(required = false) String status,
             @RequestParam(required = false) String search,
             @PageableDefault(size = 10, sort = "createdAt", direction = Sort.Direction.DESC) Pageable pageable) {
         verifyAdminAccess();
@@ -219,9 +220,10 @@ public class OrderController {
         return ResponseEntity.ok(orderService.getBranchOrderDetail(user.getBranch().getId(), orderId));
     }
 
-    @Operation(summary = "Cập nhật trạng thái phần đơn của chi nhánh", description = "Chi nhánh tự quản lý trạng thái phần đơn của mình theo quy trình: "
-            + "PENDING → CONFIRMED → PROCESSING → READY_FOR_PICKUP → SHIPPING → RECEIVED → COMPLETED. "
-            + "Trạng thái tổng của đơn hàng sẽ được tự động đồng bộ theo chi nhánh chậm nhất.")
+    @Operation(summary = "Cập nhật trạng thái phần đơn của chi nhánh", description = "Chi nhánh tự quản lý phần đơn theo luồng: "
+            + "PENDING → CONFIRMED → PROCESSING → READY_FOR_PICKUP, sau đó bàn giao qua handover để sang SHIPPING. "
+            + "Nếu thiếu hàng thì phần đơn nằm ở AWAITING_REPLENISHMENT cho đến khi được bổ sung đủ. "
+            + "Trạng thái tổng của đơn hàng sẽ được đồng bộ tự động theo tiến độ các sub-order.")
     @RequirePermission("ORDER_UPDATE")
     @PutMapping("/branch/orders/{orderId}/status")
     public ResponseEntity<?> updateBranchSubOrderStatus(

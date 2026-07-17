@@ -180,9 +180,10 @@ public class InventoryTransferService {
 
         boolean fromWarehouse = isWarehouseBranch(fromBranch);
         boolean toWarehouse = isWarehouseBranch(toBranch);
+        boolean autoReplenishmentTransfer = AUTO_REPLENISHMENT_TRANSFER_TYPE.equalsIgnoreCase(req.getTransferType());
 
         if (businessType == TransferBusinessType.STOCK_TRANSFER) {
-            if (!fromWarehouse) {
+            if (!fromWarehouse && !autoReplenishmentTransfer) {
                 throw new BadRequestException("Luồng cấp phát nội bộ chỉ được xuất từ chi nhánh loại kho.");
             }
             if (toWarehouse) {
@@ -425,8 +426,13 @@ public class InventoryTransferService {
     public List<InventoryTransfer> createReplenishmentTransfersForSubOrder(SubOrder subOrder) {
         subOrder = subOrderRepo.findByIdWithItems(subOrder.getId())
                 .orElseThrow(() -> new RuntimeException("Khong tim thay phan don can dieu chuyen bo sung"));
-        if (subOrder.getStatus() != OrderStatus.AWAITING_REPLENISHMENT) {
-            throw new RuntimeException("ChĂ¡Â»â€° cÄ‚Â³ thĂ¡Â»Æ’ tĂ¡ÂºÂ¡o Ă„â€˜iĂ¡Â»Âu chuyĂ¡Â»Æ’n bĂ¡Â»â€¢ sung cho phĂ¡ÂºÂ§n Ă„â€˜Ă†Â¡n Ă„â€˜ang chĂ¡Â»Â Ă„â€˜iĂ¡Â»Âu chuyĂ¡Â»Æ’n");
+        boolean hasMissingItems = subOrder.getItems() != null
+                && subOrder.getItems().stream()
+                        .anyMatch(item -> Objects.requireNonNullElse(item.getMissingQuantity(), 0) > 0);
+        if (!hasMissingItems
+                || (subOrder.getStatus() != OrderStatus.PENDING
+                        && subOrder.getStatus() != OrderStatus.AWAITING_REPLENISHMENT)) {
+            throw new BadRequestException("Chi co the tao dieu chuyen bo sung cho phan don dang cho dieu chuyen");
         }
 
         String referenceCode = subOrder.getOrder().getCode() + "-SUB-" + subOrder.getId();
@@ -438,6 +444,9 @@ public class InventoryTransferService {
         }
 
         Branch warehouse = resolveMainWarehouse();
+        if (shouldUseDistributedReplenishment()) {
+            return createPlannedReplenishmentTransfers(subOrder, warehouse, referenceCode);
+        }
 
         Branch toBranch = subOrder.getBranch();
 
@@ -492,6 +501,149 @@ public class InventoryTransferService {
         request.setItems(requestItems);
         transfers.add(createTransferInternal(request, findCurrentUserOrNull(), toBranch));
         return transfers;
+    }
+
+    private boolean shouldUseDistributedReplenishment() {
+        return true;
+    }
+
+    private List<InventoryTransfer> createPlannedReplenishmentTransfers(
+            SubOrder subOrder,
+            Branch warehouse,
+            String referenceCode) {
+        Branch toBranch = subOrder.getBranch();
+        Map<Long, Map<String, Integer>> transferPlanBySourceBranch = buildAutoReplenishmentPlan(subOrder, warehouse);
+        if (transferPlanBySourceBranch.isEmpty()) {
+            throw new RuntimeException("Khong co san pham nao can dieu chuyen bo sung");
+        }
+
+        List<InventoryTransfer> transfers = new ArrayList<>();
+        LocalDateTime now = LocalDateTime.now();
+        for (Map.Entry<Long, Map<String, Integer>> sourcePlan : transferPlanBySourceBranch.entrySet()) {
+            TransferRequest request = new TransferRequest();
+            request.setFromBranchId(sourcePlan.getKey());
+            request.setToBranchId(toBranch.getId());
+            request.setTransferType(AUTO_REPLENISHMENT_TRANSFER_TYPE);
+            request.setDescription(buildAutoReplenishmentDescription(subOrder));
+            request.setReferenceCode(referenceCode);
+            request.setPriority("HIGH");
+            request.setTransferDate(now);
+            request.setDeadline(now.plusDays(1));
+            request.setItems(sourcePlan.getValue().entrySet().stream()
+                    .map(itemEntry -> {
+                        TransferItemRequest itemRequest = new TransferItemRequest();
+                        itemRequest.setSku(itemEntry.getKey());
+                        itemRequest.setQuantity(itemEntry.getValue());
+                        itemRequest.setItemNote("Tu dong bo sung cho phan don " + referenceCode);
+                        return itemRequest;
+                    })
+                    .toList());
+            transfers.add(createTransfer(request));
+        }
+        return transfers;
+    }
+
+    private Map<Long, Map<String, Integer>> buildAutoReplenishmentPlan(SubOrder subOrder, Branch warehouse) {
+        Map<Long, Map<String, Integer>> transferPlanBySourceBranch = new LinkedHashMap<>();
+        Branch toBranch = subOrder.getBranch();
+        Long toBranchId = toBranch != null ? toBranch.getId() : null;
+        Long warehouseId = warehouse != null ? warehouse.getId() : null;
+
+        List<SubOrderItem> subOrderItems = subOrder.getItems() != null ? subOrder.getItems() : List.of();
+        for (SubOrderItem item : subOrderItems) {
+            int remainingMissing = Objects.requireNonNullElse(item.getMissingQuantity(), 0);
+            if (remainingMissing <= 0 || item.getProductVariant() == null || item.getProductVariant().getId() == null) {
+                continue;
+            }
+
+            String sku = item.getProductVariant().getSku();
+            if (sku == null || sku.isBlank()) {
+                continue;
+            }
+
+            for (SourceBranchCandidate candidate : loadNearestSellableSourceCandidates(
+                    toBranch,
+                    item.getProductVariant().getId())) {
+                if (remainingMissing <= 0) {
+                    break;
+                }
+
+                int quantityToMove = Math.min(remainingMissing, candidate.availableQuantity());
+                if (quantityToMove <= 0) {
+                    continue;
+                }
+
+                transferPlanBySourceBranch
+                        .computeIfAbsent(candidate.branchId(), ignored -> new LinkedHashMap<>())
+                        .merge(sku, quantityToMove, Integer::sum);
+                remainingMissing -= quantityToMove;
+            }
+
+            if (remainingMissing > 0 && warehouseId != null && !Objects.equals(warehouseId, toBranchId)) {
+                if (ENFORCE_SOURCE_STOCK_CHECK_ON_CREATE
+                        && resolveAvailableQuantityAtBranch(item.getProductVariant().getId(), warehouseId) < remainingMissing) {
+                    throw new RuntimeException("Kho tong khong du hang de dieu chuyen bo sung cho SKU: " + sku);
+                }
+                transferPlanBySourceBranch
+                        .computeIfAbsent(warehouseId, ignored -> new LinkedHashMap<>())
+                        .merge(sku, remainingMissing, Integer::sum);
+            }
+        }
+
+        return transferPlanBySourceBranch;
+    }
+
+    private List<SourceBranchCandidate> loadNearestSellableSourceCandidates(Branch toBranch, Long variantId) {
+        if (toBranch == null || toBranch.getId() == null || variantId == null) {
+            return List.of();
+        }
+
+        Map<Long, Integer> availableByBranch = new LinkedHashMap<>();
+        Map<Long, Branch> branchById = new LinkedHashMap<>();
+
+        for (Inventory inventory : inventoryRepo.findByProductVariantId(variantId)) {
+            Branch sourceBranch = inventory.getBranch();
+            Long sourceBranchId = sourceBranch != null ? sourceBranch.getId() : null;
+            int availableQty = Objects.requireNonNullElse(inventory.getQuantity(), 0);
+
+            if (sourceBranchId == null
+                    || Objects.equals(sourceBranchId, toBranch.getId())
+                    || isWarehouseBranch(sourceBranch)
+                    || availableQty <= 0) {
+                continue;
+            }
+
+            availableByBranch.merge(sourceBranchId, availableQty, Integer::sum);
+            branchById.putIfAbsent(sourceBranchId, sourceBranch);
+        }
+
+        return availableByBranch.entrySet().stream()
+                .map(entry -> new SourceBranchCandidate(
+                        entry.getKey(),
+                        entry.getValue(),
+                        calculateHaversineDistance(
+                                toBranch.getLat(),
+                                toBranch.getLng(),
+                                branchById.get(entry.getKey()) != null ? branchById.get(entry.getKey()).getLat() : null,
+                                branchById.get(entry.getKey()) != null ? branchById.get(entry.getKey()).getLng() : null)))
+                .sorted(Comparator
+                        .comparingDouble(SourceBranchCandidate::distanceKm)
+                        .thenComparing(SourceBranchCandidate::branchId))
+                .toList();
+    }
+
+    private int resolveAvailableQuantityAtBranch(Long variantId, Long branchId) {
+        if (variantId == null || branchId == null) {
+            return 0;
+        }
+
+        return inventoryRepo.findByProductVariantId(variantId).stream()
+                .filter(inv -> inv.getBranch() != null && Objects.equals(inv.getBranch().getId(), branchId))
+                .mapToInt(inv -> Objects.requireNonNullElse(inv.getQuantity(), 0))
+                .sum();
+    }
+
+    private record SourceBranchCandidate(Long branchId, int availableQuantity, double distanceKm) {
     }
 
     // ==========================================

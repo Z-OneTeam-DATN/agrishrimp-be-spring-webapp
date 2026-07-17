@@ -2,7 +2,7 @@ spring:
   application:
     name: agri-shrimp
   config:
-    import: optional:file:.env[.properties],optional:file:.env.local[.properties]
+    import: optional:file:.env[.properties]
   profiles:
     active: ${SPRING_PROFILES_ACTIVE:dev}
 

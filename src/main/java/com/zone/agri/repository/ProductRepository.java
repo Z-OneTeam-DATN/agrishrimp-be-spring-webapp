@@ -66,8 +66,7 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
   @Query("SELECT b FROM Brand b WHERE LOWER(b.name) = LOWER(:name)")
   Optional<Brand> findBrandByName(@Param("name") String name);
 
-  // --- MINI APP: lấy sản phẩm ACTIVE kèm ảnh + category để gợi ý cho AI
-  // prescription ---
+  // --- AI DOCTOR: lấy sản phẩm ACTIVE kèm ảnh + category để gợi ý theo phác đồ ---
   // Phase BE-3: bổ sung LEFT JOIN FETCH p.category để rankCandidateProducts truy
   // cập category.getName()
   // an toàn sau khi transaction đóng (proxy đã initialized).
@@ -76,7 +75,7 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
       "LEFT JOIN FETCH p.category " +
       "WHERE p.status = :status " +
       "ORDER BY p.name ASC")
-  List<Product> findActiveProductsForMiniApp(@Param("status") ProductStatus status);
+  List<Product> findActiveProductsForAiDoctor(@Param("status") ProductStatus status);
 
   // Lấy danh sách sản phẩm đang kinh doanh và còn hàng tại chi nhánh ACTIVE
   @Query("SELECT p FROM Product p " +

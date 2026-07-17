@@ -67,7 +67,7 @@ Swagger is grouped for easier review:
 - `Public APIs`: `/api/auth/**`, `/api/public/**`, `/api/external/**`
 - `Core System`: `/api/users/**`, `/api/roles/**`, `/api/branches/**`, `/api/files/**`
 - `Business Operations`: `/api/products/**`, `/api/categories/**`, `/api/suppliers/**`, `/api/customers/**`, `/api/attributes/**`
-- `Mini App`: `/api/miniapp/**`
+- `AI Doctor`: `/api/ai-doctor/**`
 
 Full endpoint documentation is available at `http://localhost:8004/swagger-ui/index.html` after the application starts.
 
@@ -124,7 +124,7 @@ After startup:
 
 ### Option 1A: Run the backend locally and test against the real server database
 
-This project already auto-loads `.env` and `.env.local` via Spring config import, so after a one-time local override setup you can start the backend with a normal Spring Boot command.
+This project already auto-loads `.env` via Spring config import, so after a one-time setup you can start the backend with a normal Spring Boot command.
 
 Recommended flow:
 
@@ -134,7 +134,7 @@ Recommended flow:
 ssh -L 3307:127.0.0.1:3306 your-user@your-server
 ```
 
-2. Copy `.env.local.example` to `.env.local`.
+2. Copy `.env.example` to `.env` and fill in the real secrets (tunnel-based DB/Redis values are already the defaults).
 3. Keep the tunnel open.
 4. Start local Redis if needed:
 
@@ -154,7 +154,7 @@ Windows PowerShell:
 .\mvnw.cmd spring-boot:run "-Dspring-boot.run.profiles=dev,live-local"
 ```
 
-Because `.env.local` is loaded automatically, no manual `source .env` or extra wrapper script is required for this workflow. The `live-local` profile keeps local runs safer against the real database by disabling startup schema patches and seed data.
+Because `.env` is loaded automatically, no manual `source .env` or extra wrapper script is required for this workflow. The `live-local` profile keeps local runs safer against the real database by disabling startup schema patches and seed data.
 
 Important:
 
@@ -188,7 +188,7 @@ Important environment variables include:
 Notes:
 
 - Do not commit real secrets to Git.
-- `EmailService` currently sends mail through Resend, so make sure the `RESEND_*` variables exist in `.env` for Docker/VPS or `.env.local` for direct local runs.
+- `EmailService` currently sends mail through Resend, so make sure the `RESEND_*` variables exist in `.env`.
 - External integrations require their matching environment variables to be fully functional.
 
 ## ✅ Testing & Operations

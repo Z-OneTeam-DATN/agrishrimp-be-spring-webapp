@@ -2,26 +2,25 @@ package com.zone.agri.dto.response.admin;
 
 import com.zone.agri.dto.response.product.AttributeValueResponse;
 import com.zone.agri.entity.enums.AttributeStatus;
-import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
 import lombok.Data;
+
 import java.util.List;
 
 @Data
 public class AttributeDTO {
     private Long id;
 
-    @NotBlank(message = "Tên thuộc tính không được để trống")
+    @jakarta.validation.constraints.NotBlank(message = "Ten thuoc tinh khong duoc de trong")
     private String name;
 
-    @NotBlank(message = "Mã thuộc tính không được để trống")
     private String code;
 
-    @NotNull(message = "Trạng thái không được để trống")
+    @NotNull(message = "Trang thai khong duoc de trong")
     private AttributeStatus status;
 
-    @NotEmpty(message = "Thuộc tính phải có ít nhất 1 giá trị")
+    @NotEmpty(message = "Thuoc tinh phai co it nhat 1 gia tri")
     private List<String> values;
 
     private List<AttributeValueResponse> valueDetails;

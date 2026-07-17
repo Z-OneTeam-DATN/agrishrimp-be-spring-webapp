@@ -4,18 +4,15 @@ import com.zone.agri.dto.response.order.CartItemDto;
 import com.zone.agri.dto.response.order.OrderItemDto;
 import com.zone.agri.dto.response.order.OutOfStockItemDto;
 import com.zone.agri.dto.response.order.SubOrderDraftDto;
+import com.zone.agri.dto.response.order.SuggestedTransferDto;
+import java.math.BigDecimal;
+import java.time.LocalDateTime;
+import java.util.List;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
-import java.math.BigDecimal;
-import java.util.List;
-
-/**
- * Lưu tạm trong Redis sau /prepare.
- * Dùng để validate và tạo đơn trong /confirm.
- */
 @Data
 @Builder
 @NoArgsConstructor
@@ -23,18 +20,19 @@ import java.util.List;
 public class PrepareOrderDraft {
     private String prepareToken;
     private Long userId;
+    private Long addressId;
     private String voucherCode;
+    private String stockStatus;
+    private LocalDateTime createdAt;
+    private LocalDateTime expiresAt;
 
-    // --- Thông tin bổ sung theo yêu cầu ---
-    private Long branchId; // Chi nhánh chính hoặc chi nhánh duy nhất
-    private List<OrderItemDto> finalItems; // Danh sách hàng hóa cuối cùng đã phân bổ
-    // --------------------------------------
+    private Long branchId;
+    private List<OrderItemDto> finalItems;
+    private List<SuggestedTransferDto> suggestedTransfers;
 
-    private List<CartItemDto> cartItems; // Snapshot gio hang goc de confirm tinh lai quote cuoi
-
+    private List<CartItemDto> cartItems;
     private String receiverName;
     private String receiverPhone;
-
     private Double userLat;
     private Double userLng;
     private String deliveryAddress;

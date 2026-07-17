@@ -13,6 +13,7 @@ import com.zone.agri.repository.RoleRepository;
 import com.zone.agri.repository.UserRepository;
 import java.time.LocalDate;
 import java.util.HashSet;
+import java.util.Optional;
 import java.util.Set;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -149,12 +150,24 @@ public class DataSeeder implements CommandLineRunner {
         Permission aChkX = pAct("Hủy phiếu kiểm kê", "INVENTORY_CHECK_CANCEL", PermissionGroup.INVENTORY, mChk);
         Permission aChkD = pAct("Xóa phiếu kiểm kê", "INVENTORY_CHECK_DELETE", PermissionGroup.INVENTORY, mChk);
 
-        Permission mPr = pMod("Yêu cầu nhập NCC", "PURCHASE_REQUEST", PermissionGroup.INVENTORY);
-        Permission aPrV = pAct("Xem yêu cầu nhập NCC", "PURCHASE_REQUEST_VIEW", PermissionGroup.INVENTORY, mPr);
-        Permission aPrC = pAct("Tạo yêu cầu nhập NCC", "PURCHASE_REQUEST_CREATE", PermissionGroup.INVENTORY, mPr);
-        Permission aPrU = pAct("Sửa yêu cầu nhập NCC", "PURCHASE_REQUEST_UPDATE", PermissionGroup.INVENTORY, mPr);
-        Permission aPrA = pAct("Duyệt yêu cầu nhập NCC", "PURCHASE_REQUEST_APPROVE", PermissionGroup.INVENTORY, mPr);
-        Permission aPrD = pAct("Xóa yêu cầu nhập NCC", "PURCHASE_REQUEST_DELETE", PermissionGroup.INVENTORY, mPr);
+        Permission mPurchaseRequest = pMod("Yêu cầu mua nhà cung cấp", "PURCHASE_REQUEST", PermissionGroup.INVENTORY);
+        Permission aPurchaseRequestV = pAct("Xem yêu cầu mua", "PURCHASE_REQUEST_VIEW", PermissionGroup.INVENTORY, mPurchaseRequest);
+        Permission aPurchaseRequestC = pAct("Tạo yêu cầu mua", "PURCHASE_REQUEST_CREATE", PermissionGroup.INVENTORY, mPurchaseRequest);
+        Permission aPurchaseRequestU = pAct("Sửa yêu cầu mua", "PURCHASE_REQUEST_UPDATE", PermissionGroup.INVENTORY, mPurchaseRequest);
+        Permission aPurchaseRequestA = pAct("Duyệt yêu cầu mua", "PURCHASE_REQUEST_APPROVE", PermissionGroup.INVENTORY, mPurchaseRequest);
+        Permission aPurchaseRequestD = pAct("Xóa yêu cầu mua", "PURCHASE_REQUEST_DELETE", PermissionGroup.INVENTORY, mPurchaseRequest);
+
+        Permission mBanner = pMod("Quản lý banner", "BANNER", PermissionGroup.SETTING);
+        Permission aBannerV = pAct("Xem banner", "BANNER_VIEW", PermissionGroup.SETTING, mBanner);
+        Permission aBannerC = pAct("Tạo banner", "BANNER_CREATE", PermissionGroup.SETTING, mBanner);
+        Permission aBannerE = pAct("Sửa banner", "BANNER_EDIT", PermissionGroup.SETTING, mBanner);
+        Permission aBannerD = pAct("Xóa banner", "BANNER_DELETE", PermissionGroup.SETTING, mBanner);
+
+        Permission mBlog = pMod("Quản lý blog", "BLOG", PermissionGroup.SETTING);
+        Permission aBlogV = pAct("Xem blog", "BLOG_VIEW", PermissionGroup.SETTING, mBlog);
+        Permission aBlogC = pAct("Tạo blog", "BLOG_CREATE", PermissionGroup.SETTING, mBlog);
+        Permission aBlogE = pAct("Sửa blog", "BLOG_EDIT", PermissionGroup.SETTING, mBlog);
+        Permission aBlogD = pAct("Xóa blog", "BLOG_DELETE", PermissionGroup.SETTING, mBlog);
 
         Permission mSet = pMod("Cài đặt hệ thống", "SETTING", PermissionGroup.SETTING);
         Permission aSetV = pAct("Xem cài đặt", "SETTING_VIEW", PermissionGroup.SETTING, mSet);
@@ -163,8 +176,28 @@ public class DataSeeder implements CommandLineRunner {
         Permission mChat = pMod("Chat với khách hàng", "CHAT", PermissionGroup.COMMUNICATION);
         Permission aChatV = pAct("Xem hội thoại chat", "CHAT_VIEW", PermissionGroup.COMMUNICATION, mChat);
         Permission aChatM = pAct("Quản lý chat (ghim, phân công)", "CHAT_MANAGE", PermissionGroup.COMMUNICATION, mChat);
+        Permission mCustomerAdvisor = pMod("Tư vấn khách hàng", "CUSTOMER_ADVISOR", PermissionGroup.COMMUNICATION);
+        Permission aCustomerAdvisorUse = pAct(
+                "Sử dụng workspace tư vấn khách hàng",
+                "CUSTOMER_ADVISOR_USE",
+                PermissionGroup.COMMUNICATION,
+                mCustomerAdvisor);
 
-        Role superAdminRole = saveRole("SUPER_ADMIN", "Siêu quản trị", true, Set.of(
+        Permission mAgronomistWorkspace = pMod("Workspace kỹ sư nông nghiệp", "AGRONOMIST_WORKSPACE", PermissionGroup.AI_KNOWLEDGE);
+        Permission aAgronomistWorkspaceUse = pAct(
+                "Sử dụng workspace kỹ sư nông nghiệp",
+                "AGRONOMIST_WORKSPACE_USE",
+                PermissionGroup.AI_KNOWLEDGE,
+                mAgronomistWorkspace);
+        Permission mAiKnowledge = pMod("Tri thức AI doctor", "AI_KNOWLEDGE", PermissionGroup.AI_KNOWLEDGE);
+        Permission aAiKnowledgeView = pAct("Xem tri thức AI", "AI_KNOWLEDGE_VIEW", PermissionGroup.AI_KNOWLEDGE, mAiKnowledge);
+        Permission aAiKnowledgeCreate = pAct("Tạo tri thức AI", "AI_KNOWLEDGE_CREATE", PermissionGroup.AI_KNOWLEDGE, mAiKnowledge);
+        Permission aAiKnowledgeUpdate = pAct("Cập nhật tri thức AI", "AI_KNOWLEDGE_UPDATE", PermissionGroup.AI_KNOWLEDGE, mAiKnowledge);
+        Permission aAiKnowledgeApprove = pAct("Duyệt tri thức AI", "AI_KNOWLEDGE_APPROVE", PermissionGroup.AI_KNOWLEDGE, mAiKnowledge);
+        Permission aAiImportKnowledge = pAct("Import tri thức AI", "AI_IMPORT_KNOWLEDGE", PermissionGroup.AI_KNOWLEDGE, mAiKnowledge);
+        Permission aAiCaseReview = pAct("Xử lý case AI", "AI_CASE_REVIEW", PermissionGroup.AI_KNOWLEDGE, mAiKnowledge);
+
+        Set<Permission> superAdminPermissions = Set.of(
                 aDashV, aWspaceV,
                 aRptSale, aRptInv, aRptFin,
                 aUserV, aUserC, aUserU, aUserD,
@@ -177,63 +210,31 @@ public class DataSeeder implements CommandLineRunner {
                 aExpV, aExpC, aExpA, aExpU, aExpX, aExpD,
                 aTrfV, aTrfC, aTrfA, aTrfU, aTrfX, aTrfD,
                 aChkV, aChkC, aChkA, aChkU, aChkX, aChkD,
-                aPrV, aPrC, aPrU, aPrA, aPrD,
+                aPurchaseRequestV, aPurchaseRequestC, aPurchaseRequestU, aPurchaseRequestA, aPurchaseRequestD,
                 aCusV, aCusC, aCusU, aCusD,
                 aVouV, aVouC, aVouU, aVouD,
                 aSupV, aSupC, aSupU, aSupD,
                 aOrdV, aOrdC, aOrdU, aOrdD, aOrdCnf, aOrdShip, aOrdX, aOrdDone, aOrdRefund, aOrdExport,
+                aBannerV, aBannerC, aBannerE, aBannerD,
+                aBlogV, aBlogC, aBlogE, aBlogD,
                 aSetV, aSetU,
-                aChatV, aChatM));
+                aChatV, aChatM,
+                aCustomerAdvisorUse,
+                aAgronomistWorkspaceUse,
+                aAiKnowledgeView, aAiKnowledgeCreate, aAiKnowledgeUpdate,
+                aAiKnowledgeApprove, aAiImportKnowledge, aAiCaseReview);
 
-        Role adminRole = saveRole("ADMIN", "Quản trị viên", true, Set.of(
-                aDashV, aWspaceV,
-                aRptSale, aRptInv, aRptFin,
-                aUserV, aUserC, aUserU, aUserD,
-                aRoleV, aRoleC, aRoleU, aRoleD,
-                aBranchV, aBranchC, aBranchU, aBranchD,
-                aProdV, aProdC, aProdU, aProdD,
-                aCatV, aCatC, aCatU, aCatD,
-                aAttrV, aAttrC, aAttrU, aAttrD,
-                aImpV, aImpC, aImpA, aImpU, aImpX, aImpD,
-                aExpV, aExpC, aExpA, aExpU, aExpX, aExpD,
-                aTrfV, aTrfC, aTrfA, aTrfU, aTrfX, aTrfD,
-                aChkV, aChkC, aChkA, aChkU, aChkX, aChkD,
-                aPrV, aPrC, aPrU, aPrA, aPrD,
-                aCusV, aCusC, aCusU, aCusD,
-                aVouV, aVouC, aVouU, aVouD,
-                aSupV, aSupC, aSupU, aSupD,
-                aOrdV, aOrdC, aOrdU, aOrdD, aOrdCnf, aOrdShip, aOrdX, aOrdDone, aOrdRefund, aOrdExport,
-                aSetV, aSetU,
-                aChatV, aChatM));
+        Role superAdminRole = saveRole("SUPER_ADMIN", "Siêu quản trị", true, superAdminPermissions);
 
-        saveRole("MANAGER", "Quản lý chi nhánh & kho", false, Set.of(
-                aDashV, aWspaceV,
-                aRptSale, aRptInv, aRptFin,
-                aUserV, aUserC, aUserU, aUserD,
-                aBranchV,
-                aProdV, aCatV, aAttrV, aSupV,
-                aImpV, aImpC, aImpU, aImpX, aImpD,
-                aExpV, aExpC, aExpU, aExpX, aExpD,
-                aTrfV, aTrfC, aTrfU, aTrfX, aTrfD,
-                aChkV, aChkC, aChkU, aChkX, aChkD,
-                aPrV, aPrC, aPrU, aPrD,
-                aCusV, aCusC, aCusU, aCusD,
-                aVouV, aVouC, aVouU,
-                aOrdV, aOrdC, aOrdU, aOrdCnf, aOrdShip, aOrdX, aOrdDone, aOrdExport,
-                aChatV, aChatM));
-
-        Set<Permission> customerPermissions = Set.of(aOrdV, aOrdC, aOrdX);
-        saveRole("USER", "Người dùng", false, customerPermissions);
-
-        ensureUser("admin@agrishrimp.vn", "Admin", "0901000001", "123456", adminRole, UserStatus.ACTIVE);
-        ensureUser("superadmin@agrishrimp.vn", "Super Admin", "0901000002", "123456", superAdminRole, UserStatus.ACTIVE);
+        // Chỉ bootstrap 1 tài khoản gốc để đăng nhập lần đầu; các vai trò khác
+        // sẽ được quản trị viên tự tạo trong màn quản lý vai trò.
         ensureUser(
-                "bot@agrishrimp.vn",
-                "AgriShrimp Bot",
-                "0900000000",
-                "bot_disabled_bootstrap",
+                "superadmin@agrishrimp.vn",
+                "Super Admin",
+                "0901000001",
+                "123456",
                 superAdminRole,
-                UserStatus.INACTIVE);
+                UserStatus.ACTIVE);
 
         if (hasExistingRoles) {
             log.info(">>> ĐỒNG BỘ DỮ LIỆU NỀN TẢNG HOÀN TẤT.");
@@ -291,17 +292,26 @@ public class DataSeeder implements CommandLineRunner {
             String rawPassword,
             Role role,
             UserStatus status) {
-        userRepository.findByEmail(email)
+        findBootstrapUser(email, phoneNumber)
                 .map(existingUser -> {
                     existingUser.setFullName(fullName);
-                    existingUser.setPhoneNumber(phoneNumber);
+                    if (!userRepository.existsByEmailAndIdNot(email, existingUser.getId())) {
+                        existingUser.setEmail(email);
+                    } else {
+                        log.warn("Seeder giữ nguyên email hiện tại cho user id={} vì email {} đang thuộc user khác",
+                                existingUser.getId(), email);
+                    }
+                    if (!userRepository.existsByPhoneNumberAndIdNot(phoneNumber, existingUser.getId())) {
+                        existingUser.setPhoneNumber(phoneNumber);
+                    } else {
+                        log.warn("Seeder giữ nguyên số điện thoại hiện tại cho user id={} vì số {} đang thuộc user khác",
+                                existingUser.getId(), phoneNumber);
+                    }
                     existingUser.setStatus(status);
                     existingUser.setRole(role);
                     existingUser.setProvider(AuthProvider.LOCAL);
-                    existingUser.setGender("bot@agrishrimp.vn".equals(email) ? Gender.OTHER : Gender.MALE);
-                    existingUser.setDateOfBirth("bot@agrishrimp.vn".equals(email)
-                            ? LocalDate.of(2000, 1, 1)
-                            : LocalDate.of(1985, 3, 15));
+                    existingUser.setGender(Gender.MALE);
+                    existingUser.setDateOfBirth(LocalDate.of(1985, 3, 15));
                     return userRepository.save(existingUser);
                 })
                 .orElseGet(() -> userRepository.save(User.builder()
@@ -311,11 +321,15 @@ public class DataSeeder implements CommandLineRunner {
                         .passwordHash(passwordEncoder.encode(rawPassword))
                         .status(status)
                         .role(role)
-                        .gender("bot@agrishrimp.vn".equals(email) ? Gender.OTHER : Gender.MALE)
-                        .dateOfBirth("bot@agrishrimp.vn".equals(email)
-                                ? LocalDate.of(2000, 1, 1)
-                                : LocalDate.of(1985, 3, 15))
+                        .gender(Gender.MALE)
+                        .dateOfBirth(LocalDate.of(1985, 3, 15))
                         .provider(AuthProvider.LOCAL)
                         .build()));
+    }
+
+    private Optional<User> findBootstrapUser(String email, String phoneNumber) {
+        return userRepository.findByEmail(email)
+                .or(() -> userRepository.findByPhoneNumber(phoneNumber))
+                .or(() -> userRepository.findFirstByRole_SlugOrderByIdAsc("SUPER_ADMIN"));
     }
 }

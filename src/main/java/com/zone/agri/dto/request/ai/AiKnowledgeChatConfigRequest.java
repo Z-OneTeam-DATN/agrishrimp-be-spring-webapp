@@ -1,0 +1,16 @@
+package com.zone.agri.dto.request.ai;
+
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
+@Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+public class AiKnowledgeChatConfigRequest {
+
+    private String greetingMessage;
+    private String fallbackMessage;
+}

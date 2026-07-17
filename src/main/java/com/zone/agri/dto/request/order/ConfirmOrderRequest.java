@@ -10,8 +10,11 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 @AllArgsConstructor
 public class ConfirmOrderRequest {
-    @NotBlank(message = "prepareToken là bắt buộc")
+    @NotBlank(message = "prepareToken la bat buoc")
     private String prepareToken;
+
+    @NotBlank(message = "idempotencyKey la bat buoc")
+    private String idempotencyKey;
 
     private PaymentMethod paymentMethod;
     private String note;

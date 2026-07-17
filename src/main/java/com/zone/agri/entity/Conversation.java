@@ -40,6 +40,9 @@ public class Conversation extends BaseEntity {
     @Column(name = "last_message_at")
     LocalDateTime lastMessageAt;
 
+    @Column(name = "last_sender_id")
+    Long lastSenderId;
+
     @Column(name = "unread_by_shop")
     @Builder.Default
     Integer unreadByShop = 0;
