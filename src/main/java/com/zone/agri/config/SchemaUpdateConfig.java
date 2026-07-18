@@ -323,6 +323,30 @@ public class SchemaUpdateConfig implements BeanPostProcessor {
                     "FOREIGN KEY (pack_id) REFERENCES sticker_packs(id) ON DELETE CASCADE" +
                     ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
 
+            executeSql(stmt,
+                    "Create drivers table",
+                    """
+                            CREATE TABLE IF NOT EXISTS drivers (
+                                id BIGINT PRIMARY KEY AUTO_INCREMENT,
+                                code VARCHAR(20) NOT NULL UNIQUE,
+                                full_name VARCHAR(255) NOT NULL,
+                                phone VARCHAR(20) NULL,
+                                email VARCHAR(100) NULL,
+                                id_card VARCHAR(50) NULL,
+                                license_number VARCHAR(50) NULL,
+                                license_class VARCHAR(20) NULL,
+                                avatar_url TEXT NULL,
+                                license_image_url TEXT NULL,
+                                status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE',
+                                vehicle_number VARCHAR(50) NULL,
+                                vehicle_type VARCHAR(100) NULL,
+                                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                                updated_at DATETIME NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                                created_by_user_id BIGINT NULL,
+                                updated_by_user_id BIGINT NULL
+                            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                            """);
+
             log.info("All schema patches executed successfully.");
         } catch (Exception e) {
             log.error("Failed to run database schema patches", e);

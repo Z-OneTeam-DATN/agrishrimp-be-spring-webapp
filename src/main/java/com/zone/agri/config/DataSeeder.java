@@ -118,6 +118,12 @@ public class DataSeeder implements CommandLineRunner {
         Permission aSupU = pAct("Sửa nhà cung cấp", "SUPPLIER_UPDATE", PermissionGroup.INVENTORY, mSup);
         Permission aSupD = pAct("Xóa nhà cung cấp", "SUPPLIER_DELETE", PermissionGroup.INVENTORY, mSup);
 
+        Permission mDriver = pMod("Quản lý tài xế", "DRIVER", PermissionGroup.INVENTORY);
+        Permission aDriverV = pAct("Xem tài xế", "DRIVER_VIEW", PermissionGroup.INVENTORY, mDriver);
+        Permission aDriverC = pAct("Thêm tài xế", "DRIVER_CREATE", PermissionGroup.INVENTORY, mDriver);
+        Permission aDriverU = pAct("Sửa tài xế", "DRIVER_UPDATE", PermissionGroup.INVENTORY, mDriver);
+        Permission aDriverD = pAct("Xóa tài xế", "DRIVER_DELETE", PermissionGroup.INVENTORY, mDriver);
+
         Permission mImp = pMod("Quản lý nhập hàng", "IMPORT", PermissionGroup.INVENTORY);
         Permission aImpV = pAct("Xem phiếu nhập", "IMPORT_VIEW", PermissionGroup.INVENTORY, mImp);
         Permission aImpC = pAct("Tạo phiếu nhập", "IMPORT_CREATE", PermissionGroup.INVENTORY, mImp);
@@ -214,6 +220,7 @@ public class DataSeeder implements CommandLineRunner {
                 aCusV, aCusC, aCusU, aCusD,
                 aVouV, aVouC, aVouU, aVouD,
                 aSupV, aSupC, aSupU, aSupD,
+                aDriverV, aDriverC, aDriverU, aDriverD,
                 aOrdV, aOrdC, aOrdU, aOrdD, aOrdCnf, aOrdShip, aOrdX, aOrdDone, aOrdRefund, aOrdExport,
                 aBannerV, aBannerC, aBannerE, aBannerD,
                 aBlogV, aBlogC, aBlogE, aBlogD,
