@@ -148,6 +148,10 @@ image-search:
 ai:
   base-url: ${AI_BASE_URL:}
   predict-path: ${AI_PREDICT_PATH:/ai/predict-image}
+  doctor:
+    clarify:
+      # Trần an toàn kỹ thuật ẩn — không hiển thị cho nông dân, chỉ để chặn hội thoại lặp vô hạn.
+      max-turns: ${AI_DOCTOR_CLARIFY_MAX_TURNS:8}
 
 zalo:
   app-secret: ${ZALO_APP_SECRET}
@@ -168,9 +172,3 @@ gemini:
   generate-content-path: ${GEMINI_GENERATE_CONTENT_PATH:/v1beta/models}
   api-key: ${GEMINI_API_KEY:}
   model: ${GEMINI_MODEL:}
-
-ai:
-  doctor:
-    clarify:
-      # Trần an toàn kỹ thuật ẩn — không hiển thị cho nông dân, chỉ để chặn hội thoại lặp vô hạn.
-      max-turns: ${AI_DOCTOR_CLARIFY_MAX_TURNS:8}
