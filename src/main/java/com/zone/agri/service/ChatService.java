@@ -385,9 +385,12 @@ public class ChatService {
 
         if (m.getPinnedProduct() != null) {
             Product p = m.getPinnedProduct();
-            String imageUrl = p.getProductImages() != null && !p.getProductImages().isEmpty()
-                    ? p.getProductImages().iterator().next().getImageUrl()
-                    : null;
+            String imageUrl = null;
+            if (p.getProductImages() != null && !p.getProductImages().isEmpty()) {
+                imageUrl = p.getProductImages().iterator().next().getImageUrl();
+            } else if (p.getVariants() != null && !p.getVariants().isEmpty()) {
+                imageUrl = p.getVariants().iterator().next().getImageUrl();
+            }
             builder.pinnedProduct(ChatMessageResponse.PinnedProductInfo.builder()
                     .id(p.getId())
                     .name(p.getName())
