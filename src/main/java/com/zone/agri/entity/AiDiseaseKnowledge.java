@@ -50,9 +50,6 @@ public class AiDiseaseKnowledge extends BaseEntity {
     @Column(name = "causes_json", columnDefinition = "LONGTEXT")
     String causesJson;
 
-    @Column(name = "sample_images_json", columnDefinition = "LONGTEXT")
-    String sampleImagesJson;
-
     @Column(name = "treatment_stages_json", columnDefinition = "LONGTEXT")
     String treatmentStagesJson;
 

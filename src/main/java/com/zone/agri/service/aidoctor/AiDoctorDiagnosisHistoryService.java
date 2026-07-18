@@ -69,6 +69,7 @@ public class AiDoctorDiagnosisHistoryService {
                 .signsSummary(response.getSignsSummary())
                 .treatmentStagesJson(toJson(response.getTreatmentStages()))
                 .purchaseUrl(response.getPurchaseUrl())
+                .needsClarification(response.getNeedsClarification())
                 .build();
 
         AiDoctorDiagnosisHistory saved = historyRepository.save(history);
@@ -78,7 +79,7 @@ public class AiDoctorDiagnosisHistoryService {
     }
 
     // =========================================================
-    // UPDATE — cập nhật prescription sau khi user chủ động gọi Gemini
+    // UPDATE — cập nhật prescription sau khi user chủ động lấy phác đồ từ kho tri thức đã duyệt
     // =========================================================
 
     @Transactional
@@ -91,6 +92,31 @@ public class AiDoctorDiagnosisHistoryService {
         history.setTreatmentStagesJson(toJson(treatmentStages));
         historyRepository.save(history);
         log.info("[AiDoctor-History] updated prescription: historyId={}", historyId);
+    }
+
+    /**
+     * Cập nhật lại danh tính bệnh sau khi luồng hỏi-đáp AI Doctor (AiDoctorClarifyService) chốt được
+     * bệnh chính xác — ban đầu history được lưu với disease "đoán" từ YOLO lúc confidence còn thấp,
+     * cần sửa lại để GET /history và GET /diagnosis/{id} không còn hiển thị bệnh đoán sai.
+     */
+    @Transactional
+    public void updateWithClarifiedDisease(Long historyId, DiseaseResponse disease, List<String> causes,
+                                           String signsSummary, List<TreatmentStageResponse> treatmentStages) {
+        AiDoctorDiagnosisHistory history = historyRepository.findById(historyId)
+                .orElseThrow(() -> new NotFoundException("AI_DOCTOR_DIAGNOSIS_NOT_FOUND"));
+        if (disease != null) {
+            history.setFinalDiseaseCode(disease.getCode());
+            history.setFinalDiseaseNameVi(disease.getNameVi());
+            history.setFinalDiseaseNameEn(disease.getNameEn());
+        }
+        history.setCausesJson(toJson(causes));
+        history.setSignsSummary(signsSummary);
+        history.setTreatmentStagesJson(toJson(treatmentStages));
+        // Clarify đã chốt được bệnh — không còn là bản ghi "đang chờ xác nhận" nữa.
+        history.setNeedsClarification(false);
+        historyRepository.save(history);
+        log.info("[AiDoctor-History] updated after clarify: historyId={}, diseaseCode={}",
+                historyId, disease != null ? disease.getCode() : null);
     }
 
     // =========================================================
@@ -157,6 +183,7 @@ public class AiDoctorDiagnosisHistoryService {
                 .createdAt(h.getCreatedAt())
                 .imageUrl(h.getImageUrl())
                 .disease(disease)
+                .needsClarification(h.getNeedsClarification())
                 .build();
     }
 
@@ -189,6 +216,7 @@ public class AiDoctorDiagnosisHistoryService {
                 .signsSummary(h.getSignsSummary())
                 .treatmentStages(treatmentStages.isEmpty() ? null : treatmentStages)
                 .purchaseUrl(h.getPurchaseUrl())
+                .needsClarification(h.getNeedsClarification())
                 .createdAt(h.getCreatedAt())
                 .build();
     }

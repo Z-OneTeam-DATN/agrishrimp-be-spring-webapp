@@ -1,6 +1,5 @@
 package com.zone.agri.service.aidoctor;
 
-import com.zone.agri.dto.ai.AiStockItem;
 import com.zone.agri.dto.response.ai.SuggestedProductResponse;
 import com.zone.agri.entity.Product;
 import com.zone.agri.entity.ProductImage;
@@ -83,25 +82,8 @@ public class AiDoctorProductSuggestionService {
     }
 
     // =========================================================
-    // 2. AI PAYLOAD — chuyển Product → AiStockItem
+    // 2. AI PAYLOAD — map id → Product
     // =========================================================
-
-    /**
-     * Chuyển candidate products → AiStockItem để gửi sang AI generate-prescription.
-     * Bao gồm tên danh mục để AI có context phân loại thuốc/chế phẩm tốt hơn.
-     */
-    public List<AiStockItem> toAiStockItems(List<Product> products) {
-        return products.stream()
-                .map(p -> AiStockItem.builder()
-                        .id(p.getId())
-                        .name(p.getName())
-                        .category(p.getCategory() != null ? p.getCategory().getName() : null)
-                        .dosage(null)
-                        .quantity(null)
-                        .notes(null)
-                        .build())
-                .collect(Collectors.toList());
-    }
 
     /**
      * Build map id → Product để clamp AI output trong O(1).

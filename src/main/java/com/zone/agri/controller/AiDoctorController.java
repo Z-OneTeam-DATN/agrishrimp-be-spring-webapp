@@ -3,11 +3,14 @@ package com.zone.agri.controller;
 import com.zone.agri.common.AuthUtils;
 import com.zone.agri.dto.ai.AiChatResponse;
 import com.zone.agri.dto.request.ai.AiDoctorChatRequest;
+import com.zone.agri.dto.request.ai.AiDoctorClarifyRequest;
+import com.zone.agri.dto.response.ai.AiDoctorClarifyResponse;
 import com.zone.agri.dto.response.ai.AiDoctorDiagnosisResponse;
 import com.zone.agri.dto.response.ai.AiDoctorHistoryListResponse;
 import com.zone.agri.dto.response.user.UserDetail;
 import com.zone.agri.exception.CustomAuthenticationException;
 import com.zone.agri.service.ai.AiKnowledgeService;
+import com.zone.agri.service.aidoctor.AiDoctorClarifyService;
 import com.zone.agri.service.aidoctor.AiDoctorDiagnosisHistoryService;
 import com.zone.agri.service.aidoctor.AiDoctorDiagnosisService;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
@@ -34,6 +37,7 @@ public class AiDoctorController {
     private final AiDoctorDiagnosisService diagnosisService;
     private final AiDoctorDiagnosisHistoryService historyService;
     private final AiKnowledgeService aiKnowledgeService;
+    private final AiDoctorClarifyService clarifyService;
 
     @PostMapping(value = "/diagnosis", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<AiDoctorDiagnosisResponse> diagnose(
@@ -68,6 +72,14 @@ public class AiDoctorController {
     public ResponseEntity<AiChatResponse> chat(@RequestBody AiDoctorChatRequest request) {
         UserDetail user = requireUser();
         return ResponseEntity.ok(aiKnowledgeService.answerChat(request, user.getId(), "AI_DOCTOR_PRIVATE", true));
+    }
+
+    @PostMapping("/diagnosis/{id}/clarify")
+    public ResponseEntity<AiDoctorClarifyResponse> clarify(
+            @PathVariable String id,
+            @RequestBody(required = false) AiDoctorClarifyRequest request) {
+        UserDetail user = requireUser();
+        return ResponseEntity.ok(clarifyService.continueClarify(id, request, user.getId(), "AI_DOCTOR_PRIVATE"));
     }
 
     private UserDetail requireUser() {

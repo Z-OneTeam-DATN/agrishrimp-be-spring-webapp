@@ -26,4 +26,7 @@ public class AiDoctorHistoryItemResponse {
 
     /** Thông tin bệnh đã chẩn đoán */
     private DiseaseResponse disease;
+
+    /** true = còn đang chờ hỏi-đáp AI xác nhận, disease ở trên chỉ là dự đoán chưa chốt */
+    private Boolean needsClarification;
 }

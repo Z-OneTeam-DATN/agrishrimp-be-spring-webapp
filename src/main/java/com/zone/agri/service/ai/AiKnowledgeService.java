@@ -19,6 +19,7 @@ import com.zone.agri.dto.request.ai.AiKnowledgeImportApplyRequest;
 import com.zone.agri.dto.request.ai.AiKnowledgeImportPreviewRowRequest;
 import com.zone.agri.dto.request.ai.AiKnowledgeTreatmentStageRequest;
 import com.zone.agri.dto.request.ai.AiReviewCaseUpdateRequest;
+import com.zone.agri.dto.response.ai.AiClarifyCandidateSummary;
 import com.zone.agri.dto.response.ai.AiDiseaseKnowledgeResponse;
 import com.zone.agri.dto.response.ai.AiDoctorChatPromptResponse;
 import com.zone.agri.dto.response.ai.AiKnowledgeCategoryResponse;
@@ -85,7 +86,11 @@ import org.springframework.web.multipart.MultipartFile;
 @Slf4j
 public class AiKnowledgeService {
 
-    private static final long SNAPSHOT_TTL_MS = 30_000L;
+    // 30s cũ quá ngắn so với nhịp hỏi-đáp thật (nông dân đọc câu hỏi + gõ trả lời trên điện thoại
+    // thường mất hơn 30s) — hầu hết các lượt hỏi trong AiDoctorClarifyService đều miss cache và
+    // load lại toàn bộ bảng tri thức. Snapshot đã có evictApprovedSnapshot() invalidate ngay khi
+    // admin/kỹ sư sửa tri thức, nên TTL dài hơn không làm mất tính "gần thời gian thực".
+    private static final long SNAPSHOT_TTL_MS = 300_000L;
     private static final String DEFAULT_GREETING =
             "Xin chào, tôi sẽ tư vấn dựa trên kho tri thức đã được kỹ sư duyệt. "
                     + "Bạn có thể hỏi triệu chứng, tên bệnh hoặc gửi ảnh để hệ thống nhận diện.";
@@ -643,6 +648,44 @@ public class AiKnowledgeService {
                 .build();
     }
 
+    /**
+     * Dùng cho luồng AI Doctor hỏi làm rõ bệnh (AiDoctorClarifyService): lọc một danh sách mã bệnh
+     * (thường là top-N dự đoán YOLO) xuống còn đúng những mã đang APPROVED trong kho tri thức.
+     * Mã nào không tồn tại/chưa duyệt sẽ bị loại thầm lặng — đây là lớp guardrail đầu tiên đảm bảo
+     * Gemini chỉ bao giờ thấy một tập bệnh đã được kỹ sư + Admin xác nhận.
+     */
+    @Transactional(readOnly = true)
+    public List<AiClarifyCandidateSummary> resolveApprovedCandidates(List<String> diseaseCodes) {
+        if (diseaseCodes == null || diseaseCodes.isEmpty()) {
+            return Collections.emptyList();
+        }
+        ApprovedKnowledgeSnapshot snapshot = getApprovedSnapshot();
+        List<AiClarifyCandidateSummary> result = new ArrayList<>();
+        for (String code : new LinkedHashSet<>(diseaseCodes)) {
+            findDiseaseByCodeFromSnapshot(code, snapshot).ifPresent(disease -> result.add(toClarifyCandidateSummary(disease)));
+        }
+        return result;
+    }
+
+    /**
+     * Guardrail cuối cùng trước khi chấp nhận một quyết định (DECISION) từ Gemini: mã bệnh đó phải
+     * vẫn đang APPROVED tại thời điểm chốt, không chỉ dựa vào tập candidate đã khoá lúc bắt đầu phiên.
+     */
+    @Transactional(readOnly = true)
+    public Optional<AiClarifyCandidateSummary> findApprovedCandidate(String diseaseCode) {
+        return findDiseaseByCodeFromSnapshot(diseaseCode, getApprovedSnapshot()).map(this::toClarifyCandidateSummary);
+    }
+
+    private AiClarifyCandidateSummary toClarifyCandidateSummary(PreparedDisease disease) {
+        return AiClarifyCandidateSummary.builder()
+                .diseaseCode(disease.entity().getCode())
+                .nameVi(disease.entity().getNameVi())
+                .nameEn(disease.entity().getNameEn())
+                .symptomKeywordsRaw(disease.entity().getSymptomKeywordsRaw())
+                .signsSummary(disease.entity().getSignsSummary())
+                .build();
+    }
+
     private void applyKeywordAnswerSet(AiKeywordAnswerSet entity, AiKeywordAnswerSetRequest request, boolean isCreate) {
         String code = requiredTrim(request.getCode(), "Mã bộ từ khóa không được để trống").toUpperCase(Locale.ROOT);
         if (isCreate ? keywordAnswerSetRepository.existsByCode(code) : keywordAnswerSetRepository.existsByCodeAndIdNot(code, entity.getId())) {
@@ -675,7 +718,6 @@ public class AiKnowledgeService {
         entity.setSymptomKeywordsRaw(requiredTrim(request.getSymptomKeywordsRaw(), "Dấu hiệu bệnh không được để trống"));
         entity.setSignsSummary(requiredTrim(request.getSignsSummary(), "Mô tả dấu hiệu không được để trống"));
         entity.setCausesJson(writeJson(defaultList(request.getCauses())));
-        entity.setSampleImagesJson(writeJson(defaultList(request.getSampleImages())));
         entity.setTreatmentStagesJson(writeJson(toKnowledgeStages(defaultList(request.getTreatmentStages()))));
         entity.setConfidenceThreshold(clampThreshold(request.getConfidenceThreshold(), 0.65D));
         entity.setMatchThreshold(clampThreshold(request.getMatchThreshold(), 0.40D));
@@ -1080,6 +1122,7 @@ public class AiKnowledgeService {
                 .signsSummary("Tôi cần thêm dấu hiệu từ người nuôi để kết luận an toàn hơn. "
                         + "Vui lòng mô tả rõ các biểu hiện như giảm ăn, đường ruột, màu gan tụy hoặc tình trạng bơi lờ đờ.")
                 .treatmentStages(Collections.emptyList())
+                .needsClarification(true)
                 .build();
     }
 
@@ -1318,8 +1361,6 @@ public class AiKnowledgeService {
                 .symptomKeywordsRaw(entity.getSymptomKeywordsRaw())
                 .signsSummary(entity.getSignsSummary())
                 .causes(defaultList(readJsonList(entity.getCausesJson(), new TypeReference<List<String>>() {
-                })))
-                .sampleImages(defaultList(readJsonList(entity.getSampleImagesJson(), new TypeReference<List<String>>() {
                 })))
                 .treatmentStages(toKnowledgeTreatmentStageResponses(entity.getTreatmentStagesJson()))
                 .confidenceThreshold(entity.getConfidenceThreshold())

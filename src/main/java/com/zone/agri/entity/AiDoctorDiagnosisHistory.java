@@ -94,4 +94,14 @@ public class AiDoctorDiagnosisHistory extends BaseEntity {
     /** Purchase link — Phase BE-4 placeholder (null), Phase BE-5: bổ sung */
     @Column(name = "purchase_url", columnDefinition = "TEXT")
     String purchaseUrl;
+
+    /**
+     * true khi bản ghi này chỉ là kết quả YOLO độ tin cậy thấp, chưa được xác nhận qua
+     * luồng hỏi-đáp AI Doctor (AiDoctorClarifyService). Trong lúc còn true:
+     *  - generatePrescription() từ chối tạo phác đồ cho finalDiseaseCode (chỉ là bệnh "đoán")
+     *  - FE (result/history page) không được hiển thị như một kết luận đã chốt
+     * Được set false khi AiDoctorClarifyService chốt được bệnh (updateWithClarifiedDisease).
+     */
+    @Column(name = "needs_clarification")
+    Boolean needsClarification;
 }

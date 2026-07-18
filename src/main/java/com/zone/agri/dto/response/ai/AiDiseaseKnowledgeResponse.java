@@ -23,7 +23,6 @@ public class AiDiseaseKnowledgeResponse {
     private String symptomKeywordsRaw;
     private String signsSummary;
     private List<String> causes;
-    private List<String> sampleImages;
     private List<AiKnowledgeTreatmentStageResponse> treatmentStages;
     private Double confidenceThreshold;
     private Double matchThreshold;

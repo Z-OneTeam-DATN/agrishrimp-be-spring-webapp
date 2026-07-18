@@ -25,7 +25,7 @@ import java.util.stream.Collectors;
 /**
  * Orchestration chính cho luồng chẩn đoán AI Doctor:
  *  Bước 1 — POST /diagnosis:      Validate image → YOLO predict → lưu history → trả kết quả bệnh
- *  Bước 2 — POST /diagnosis/{id}/prescription: Gemini generate-prescription → cập nhật history → trả phác đồ
+ *  Bước 2 — POST /diagnosis/{id}/prescription: lấy phác đồ từ kho tri thức đã duyệt → cập nhật history → trả phác đồ
  */
 @Service
 @RequiredArgsConstructor
@@ -126,12 +126,19 @@ public class AiDoctorDiagnosisService {
     }
 
     // =========================================================
-    // PUBLIC: Gọi Gemini tạo phác đồ (bước 2 — user chủ động trigger)
+    // PUBLIC: Lấy phác đồ từ kho tri thức đã duyệt (bước 2 — user chủ động trigger)
     // =========================================================
 
     public AiDoctorDiagnosisResponse generatePrescription(Long diagnosisId, Long userId) {
         AiDoctorDiagnosisHistory history = historyRepository.findByIdAndUserId(diagnosisId, userId)
                 .orElseThrow(() -> new NotFoundException("AI_DOCTOR_DIAGNOSIS_NOT_FOUND"));
+
+        // Ca này còn đang chờ AI Doctor hỏi làm rõ bệnh (chưa xác nhận) — finalDiseaseCode
+        // hiện tại chỉ là dự đoán YOLO độ tin cậy thấp, không được phép tạo phác đồ cho nó.
+        if (Boolean.TRUE.equals(history.getNeedsClarification())) {
+            throw new BadRequestException(
+                    "Ca chẩn đoán này đang chờ bác sĩ AI hỏi thêm để xác nhận bệnh. Vui lòng hoàn tất hội thoại trước khi xem phác đồ.");
+        }
 
         String diseaseCode = history.getFinalDiseaseCode();
         if (diseaseCode == null) {

@@ -31,6 +31,13 @@ public class AiDoctorDiagnosisResponse {
     private String signsSummary;
     private List<TreatmentStageResponse> treatmentStages;
 
+    /**
+     * true khi độ tin cậy quá thấp để kết luận ngay — FE cần chủ động gọi
+     * POST /diagnosis/{id}/clarify để bắt đầu hội thoại hỏi làm rõ bệnh với AI.
+     * Null/absent (NON_NULL) ở các response bình thường.
+     */
+    private Boolean needsClarification;
+
     /** Purchase link — Phase BE-5: bổ sung */
     private String purchaseUrl;
 
