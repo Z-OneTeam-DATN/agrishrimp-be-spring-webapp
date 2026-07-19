@@ -53,6 +53,14 @@ public class AiDiseaseKnowledge extends BaseEntity {
     @Column(name = "treatment_stages_json", columnDefinition = "LONGTEXT")
     String treatmentStagesJson;
 
+    /** Tên kỹ sư/đội ngũ đứng sau tri thức bệnh này — hiển thị làm nguồn khi AI trả lời chat. */
+    @Column(name = "engineer_name", length = 150)
+    String engineerName;
+
+    /** SĐT liên hệ khẩn cấp gắn với đúng bệnh này — hiển thị kèm phác đồ khi AI trả lời chat. */
+    @Column(name = "engineer_phone", length = 30)
+    String engineerPhone;
+
     @Builder.Default
     @Column(name = "confidence_threshold", nullable = false)
     Double confidenceThreshold = 0.65d;

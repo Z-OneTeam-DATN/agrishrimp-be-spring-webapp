@@ -22,6 +22,8 @@ public class AiDiseaseKnowledgeRequest {
     private String signsSummary;
     private List<String> causes;
     private List<AiKnowledgeTreatmentStageRequest> treatmentStages;
+    private String engineerName;
+    private String engineerPhone;
     private Double confidenceThreshold;
     private Double matchThreshold;
     private Boolean enabled;

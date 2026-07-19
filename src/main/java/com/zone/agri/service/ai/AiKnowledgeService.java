@@ -719,6 +719,8 @@ public class AiKnowledgeService {
         entity.setSignsSummary(requiredTrim(request.getSignsSummary(), "Mô tả dấu hiệu không được để trống"));
         entity.setCausesJson(writeJson(defaultList(request.getCauses())));
         entity.setTreatmentStagesJson(writeJson(toKnowledgeStages(defaultList(request.getTreatmentStages()))));
+        entity.setEngineerName(trimToNull(request.getEngineerName()));
+        entity.setEngineerPhone(trimToNull(request.getEngineerPhone()));
         entity.setConfidenceThreshold(clampThreshold(request.getConfidenceThreshold(), 0.65D));
         entity.setMatchThreshold(clampThreshold(request.getMatchThreshold(), 0.40D));
         entity.setEnabled(defaultBoolean(request.getEnabled(), true));
@@ -947,6 +949,21 @@ public class AiKnowledgeService {
         MatchScore diseaseMatch = matchDiseaseFromText(normalizedMessage, snapshot.diseaseEntries);
         MatchScore keywordMatch = matchKeywordSetFromText(normalizedMessage, snapshot.keywordEntries);
 
+        // Nhiều bệnh cùng vượt ngưỡng riêng của chúng (vd "tôm lờ đờ" là dấu hiệu chung của nhiều
+        // bệnh) → không tự chọn đại 1 bệnh, liệt kê các bệnh nghi ngờ và xin thêm ảnh/mô tả thay vì
+        // đoán mò. Chỉ áp dụng cho luồng gõ chữ tự do — hai nhánh phía trên (đã có diseaseCode/
+        // diseaseName xác định từ ảnh) không đi qua đây.
+        List<PreparedDisease> qualifyingDiseases = findQualifyingDiseases(normalizedMessage, snapshot.diseaseEntries);
+        if (qualifyingDiseases.size() > 1) {
+            return MatchOutcome.builder()
+                    .matched(true)
+                    .matchType(AiKnowledgeMatchType.AMBIGUOUS)
+                    .knowledgeCode(qualifyingDiseases.stream().map(d -> d.entity().getCode()).collect(Collectors.joining(",")))
+                    .score(diseaseMatch.score())
+                    .answerHtml(buildAmbiguousAnswerHtml(qualifyingDiseases))
+                    .build();
+        }
+
         boolean diseaseWins = diseaseMatch.score() > 0D
                 && diseaseMatch.disease() != null
                 && diseaseMatch.score() >= defaultDouble(diseaseMatch.disease().entity().getMatchThreshold(), 0.4D)
@@ -991,6 +1008,24 @@ public class AiKnowledgeService {
             }
         }
         return best;
+    }
+
+    /**
+     * Mọi bệnh vượt NGƯỠNG RIÊNG của chính nó — không chỉ 1 bệnh điểm cao nhất. Dùng để phát hiện
+     * câu mô tả mơ hồ khớp cùng lúc nhiều bệnh (vd "tôm lờ đờ"), để không tự ý chọn đại 1 bệnh.
+     */
+    private List<PreparedDisease> findQualifyingDiseases(String normalizedMessage, List<PreparedDisease> diseases) {
+        Set<String> messageTokens = new LinkedHashSet<>(AiKnowledgeTextUtils.tokenize(normalizedMessage));
+        List<PreparedDisease> qualifying = new ArrayList<>();
+        for (PreparedDisease disease : diseases) {
+            double score = scoreAgainstKeywords(normalizedMessage, messageTokens, disease.keywords());
+            score += disease.entity().getCanonical() != null && disease.entity().getCanonical() ? 0.03D : 0D;
+            score += Math.min(defaultInt(disease.entity().getPriority(), 0), 10) * 0.002D;
+            if (score >= defaultDouble(disease.entity().getMatchThreshold(), 0.4D)) {
+                qualifying.add(disease);
+            }
+        }
+        return qualifying;
     }
 
     private MatchScore matchKeywordSetFromText(String normalizedMessage, List<PreparedKeywordSet> keywordSets) {
@@ -1211,6 +1246,9 @@ public class AiKnowledgeService {
         }));
         List<TreatmentStageResponse> treatmentStages = toTreatmentStageResponses(disease.entity().getTreatmentStagesJson());
         StringBuilder builder = new StringBuilder();
+        // "Dựa trên dấu hiệu" chứ không cố định "theo ảnh": hàm này dùng chung cho cả trả lời
+        // chat gõ chữ (thường không kèm ảnh) lẫn ngữ cảnh đã có ảnh chẩn đoán trước đó.
+        builder.append("<p>Dựa trên các dấu hiệu bạn mô tả, tôi nghi ngờ tôm bạn mắc bệnh:</p>");
         builder.append("<div><strong>")
                 .append(escapeHtml(disease.entity().getNameVi()))
                 .append("</strong>");
@@ -1260,6 +1298,38 @@ public class AiKnowledgeService {
             builder.append("</ol>");
         }
 
+        String engineerName = trimToNull(disease.entity().getEngineerName());
+        String engineerPhone = trimToNull(disease.entity().getEngineerPhone());
+        if (engineerName != null || engineerPhone != null) {
+            builder.append("<p><em>Nguồn: ")
+                    .append(escapeHtml(engineerName != null ? engineerName : "Đội ngũ kỹ sư AgriShrimp"))
+                    .append("</em></p>");
+            if (engineerPhone != null) {
+                builder.append("<p>Tham khảo phác đồ trên để biết chi tiết. Trường hợp khẩn cấp, vui lòng liên hệ: <strong>")
+                        .append(escapeHtml(engineerPhone))
+                        .append("</strong></p>");
+            }
+        }
+
+        return builder.toString();
+    }
+
+    /**
+     * Nhiều bệnh cùng vượt ngưỡng khớp — không tự chọn đại 1 bệnh, liệt kê các bệnh nghi ngờ và
+     * xin thêm ảnh/mô tả cụ thể hơn thay vì kết luận sai.
+     */
+    private String buildAmbiguousAnswerHtml(List<PreparedDisease> candidates) {
+        StringBuilder builder = new StringBuilder();
+        builder.append("<p>Dựa trên dấu hiệu bạn mô tả, tôm nhà bạn có thể đang mắc một trong các bệnh sau:</p><ul>");
+        for (PreparedDisease candidate : candidates) {
+            builder.append("<li><strong>").append(escapeHtml(candidate.entity().getNameVi())).append("</strong>");
+            if (trimToNull(candidate.entity().getNameEn()) != null) {
+                builder.append(" <em>(").append(escapeHtml(candidate.entity().getNameEn())).append(")</em>");
+            }
+            builder.append("</li>");
+        }
+        builder.append("</ul>");
+        builder.append("<p>Vui lòng gửi thêm ảnh chụp rõ tôm và mô tả cụ thể hơn (màu sắc, vị trí xuất hiện, thời gian...) để tôi chẩn đoán chính xác hơn nhé.</p>");
         return builder.toString();
     }
 
@@ -1363,6 +1433,8 @@ public class AiKnowledgeService {
                 .causes(defaultList(readJsonList(entity.getCausesJson(), new TypeReference<List<String>>() {
                 })))
                 .treatmentStages(toKnowledgeTreatmentStageResponses(entity.getTreatmentStagesJson()))
+                .engineerName(entity.getEngineerName())
+                .engineerPhone(entity.getEngineerPhone())
                 .confidenceThreshold(entity.getConfidenceThreshold())
                 .matchThreshold(entity.getMatchThreshold())
                 .enabled(entity.getEnabled())
