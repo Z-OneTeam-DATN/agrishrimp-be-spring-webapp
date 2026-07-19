@@ -5,15 +5,12 @@ import com.zone.agri.dto.request.ai.AiDoctorChatRequest;
 import com.zone.agri.dto.request.ai.AiDoctorClarifyRequest;
 import com.zone.agri.dto.response.ai.AiDoctorClarifyResponse;
 import com.zone.agri.dto.response.ai.AiDoctorDiagnosisResponse;
-import com.zone.agri.dto.response.ai.AiDoctorChatPromptResponse;
 import com.zone.agri.service.ai.AiKnowledgeService;
 import com.zone.agri.service.aidoctor.AiDoctorClarifyService;
 import com.zone.agri.service.aidoctor.AiDoctorDiagnosisService;
-import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -30,11 +27,6 @@ public class PublicAiDoctorController {
     private final AiKnowledgeService aiKnowledgeService;
     private final AiDoctorDiagnosisService diagnosisService;
     private final AiDoctorClarifyService clarifyService;
-
-    @GetMapping("/prompts")
-    public ResponseEntity<List<AiDoctorChatPromptResponse>> getPrompts() {
-        return ResponseEntity.ok(aiKnowledgeService.getChatPrompts());
-    }
 
     @PostMapping("/chat")
     public ResponseEntity<AiChatResponse> chat(@RequestBody AiDoctorChatRequest request) {
