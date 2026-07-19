@@ -1032,16 +1032,7 @@ public class AiKnowledgeService {
             long overlap = keywordTokens.stream().filter(messageTokens::contains).count();
             if (overlap > 0) {
                 double overlapRatio = (double) overlap / keywordTokens.size();
-                // Khớp kiểu "trùng từ rời rạc" (không phải khớp nguyên cụm liền mạch ở nhánh
-                // contains() phía trên) là tín hiệu YẾU: một câu mô tả chung chung có thể trùng
-                // hết các từ của một cụm ngắn (vd nông dân gõ "tôm bơi lờ đờ, tấp mé" vô tình
-                // trùng đủ 3 từ của cụm "bơi tấp mé", dù triệu chứng đó gần như bệnh nào cũng có,
-                // không đặc trưng). Trần 0.30 đảm bảo overlapRatio=1.0 CỘNG cả bonus canonical
-                // (+0.03) và priority (+0.02) vẫn không vượt qua match_threshold thông thường
-                // (0.35-0.40) — tín hiệu này một mình không bao giờ đủ để kết luận, phải đi kèm
-                // khớp nguyên cụm từ khóa (nhánh contains(), mạnh hơn nhiều — 0.82-0.92) hoặc
-                // nông dân mô tả cụ thể, đặc trưng hơn.
-                bestScore = Math.max(bestScore, overlapRatio * 0.30D);
+                bestScore = Math.max(bestScore, overlapRatio * 0.75D);
             }
         }
         return bestScore;
