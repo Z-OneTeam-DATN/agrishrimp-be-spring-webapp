@@ -89,6 +89,18 @@ public class ExternalApiService {
         }
 
         // Gather completed results in priority order
+        Optional<VietQrResponse.BusinessData> doanhNghiepData = joinFuture(doanhNghiepFuture);
+        queriedSources.add("DOANH_NGHIEP_BIZ");
+        doanhNghiepData.ifPresent(data -> absorbData(data, "DOANH_NGHIEP_BIZ", rawByField, fieldSources));
+
+        Optional<VietQrResponse.BusinessData> xInvoiceData = joinFuture(xInvoiceFuture);
+        queriedSources.add("XINVOICE");
+        xInvoiceData.ifPresent(data -> absorbData(data, "XINVOICE", rawByField, fieldSources));
+
+        Optional<VietQrResponse.BusinessData> masothueData = joinFuture(masothueFuture);
+        queriedSources.add("MA_SO_THUE");
+        masothueData.ifPresent(data -> absorbData(data, "MA_SO_THUE", rawByField, fieldSources));
+
         Optional<VietQrResponse.BusinessData> vietQrData = joinFuture(vietQrFuture);
         queriedSources.add("VIETQR");
         vietQrData.ifPresent(data -> absorbData(data, "VIETQR", rawByField, fieldSources));
@@ -100,18 +112,6 @@ public class ExternalApiService {
         Optional<VietQrResponse.BusinessData> ttdnData = joinFuture(ttdnFuture);
         queriedSources.add("THONG_TIN_DOANH_NGHIEP");
         ttdnData.ifPresent(data -> absorbData(data, "THONG_TIN_DOANH_NGHIEP", rawByField, fieldSources));
-
-        Optional<VietQrResponse.BusinessData> xInvoiceData = joinFuture(xInvoiceFuture);
-        queriedSources.add("XINVOICE");
-        xInvoiceData.ifPresent(data -> absorbData(data, "XINVOICE", rawByField, fieldSources));
-
-        Optional<VietQrResponse.BusinessData> masothueData = joinFuture(masothueFuture);
-        queriedSources.add("MA_SO_THUE");
-        masothueData.ifPresent(data -> absorbData(data, "MA_SO_THUE", rawByField, fieldSources));
-
-        Optional<VietQrResponse.BusinessData> doanhNghiepData = joinFuture(doanhNghiepFuture);
-        queriedSources.add("DOANH_NGHIEP_BIZ");
-        doanhNghiepData.ifPresent(data -> absorbData(data, "DOANH_NGHIEP_BIZ", rawByField, fieldSources));
 
         Optional<VietQrResponse.BusinessData> internalData = joinFuture(internalFuture);
         queriedSources.add("INTERNAL_SUPPLIER");
@@ -315,6 +315,9 @@ public class ExternalApiService {
             Map<String, String> fieldSources) {
         if (!isNotBlank(value))
             return;
+        if (FIELD_ISSUE_DATE.equals(field) && "1970-01-01".equals(value.trim())) {
+            return;
+        }
         if (!rawByField.containsKey(field) || !isNotBlank(rawByField.get(field))) {
             String sanitizedValue = value.trim();
             if (FIELD_MAIN_BUSINESS_SECTOR.equals(field)) {
