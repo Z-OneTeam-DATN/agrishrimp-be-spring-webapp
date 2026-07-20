@@ -195,16 +195,26 @@ if ($SkipTunnelSetup -and -not $reuseExistingTunnel) {
 }
 
 if (-not $reuseExistingTunnel -and -not $SkipTunnelSetup) {
-    Write-Step "Requesting SSH password for $SshHost"
-    $securePassword = Read-Host "SSH password" -AsSecureString
-    $credential = New-Object System.Management.Automation.PSCredential ("ignored", $securePassword)
-    $plainPassword = $credential.GetNetworkCredential().Password
-    if ([string]::IsNullOrWhiteSpace($plainPassword)) {
-        throw "SSH password cannot be empty."
-    }
-
     $passwordFile = Join-Path $stateDir "sshpass.txt"
-    Set-Content -LiteralPath $passwordFile -Value $plainPassword -NoNewline
+    $parentPasswordFile = Join-Path (Split-Path $workspaceRoot -Parent) ".live-local\sshpass.txt"
+    
+    if (Test-Path $passwordFile) {
+        $plainPassword = Get-Content -LiteralPath $passwordFile -Raw
+        Write-Host "Reusing saved SSH password from $passwordFile" -ForegroundColor Yellow
+    } elseif (Test-Path $parentPasswordFile) {
+        $plainPassword = Get-Content -LiteralPath $parentPasswordFile -Raw
+        $passwordFile = $parentPasswordFile
+        Write-Host "Reusing saved SSH password from $parentPasswordFile" -ForegroundColor Yellow
+    } else {
+        Write-Step "Requesting SSH password for $SshHost"
+        $securePassword = Read-Host "SSH password" -AsSecureString
+        $credential = New-Object System.Management.Automation.PSCredential ("ignored", $securePassword)
+        $plainPassword = $credential.GetNetworkCredential().Password
+        if ([string]::IsNullOrWhiteSpace($plainPassword)) {
+            throw "SSH password cannot be empty."
+        }
+        Set-Content -LiteralPath $passwordFile -Value $plainPassword -NoNewline
+    }
 
     try {
         Write-Step "Ensuring remote DB and Redis proxy containers"
