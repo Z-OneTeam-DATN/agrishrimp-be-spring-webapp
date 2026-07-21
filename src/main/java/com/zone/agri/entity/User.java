@@ -86,9 +86,6 @@ public class User extends BaseEntity {
     @JsonIgnore
     private Role role;
 
-    @Column(name = "zalo_id", unique = true)
-    private String zaloId;
-
     @Enumerated(EnumType.STRING)
     @Column(name = "auth_provider")
     @JsonIgnore

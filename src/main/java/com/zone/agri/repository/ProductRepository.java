@@ -50,10 +50,6 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
   void deleteVariantAttributesByProduct(@Param("product") Product product);
 
   @Modifying
-  @Query("DELETE FROM UnitConversion uc WHERE uc.variant.product = :product")
-  void deleteUnitConversionsByProduct(@Param("product") Product product);
-
-  @Modifying
   @Query("DELETE FROM ProductVariant pv WHERE pv.product = :product")
   void deleteVariantsByProduct(@Param("product") Product product);
 

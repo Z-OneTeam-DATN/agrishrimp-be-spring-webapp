@@ -68,7 +68,6 @@ public class JwtUtils {
         claims.put("warehouseId", customUserDetail.getUserDetail().getBranchId());
         claims.put("roleSlug", customUserDetail.getUserDetail().getRole() != null
                 ? customUserDetail.getUserDetail().getRole().getSlug() : null);
-        claims.put("zaloId", zaloId);
 
         return buildToken(customUserDetail.getUsername(), claims, accessExpiration);
     }

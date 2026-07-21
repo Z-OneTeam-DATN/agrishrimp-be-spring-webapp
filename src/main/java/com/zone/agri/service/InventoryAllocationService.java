@@ -174,7 +174,7 @@ public class InventoryAllocationService {
                     .branchId(selectedBranchId)
                     .branchName(selectedBranchWithDistance.branch().getName())
                     .branchAddress(selectedBranchWithDistance.branch().getAddressDetail())
-                    .fromDistrictId(selectedBranchWithDistance.branch().getDistrictId())
+                    .fromDistrictId(null)
                     .durationMinutes(selectedBranchWithDistance.durationMinutes())
                     .distanceKm(selectedBranchWithDistance.distanceKm())
                     .items(allocatedItems)

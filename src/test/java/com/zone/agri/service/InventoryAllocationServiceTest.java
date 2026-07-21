@@ -62,13 +62,11 @@ class InventoryAllocationServiceTest {
         setId(branch1, 1L, "id");
         branch1.setName("Chi Nhánh Cần Thơ");
         branch1.setAddressDetail("15 Mậu Thân, Cần Thơ");
-        branch1.setDistrictId(1442);
 
         branch2 = Branch.builder().build();
         setId(branch2, 2L, "id");
         branch2.setName("Chi Nhánh Sóc Trăng");
         branch2.setAddressDetail("21 Trần Hưng Đạo, Sóc Trăng");
-        branch2.setDistrictId(1444);
 
         // Biến thể không còn lưu giá, nhưng vẫn setup giả định để map
         varA = ProductVariant.builder().sku("SKU-A").build();

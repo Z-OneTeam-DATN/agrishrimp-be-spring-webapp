@@ -281,7 +281,7 @@ public class AuthService {
             return doZaloLogin(request, normalizedPhone);
         } catch (DataIntegrityViolationException e) {
             // Race condition: concurrent request đã tạo user cùng lúc — retry lookup
-            log.warn("Race condition trên Zalo login zaloId={}, retrying", request.getUserId());
+            log.warn("Race condition trên Zalo login phone={}, retrying", normalizedPhone);
             return doZaloLogin(request, normalizedPhone);
         }
     }
@@ -290,8 +290,7 @@ public class AuthService {
     protected ZaloAuthResponse doZaloLogin(ZaloAuthRequest request, String normalizedPhone) {
 
         // 2. Tìm hoặc tạo user
-        User user = userRepository.findByZaloId(request.getUserId())
-                .orElseGet(() -> userRepository.findByPhoneNumber(normalizedPhone).orElse(null));
+        User user = userRepository.findByPhoneNumber(normalizedPhone).orElse(null);
 
         if (user == null) {
             // Tạo user mới
@@ -309,7 +308,6 @@ public class AuthService {
                     .fullName(displayName)
                     .phoneNumber(normalizedPhone)
                     .avatarUrl(avatarUrl)
-                    .zaloId(request.getUserId())
                     .provider(AuthProvider.ZALO)
                     .role(defaultRole)
                     .status(UserStatus.ACTIVE)
@@ -317,26 +315,14 @@ public class AuthService {
                     .build();
 
             userRepository.save(user);
-            log.info("Tạo tài khoản Zalo mới: zaloId={}, phone={}", request.getUserId(), normalizedPhone);
+            log.info("Tạo tài khoản Zalo mới: phone={}", normalizedPhone);
         } else {
             // Kiểm tra trạng thái tài khoản
             checkUserStatus(user);
 
-            // FIX ACCOUNT TAKEOVER: nếu phone này đã linked với zaloId KHÁC → reject
-            if (user.getZaloId() != null && !user.getZaloId().equals(request.getUserId())) {
-                log.warn("Zalo ID conflict: phone={}, dbZaloId={}, requestZaloId={}",
-                        normalizedPhone, user.getZaloId(), request.getUserId());
-                throw new BadRequestException(
-                        "Số điện thoại này đã liên kết với một tài khoản Zalo khác. Vui lòng liên hệ hỗ trợ.");
-            }
-
             // Liên kết / cập nhật thông tin
             boolean changed = false;
 
-            if (user.getZaloId() == null) {
-                user.setZaloId(request.getUserId());
-                changed = true;
-            }
             if (request.getName() != null && !request.getName().isBlank()
                     && !request.getName().trim().equals(user.getFullName())) {
                 user.setFullName(request.getName().trim());
@@ -354,7 +340,7 @@ public class AuthService {
             if (changed) {
                 userRepository.save(user);
             }
-            log.info("Đăng nhập Zalo thành công: userId={}, zaloId={}", user.getId(), request.getUserId());
+            log.info("Đăng nhập Zalo thành công: userId={}, phone={}", user.getId(), normalizedPhone);
         }
 
         // 3. Generate JWT nội bộ — subject = phoneNumber

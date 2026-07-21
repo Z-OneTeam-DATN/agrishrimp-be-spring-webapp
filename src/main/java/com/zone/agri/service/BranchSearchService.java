@@ -237,13 +237,10 @@ public class BranchSearchService {
         if (wardCode != null && wardCode.equals(branchWardCode)) {
             return 0;
         }
-        if (districtId != null && districtId.equals(branch.getDistrictId())) {
+        if (provinceId != null && provinceId.equals(branch.getProvinceId())) {
             return 1;
         }
-        if (provinceId != null && provinceId.equals(branch.getProvinceId())) {
-            return 2;
-        }
-        return 3;
+        return 2;
     }
 
     private String normalizeWardCode(String wardCode) {

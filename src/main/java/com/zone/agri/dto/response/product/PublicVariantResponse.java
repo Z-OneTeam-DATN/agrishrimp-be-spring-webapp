@@ -38,7 +38,4 @@ public class PublicVariantResponse {
 
     /** Các giá trị thuộc tính động (màu, size, v.v.) */
     private List<AttributeValueResponse> attributeValues;
-
-    /** Bảng quy đổi đơn vị */
-    private List<UnitConversionResponse> unitConversions;
 }
