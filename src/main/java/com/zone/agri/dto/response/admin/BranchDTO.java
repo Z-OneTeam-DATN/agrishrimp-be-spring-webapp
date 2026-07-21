@@ -41,7 +41,6 @@ public class BranchDTO {
     /** GHN WardCode (string, ví dụ: "550113") — dùng cho shipping fee API */
     private String wardCode;
     private String provinceName;
-    private String districtName;
     private String wardName;
     /** Tọa độ — tự động geocode từ addressDetail khi create/update */
     private Double lat;

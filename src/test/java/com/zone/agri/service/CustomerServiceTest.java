@@ -28,9 +28,7 @@ import com.zone.agri.entity.enums.AuthProvider;
 import com.zone.agri.entity.enums.CustomerStatus;
 import com.zone.agri.entity.enums.UserStatus;
 import com.zone.agri.repository.BranchRepository;
-import com.zone.agri.repository.CustomerInternalNoteRepository;
 import com.zone.agri.repository.CustomerRepository;
-import com.zone.agri.repository.CustomerStatusLogRepository;
 import com.zone.agri.repository.OrderRepository;
 import com.zone.agri.repository.RoleRepository;
 import com.zone.agri.repository.UserAddressRepository;
@@ -59,12 +57,6 @@ class CustomerServiceTest {
 
     @Mock
     private OrderRepository orderRepository;
-
-    @Mock
-    private CustomerInternalNoteRepository customerInternalNoteRepository;
-
-    @Mock
-    private CustomerStatusLogRepository customerStatusLogRepository;
 
     @Mock
     private BranchRepository branchRepository;
@@ -187,18 +179,12 @@ class CustomerServiceTest {
         when(orderRepository.findAverageOrderValueByUserId(7L)).thenReturn(null);
         when(userAddressRepository.findByUserIdOrderByIsDefaultDescCreatedAtDesc(7L))
                 .thenReturn(Collections.emptyList());
-        when(customerInternalNoteRepository.findByCustomerUserIdOrderByCreatedAtDesc(7L))
-                .thenReturn(Collections.emptyList());
-        when(customerStatusLogRepository.findByCustomerUserIdOrderByCreatedAtDesc(7L))
-                .thenReturn(Collections.emptyList());
 
         CustomerDetailResponse response = customerService.getCustomerDetailById(7L);
 
         assertThat(response.getUserId()).isEqualTo(7L);
         assertThat(response.getCustomerId()).isNull();
         assertThat(response.getRiskLevel()).isEqualTo("UNKNOWN");
-        assertThat(response.getInternalNotes()).isEmpty();
-        assertThat(response.getStatusLogs()).isEmpty();
     }
 
     @Test

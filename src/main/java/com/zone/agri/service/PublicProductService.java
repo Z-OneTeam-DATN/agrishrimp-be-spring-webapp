@@ -247,7 +247,6 @@ public class PublicProductService {
                 .unit("Cái") // Giá trị mặc định do entity không còn lưu unit
                 .imageUrl(variant.getImageUrl())
                 .attributeValues(attrs)
-                .unitConversions(Collections.emptyList()) // Ẩn quy đổi
                 .build();
     }
 

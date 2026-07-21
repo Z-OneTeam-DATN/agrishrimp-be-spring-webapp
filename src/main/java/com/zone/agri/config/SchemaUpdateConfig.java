@@ -347,6 +347,42 @@ public class SchemaUpdateConfig implements BeanPostProcessor {
                             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
                             """);
 
+            executeSql(stmt,
+                    "Drop obsolete table unit_conversions if exists",
+                    "DROP TABLE IF EXISTS unit_conversions");
+
+            executeSql(stmt,
+                    "Drop obsolete table units if exists",
+                    "DROP TABLE IF EXISTS units");
+
+            executeSql(stmt,
+                    "Drop obsolete table canned_responses if exists",
+                    "DROP TABLE IF EXISTS canned_responses");
+
+            executeSql(stmt,
+                    "Drop obsolete table customer_internal_notes if exists",
+                    "DROP TABLE IF EXISTS customer_internal_notes");
+
+            executeSql(stmt,
+                    "Drop obsolete table customer_status_logs if exists",
+                    "DROP TABLE IF EXISTS customer_status_logs");
+
+            executeSql(stmt,
+                    "Drop obsolete table images if exists",
+                    "DROP TABLE IF EXISTS images");
+
+            executeSql(stmt,
+                    "Drop obsolete columns geocoded_at, district_id, district_name from branches",
+                    "ALTER TABLE branches DROP COLUMN geocoded_at, DROP COLUMN district_id, DROP COLUMN district_name");
+
+            executeSql(stmt,
+                    "Drop obsolete columns internal_notes, note from customers",
+                    "ALTER TABLE customers DROP COLUMN internal_notes, DROP COLUMN note");
+
+            executeSql(stmt,
+                    "Drop obsolete column zalo_id from users",
+                    "ALTER TABLE users DROP COLUMN zalo_id");
+
             log.info("All schema patches executed successfully.");
         } catch (Exception e) {
             log.error("Failed to run database schema patches", e);

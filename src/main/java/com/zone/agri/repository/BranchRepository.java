@@ -45,8 +45,6 @@ public interface BranchRepository extends JpaRepository<Branch, Long> {
     @Query("SELECT b FROM Branch b WHERE b.id = :id")
     Optional<Branch> findByIdForUpdate(@Param("id") Long id);
 
-    List<Branch> findByStatusAndDistrictId(BranchStatus status, Integer districtId);
-
     List<Branch> findByStatusAndProvinceId(BranchStatus status, Integer provinceId);
 
     /**
