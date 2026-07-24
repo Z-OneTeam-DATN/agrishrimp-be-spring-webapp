@@ -26,7 +26,6 @@ import com.zone.agri.dto.response.ai.AiKnowledgeCategoryResponse;
 import com.zone.agri.dto.response.ai.AiKnowledgeChatConfigResponse;
 import com.zone.agri.dto.response.ai.AiKnowledgeImportPreviewResponse;
 import com.zone.agri.dto.response.ai.AiKnowledgeImportPreviewRowResponse;
-import com.zone.agri.dto.response.ai.AiKnowledgeReportResponse;
 import com.zone.agri.dto.response.ai.AiKnowledgeReviewCaseResponse;
 import com.zone.agri.dto.response.ai.AiKnowledgeTreatmentStageResponse;
 import com.zone.agri.dto.response.ai.AiKeywordAnswerSetResponse;
@@ -59,7 +58,6 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.EnumMap;
 import java.util.HashMap;
-import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
@@ -490,32 +488,6 @@ public class AiKnowledgeService {
         } catch (IOException exception) {
             throw new RuntimeException("Không thể tạo file mẫu import tri thức", exception);
         }
-    }
-
-    @Transactional(readOnly = true)
-    public AiKnowledgeReportResponse getReport() {
-        Map<String, Long> matchedTypeCounts = new LinkedHashMap<>();
-        for (AiKnowledgeMatchType type : AiKnowledgeMatchType.values()) {
-            matchedTypeCounts.put(type.name(), chatLogRepository.countByMatchedType(type));
-        }
-
-        List<AiKnowledgeReportResponse.QuestionFrequency> questions = chatLogRepository.findTopUnmatchedQuestions()
-                .stream()
-                .limit(10)
-                .map(row -> AiKnowledgeReportResponse.QuestionFrequency.builder()
-                        .question(String.valueOf(row[0]))
-                        .count(((Number) row[1]).longValue())
-                        .build())
-                .toList();
-
-        return AiKnowledgeReportResponse.builder()
-                .totalQuestions(chatLogRepository.count())
-                .matchedQuestions(chatLogRepository.countByMatched(true))
-                .unmatchedQuestions(chatLogRepository.countByMatched(false))
-                .reviewCaseCount(reviewCaseRepository.count())
-                .matchedTypeCounts(matchedTypeCounts)
-                .topUnmatchedQuestions(questions)
-                .build();
     }
 
     @Transactional

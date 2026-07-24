@@ -12,7 +12,6 @@ import com.zone.agri.dto.response.ai.AiDiseaseKnowledgeResponse;
 import com.zone.agri.dto.response.ai.AiKnowledgeCategoryResponse;
 import com.zone.agri.dto.response.ai.AiKnowledgeChatConfigResponse;
 import com.zone.agri.dto.response.ai.AiKnowledgeImportPreviewResponse;
-import com.zone.agri.dto.response.ai.AiKnowledgeReportResponse;
 import com.zone.agri.dto.response.ai.AiKnowledgeReviewCaseResponse;
 import com.zone.agri.dto.response.ai.AiKeywordAnswerSetResponse;
 import com.zone.agri.entity.enums.AiReviewCaseStatus;
@@ -191,12 +190,6 @@ public class AiKnowledgeController {
         return ResponseEntity.ok()
                 .headers(headers)
                 .body(fileBytes);
-    }
-
-    @GetMapping("/reports")
-    @RequirePermission("AI_KNOWLEDGE_VIEW")
-    public ResponseEntity<AiKnowledgeReportResponse> getReport() {
-        return ResponseEntity.ok(aiKnowledgeService.getReport());
     }
 
     @PostMapping("/test-chat")
