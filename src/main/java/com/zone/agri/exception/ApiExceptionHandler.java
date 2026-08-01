@@ -1,10 +1,12 @@
 package com.zone.agri.exception;
 
+import jakarta.validation.ConstraintViolationException;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -22,6 +24,9 @@ import org.springframework.web.multipart.MaxUploadSizeExceededException;
 public class ApiExceptionHandler {
 
   private static final String ERROR_LOG_FORMAT = "Error: URI: {}, ErrorCode: {}, Message: {}";
+
+  @Value("${spring.servlet.multipart.max-file-size}")
+  private String maxUploadFileSize;
 
   @ExceptionHandler(NotFoundException.class)
   public ResponseEntity<ErrorDetail> handleNotFoundException(NotFoundException ex,
@@ -99,6 +104,18 @@ public class ApiExceptionHandler {
     return ResponseEntity.badRequest().body(errorVm);
   }
 
+  @ExceptionHandler(ConstraintViolationException.class)
+  public ResponseEntity<ErrorDetail> handleConstraintViolationException(
+      ConstraintViolationException ex, WebRequest request) {
+    String detail = ex.getConstraintViolations().stream()
+        .map(violation -> violation.getPropertyPath() + ": " + violation.getMessage())
+        .collect(java.util.stream.Collectors.joining(", "));
+    ErrorDetail errorVm = new ErrorDetail(HttpStatus.BAD_REQUEST.toString(), "Bad Request",
+        "Dữ liệu không hợp lệ: " + detail);
+    log.warn(ERROR_LOG_FORMAT, this.getServletPath(request), 400, detail);
+    return ResponseEntity.badRequest().body(errorVm);
+  }
+
   @ExceptionHandler({ SignInRequiredException.class })
   public ResponseEntity<ErrorDetail> handleSignInRequired(SignInRequiredException ex) {
     String message = ex.getMessage();
@@ -152,12 +169,12 @@ public class ApiExceptionHandler {
   public ResponseEntity<ErrorDetail> handleMaxSizeException(MaxUploadSizeExceededException exc,
       WebRequest request) {
     String message = exc.getMessage();
-    ErrorDetail errorVm = new ErrorDetail(HttpStatus.NOT_FOUND.toString(),
-        "Maximum upload size exceeded",
-        "File is too large! Please upload a file smaller than 100MB.");
-    log.warn(ERROR_LOG_FORMAT, this.getServletPath(request), 404, message);
+    ErrorDetail errorVm = new ErrorDetail(HttpStatus.PAYLOAD_TOO_LARGE.toString(),
+        "Payload Too Large",
+        "File tải lên vượt quá dung lượng cho phép (tối đa " + maxUploadFileSize + "). Vui lòng chọn file nhỏ hơn.");
+    log.warn(ERROR_LOG_FORMAT, this.getServletPath(request), 413, message);
     log.debug(exc.toString());
-    return new ResponseEntity<>(errorVm, HttpStatus.NOT_FOUND);
+    return new ResponseEntity<>(errorVm, HttpStatus.PAYLOAD_TOO_LARGE);
   }
 
   @ExceptionHandler(org.springframework.web.server.ResponseStatusException.class)
