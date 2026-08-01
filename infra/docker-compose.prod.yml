@@ -143,8 +143,10 @@ services:
     networks:
       - agrishrimp-net
     healthcheck:
+      # curl, khong phai wget — image jre-jammy chi cai curl (xem Dockerfile), khong co wget,
+      # nen ban wget cu khong bao gio chay duoc va container luon bao unhealthy du app that su OK.
       test: ["CMD-SHELL",
-             "wget -qO- http://localhost:8004/actuator/health | grep -q '\"status\":\"UP\"'"]
+             "curl -sf http://localhost:8004/actuator/health | grep -q '\"status\":\"UP\"'"]
       interval: 30s
       timeout: 10s
       retries: 3
