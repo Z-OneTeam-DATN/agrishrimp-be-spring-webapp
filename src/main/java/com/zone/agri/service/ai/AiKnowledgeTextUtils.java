@@ -11,6 +11,13 @@ import java.util.stream.Collectors;
 
 public final class AiKnowledgeTextUtils {
 
+    // "tom" (tôm) va "bi" (bị) xuat hien trong HAU HET ten benh ("Tom bi X") va HAU HET cau mo ta
+    // trieu chung cua nguoi dung ("tom ... bi ..."), nen khong mang tin hieu phan biet gi khi tinh
+    // do trung token — bo qua o buoc tokenize (chi dung cho scoring) de ten benh khong tu thang
+    // diem chi vi trung 2 tu de đem nay voi bat ky cau nao ma nguoi dung go, du trieu chung thuc
+    // te khong khop. Danh sach co tinh, chi gom tu chac chan vo nghia trong moi truong hop khop.
+    private static final Set<String> STOP_WORDS = Set.of("tom", "bi");
+
     private AiKnowledgeTextUtils() {
     }
 
@@ -36,7 +43,7 @@ public final class AiKnowledgeTextUtils {
             return Collections.emptyList();
         }
         return Arrays.stream(normalized.split("\\s+"))
-                .filter(token -> !token.isBlank())
+                .filter(token -> !token.isBlank() && !STOP_WORDS.contains(token))
                 .distinct()
                 .toList();
     }
