@@ -59,6 +59,10 @@ public class SchemaUpdateConfig implements BeanPostProcessor {
                     "Patch inventory_notes.type enum adds CHECK",
                     "ALTER TABLE inventory_notes MODIFY COLUMN type ENUM('IMPORT','EXPORT','CHECK')");
 
+            patchBranches(conn, stmt);
+            patchUsers(conn, stmt);
+            patchCustomers(conn, stmt);
+
             executeSql(stmt,
                     "Patch inventory_notes adds check_scope_type",
                     "ALTER TABLE inventory_notes ADD COLUMN check_scope_type VARCHAR(50) NULL");
@@ -351,6 +355,70 @@ public class SchemaUpdateConfig implements BeanPostProcessor {
         } catch (Exception e) {
             log.error("Failed to run database schema patches", e);
         }
+    }
+
+    private void patchBranches(Connection conn, Statement stmt) {
+        String tableName = "branches";
+        if (!tableExists(conn, tableName)) {
+            log.info("Skip branches schema patch because table '{}' does not exist yet.", tableName);
+            return;
+        }
+
+        ensureColumnWithLegacyBackfill(conn, stmt, tableName, "branch_type", "VARCHAR(20) NULL", List.of());
+        ensureColumnWithLegacyBackfill(conn, stmt, tableName, "address_detail", "TEXT NULL", List.of());
+        ensureColumnWithLegacyBackfill(conn, stmt, tableName, "full_address", "TEXT NULL", List.of());
+        ensureColumnWithLegacyBackfill(conn, stmt, tableName, "map_display_name", "TEXT NULL", List.of());
+        ensureColumnWithLegacyBackfill(conn, stmt, tableName, "province_id", "INT NULL", List.of());
+        ensureColumnWithLegacyBackfill(conn, stmt, tableName, "province_name", "VARCHAR(100) NULL", List.of());
+        ensureColumnWithLegacyBackfill(conn, stmt, tableName, "district_id", "INT NULL", List.of());
+        ensureColumnWithLegacyBackfill(conn, stmt, tableName, "district_name", "VARCHAR(100) NULL", List.of());
+        ensureColumnWithLegacyBackfill(conn, stmt, tableName, "ward_id", "INT NULL", List.of());
+        ensureColumnWithLegacyBackfill(conn, stmt, tableName, "ward_name", "VARCHAR(100) NULL", List.of());
+        ensureColumnWithLegacyBackfill(conn, stmt, tableName, "lat", "DOUBLE NULL", List.of());
+        ensureColumnWithLegacyBackfill(conn, stmt, tableName, "lng", "DOUBLE NULL", List.of());
+        ensureColumnWithLegacyBackfill(conn, stmt, tableName, "ward_code", "VARCHAR(20) NULL", List.of());
+        ensureColumnWithLegacyBackfill(conn, stmt, tableName, "geocoded_at", "DATETIME(6) NULL", List.of());
+    }
+
+    private void patchUsers(Connection conn, Statement stmt) {
+        String tableName = "users";
+        if (!tableExists(conn, tableName)) {
+            log.info("Skip users schema patch because table '{}' does not exist yet.", tableName);
+            return;
+        }
+
+        ensureColumnWithLegacyBackfill(conn, stmt, tableName, "citizen_id", "VARCHAR(12) NULL", List.of());
+        ensureColumnWithLegacyBackfill(conn, stmt, tableName, "date_of_birth", "DATE NULL", List.of());
+        ensureColumnWithLegacyBackfill(conn, stmt, tableName, "address_detail", "TEXT NULL", List.of());
+        ensureColumnWithLegacyBackfill(conn, stmt, tableName, "start_date", "DATE NULL", List.of());
+        ensureColumnWithLegacyBackfill(conn, stmt, tableName, "gender", "TINYINT NULL", List.of());
+        ensureColumnWithLegacyBackfill(conn, stmt, tableName, "deleted_at", "DATETIME(6) NULL", List.of());
+        ensureColumnWithLegacyBackfill(conn, stmt, tableName, "zalo_id", "VARCHAR(255) NULL", List.of());
+        ensureColumnWithLegacyBackfill(conn, stmt, tableName, "auth_provider", "VARCHAR(50) NULL", List.of("provider"));
+
+        executeSql(stmt,
+                "Backfill users.auth_provider to LOCAL",
+                "UPDATE users SET auth_provider = 'LOCAL' WHERE auth_provider IS NULL OR TRIM(auth_provider) = ''");
+    }
+
+    private void patchCustomers(Connection conn, Statement stmt) {
+        String tableName = "customers";
+        if (!tableExists(conn, tableName)) {
+            log.info("Skip customers schema patch because table '{}' does not exist yet.", tableName);
+            return;
+        }
+
+        ensureColumnWithLegacyBackfill(conn, stmt, tableName, "gender", "VARCHAR(30) NULL", List.of());
+        ensureColumnWithLegacyBackfill(conn, stmt, tableName, "province_id", "VARCHAR(255) NULL", List.of());
+        ensureColumnWithLegacyBackfill(conn, stmt, tableName, "district_id", "VARCHAR(255) NULL", List.of());
+        ensureColumnWithLegacyBackfill(conn, stmt, tableName, "ward_id", "VARCHAR(255) NULL", List.of());
+        ensureColumnWithLegacyBackfill(conn, stmt, tableName, "address_detail", "VARCHAR(255) NULL", List.of());
+        ensureColumnWithLegacyBackfill(conn, stmt, tableName, "status", "VARCHAR(30) NULL", List.of());
+        ensureColumnWithLegacyBackfill(conn, stmt, tableName, "note", "TEXT NULL", List.of());
+        ensureColumnWithLegacyBackfill(conn, stmt, tableName, "user_id", "BIGINT NULL", List.of());
+        ensureColumnWithLegacyBackfill(conn, stmt, tableName, "branch_id", "BIGINT NULL", List.of("assigned_branch_id"));
+        ensureColumnWithLegacyBackfill(conn, stmt, tableName, "staff_assigned_id", "BIGINT NULL", List.of("assigned_staff_id"));
+        ensureColumnWithLegacyBackfill(conn, stmt, tableName, "internal_notes", "TEXT NULL", List.of());
     }
 
     private void patchInventoryTransfers(Connection conn, Statement stmt) {

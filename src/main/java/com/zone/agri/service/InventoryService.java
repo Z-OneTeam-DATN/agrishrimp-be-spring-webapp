@@ -3,6 +3,8 @@ package com.zone.agri.service;
 import com.zone.agri.dto.request.inventory.InventoryQCRequest;
 import com.zone.agri.dto.request.inventory.InventoryReceiptRequest;
 import com.zone.agri.dto.response.inventory.InventoryReceiptResponse;
+import com.zone.agri.common.AuthUtils;
+import com.zone.agri.common.RoleUtils;
 import com.zone.agri.entity.*;
 import com.zone.agri.entity.enums.InventoryNoteStatus;
 import com.zone.agri.entity.enums.InventoryNoteType;
@@ -43,6 +45,21 @@ public class InventoryService {
     private final PurchaseRequestRepository purchaseRequestRepository;
     private final InventoryCheckGuardService inventoryCheckGuardService;
     private final ApplicationContext applicationContext; // Dùng để lazy-get PurchaseRequestService tránh circular dep
+
+    private Long resolveImportListBranchId() {
+        return canApproveImportsAcrossBranches() ? null : warehouseContext.resolveWarehouseId();
+    }
+
+    private void assertImportReadOrApproveAccess(InventoryNote note) {
+        if (!canApproveImportsAcrossBranches()) {
+            warehouseContext.assertAccess(note.getBranch().getId());
+        }
+    }
+
+    private boolean canApproveImportsAcrossBranches() {
+        return hasAuthority("IMPORT_APPROVE")
+                && RoleUtils.hasAdminLikeAuthority(AuthUtils.getAuthorities());
+    }
     private static final Set<InventoryNoteStatus> OPEN_RECEIPT_STATUSES = Set.of(
             InventoryNoteStatus.PENDING,
             InventoryNoteStatus.APPROVED
@@ -150,7 +167,7 @@ public class InventoryService {
     public InventoryReceiptResponse approveReceipt(Long id) {
         InventoryNote note = noteRepository.findByIdWithDetails(id)
                 .orElseThrow(() -> new NotFoundException("Khong tim thay phieu ID: " + id));
-        warehouseContext.assertAccess(note.getBranch().getId());
+        assertImportReadOrApproveAccess(note);
 
         if (note.getStatus() != InventoryNoteStatus.PENDING) {
             throw new BadRequestException("Chi co the duyet phieu dang o trang thai Cho duyet (PENDING).");
@@ -166,7 +183,7 @@ public class InventoryService {
     public InventoryReceiptResponse rejectReceipt(Long id) {
         InventoryNote note = noteRepository.findById(id)
                 .orElseThrow(() -> new NotFoundException("Không tìm thấy phiếu ID: " + id));
-        warehouseContext.assertAccess(note.getBranch().getId());
+        assertImportReadOrApproveAccess(note);
         if (note.getStatus() != InventoryNoteStatus.PENDING) {
             throw new BadRequestException("Chỉ có thể từ chối phiếu đang ở trạng thái Chờ duyệt.");
         }
@@ -179,7 +196,7 @@ public class InventoryService {
     public InventoryReceiptResponse completeReceipt(Long id, InventoryQCRequest qcRequest) {
         InventoryNote note = noteRepository.findById(id)
                 .orElseThrow(() -> new NotFoundException("Khong tim thay phieu ID: " + id));
-        warehouseContext.assertAccess(note.getBranch().getId());
+        assertImportReadOrApproveAccess(note);
 
         inventoryCheckGuardService.assertStockMutationAllowed(
                 note.getBranch().getId(),
@@ -473,7 +490,7 @@ public class InventoryService {
     // --- 4 & 5. LẤY DANH SÁCH & CHI TIẾT ---
     @Transactional(readOnly = true)
     public List<InventoryReceiptResponse> getAllReceipts() {
-        Long warehouseId = warehouseContext.resolveWarehouseId();
+        Long warehouseId = resolveImportListBranchId();
         List<InventoryNote> notes = (warehouseId == null) 
                 ? noteRepository.findAllByTypeWithPartners(InventoryNoteType.IMPORT)
                 : noteRepository.findAllByTypeAndBranchWithPartners(InventoryNoteType.IMPORT, warehouseId);
@@ -487,7 +504,7 @@ public class InventoryService {
     public InventoryReceiptResponse getReceiptById(Long id) {
         InventoryNote note = noteRepository.findById(id)
                 .orElseThrow(() -> new NotFoundException("Không tìm thấy phiếu ID: " + id));
-        warehouseContext.assertAccess(note.getBranch().getId());
+        assertImportReadOrApproveAccess(note);
         return mapToResponse(note);
     }
 

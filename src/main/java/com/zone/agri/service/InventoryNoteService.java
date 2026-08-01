@@ -4,6 +4,8 @@ import com.zone.agri.dto.request.inventory.CheckNoteRequest;
 import com.zone.agri.dto.request.inventory.ExportNoteRequest;
 import com.zone.agri.dto.response.inventory.InventoryNoteDetailResponse;
 import com.zone.agri.dto.response.inventory.InventoryNoteResponse;
+import com.zone.agri.common.AuthUtils;
+import com.zone.agri.common.RoleUtils;
 import com.zone.agri.entity.*;
 import com.zone.agri.entity.enums.InventoryCheckScopeType;
 import com.zone.agri.entity.enums.InventoryCheckWorkflowStatus;
@@ -57,6 +59,31 @@ public class InventoryNoteService {
         return auth != null
                 && auth.getAuthorities() != null
                 && auth.getAuthorities().stream().anyMatch(a -> authority.equals(a.getAuthority()));
+    }
+
+    private boolean canApproveAcrossBranches(String approvalAuthority) {
+        return hasAuthority(approvalAuthority)
+                && RoleUtils.hasAdminLikeAuthority(AuthUtils.getAuthorities());
+    }
+
+    private Long resolveExportListBranchId() {
+        return canApproveAcrossBranches("EXPORT_APPROVE") ? null : warehouseContext.resolveWarehouseId();
+    }
+
+    private void assertExportReadOrApproveAccess(InventoryNote note) {
+        if (!canApproveAcrossBranches("EXPORT_APPROVE")) {
+            warehouseContext.assertAccess(note.getBranch().getId());
+        }
+    }
+
+    private Long resolveCheckListBranchId() {
+        return canApproveAcrossBranches("INVENTORY_CHECK_APPROVE") ? null : warehouseContext.resolveWarehouseId();
+    }
+
+    private void assertCheckReadOrApproveAccess(InventoryNote note) {
+        if (!canApproveAcrossBranches("INVENTORY_CHECK_APPROVE")) {
+            warehouseContext.assertAccess(note.getBranch().getId());
+        }
     }
 
     private boolean isWarehouseBranch(Branch branch) {
@@ -117,7 +144,7 @@ public class InventoryNoteService {
         InventoryNote note = inventoryNoteRepository.findByIdWithDetails(id)
                 .orElseThrow(() -> new NotFoundException("Khong tim thay lenh xuat ID: " + id));
 
-        warehouseContext.assertAccess(note.getBranch().getId());
+        assertExportReadOrApproveAccess(note);
         inventoryCheckGuardService.assertStockMutationAllowed(
                 note.getBranch().getId(),
                 note.getDetails().stream().map(detail -> detail.getProductVariant().getId()).toList(),
@@ -467,7 +494,7 @@ public class InventoryNoteService {
 
     @Transactional(readOnly = true)
     public List<InventoryNoteResponse> getAllCheckNotes() {
-        Long warehouseId = warehouseContext.resolveWarehouseId();
+        Long warehouseId = resolveCheckListBranchId();
         List<InventoryNote> notes = (warehouseId == null)
                 ? inventoryNoteRepository.findAllByTypeWithPartners(InventoryNoteType.CHECK)
                 : inventoryNoteRepository.findAllByTypeAndBranchWithPartners(InventoryNoteType.CHECK, warehouseId);
@@ -479,13 +506,16 @@ public class InventoryNoteService {
 
     @Transactional(readOnly = true)
     public InventoryNoteResponse getCheckCommandById(Long id) {
-        return inventoryNoteRepository.findByIdWithDetails(id)
-                .map(this::mapToResponse)
+        InventoryNote note = inventoryNoteRepository.findByIdWithDetails(id)
                 .orElseThrow(() -> new NotFoundException("KhÄ‚Â´ng tÄ‚Â¬m thĂ¡ÂºÂ¥y lĂ¡Â»â€¡nh kiĂ¡Â»Æ’m kho."));
+        assertCheckReadOrApproveAccess(note);
+        return mapToResponse(note);
     }
 
     private List<InventoryNoteResponse> getNotesByTypeAndStatus(InventoryNoteType type, InventoryNoteStatus status) {
-        Long warehouseId = warehouseContext.resolveWarehouseId();
+        Long warehouseId = type == InventoryNoteType.CHECK
+                ? resolveCheckListBranchId()
+                : warehouseContext.resolveWarehouseId();
         List<InventoryNote> notes = (warehouseId == null)
                 ? inventoryNoteRepository.findAllByTypeAndStatusWithPartners(type, status)
                 : inventoryNoteRepository.findAllByTypeAndStatusAndBranchWithPartners(type, status, warehouseId);
@@ -744,7 +774,7 @@ public class InventoryNoteService {
     }
 
     private List<InventoryNoteResponse> getNotesByStatuses(InventoryNoteType type, Collection<InventoryNoteStatus> statuses) {
-        Long warehouseId = warehouseContext.resolveWarehouseId();
+        Long warehouseId = resolveExportListBranchId();
         List<InventoryNote> notes = (warehouseId == null)
                 ? inventoryNoteRepository.findAllByTypeAndStatusInWithPartners(type, statuses)
                 : inventoryNoteRepository.findAllByTypeAndStatusInAndBranchWithPartners(type, statuses, warehouseId);
@@ -816,7 +846,7 @@ public class InventoryNoteService {
     public InventoryNoteResponse requestCheckRecount(Long id, String reason) {
         InventoryNote note = inventoryNoteRepository.findByIdWithDetails(id)
                 .orElseThrow(() -> new NotFoundException("KhÄ‚Â´ng tÄ‚Â¬m thĂ¡ÂºÂ¥y phiĂ¡ÂºÂ¿u kiĂ¡Â»Æ’m kÄ‚Âª."));
-        warehouseContext.assertAccess(note.getBranch().getId());
+        assertCheckReadOrApproveAccess(note);
 
         if (canonicalStatus(note) != InventoryCheckWorkflowStatus.PENDING_APPROVAL) {
             throw new BadRequestException("ChĂ¡Â»â€° cÄ‚Â³ thĂ¡Â»Æ’ yÄ‚Âªu cĂ¡ÂºÂ§u kiĂ¡Â»Æ’m lĂ¡ÂºÂ¡i Ă¡Â»Å¸ trĂ¡ÂºÂ¡ng thÄ‚Â¡i chĂ¡Â»Â duyĂ¡Â»â€¡t.");
@@ -860,7 +890,7 @@ public class InventoryNoteService {
         User approver = getCurrentUser();
         InventoryNote note = inventoryNoteRepository.findByIdWithDetails(id)
                 .orElseThrow(() -> new NotFoundException("KhÄ‚Â´ng tÄ‚Â¬m thĂ¡ÂºÂ¥y lĂ¡Â»â€¡nh kiĂ¡Â»Æ’m kho ID: " + id));
-        warehouseContext.assertAccess(note.getBranch().getId());
+        assertCheckReadOrApproveAccess(note);
 
         if (canonicalStatus(note) != InventoryCheckWorkflowStatus.PENDING_APPROVAL) {
             throw new BadRequestException("PhiĂ¡ÂºÂ¿u kiĂ¡Â»Æ’m kÄ‚Âª phĂ¡ÂºÂ£i Ă¡Â»Å¸ trĂ¡ÂºÂ¡ng thÄ‚Â¡i chĂ¡Â»Â duyĂ¡Â»â€¡t.");
@@ -1216,9 +1246,10 @@ public class InventoryNoteService {
 
     @Transactional(readOnly = true)
     public InventoryNoteResponse getExportCommandById(Long id) {
-        return inventoryNoteRepository.findByIdWithDetails(id)
-                .map(this::mapToResponse)
+        InventoryNote note = inventoryNoteRepository.findByIdWithDetails(id)
                 .orElseThrow(() -> new NotFoundException("KhÄ‚Â´ng tÄ‚Â¬m thĂ¡ÂºÂ¥y lĂ¡Â»â€¡nh xuĂ¡ÂºÂ¥t."));
+        assertExportReadOrApproveAccess(note);
+        return mapToResponse(note);
     }
 
     @Transactional(readOnly = true)
