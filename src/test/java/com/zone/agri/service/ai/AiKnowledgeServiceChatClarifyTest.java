@@ -493,6 +493,61 @@ class AiKnowledgeServiceChatClarifyTest {
         assertThat(readTurns(session.get()).get(0).getText()).isEqualTo(abusiveMessage);
     }
 
+    // =========================================================
+    // 5) Bug thuc te tren production: ten benh dang "Tom bi X" khien cau mo hong "tom ... bi ..."
+    // trung diem cao voi BAT KY benh nao chi vi 2 tu chung "tom"/"bi", khong lien quan trieu chung
+    // thuc. Vd "tom cua toi bi do" (khong co "do"/red trong du lieu benh nao) van bi chan doan
+    // nham thanh "Tom bi viem mang" (mo ta benh do la "mang chuyen mau nau den hoac vang" — khong
+    // he nhac "do"). Day la test tai hien dung bug nguoi dung bao cao.
+    // =========================================================
+
+    @Test
+    void vagueMessageSharingOnlyGenericWordsWithDiseaseName_doesNotFalselyMatch() {
+        diseaseKnowledgeRepository.save(AiDiseaseKnowledge.builder()
+                .code("BG")
+                .nameVi("Tom bi viem mang")
+                .symptomKeywordsRaw("mang chuyen mau nau den, mang chuyen mau vang, kho tho")
+                .signsSummary("Mang tom chuyen mau nau den hoac vang, bam nhieu chat ban")
+                .confidenceThreshold(0.65D)
+                .matchThreshold(0.4D)
+                .enabled(true)
+                .priority(0)
+                .canonical(false)
+                .status(AiKnowledgeStatus.APPROVED)
+                .build());
+        ReflectionTestUtils.invokeMethod(aiKnowledgeService, "evictApprovedSnapshot");
+
+        // Cau nay chi trung "tom" va "bi" voi ten benh — khong co tu nao trong symptomKeywordsRaw
+        // thuc su cua benh. Truoc khi sua (ten benh duoc dung nguyen de tinh diem trung token,
+        // khong loc "tom"/"bi") no se bi cham diem qua nguong chi nho 2 tu chung nay.
+        AiChatResponse response = chat("tom cua toi bi do", "sess-" + UUID.randomUUID(), null);
+
+        assertThat(response.getReply()).doesNotContain("viem mang", "Tom bi viem mang");
+    }
+
+    @Test
+    void specificSymptomMatch_stillWorksNormally_afterStopWordFix() {
+        diseaseKnowledgeRepository.save(AiDiseaseKnowledge.builder()
+                .code("WSSV")
+                .nameVi("Benh dom trang")
+                .symptomKeywordsRaw("dom trang tren vo, boi lo do, giam an")
+                .signsSummary("Xuat hien cac dom trang tron tren vo va giap dau nguc")
+                .confidenceThreshold(0.65D)
+                .matchThreshold(0.4D)
+                .enabled(true)
+                .priority(0)
+                .canonical(false)
+                .status(AiKnowledgeStatus.APPROVED)
+                .build());
+        ReflectionTestUtils.invokeMethod(aiKnowledgeService, "evictApprovedSnapshot");
+
+        // Trieu chung cu the ("dom trang") van phai khop binh thuong — loc "tom"/"bi" chi bo tin
+        // hieu vo nghia, khong lam yeu di cac tu khoa trieu chung that su.
+        AiChatResponse response = chat("tom nha toi bi dom trang tren vo", "sess-" + UUID.randomUUID(), null);
+
+        assertThat(response.getReply()).contains("Benh dom trang");
+    }
+
     @SuppressWarnings("unchecked")
     private List<String> readChatCandidateCodes(AiChatClarifySession session) {
         try {
