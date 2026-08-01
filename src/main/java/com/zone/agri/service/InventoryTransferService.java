@@ -21,6 +21,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.zone.agri.common.AuthUtils;
+import com.zone.agri.common.RoleUtils;
 import com.zone.agri.dto.request.transfer.TransferItemRequest;
 import com.zone.agri.dto.request.transfer.TransferQCRequest;
 import com.zone.agri.dto.request.transfer.TransferRequest;
@@ -105,7 +106,22 @@ public class InventoryTransferService {
     private final InventoryCheckGuardService inventoryCheckGuardService;
     private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(InventoryTransferService.class);
 
+    private boolean hasAuthority(String authority) {
+        var auth = org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication();
+        return auth != null && auth.getAuthorities().stream()
+                .anyMatch(a -> authority.equals(a.getAuthority()));
+    }
+
+    private boolean canApproveTransfersAcrossBranches() {
+        return hasAuthority("TRANSFER_APPROVE")
+                && RoleUtils.hasAdminLikeAuthority(AuthUtils.getAuthorities());
+    }
+
     private void assertTransferParticipantAccess(InventoryTransfer transfer) {
+        if (canApproveTransfersAcrossBranches()) {
+            return;
+        }
+
         Long allowedBranchId = warehouseContext.resolveWarehouseId();
         if (allowedBranchId == null) {
             return;
@@ -1494,7 +1510,7 @@ public class InventoryTransferService {
             } catch (Exception e) {
             }
         }
-        Long branchId = warehouseContext.resolveWarehouseId();
+        Long branchId = canApproveTransfersAcrossBranches() ? null : warehouseContext.resolveWarehouseId();
         return branchId == null
                 ? transferRepo.searchTransfers(keyword, status, pageable)
                 : transferRepo.searchTransfersForBranch(keyword, status, branchId, pageable);

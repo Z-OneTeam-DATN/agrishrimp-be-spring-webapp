@@ -24,8 +24,9 @@ public class PurchaseRequestController {
 
     @RequirePermission("PURCHASE_REQUEST_VIEW")
     @GetMapping
-    public ResponseEntity<List<PurchaseRequestResponse>> getAll() {
-        return ResponseEntity.ok(purchaseRequestService.getAllRequests());
+    public ResponseEntity<List<PurchaseRequestResponse>> getAll(
+            @RequestParam(required = false) Long branchId) {
+        return ResponseEntity.ok(purchaseRequestService.getAllRequests(branchId));
     }
 
     @RequirePermission("PURCHASE_REQUEST_VIEW")

@@ -1,5 +1,7 @@
 package com.zone.agri.service;
 
+import com.zone.agri.common.AuthUtils;
+import com.zone.agri.common.RoleUtils;
 import com.zone.agri.common.WarehouseContext;
 import com.zone.agri.dto.request.purchase.PurchaseRequestCreateRequest;
 import com.zone.agri.dto.response.purchase.PurchaseRequestResponse;
@@ -54,6 +56,33 @@ public class PurchaseRequestService {
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
         return auth != null && auth.getAuthorities().stream()
                 .anyMatch(a -> a.getAuthority().equals(authority));
+    }
+
+    private boolean canApprovePurchaseRequests() {
+        return hasAuthority("PURCHASE_REQUEST_APPROVE");
+    }
+
+    private boolean canApprovePurchaseRequestsAcrossBranches() {
+        return canApprovePurchaseRequests()
+                && RoleUtils.hasAdminLikeAuthority(AuthUtils.getAuthorities());
+    }
+
+    private void assertPurchaseRequestReadOrApproveAccess(PurchaseRequest pr) {
+        if (!canApprovePurchaseRequestsAcrossBranches()) {
+            warehouseContext.assertAccess(pr.getBranch().getId());
+        }
+    }
+
+    private Long resolvePurchaseRequestListBranchId(Long requestedBranchId) {
+        if (canApprovePurchaseRequestsAcrossBranches()) {
+            return requestedBranchId;
+        }
+
+        Long scopedBranchId = warehouseContext.resolveWarehouseId();
+        if (requestedBranchId != null) {
+            warehouseContext.assertAccess(requestedBranchId);
+        }
+        return scopedBranchId;
     }
 
     private Branch resolveRequestBranch(PurchaseRequestCreateRequest request) {
@@ -420,8 +449,8 @@ public class PurchaseRequestService {
     // ─────────────────────────────────────────────────────────────────────────
 
     @Transactional(readOnly = true)
-    public List<PurchaseRequestResponse> getAllRequests() {
-        Long branchId = warehouseContext.resolveWarehouseId();
+    public List<PurchaseRequestResponse> getAllRequests(Long requestedBranchId) {
+        Long branchId = resolvePurchaseRequestListBranchId(requestedBranchId);
         List<PurchaseRequest> list = (branchId == null)
                 ? purchaseRequestRepository.findAllWithRelations()
                 : purchaseRequestRepository.findAllByBranchWithRelations(branchId);
@@ -433,7 +462,7 @@ public class PurchaseRequestService {
     public PurchaseRequestResponse getById(Long id) {
         PurchaseRequest pr = purchaseRequestRepository.findByIdWithDetails(id)
                 .orElseThrow(() -> new NotFoundException("Không tìm thấy phiếu yêu cầu mua ID: " + id));
-        warehouseContext.assertAccess(pr.getBranch().getId());
+        assertPurchaseRequestReadOrApproveAccess(pr);
         return mapToResponse(pr);
     }
 
@@ -481,7 +510,7 @@ public class PurchaseRequestService {
     @Transactional
     public PurchaseRequestResponse approve(Long id) {
         PurchaseRequest pr = findOrThrow(id);
-        warehouseContext.assertAccess(pr.getBranch().getId());
+        assertPurchaseRequestReadOrApproveAccess(pr);
         if (pr.getStatus() != PurchaseRequestStatus.PENDING_APPROVAL) {
             throw new BadRequestException("Chỉ có thể duyệt phiếu đang ở trạng thái Chờ duyệt.");
         }
@@ -494,7 +523,7 @@ public class PurchaseRequestService {
     @Transactional
     public PurchaseRequestResponse reject(Long id) {
         PurchaseRequest pr = findOrThrow(id);
-        warehouseContext.assertAccess(pr.getBranch().getId());
+        assertPurchaseRequestReadOrApproveAccess(pr);
         if (pr.getStatus() != PurchaseRequestStatus.PENDING_APPROVAL) {
             throw new BadRequestException("Chỉ có thể từ chối phiếu đang ở trạng thái Chờ duyệt.");
         }
@@ -580,7 +609,7 @@ public class PurchaseRequestService {
     @Transactional
     public PurchaseRequestResponse close(Long id) {
         PurchaseRequest pr = findOrThrow(id);
-        warehouseContext.assertAccess(pr.getBranch().getId());
+        assertPurchaseRequestReadOrApproveAccess(pr);
         Set<PurchaseRequestStatus> closableStatuses = Set.of(
                 PurchaseRequestStatus.PARTIALLY_RECEIVED,
                 PurchaseRequestStatus.COMPLETED
