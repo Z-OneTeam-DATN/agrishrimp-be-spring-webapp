@@ -2,7 +2,10 @@ package com.zone.agri.service.ai;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.zone.agri.client.ai.GeminiClarifyClient;
 import com.zone.agri.dto.ai.AiChatResponse;
+import com.zone.agri.dto.ai.AiClarifyLlmResult;
+import com.zone.agri.dto.ai.AiClarifyTurn;
 import com.zone.agri.dto.ai.AiPredictResponse;
 import com.zone.agri.dto.ai.AiPredictionItem;
 import com.zone.agri.dto.response.ai.AiDoctorDiagnosisResponse;
@@ -29,6 +32,7 @@ import com.zone.agri.dto.response.ai.AiKnowledgeImportPreviewRowResponse;
 import com.zone.agri.dto.response.ai.AiKnowledgeReviewCaseResponse;
 import com.zone.agri.dto.response.ai.AiKnowledgeTreatmentStageResponse;
 import com.zone.agri.dto.response.ai.AiKeywordAnswerSetResponse;
+import com.zone.agri.entity.AiChatClarifySession;
 import com.zone.agri.entity.AiDiseaseKnowledge;
 import com.zone.agri.entity.AiKeywordAnswerSet;
 import com.zone.agri.entity.AiKnowledgeCategory;
@@ -36,12 +40,14 @@ import com.zone.agri.entity.AiKnowledgeChatConfig;
 import com.zone.agri.entity.AiKnowledgeChatLog;
 import com.zone.agri.entity.AiKnowledgeReviewCase;
 import com.zone.agri.entity.Product;
+import com.zone.agri.entity.enums.AiClarifySessionStatus;
 import com.zone.agri.entity.enums.AiKnowledgeMatchType;
 import com.zone.agri.entity.enums.AiKnowledgeStatus;
 import com.zone.agri.entity.enums.AiReviewCaseReason;
 import com.zone.agri.entity.enums.AiReviewCaseStatus;
 import com.zone.agri.exception.ConflictException;
 import com.zone.agri.exception.NotFoundException;
+import com.zone.agri.repository.AiChatClarifySessionRepository;
 import com.zone.agri.repository.AiDiseaseKnowledgeRepository;
 import com.zone.agri.repository.AiKeywordAnswerSetRepository;
 import com.zone.agri.repository.AiKnowledgeCategoryRepository;
@@ -52,12 +58,9 @@ import com.zone.agri.repository.ProductRepository;
 import com.zone.agri.service.aidoctor.AiDoctorProductSuggestionService;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.EnumMap;
-import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
@@ -74,6 +77,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.apache.poi.ss.usermodel.Row;
 import org.apache.poi.ss.usermodel.Sheet;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -95,6 +99,13 @@ public class AiKnowledgeService {
     private static final String DEFAULT_FALLBACK =
             "Xin lỗi, tôi chưa có đủ tri thức đã duyệt để trả lời chính xác. "
                     + "Vui lòng mô tả rõ hơn dấu hiệu hoặc liên hệ kỹ sư nông nghiệp để được hỗ trợ.";
+    private static final String CHAT_CLARIFY_ESCALATION_MESSAGE =
+            "Dấu hiệu bạn mô tả chưa đủ để tôi kết luận chắc chắn. "
+                    + "Vui lòng mô tả rõ hơn hoặc liên hệ kỹ sư nông nghiệp để được hỗ trợ.";
+    // Bệnh có điểm khớp thấp hơn ngưỡng riêng nhưng vẫn đạt tối thiểu 60% ngưỡng đó được coi là
+    // "gần đạt" — đủ để chủ động hỏi thêm các dấu hiệu phân biệt còn thiếu (qua Gemini) thay vì
+    // rơi thẳng vào fallback cứng như trước.
+    private static final double NEAR_MISS_THRESHOLD_RATIO = 0.6D;
 
     private final ObjectMapper objectMapper;
     private final AiKnowledgeCategoryRepository categoryRepository;
@@ -103,8 +114,13 @@ public class AiKnowledgeService {
     private final AiKnowledgeReviewCaseRepository reviewCaseRepository;
     private final AiKnowledgeChatConfigRepository chatConfigRepository;
     private final AiKnowledgeChatLogRepository chatLogRepository;
+    private final AiChatClarifySessionRepository chatClarifySessionRepository;
     private final ProductRepository productRepository;
     private final AiDoctorProductSuggestionService productSuggestionService;
+    private final GeminiClarifyClient geminiClarifyClient;
+
+    @Value("${ai.doctor.clarify.max-turns:8}")
+    private int maxClarifyTurns;
 
     private final AtomicReference<ApprovedKnowledgeSnapshot> approvedSnapshotRef = new AtomicReference<>();
     private volatile long approvedSnapshotLoadedAt = 0L;
@@ -490,14 +506,19 @@ public class AiKnowledgeService {
         }
     }
 
-    @Transactional
+    /**
+     * KHÔNG @Transactional: khi câu hỏi mơ hồ (nhiều bệnh cùng khớp) hoặc gần đạt ngưỡng 1 bệnh,
+     * hàm này mở/tiếp tục một phiên hỏi-đáp gọi Gemini (HTTP ra ngoài, tối đa ~40s) qua
+     * bootstrapChatClarify/continueChatClarify — cùng lý do với AiDoctorClarifyService#continueClarify:
+     * bọc trong 1 transaction sẽ giữ connection DB mở suốt thời gian gọi Gemini. Từng thao tác DB
+     * (save/find) bên dưới đã tự có transaction riêng ở tầng repository.
+     */
     public AiChatResponse answerChat(
             AiDoctorChatRequest request,
             Long userId,
             String sourceChannel,
             boolean createReviewCaseWhenUnmatched) {
         String normalizedMessage = AiKnowledgeTextUtils.normalize(request.getMessage());
-        ApprovedKnowledgeSnapshot snapshot = getApprovedSnapshot();
         AiKnowledgeChatConfig config = ensureChatConfig();
         String sessionId = trimToNull(request.getSessionId()) != null
                 ? request.getSessionId().trim()
@@ -507,6 +528,21 @@ public class AiKnowledgeService {
             return buildChatResponse(config.getGreetingMessage(), sessionId, getSuggestedActionLabels());
         }
 
+        Optional<AiChatClarifySession> activeSession = chatClarifySessionRepository
+                .findFirstBySessionIdAndStatusOrderByIdDesc(sessionId, AiClarifySessionStatus.ACTIVE);
+        if (activeSession.isPresent() && chatSessionOwnerMatches(activeSession.get(), userId)) {
+            return continueChatClarify(activeSession.get(), request.getMessage(), createReviewCaseWhenUnmatched);
+        }
+        if (activeSession.isPresent()) {
+            // sessionId là chuỗi phía client tự sinh và lưu localStorage — trên thiết bị dùng
+            // chung, một người khác đăng nhập sau có thể vô tình mang cùng sessionId cũ. Không
+            // được tiếp tục hộ hội thoại của người khác: coi như chưa có phiên nào, xử lý như
+            // câu hỏi mới (phiên cũ tự hết hiệu lực khi hết turn hoặc người chủ thực sự quay lại).
+            log.warn("[AiChatClarify] sessionId={} dang ACTIVE nhung khac userId (session={}, caller={}) — bo qua, xu ly nhu cau hoi moi",
+                    sessionId, activeSession.get().getUserId(), userId);
+        }
+
+        ApprovedKnowledgeSnapshot snapshot = getApprovedSnapshot();
         MatchOutcome outcome = resolveBestMatch(
                 normalizedMessage,
                 request.getDiagnosisContext() != null ? request.getDiagnosisContext().getDiseaseCode() : null,
@@ -518,6 +554,11 @@ public class AiKnowledgeService {
                     true, outcome.matchType(), outcome.knowledgeCode(), outcome.score());
 
             return buildChatResponse(outcome.answerHtml(), sessionId, getSuggestedActionLabels());
+        }
+
+        if (outcome.clarifyCandidates() != null && !outcome.clarifyCandidates().isEmpty()) {
+            return bootstrapChatClarify(sessionId, userId, sourceChannel, request.getMessage(),
+                    outcome.clarifyCandidates(), createReviewCaseWhenUnmatched);
         }
 
         persistChatLog(userId, sessionId, sourceChannel, request.getMessage(), config.getFallbackMessage(),
@@ -538,6 +579,200 @@ public class AiKnowledgeService {
         }
 
         return buildChatResponse(config.getFallbackMessage(), sessionId, getSuggestedActionLabels());
+    }
+
+    // =========================================================
+    // Chat clarify — tái dùng GeminiClarifyClient (đã schema-lock vào candidate APPROVED) để hỏi
+    // thêm khi chat gõ chữ khớp mơ hồ hoặc gần đạt ngưỡng, thay vì trả lời cứng/liệt kê rồi bỏ đó.
+    // =========================================================
+
+    private boolean chatSessionOwnerMatches(AiChatClarifySession session, Long callerUserId) {
+        return Objects.equals(session.getUserId(), callerUserId);
+    }
+
+    private AiChatResponse bootstrapChatClarify(
+            String sessionId,
+            Long userId,
+            String sourceChannel,
+            String farmerMessage,
+            List<PreparedDisease> candidates,
+            boolean createReviewCaseWhenUnmatched) {
+        List<AiClarifyCandidateSummary> candidateSummaries = candidates.stream()
+                .map(this::toClarifyCandidateSummary)
+                .toList();
+
+        AiChatClarifySession session = AiChatClarifySession.builder()
+                .sessionId(sessionId)
+                .userId(userId)
+                .sourceChannel(sourceChannel)
+                .candidateDiseaseCodesJson(writeJson(candidateSummaries.stream()
+                        .map(AiClarifyCandidateSummary::getDiseaseCode)
+                        .toList()))
+                .conversationJson(writeJson(List.of(
+                        AiClarifyTurn.builder().role(AiClarifyTurn.ROLE_FARMER).text(farmerMessage).build())))
+                .turnCount(0)
+                .status(AiClarifySessionStatus.ACTIVE)
+                .build();
+        session = chatClarifySessionRepository.save(session);
+
+        return advanceChatClarify(session, candidateSummaries, farmerMessage, createReviewCaseWhenUnmatched);
+    }
+
+    private AiChatResponse continueChatClarify(
+            AiChatClarifySession session, String farmerAnswer, boolean createReviewCaseWhenUnmatched) {
+        List<AiClarifyTurn> turns = new ArrayList<>(readChatTurns(session));
+        turns.add(AiClarifyTurn.builder().role(AiClarifyTurn.ROLE_FARMER).text(farmerAnswer).build());
+        session.setConversationJson(writeJson(turns));
+        session = chatClarifySessionRepository.save(session);
+
+        if (session.getTurnCount() >= maxClarifyTurns) {
+            log.info("[AiChatClarify] sessionId={} cham tran an toan ({} luot), escalate", session.getSessionId(), maxClarifyTurns);
+            return escalateChatClarify(session, farmerAnswer, createReviewCaseWhenUnmatched);
+        }
+
+        return advanceChatClarify(session, resolveChatCandidates(session), farmerAnswer, createReviewCaseWhenUnmatched);
+    }
+
+    private AiChatResponse advanceChatClarify(
+            AiChatClarifySession session,
+            List<AiClarifyCandidateSummary> candidates,
+            String latestFarmerText,
+            boolean createReviewCaseWhenUnmatched) {
+        AiClarifyLlmResult llmResult;
+        try {
+            llmResult = geminiClarifyClient.clarify(candidates, readChatTurns(session));
+        } catch (Exception ex) {
+            log.warn("[AiChatClarify] sessionId={} Gemini call fail, escalate: {}", session.getSessionId(), ex.getMessage());
+            return escalateChatClarify(session, latestFarmerText, createReviewCaseWhenUnmatched);
+        }
+
+        String responseType = llmResult.getResponseType();
+
+        if ("DECISION".equalsIgnoreCase(responseType)) {
+            Optional<PreparedDisease> decided = validateChatDecision(session, llmResult.getDiseaseCode());
+            if (decided.isEmpty()) {
+                log.warn("[AiChatClarify] sessionId={} Gemini decision khong hop le (diseaseCode={}), escalate",
+                        session.getSessionId(), llmResult.getDiseaseCode());
+                return escalateChatClarify(session, latestFarmerText, createReviewCaseWhenUnmatched);
+            }
+            return finalizeChatDecision(session, decided.get(), latestFarmerText);
+        }
+
+        if ("QUESTION".equalsIgnoreCase(responseType) && trimToNull(llmResult.getQuestionText()) != null) {
+            String question = llmResult.getQuestionText().trim();
+
+            // Phong thu o tang code, khong chi dua vao prompt: neu Gemini hoi lai gan nhu y nguyen
+            // cau hoi truoc (loi model / bi dan vao vong lap "vet") thi khong tiep tuc hoi them —
+            // escalate ngay thay vi de nong dan bi hoi lap lai toi khi cham tran max-turns.
+            if (isRepeatOfLastAssistantQuestion(session, question)) {
+                log.warn("[AiChatClarify] sessionId={} Gemini hoi lap lai cau truoc, khong tien trien, escalate",
+                        session.getSessionId());
+                return escalateChatClarify(session, latestFarmerText, createReviewCaseWhenUnmatched);
+            }
+
+            List<AiClarifyTurn> turns = new ArrayList<>(readChatTurns(session));
+            turns.add(AiClarifyTurn.builder().role(AiClarifyTurn.ROLE_ASSISTANT).text(question).build());
+            session.setConversationJson(writeJson(turns));
+            session.setTurnCount(session.getTurnCount() + 1);
+            chatClarifySessionRepository.save(session);
+
+            persistChatLog(session.getUserId(), session.getSessionId(), session.getSourceChannel(),
+                    latestFarmerText, question, false, AiKnowledgeMatchType.AMBIGUOUS, null, null);
+
+            // escapeHtml ở biên trả về (FE render "reply" bằng dangerouslySetInnerHTML): question
+            // là văn bản do Gemini sinh ra, không phải HTML admin đã duyệt như answerHtml/fallback
+            // — câu hỏi người dùng (farmer) gửi lên nằm trong lịch sử hội thoại gửi cho Gemini nên
+            // về lý thuyết có thể prompt-inject Gemini in ra thẻ HTML/script trong questionText.
+            // Lưu turns ở trên vẫn giữ bản gốc (chưa escape) để gửi lại đúng nguyên văn cho Gemini
+            // ở lượt sau — chỉ escape đúng lúc trả ra ngoài.
+            return buildChatResponse(escapeHtml(question), session.getSessionId(), Collections.emptyList());
+        }
+
+        log.warn("[AiChatClarify] sessionId={} Gemini tra ve output khong hop le: responseType={}",
+                session.getSessionId(), responseType);
+        return escalateChatClarify(session, latestFarmerText, createReviewCaseWhenUnmatched);
+    }
+
+    private Optional<PreparedDisease> validateChatDecision(AiChatClarifySession session, String diseaseCode) {
+        String normalized = trimToNull(diseaseCode);
+        if (normalized == null || !readChatCandidateCodes(session).contains(normalized)) {
+            return Optional.empty();
+        }
+        // Guardrail cuối: bệnh đó phải vẫn đang APPROVED tại thời điểm chốt, không chỉ dựa vào
+        // tập candidate đã khoá lúc bắt đầu phiên.
+        return findDiseaseByCodeFromSnapshot(normalized, getApprovedSnapshot());
+    }
+
+    private AiChatResponse finalizeChatDecision(AiChatClarifySession session, PreparedDisease disease, String latestFarmerText) {
+        session.setStatus(AiClarifySessionStatus.DECIDED);
+        session.setDecidedDiseaseCode(disease.entity().getCode());
+        chatClarifySessionRepository.save(session);
+
+        String answerHtml = buildDiseaseAnswerHtml(disease);
+        persistChatLog(session.getUserId(), session.getSessionId(), session.getSourceChannel(),
+                latestFarmerText, answerHtml, true, AiKnowledgeMatchType.DISEASE_KNOWLEDGE, disease.entity().getCode(), 1D);
+
+        log.info("[AiChatClarify] sessionId={} DECIDED: diseaseCode={}, turns={}",
+                session.getSessionId(), disease.entity().getCode(), session.getTurnCount());
+
+        return buildChatResponse(answerHtml, session.getSessionId(), getSuggestedActionLabels());
+    }
+
+    private AiChatResponse escalateChatClarify(
+            AiChatClarifySession session, String latestFarmerText, boolean createReviewCaseWhenUnmatched) {
+        session.setStatus(AiClarifySessionStatus.ESCALATED);
+        if (createReviewCaseWhenUnmatched) {
+            AiKnowledgeReviewCase reviewCase = createReviewCase(
+                    session.getUserId(),
+                    session.getSessionId(),
+                    session.getSourceChannel(),
+                    latestFarmerText,
+                    null,
+                    null,
+                    null,
+                    null,
+                    0D,
+                    AiReviewCaseReason.LOW_CONFIDENCE);
+            session.setReviewCaseId(reviewCase.getId());
+        }
+        chatClarifySessionRepository.save(session);
+
+        persistChatLog(session.getUserId(), session.getSessionId(), session.getSourceChannel(),
+                latestFarmerText, CHAT_CLARIFY_ESCALATION_MESSAGE, false, AiKnowledgeMatchType.AMBIGUOUS, null, 0D);
+
+        return buildChatResponse(CHAT_CLARIFY_ESCALATION_MESSAGE, session.getSessionId(), getSuggestedActionLabels());
+    }
+
+    private boolean isRepeatOfLastAssistantQuestion(AiChatClarifySession session, String newQuestion) {
+        List<AiClarifyTurn> turns = readChatTurns(session);
+        for (int i = turns.size() - 1; i >= 0; i--) {
+            AiClarifyTurn turn = turns.get(i);
+            if (AiClarifyTurn.ROLE_ASSISTANT.equals(turn.getRole())) {
+                return newQuestion.equalsIgnoreCase(trimToNull(turn.getText()));
+            }
+        }
+        return false;
+    }
+
+    private List<AiClarifyTurn> readChatTurns(AiChatClarifySession session) {
+        List<AiClarifyTurn> turns = readJsonList(session.getConversationJson(), new TypeReference<List<AiClarifyTurn>>() {
+        });
+        return turns != null ? turns : Collections.emptyList();
+    }
+
+    private List<String> readChatCandidateCodes(AiChatClarifySession session) {
+        List<String> codes = readJsonList(session.getCandidateDiseaseCodesJson(), new TypeReference<List<String>>() {
+        });
+        return codes != null ? codes : Collections.emptyList();
+    }
+
+    private List<AiClarifyCandidateSummary> resolveChatCandidates(AiChatClarifySession session) {
+        ApprovedKnowledgeSnapshot snapshot = getApprovedSnapshot();
+        return readChatCandidateCodes(session).stream()
+                .map(code -> findDiseaseByCodeFromSnapshot(code, snapshot))
+                .flatMap(Optional::stream)
+                .map(this::toClarifyCandidateSummary)
+                .toList();
     }
 
     @Transactional(readOnly = true)
@@ -922,17 +1157,17 @@ public class AiKnowledgeService {
         MatchScore keywordMatch = matchKeywordSetFromText(normalizedMessage, snapshot.keywordEntries);
 
         // Nhiều bệnh cùng vượt ngưỡng riêng của chúng (vd "tôm lờ đờ" là dấu hiệu chung của nhiều
-        // bệnh) → không tự chọn đại 1 bệnh, liệt kê các bệnh nghi ngờ và xin thêm ảnh/mô tả thay vì
-        // đoán mò. Chỉ áp dụng cho luồng gõ chữ tự do — hai nhánh phía trên (đã có diseaseCode/
-        // diseaseName xác định từ ảnh) không đi qua đây.
+        // bệnh) → không tự chọn đại 1 bệnh và cũng không đoán mò: trả về danh sách candidate để
+        // answerChat() mở phiên hỏi-đáp Gemini (giống luồng ảnh) nhằm hỏi thêm câu phân biệt thay
+        // vì chỉ liệt kê tên bệnh rồi bỏ đó. Chỉ áp dụng cho luồng gõ chữ tự do — hai nhánh phía
+        // trên (đã có diseaseCode/diseaseName xác định từ ảnh) không đi qua đây.
         List<PreparedDisease> qualifyingDiseases = findQualifyingDiseases(normalizedMessage, snapshot.diseaseEntries);
         if (qualifyingDiseases.size() > 1) {
             return MatchOutcome.builder()
-                    .matched(true)
+                    .matched(false)
                     .matchType(AiKnowledgeMatchType.AMBIGUOUS)
-                    .knowledgeCode(qualifyingDiseases.stream().map(d -> d.entity().getCode()).collect(Collectors.joining(",")))
                     .score(diseaseMatch.score())
-                    .answerHtml(buildAmbiguousAnswerHtml(qualifyingDiseases))
+                    .clarifyCandidates(qualifyingDiseases)
                     .build();
         }
 
@@ -961,6 +1196,21 @@ public class AiKnowledgeService {
                     .score(keywordMatch.score())
                     .answerHtml(keywordMatch.keyword().entity().getAnswerHtml())
                     .build();
+        }
+
+        // Không đủ điểm để kết luận, nhưng đủ gần ngưỡng của chính bệnh đó để tin là người dùng
+        // đang mô tả đúng hướng và chỉ thiếu vài dấu hiệu — mở phiên hỏi-đáp Gemini để hỏi thêm
+        // (dựa trên symptomKeywordsRaw/signsSummary của đúng bệnh này) thay vì rơi thẳng fallback.
+        if (diseaseMatch.score() > 0D && diseaseMatch.disease() != null) {
+            double threshold = defaultDouble(diseaseMatch.disease().entity().getMatchThreshold(), 0.4D);
+            if (diseaseMatch.score() >= threshold * NEAR_MISS_THRESHOLD_RATIO) {
+                return MatchOutcome.builder()
+                        .matched(false)
+                        .matchType(AiKnowledgeMatchType.DISEASE_KNOWLEDGE)
+                        .score(diseaseMatch.score())
+                        .clarifyCandidates(List.of(diseaseMatch.disease()))
+                        .build();
+            }
         }
 
         return MatchOutcome.builder().matched(false).build();
@@ -1286,24 +1536,6 @@ public class AiKnowledgeService {
         return builder.toString();
     }
 
-    /**
-     * Nhiều bệnh cùng vượt ngưỡng khớp — không tự chọn đại 1 bệnh, liệt kê các bệnh nghi ngờ và
-     * xin thêm ảnh/mô tả cụ thể hơn thay vì kết luận sai.
-     */
-    private String buildAmbiguousAnswerHtml(List<PreparedDisease> candidates) {
-        StringBuilder builder = new StringBuilder();
-        builder.append("<p>Dựa trên dấu hiệu bạn mô tả, tôm nhà bạn có thể đang mắc một trong các bệnh sau:</p><ul>");
-        for (PreparedDisease candidate : candidates) {
-            builder.append("<li><strong>").append(escapeHtml(candidate.entity().getNameVi())).append("</strong>");
-            if (trimToNull(candidate.entity().getNameEn()) != null) {
-                builder.append(" <em>(").append(escapeHtml(candidate.entity().getNameEn())).append(")</em>");
-            }
-            builder.append("</li>");
-        }
-        builder.append("</ul>");
-        builder.append("<p>Vui lòng gửi thêm ảnh chụp rõ tôm và mô tả cụ thể hơn (màu sắc, vị trí xuất hiện, thời gian...) để tôi chẩn đoán chính xác hơn nhé.</p>");
-        return builder.toString();
-    }
 
     private ApprovedKnowledgeSnapshot getApprovedSnapshot() {
         ApprovedKnowledgeSnapshot current = approvedSnapshotRef.get();
@@ -1745,7 +1977,8 @@ public class AiKnowledgeService {
             AiKnowledgeMatchType matchType,
             String knowledgeCode,
             Double score,
-            String answerHtml) {
+            String answerHtml,
+            List<PreparedDisease> clarifyCandidates) {
     }
 
     private record MatchScore(
