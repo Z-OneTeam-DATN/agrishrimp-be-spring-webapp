@@ -14,6 +14,11 @@ RUN mvn clean package -DskipTests
 FROM eclipse-temurin:25-jre-jammy
 WORKDIR /app
 
+# curl is required for the container HEALTHCHECK (docker-compose.yml probes /actuator/health);
+# the base jre-jammy image ships neither curl nor wget.
+RUN apt-get update && apt-get install -y --no-install-recommends curl \
+    && rm -rf /var/lib/apt/lists/*
+
 # Copy the built JAR
 COPY --from=build /app/target/*.jar app.jar
 
