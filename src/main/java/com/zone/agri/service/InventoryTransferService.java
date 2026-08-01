@@ -62,9 +62,35 @@ public class InventoryTransferService {
     private static final String SYSTEM_DEFECT_BRANCH_PHONE = "SYS-DEFECT-01";
     private static final String AUTO_REPLENISHMENT_TRANSFER_TYPE = "ORDER_REPLENISHMENT";
     private static final boolean ENFORCE_SOURCE_STOCK_CHECK_ON_CREATE = false;
+    private static final List<InventoryTransferStatus> ACTIVE_REPLENISHMENT_TRANSFER_STATUSES = List.of(
+            InventoryTransferStatus.PENDING,
+            InventoryTransferStatus.SOURCE_CONFIRMED,
+            InventoryTransferStatus.APPROVED,
+            InventoryTransferStatus.SHIPPING,
+            InventoryTransferStatus.INSPECTING);
     private static final List<InventoryTransferStatus> RESERVATION_HOLDER_STATUSES = List.of(
             InventoryTransferStatus.SOURCE_CONFIRMED,
             InventoryTransferStatus.APPROVED);
+
+    public enum ReplenishmentDecisionType {
+        REGULAR_BRANCH_TRANSFER,
+        MAIN_WAREHOUSE_TRANSFER,
+        PURCHASE_REQUEST
+    }
+
+    public record ReplenishmentDecision(
+            ReplenishmentDecisionType type,
+            Branch sourceBranch,
+            Branch destinationBranch,
+            String referenceCode,
+            Map<String, Integer> itemQuantities) {
+    }
+
+    private record MissingItemRequirement(
+            Long variantId,
+            String sku,
+            int quantity) {
+    }
 
     private final InventoryTransferRepository transferRepo;
     private final BranchRepository branchRepo;
@@ -97,6 +123,18 @@ public class InventoryTransferService {
                 && ((branch.getBranchType() != null
                         && normalizeText(branch.getBranchType()).contains("warehouse"))
                         || normalizeText(branch.getName()).contains("kho tong"));
+    }
+
+    private boolean isAutoReplenishmentTransfer(InventoryTransfer transfer) {
+        return transfer != null
+                && AUTO_REPLENISHMENT_TRANSFER_TYPE.equalsIgnoreCase(transfer.getTransferType());
+    }
+
+    private boolean requiresSourceConfirmation(InventoryTransfer transfer) {
+        return transfer != null
+                && (transfer.getTransferBusinessType() == TransferBusinessType.INTERNAL_SALE
+                        || (isAutoReplenishmentTransfer(transfer)
+                                && !isWarehouseBranch(transfer.getFromBranch())));
     }
 
     private Branch resolveMainWarehouse() {
@@ -424,6 +462,10 @@ public class InventoryTransferService {
     }
     @Transactional
     public List<InventoryTransfer> createReplenishmentTransfersForSubOrder(SubOrder subOrder) {
+        if (canUseSingleSourceReplenishmentRule()) {
+            return createReplenishmentTransfersWithSingleSourceRule(subOrder);
+        }
+
         subOrder = subOrderRepo.findByIdWithItems(subOrder.getId())
                 .orElseThrow(() -> new RuntimeException("Khong tim thay phan don can dieu chuyen bo sung"));
         boolean hasMissingItems = subOrder.getItems() != null
@@ -639,11 +681,265 @@ public class InventoryTransferService {
 
         return inventoryRepo.findByProductVariantId(variantId).stream()
                 .filter(inv -> inv.getBranch() != null && Objects.equals(inv.getBranch().getId(), branchId))
-                .mapToInt(inv -> Objects.requireNonNullElse(inv.getQuantity(), 0))
+                .mapToInt(inv -> Math.max(
+                        0,
+                        Objects.requireNonNullElse(inv.getQuantity(), 0)
+                                - Objects.requireNonNullElse(inv.getReservedQuantity(), 0)))
                 .sum();
     }
 
     private record SourceBranchCandidate(Long branchId, int availableQuantity, double distanceKm) {
+    }
+
+    private boolean canUseSingleSourceReplenishmentRule() {
+        return true;
+    }
+
+    @Transactional(readOnly = true)
+    public List<InventoryTransfer> findActiveReplenishmentTransfersForSubOrder(Long subOrderId) {
+        SubOrder subOrder = loadReplenishmentSubOrder(subOrderId);
+        return transferRepo.findByReferenceCodeAndStatusInOrderByCreatedAtDesc(
+                buildReplenishmentReferenceCode(subOrder),
+                ACTIVE_REPLENISHMENT_TRANSFER_STATUSES);
+    }
+
+    @Transactional(readOnly = true)
+    public ReplenishmentDecision planReplenishmentForSubOrder(SubOrder subOrder) {
+        SubOrder replenishmentSubOrder = loadReplenishmentSubOrder(subOrder.getId());
+        validateReplenishmentSubOrder(replenishmentSubOrder);
+
+        Branch destinationBranch = replenishmentSubOrder.getBranch();
+        Branch mainWarehouse = resolveMainWarehouse();
+        List<MissingItemRequirement> requirements = buildMissingItemRequirements(replenishmentSubOrder);
+        Map<String, Integer> itemQuantities = buildItemQuantities(requirements);
+        String referenceCode = buildReplenishmentReferenceCode(replenishmentSubOrder);
+
+        Branch regularSourceBranch = findNearestRegularSourceBranch(destinationBranch, requirements);
+        if (regularSourceBranch != null) {
+            return new ReplenishmentDecision(
+                    ReplenishmentDecisionType.REGULAR_BRANCH_TRANSFER,
+                    regularSourceBranch,
+                    destinationBranch,
+                    referenceCode,
+                    itemQuantities);
+        }
+
+        if (!Objects.equals(mainWarehouse.getId(), destinationBranch.getId())
+                && canBranchFullySupplyRequirements(mainWarehouse.getId(), requirements)) {
+            return new ReplenishmentDecision(
+                    ReplenishmentDecisionType.MAIN_WAREHOUSE_TRANSFER,
+                    mainWarehouse,
+                    destinationBranch,
+                    referenceCode,
+                    itemQuantities);
+        }
+
+        return new ReplenishmentDecision(
+                ReplenishmentDecisionType.PURCHASE_REQUEST,
+                mainWarehouse,
+                destinationBranch,
+                referenceCode,
+                itemQuantities);
+    }
+
+    @Transactional
+    public List<InventoryTransfer> createMainWarehouseReplenishmentTransferIfPossible(Long subOrderId) {
+        SubOrder subOrder = loadReplenishmentSubOrder(subOrderId);
+        if (!canReplenishSubOrder(subOrder)) {
+            return List.of();
+        }
+
+        List<InventoryTransfer> existingTransfers = findActiveReplenishmentTransfersForSubOrder(subOrderId);
+        if (!existingTransfers.isEmpty()) {
+            return existingTransfers;
+        }
+
+        List<MissingItemRequirement> requirements = buildMissingItemRequirements(subOrder);
+        if (requirements.isEmpty()) {
+            return List.of();
+        }
+
+        Branch mainWarehouse = resolveMainWarehouse();
+        if (Objects.equals(mainWarehouse.getId(), subOrder.getBranch().getId())
+                || !canBranchFullySupplyRequirements(mainWarehouse.getId(), requirements)) {
+            return List.of();
+        }
+
+        return createTransfersForDecision(new ReplenishmentDecision(
+                ReplenishmentDecisionType.MAIN_WAREHOUSE_TRANSFER,
+                mainWarehouse,
+                subOrder.getBranch(),
+                buildReplenishmentReferenceCode(subOrder),
+                buildItemQuantities(requirements)));
+    }
+
+    private List<InventoryTransfer> createReplenishmentTransfersWithSingleSourceRule(SubOrder subOrder) {
+        SubOrder replenishmentSubOrder = loadReplenishmentSubOrder(subOrder.getId());
+        validateReplenishmentSubOrder(replenishmentSubOrder);
+
+        List<InventoryTransfer> existingTransfers = findActiveReplenishmentTransfersForSubOrder(replenishmentSubOrder.getId());
+        if (!existingTransfers.isEmpty()) {
+            return existingTransfers;
+        }
+
+        ReplenishmentDecision decision = planReplenishmentForSubOrder(replenishmentSubOrder);
+        if (decision.type() == ReplenishmentDecisionType.PURCHASE_REQUEST) {
+            return List.of();
+        }
+
+        return createTransfersForDecision(decision);
+    }
+
+    private SubOrder loadReplenishmentSubOrder(Long subOrderId) {
+        return subOrderRepo.findByIdWithItems(subOrderId)
+                .orElseThrow(() -> new BadRequestException("Khong tim thay phan don can dieu chuyen bo sung."));
+    }
+
+    private boolean canReplenishSubOrder(SubOrder subOrder) {
+        return subOrder != null
+                && subOrder.getOrder() != null
+                && subOrder.getBranch() != null
+                && (subOrder.getStatus() == OrderStatus.PENDING
+                        || subOrder.getStatus() == OrderStatus.AWAITING_REPLENISHMENT)
+                && subOrder.getItems() != null
+                && subOrder.getItems().stream()
+                        .anyMatch(item -> Objects.requireNonNullElse(item.getMissingQuantity(), 0) > 0
+                                && item.getProductVariant() != null
+                                && item.getProductVariant().getId() != null
+                                && item.getProductVariant().getSku() != null
+                                && !item.getProductVariant().getSku().isBlank());
+    }
+
+    private void validateReplenishmentSubOrder(SubOrder subOrder) {
+        if (!canReplenishSubOrder(subOrder)) {
+            throw new BadRequestException("Chi co the tao dieu chuyen bo sung cho phan don dang cho dieu chuyen.");
+        }
+    }
+
+    private String buildReplenishmentReferenceCode(SubOrder subOrder) {
+        return subOrder.getOrder().getCode() + "-SUB-" + subOrder.getId();
+    }
+
+    private List<MissingItemRequirement> buildMissingItemRequirements(SubOrder subOrder) {
+        Map<String, MissingItemRequirement> requirementsBySku = new LinkedHashMap<>();
+        List<SubOrderItem> subOrderItems = subOrder.getItems() != null ? subOrder.getItems() : List.of();
+
+        for (SubOrderItem item : subOrderItems) {
+            int missingQty = Objects.requireNonNullElse(item.getMissingQuantity(), 0);
+            if (missingQty <= 0 || item.getProductVariant() == null || item.getProductVariant().getId() == null) {
+                continue;
+            }
+
+            String sku = item.getProductVariant().getSku();
+            if (sku == null || sku.isBlank()) {
+                continue;
+            }
+
+            requirementsBySku.compute(
+                    sku,
+                    (ignored, existing) -> existing == null
+                            ? new MissingItemRequirement(item.getProductVariant().getId(), sku, missingQty)
+                            : new MissingItemRequirement(existing.variantId(), existing.sku(), existing.quantity() + missingQty));
+        }
+
+        return new ArrayList<>(requirementsBySku.values());
+    }
+
+    private Map<String, Integer> buildItemQuantities(List<MissingItemRequirement> requirements) {
+        Map<String, Integer> itemQuantities = new LinkedHashMap<>();
+        for (MissingItemRequirement requirement : requirements) {
+            if (requirement.quantity() <= 0 || requirement.sku() == null || requirement.sku().isBlank()) {
+                continue;
+            }
+            itemQuantities.merge(requirement.sku(), requirement.quantity(), Integer::sum);
+        }
+        return itemQuantities;
+    }
+
+    private Branch findNearestRegularSourceBranch(
+            Branch destinationBranch,
+            List<MissingItemRequirement> requirements) {
+        if (destinationBranch == null || destinationBranch.getId() == null || requirements.isEmpty()) {
+            return null;
+        }
+
+        return branchRepo.findAll().stream()
+                .filter(branch -> branch != null
+                        && branch.getId() != null
+                        && !Objects.equals(branch.getId(), destinationBranch.getId())
+                        && branch.getStatus() == BranchStatus.ACTIVE
+                        && !isWarehouseBranch(branch)
+                        && canBranchFullySupplyRequirements(branch.getId(), requirements))
+                .min(Comparator
+                        .<Branch>comparingDouble(branch -> calculateHaversineDistance(
+                                destinationBranch.getLat(),
+                                destinationBranch.getLng(),
+                                branch.getLat(),
+                                branch.getLng()))
+                        .thenComparing(Branch::getId))
+                .orElse(null);
+    }
+
+    private boolean canBranchFullySupplyRequirements(
+            Long branchId,
+            List<MissingItemRequirement> requirements) {
+        if (branchId == null || requirements == null || requirements.isEmpty()) {
+            return false;
+        }
+
+        for (MissingItemRequirement requirement : requirements) {
+            if (resolveAvailableQuantityAtBranch(requirement.variantId(), branchId) < requirement.quantity()) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private TransferRequest buildAutoReplenishmentTransferRequest(
+            Branch sourceBranch,
+            Branch destinationBranch,
+            String referenceCode,
+            Map<String, Integer> itemQuantities) {
+        LocalDateTime now = LocalDateTime.now();
+        TransferRequest request = new TransferRequest();
+        request.setFromBranchId(sourceBranch.getId());
+        request.setToBranchId(destinationBranch.getId());
+        request.setTransferType(AUTO_REPLENISHMENT_TRANSFER_TYPE);
+        request.setDescription(buildAutoReplenishmentDescription(referenceCode, destinationBranch));
+        request.setReferenceCode(referenceCode);
+        request.setPriority("HIGH");
+        request.setTransferDate(now);
+        request.setDeadline(now.plusDays(1));
+        request.setItems(itemQuantities.entrySet().stream()
+                .map(itemEntry -> {
+                    TransferItemRequest itemRequest = new TransferItemRequest();
+                    itemRequest.setSku(itemEntry.getKey());
+                    itemRequest.setQuantity(itemEntry.getValue());
+                    itemRequest.setItemNote("Tu dong bo sung cho phan don " + referenceCode);
+                    return itemRequest;
+                })
+                .toList());
+        return request;
+    }
+
+    private List<InventoryTransfer> createTransfersForDecision(ReplenishmentDecision decision) {
+        if (decision == null
+                || decision.type() == ReplenishmentDecisionType.PURCHASE_REQUEST
+                || decision.sourceBranch() == null
+                || decision.destinationBranch() == null
+                || decision.itemQuantities() == null
+                || decision.itemQuantities().isEmpty()) {
+            return List.of();
+        }
+
+        return List.of(createTransferInternal(
+                buildAutoReplenishmentTransferRequest(
+                        decision.sourceBranch(),
+                        decision.destinationBranch(),
+                        decision.referenceCode(),
+                        decision.itemQuantities()),
+                findCurrentUserOrNull(),
+                decision.destinationBranch()));
     }
 
     // ==========================================
@@ -659,12 +955,14 @@ public class InventoryTransferService {
         inventoryCheckGuardService.assertNoOpenCheckForBranch(transfer.getFromBranch().getId(), "duyet phieu dieu chuyen");
         inventoryCheckGuardService.assertNoOpenCheckForBranch(transfer.getToBranch().getId(), "duyet phieu dieu chuyen");
 
-        boolean internalSale = transfer.getTransferBusinessType() == TransferBusinessType.INTERNAL_SALE;
-        if (internalSale) {
+        boolean sourceConfirmationRequired = requiresSourceConfirmation(transfer);
+        if (sourceConfirmationRequired) {
             if (transfer.getStatus() != InventoryTransferStatus.SOURCE_CONFIRMED) {
                 throw new BadRequestException("Phiếu bán nội bộ phải được chi nhánh nguồn xác nhận trước khi người có quyền duyệt phê duyệt.");
             }
-            validateInternalSalePricesForTransfer(transfer);
+            if (transfer.getTransferBusinessType() == TransferBusinessType.INTERNAL_SALE) {
+                validateInternalSalePricesForTransfer(transfer);
+            }
         } else {
             if (transfer.getStatus() != InventoryTransferStatus.PENDING) {
                 throw new BadRequestException("Chỉ có thể duyệt phiếu đang ở trạng thái chờ duyệt.");
@@ -685,7 +983,7 @@ public class InventoryTransferService {
         inventoryCheckGuardService.assertNoOpenCheckForBranch(transfer.getFromBranch().getId(), "xac nhan dieu chuyen");
         inventoryCheckGuardService.assertNoOpenCheckForBranch(transfer.getToBranch().getId(), "xac nhan dieu chuyen");
 
-        if (transfer.getTransferBusinessType() != TransferBusinessType.INTERNAL_SALE) {
+        if (!requiresSourceConfirmation(transfer)) {
             throw new BadRequestException("Chỉ phiếu bán nội bộ mới cần bước xác nhận của chi nhánh nguồn.");
         }
         if (transfer.getStatus() != InventoryTransferStatus.PENDING) {
@@ -694,7 +992,9 @@ public class InventoryTransferService {
 
         User currentUser = getCurrentUser();
         assertBranchActor(currentUser, transfer.getFromBranch(), "xac nhan nguon");
-        validateInternalSalePricesForTransfer(transfer);
+        if (transfer.getTransferBusinessType() == TransferBusinessType.INTERNAL_SALE) {
+            validateInternalSalePricesForTransfer(transfer);
+        }
         reserveSourceStock(transfer);
 
         transfer.setSourceConfirmedBy(currentUser);
@@ -1404,6 +1704,13 @@ public class InventoryTransferService {
         return "Tu dong tao tu don thieu hang " + orderCode + " cho " + branchName;
     }
 
+    private String buildAutoReplenishmentDescription(String referenceCode, Branch destinationBranch) {
+        return "Tu dong tao tu don thieu hang "
+                + referenceCode
+                + " cho "
+                + safeBranchName(destinationBranch);
+    }
+
     private String normalizeText(String value) {
         if (value == null) {
             return "";
@@ -1526,6 +1833,7 @@ public class InventoryTransferService {
                 .toBranchName(t.getToBranch() != null ? t.getToBranch().getName() : "N/A")
                 .createdByBranchId(t.getCreatedByBranch() != null ? t.getCreatedByBranch().getId() : null)
                 .createdByBranchName(t.getCreatedByBranch() != null ? t.getCreatedByBranch().getName() : null)
+                .sourceConfirmationRequired(requiresSourceConfirmation(t))
                 .createdByName(safeUserName(t.getCreatedBy()))
                 .sourceConfirmedByName(safeUserName(t.getSourceConfirmedBy()))
                 .sourceConfirmedAt(t.getSourceConfirmedAt())

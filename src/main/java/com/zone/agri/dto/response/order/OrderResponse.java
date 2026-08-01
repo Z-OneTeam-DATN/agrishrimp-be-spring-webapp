@@ -41,6 +41,10 @@ public class OrderResponse {
     private LocalDateTime createdAt;
     private String shippingAddress;
     private String note;
+    private String cancelReasonCode;
+    private String cancelReasonLabel;
+    private String cancelReasonText;
+    private String cancelReasonDisplay;
     private String checkoutUrl;
     private List<OrderItemResponse> items;
     private List<SubOrderSummaryDto> subOrders;

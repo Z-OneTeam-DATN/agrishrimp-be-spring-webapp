@@ -77,4 +77,18 @@ public interface PurchaseRequestRepository extends JpaRepository<PurchaseRequest
     List<PurchaseRequest> findByStatusIn(@Param("statuses") List<PurchaseRequestStatus> statuses);
 
     boolean existsBySupplierId(Long supplierId);
+
+    @Query("""
+        SELECT DISTINCT pr
+        FROM PurchaseRequest pr
+        LEFT JOIN FETCH pr.supplier
+        LEFT JOIN FETCH pr.branch
+        WHERE pr.autoReplenishment = true
+          AND pr.linkedSubOrderId = :subOrderId
+          AND pr.status NOT IN :excludedStatuses
+        ORDER BY pr.createdAt DESC
+    """)
+    List<PurchaseRequest> findAutoReplenishmentRequestsByLinkedSubOrderIdExcludingStatuses(
+            @Param("subOrderId") Long subOrderId,
+            @Param("excludedStatuses") List<PurchaseRequestStatus> excludedStatuses);
 }

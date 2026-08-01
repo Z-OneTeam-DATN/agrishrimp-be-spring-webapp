@@ -6,6 +6,7 @@ import com.zone.agri.dto.response.order.*;
 import com.zone.agri.entity.Order;
 import com.zone.agri.entity.User;
 import com.zone.agri.entity.enums.OrderStatus;
+import com.zone.agri.entity.enums.PaymentStatus;
 import com.zone.agri.exception.BadRequestException;
 import com.zone.agri.exception.SignInRequiredException;
 import com.zone.agri.repository.UserRepository;
@@ -86,17 +87,9 @@ public class OrderController {
     @Operation(summary = "Hủy đơn hàng của tôi")
     @PostMapping("/orders/{id}/cancel")
     public ResponseEntity<?> cancelMyOrder(@PathVariable Long id,
-            @RequestBody(required = false) Map<String, Object> body) {
+            @Valid @RequestBody(required = false) OrderCancelRequest request) {
         Long userId = getCurrentUserId();
-        String reasonCode = body != null && body.get("reasonCode") != null ? body.get("reasonCode").toString() : null;
-        String otherReasonText = body != null && body.get("otherReasonText") != null
-                ? body.get("otherReasonText").toString()
-                : null;
-        String cancelReason = reasonCode;
-        if (otherReasonText != null && !otherReasonText.isBlank()) {
-            cancelReason = (cancelReason != null ? cancelReason + ": " : "") + otherReasonText;
-        }
-        orderService.cancelMyOrder(userId, id, cancelReason);
+        orderService.cancelMyOrder(userId, id, request);
         return ResponseEntity.ok(Map.of("message", "Hủy đơn hàng thành công"));
     }
 
@@ -139,12 +132,43 @@ public class OrderController {
     public ResponseEntity<Page<OrderResponse>> getAllOrders(
             @RequestParam(required = false) String status,
             @RequestParam(required = false) String search,
+            @RequestParam(required = false) PaymentStatus paymentStatus,
+            @RequestParam(required = false) String startDate,
+            @RequestParam(required = false) String endDate,
             @PageableDefault(size = 10, sort = "createdAt", direction = Sort.Direction.DESC) Pageable pageable) {
         verifyAdminAccess();
-        return ResponseEntity.ok(orderService.getAdminOrders(status, search, pageable));
+        return ResponseEntity.ok(orderService.getAdminOrders(
+                status,
+                search,
+                paymentStatus,
+                startDate,
+                endDate,
+                pageable));
     }
 
     @Operation(summary = "Lấy chi tiết đơn hàng (Admin)", description = "Admin xem chi tiết toàn bộ thông tin đơn hàng")
+    private void adminOrderDetailOpenApiAnchor() {
+    }
+
+    @Operation(summary = "Tổng quan danh sách đơn hàng (Admin)", description = "Lấy số liệu tổng hợp theo đúng bộ lọc đang áp dụng ở màn quản lý đơn hàng.")
+    @RequirePermission("ORDER_VIEW")
+    @GetMapping("/admin/all/summary")
+    public ResponseEntity<AdminOrderSummaryResponse> getAllOrdersSummary(
+            @RequestParam(required = false) String status,
+            @RequestParam(required = false) String search,
+            @RequestParam(required = false) PaymentStatus paymentStatus,
+            @RequestParam(required = false) String startDate,
+            @RequestParam(required = false) String endDate) {
+        verifyAdminAccess();
+        return ResponseEntity.ok(orderService.getAdminOrderSummary(
+                status,
+                search,
+                paymentStatus,
+                startDate,
+                endDate));
+    }
+
+    @Operation(summary = "Láº¥y chi tiáº¿t Ä‘Æ¡n hĂ ng (Admin)", description = "Admin xem chi tiáº¿t toĂ n bá»™ thĂ´ng tin Ä‘Æ¡n hĂ ng")
     @RequirePermission("ORDER_VIEW")
     @GetMapping("/admin/{id}")
     public ResponseEntity<OrderResponse> getAdminOrderDetail(@PathVariable Long id) {
@@ -200,12 +224,19 @@ public class OrderController {
     @GetMapping("/branch/orders")
     public ResponseEntity<List<BranchOrderResponse>> getBranchOrders(
             @RequestParam(required = false) OrderStatus status,
-            @RequestParam(required = false) String search) {
+            @RequestParam(required = false) String search,
+            @RequestParam(required = false) String startDate,
+            @RequestParam(required = false) String endDate) {
         User user = getCurrentUser();
         if (user.getBranch() == null) {
             throw new BadRequestException("Tài khoản chưa được gán vào chi nhánh nào");
         }
-        return ResponseEntity.ok(orderService.getBranchOrders(user.getBranch().getId(), status, search));
+        return ResponseEntity.ok(orderService.getBranchOrders(
+                user.getBranch().getId(),
+                status,
+                search,
+                startDate,
+                endDate));
     }
 
     @Operation(summary = "Chi tiết đơn hàng của chi nhánh", description = "Xem chi tiết phần đơn (SubOrder) thuộc chi nhánh của người dùng đang đăng nhập, "
@@ -242,10 +273,10 @@ public class OrderController {
     @PostMapping("/admin/{id}/request-replenishment")
     public ResponseEntity<?> requestReplenishmentForAdmin(@PathVariable Long id) {
         verifyAdminAccess();
-        List<String> transferCodes = orderService.requestReplenishmentForAdmin(id);
-        return ResponseEntity.ok(Map.of(
+        Object response = orderService.requestReplenishmentForAdminResponse(id);
+        return ResponseEntity.ok(response); /*
                 "message", "Đã tạo lệnh điều chuyển bổ sung",
-                "transferCodes", transferCodes));
+        */
     }
 
     @Operation(summary = "Tạo lệnh điều chuyển bổ sung cho phần đơn của chi nhánh")
@@ -256,9 +287,9 @@ public class OrderController {
         if (user.getBranch() == null) {
             throw new BadRequestException("Tài khoản chưa được gán vào chi nhánh nào");
         }
-        List<String> transferCodes = orderService.requestReplenishmentForBranch(user.getBranch().getId(), orderId);
-        return ResponseEntity.ok(Map.of(
+        Object response = orderService.requestReplenishmentForBranchResponse(user.getBranch().getId(), orderId);
+        return ResponseEntity.ok(response); /*
                 "message", "Đã tạo lệnh điều chuyển bổ sung",
-                "transferCodes", transferCodes));
+                "transferCodes", transferCodes)); */
     }
 }

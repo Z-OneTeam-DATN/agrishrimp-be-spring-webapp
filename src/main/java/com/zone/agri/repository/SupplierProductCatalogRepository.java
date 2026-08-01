@@ -1,6 +1,7 @@
 package com.zone.agri.repository;
 
 import com.zone.agri.entity.SupplierProductCatalog;
+import com.zone.agri.entity.enums.SupplierProductCatalogStatus;
 import java.util.List;
 import java.util.Optional;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -34,6 +35,20 @@ public interface SupplierProductCatalogRepository extends JpaRepository<Supplier
             """)
     boolean existsAvailableBySupplierIdAndProductVariantId(@Param("supplierId") Long supplierId,
             @Param("productVariantId") Long productVariantId);
+
+    @Query("""
+            SELECT spc
+            FROM SupplierProductCatalog spc
+            JOIN FETCH spc.supplier s
+            JOIN FETCH spc.productVariant pv
+            WHERE pv.id IN :productVariantIds
+              AND spc.status = :status
+              AND s.status = com.zone.agri.entity.enums.SupplierStatus.ACTIVE
+            ORDER BY s.id ASC, pv.id ASC
+            """)
+    List<SupplierProductCatalog> findByProductVariantIdInAndStatus(
+            @Param("productVariantIds") List<Long> productVariantIds,
+            @Param("status") SupplierProductCatalogStatus status);
 
     @Modifying
     @Query("DELETE FROM SupplierProductCatalog spc WHERE spc.supplier.id = :supplierId AND spc.productVariant.id NOT IN :productVariantIds")

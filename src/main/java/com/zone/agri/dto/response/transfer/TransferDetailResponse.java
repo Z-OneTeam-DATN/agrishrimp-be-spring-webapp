@@ -28,6 +28,7 @@ public class TransferDetailResponse {
     private String toBranchName;
     private Long createdByBranchId;
     private String createdByBranchName;
+    private Boolean sourceConfirmationRequired;
     private String createdByName;
     private String sourceConfirmedByName;
     private LocalDateTime sourceConfirmedAt;

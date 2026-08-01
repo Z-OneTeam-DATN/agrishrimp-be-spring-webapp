@@ -2,6 +2,7 @@ package com.zone.agri.service;
 
 import com.zone.agri.entity.Order;
 import com.zone.agri.entity.SubOrder;
+import com.zone.agri.entity.enums.OrderCancelReasonCode;
 import com.zone.agri.entity.enums.OrderStatus;
 import com.zone.agri.entity.enums.PaymentMethod;
 import com.zone.agri.entity.enums.PaymentStatus;
@@ -74,6 +75,9 @@ public class OrderStatusSyncService {
             if (PaymentMethod.PAYOS.equals(order.getPaymentMethod())
                     && PaymentStatus.UNPAID.equals(order.getPaymentStatus())) {
                 payOSService.cancelPaymentLink(order);
+            }
+            if (order.getCancelReasonCode() == null) {
+                order.setCancelReasonCode(OrderCancelReasonCode.SUB_ORDERS_CANCELLED);
             }
         }
 

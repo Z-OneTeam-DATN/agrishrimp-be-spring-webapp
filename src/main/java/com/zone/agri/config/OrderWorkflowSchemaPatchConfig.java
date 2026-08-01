@@ -82,6 +82,10 @@ public class OrderWorkflowSchemaPatchConfig implements BeanPostProcessor {
                     "ALTER TABLE orders ADD COLUMN version INT NOT NULL DEFAULT 0");
             addColumnIfMissing(conn, stmt,
                     "orders",
+                    "updated_at",
+                    "ALTER TABLE orders ADD COLUMN updated_at DATETIME NULL");
+            addColumnIfMissing(conn, stmt,
+                    "orders",
                     "received_at",
                     "ALTER TABLE orders ADD COLUMN received_at DATETIME NULL");
             addColumnIfMissing(conn, stmt,
@@ -96,6 +100,14 @@ public class OrderWorkflowSchemaPatchConfig implements BeanPostProcessor {
                     "orders",
                     "cancelled_at",
                     "ALTER TABLE orders ADD COLUMN cancelled_at DATETIME NULL");
+            addColumnIfMissing(conn, stmt,
+                    "orders",
+                    "cancel_reason_code",
+                    "ALTER TABLE orders ADD COLUMN cancel_reason_code VARCHAR(50) NULL");
+            addColumnIfMissing(conn, stmt,
+                    "orders",
+                    "cancel_reason_text",
+                    "ALTER TABLE orders ADD COLUMN cancel_reason_text TEXT NULL");
 
             executeSql(stmt,
                     "Patch sub_orders.status length to 40",
@@ -126,6 +138,30 @@ public class OrderWorkflowSchemaPatchConfig implements BeanPostProcessor {
                     "sub_order_items",
                     "missing_quantity",
                     "ALTER TABLE sub_order_items ADD COLUMN missing_quantity INT NULL");
+
+            addColumnIfMissing(conn, stmt,
+                    "purchase_requests",
+                    "auto_replenishment",
+                    "ALTER TABLE purchase_requests ADD COLUMN auto_replenishment BIT(1) NOT NULL DEFAULT b'0'");
+            addColumnIfMissing(conn, stmt,
+                    "purchase_requests",
+                    "linked_sub_order_id",
+                    "ALTER TABLE purchase_requests ADD COLUMN linked_sub_order_id BIGINT NULL");
+            addColumnIfMissing(conn, stmt,
+                    "purchase_requests",
+                    "linked_destination_branch_id",
+                    "ALTER TABLE purchase_requests ADD COLUMN linked_destination_branch_id BIGINT NULL");
+            addColumnIfMissing(conn, stmt,
+                    "purchase_requests",
+                    "linked_reference_code",
+                    "ALTER TABLE purchase_requests ADD COLUMN linked_reference_code VARCHAR(120) NULL");
+
+            executeSql(stmt,
+                    "Backfill orders.updated_at from created_at when missing",
+                    """
+                            UPDATE orders
+                            SET updated_at = COALESCE(updated_at, created_at)
+                            """);
 
             executeSql(stmt,
                     "Backfill lifecycle timestamps for existing orders",

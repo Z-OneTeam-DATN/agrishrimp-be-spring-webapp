@@ -103,9 +103,34 @@ public class SchemaUpdateConfig implements BeanPostProcessor {
                     "Patch orders adds financial lifecycle timestamps",
                     "ALTER TABLE orders ADD COLUMN received_at DATETIME NULL, ADD COLUMN completed_at DATETIME NULL, ADD COLUMN returned_at DATETIME NULL, ADD COLUMN cancelled_at DATETIME NULL");
 
+            ensureColumnWithLegacyBackfill(conn, stmt,
+                    "orders",
+                    "cancel_reason_code",
+                    "VARCHAR(50) NULL",
+                    List.of());
+
+            ensureColumnWithLegacyBackfill(conn, stmt,
+                    "orders",
+                    "cancel_reason_text",
+                    "TEXT NULL",
+                    List.of());
+
+            ensureColumnWithLegacyBackfill(conn, stmt,
+                    "orders",
+                    "updated_at",
+                    "DATETIME NULL",
+                    List.of("created_at"));
+
             executeSql(stmt,
                     "Patch sub_orders adds financial lifecycle timestamps",
                     "ALTER TABLE sub_orders ADD COLUMN received_at DATETIME NULL, ADD COLUMN completed_at DATETIME NULL, ADD COLUMN returned_at DATETIME NULL, ADD COLUMN cancelled_at DATETIME NULL");
+
+            executeSql(stmt,
+                    "Patch purchase_requests adds auto replenishment tracking columns",
+                    "ALTER TABLE purchase_requests ADD COLUMN auto_replenishment BIT(1) NOT NULL DEFAULT b'0', " +
+                            "ADD COLUMN linked_sub_order_id BIGINT NULL, " +
+                            "ADD COLUMN linked_destination_branch_id BIGINT NULL, " +
+                            "ADD COLUMN linked_reference_code VARCHAR(120) NULL");
 
             patchInventoryTransfers(conn, stmt);
 
