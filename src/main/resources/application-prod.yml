@@ -136,19 +136,6 @@ ai:
   base-url: ${AI_BASE_URL:}
   predict-path: ${AI_PREDICT_PATH:/ai/predict-image}
 
-zalo:
-  app-secret: ${ZALO_APP_SECRET}
-
-cloud:
-  aws:
-    accessKey: ${AWS_ACCESS_KEY_ID:}
-    secretKey: ${AWS_SECRET_ACCESS_KEY:}
-    region: ${AWS_REGION:ap-southeast-1}
-  s3:
-    bucket-name: ${AWS_S3_BUCKET_NAME:agri-shrimp-storage}
-    upload-dir: ${AWS_S3_UPLOAD_DIR:webapp}
-    region: ${AWS_REGION:ap-southeast-1}
-
 logging:
   level:
     root: INFO

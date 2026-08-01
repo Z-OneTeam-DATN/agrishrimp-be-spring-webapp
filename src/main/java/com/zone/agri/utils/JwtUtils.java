@@ -59,19 +59,6 @@ public class JwtUtils {
         return buildToken(customUserDetail.getUsername(), claims, accessExpiration);
     }
 
-    public String generateAccessTokenFromZalo(UserDetails userDetails, String zaloId) {
-        CustomUserDetail customUserDetail = (CustomUserDetail) userDetails;
-
-        Map<String, Object> claims = new HashMap<>();
-        claims.put("userId", customUserDetail.getUserDetail().getId());
-        claims.put("fullName", customUserDetail.getUserDetail().getFullName());
-        claims.put("warehouseId", customUserDetail.getUserDetail().getBranchId());
-        claims.put("roleSlug", customUserDetail.getUserDetail().getRole() != null
-                ? customUserDetail.getUserDetail().getRole().getSlug() : null);
-
-        return buildToken(customUserDetail.getUsername(), claims, accessExpiration);
-    }
-
     public String generateRefreshToken(UserDetails userDetails) {
         return buildToken(userDetails.getUsername(), new HashMap<>(), refreshExpiration);
     }
