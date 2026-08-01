@@ -3,9 +3,11 @@ package com.zone.agri.service;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zone.agri.common.CloudinaryService;
 import com.zone.agri.dto.request.blog.BlogCategoryRequest;
+import com.zone.agri.dto.request.blog.BlogCommentRequest;
 import com.zone.agri.dto.request.blog.BlogPostRequest;
 import com.zone.agri.dto.request.blog.BlogTagRequest;
 import com.zone.agri.dto.response.blog.BlogCategoryResponse;
+import com.zone.agri.dto.response.blog.BlogCommentResponse;
 import com.zone.agri.dto.response.blog.BlogPostResponse;
 import com.zone.agri.entity.*;
 import com.zone.agri.entity.enums.BlogCategoryStatus;
@@ -13,10 +15,12 @@ import com.zone.agri.entity.enums.BlogPostStatus;
 import com.zone.agri.exception.BadRequestException;
 import com.zone.agri.exception.ConflictException;
 import com.zone.agri.exception.NotFoundException;
+import com.zone.agri.exception.SignInRequiredException;
 import com.zone.agri.repository.*;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -37,6 +41,7 @@ public class BlogService {
     private final BlogPostProductRepository postProductRepo;
     private final ProductRepository productRepo;
     private final UserRepository userRepo;
+    private final BlogCommentRepository commentRepo;
     private final CloudinaryService cloudinaryService;
 
     // ─── CATEGORY ──────────────────────────────────────────────────────────────
@@ -204,6 +209,52 @@ public class BlogService {
         return toResponse(post, true);
     }
 
+    public List<BlogCommentResponse> getPublicComments(String slug) {
+        BlogPost post = findPublishedPost(slug);
+        return commentRepo.findByPostIdAndParentIsNullOrderByCreatedAtAscIdAsc(post.getId()).stream()
+                .map(this::toCommentResponse)
+                .collect(Collectors.toList());
+    }
+
+    @Transactional
+    public BlogCommentResponse createPublicComment(String slug, BlogCommentRequest req) {
+        BlogPost post = findPublishedPost(slug);
+        User currentUser = getCurrentCommentUser();
+        String content = normalizeCommentContent(req.getContent());
+
+        BlogComment parent = null;
+        String mentionName = null;
+
+        if (req.getParentId() != null) {
+            parent = commentRepo.findById(req.getParentId())
+                    .orElseThrow(() -> new NotFoundException("Bình luận cha không tồn tại"));
+
+            if (!Objects.equals(parent.getPost().getId(), post.getId())) {
+                throw new BadRequestException("Bình luận cha không thuộc bài viết này");
+            }
+
+            if (parent.getParent() != null) {
+                throw new BadRequestException("Bài viết chỉ hỗ trợ trả lời bình luận ở 2 cấp");
+            }
+
+            mentionName = resolveCommentAuthorName(parent.getUser());
+            String mentionPrefix = "@" + mentionName;
+            if (!content.startsWith(mentionPrefix)) {
+                content = mentionPrefix + " " + content;
+            }
+        }
+
+        BlogComment comment = BlogComment.builder()
+                .post(post)
+                .parent(parent)
+                .user(currentUser)
+                .content(content)
+                .mentionName(mentionName)
+                .build();
+
+        return toCommentResponse(commentRepo.save(comment));
+    }
+
     @Transactional
     public BlogPostResponse create(BlogPostRequest req, MultipartFile thumbnail) {
         String slug = resolveSlug(req.getSlug(), req.getTitle(), null);
@@ -282,6 +333,68 @@ public class BlogService {
     }
 
     // ─── Helpers ───────────────────────────────────────────────────────────────
+
+    private BlogPost findPublishedPost(String slug) {
+        return postRepo.findPublishedBySlug(
+                        slug,
+                        BlogPostStatus.PUBLISHED,
+                        BlogCategoryStatus.ACTIVE
+                )
+                .orElseThrow(() -> new NotFoundException("Bài viết không tồn tại hoặc đã bị ẩn: " + slug));
+    }
+
+    private User getCurrentCommentUser() {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth == null || !auth.isAuthenticated() || "anonymousUser".equals(auth.getPrincipal())) {
+            throw new SignInRequiredException("Vui lòng đăng nhập để bình luận");
+        }
+
+        return userRepo.findByEmail(auth.getName())
+                .orElseThrow(() -> new SignInRequiredException("Tài khoản không tồn tại"));
+    }
+
+    private String normalizeCommentContent(String value) {
+        String normalized = value == null ? "" : value.trim().replaceAll("\\s+", " ");
+        if (normalized.isBlank()) {
+            throw new BadRequestException("Nội dung bình luận không được để trống");
+        }
+        if (normalized.length() > 2000) {
+            throw new BadRequestException("Bình luận không được vượt quá 2000 ký tự");
+        }
+        return normalized;
+    }
+
+    private BlogCommentResponse toCommentResponse(BlogComment comment) {
+        User user = comment.getUser();
+        return BlogCommentResponse.builder()
+                .id(comment.getId())
+                .parentId(comment.getParent() == null ? null : comment.getParent().getId())
+                .authorId(user == null ? null : user.getId())
+                .authorName(resolveCommentAuthorName(user))
+                .authorAvatarUrl(user == null ? null : user.getAvatarUrl())
+                .content(comment.getContent())
+                .mentionName(comment.getMentionName())
+                .createdAt(comment.getCreatedAt())
+                .replies(comment.getReplies() == null ? List.of() : comment.getReplies().stream()
+                        .map(this::toCommentResponse)
+                        .collect(Collectors.toList()))
+                .build();
+    }
+
+    private String resolveCommentAuthorName(User user) {
+        if (user == null) {
+            return "Người dùng AgriShrimp";
+        }
+        String fullName = user.getFullName();
+        if (fullName != null && !fullName.isBlank()) {
+            return fullName.trim();
+        }
+        String email = user.getEmail();
+        if (email != null && !email.isBlank()) {
+            return email.split("@")[0];
+        }
+        return "Khách hàng";
+    }
 
     private void applyAuthor(BlogPost post) {
         try {

@@ -160,19 +160,6 @@ ai:
       # Trần an toàn kỹ thuật ẩn — không hiển thị cho nông dân, chỉ để chặn hội thoại lặp vô hạn.
       max-turns: ${AI_DOCTOR_CLARIFY_MAX_TURNS:8}
 
-zalo:
-  app-secret: ${ZALO_APP_SECRET}
-
-cloud:
-  aws:
-    accessKey: ${AWS_ACCESS_KEY_ID:}
-    secretKey: ${AWS_SECRET_ACCESS_KEY:}
-    region: ${AWS_REGION:ap-southeast-1}
-  s3:
-    bucket-name: ${AWS_S3_BUCKET_NAME:agri-shrimp-storage}
-    upload-dir: ${AWS_S3_UPLOAD_DIR:webapp}
-    region: ${AWS_REGION:ap-southeast-1}
-
 # Gemini — dùng cho luồng AI Doctor hỏi làm rõ bệnh khi ảnh có độ tin cậy thấp
 gemini:
   base-url: ${GEMINI_BASE_URL:https://generativelanguage.googleapis.com}

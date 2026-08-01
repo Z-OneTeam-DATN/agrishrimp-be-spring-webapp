@@ -122,7 +122,6 @@ services:
       SECURITY_JWT_SECRET_KEY: ${SECURITY_JWT_SECRET_KEY:-dev-only-change-me}
       SECURITY_JWT_ISSUER: ${SECURITY_JWT_ISSUER:-agri-shrimp}
       APP_TURNSTILE_SECRET_KEY: ${APP_TURNSTILE_SECRET_KEY:-}
-      ZALO_APP_SECRET: ${ZALO_APP_SECRET}
       APP_GOOGLE_CLIENT_ID: ${APP_GOOGLE_CLIENT_ID}
       CLOUDINARY_CLOUD_NAME: ${CLOUDINARY_CLOUD_NAME:-}
       CLOUDINARY_API_KEY: ${CLOUDINARY_API_KEY:-}
@@ -140,12 +139,6 @@ services:
       APP_COOKIE_SAME_SITE: ${APP_COOKIE_SAME_SITE:-Lax}
       # Hibernate (validate = chỉ kiểm tra schema, không tự ALTER; update = tự ALTER khi có thay đổi entity)
       SPRING_JPA_HIBERNATE_DDL_AUTO: ${SPRING_JPA_HIBERNATE_DDL_AUTO:-update}
-      # AWS (optional — for S3)
-      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
-      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
-      AWS_REGION: ${AWS_REGION:-ap-southeast-1}
-      AWS_S3_BUCKET_NAME: ${AWS_S3_BUCKET_NAME:-agri-shrimp-storage}
-      AWS_S3_UPLOAD_DIR: ${AWS_S3_UPLOAD_DIR:-webapp}
       # Python AI Service
       IMAGE_SEARCH_URL: http://ai-visual-search:5001
       AI_BASE_URL: http://ai-diagnosis:8000
