@@ -342,6 +342,8 @@ public class AiKnowledgeService {
         config.setFallbackMessage(trimToNull(request.getFallbackMessage()) == null
                 ? DEFAULT_FALLBACK
                 : request.getFallbackMessage().trim());
+        config.setFallbackContactName(trimToNull(request.getFallbackContactName()));
+        config.setFallbackContactPhone(trimToNull(request.getFallbackContactPhone()));
         return toChatConfigResponse(chatConfigRepository.save(config));
     }
 
@@ -528,10 +530,16 @@ public class AiKnowledgeService {
             return buildChatResponse(config.getGreetingMessage(), sessionId, getSuggestedActionLabels());
         }
 
+        String imageBase64 = trimToNull(request.getImageBase64());
+        String imageMimeType = request.getImageMimeType();
+
         Optional<AiChatClarifySession> activeSession = chatClarifySessionRepository
                 .findFirstBySessionIdAndStatusOrderByIdDesc(sessionId, AiClarifySessionStatus.ACTIVE);
         if (activeSession.isPresent() && chatSessionOwnerMatches(activeSession.get(), userId)) {
-            return continueChatClarify(activeSession.get(), request.getMessage(), createReviewCaseWhenUnmatched);
+            AiChatClarifySession session = activeSession.get();
+            return readChatCandidateCodes(session).isEmpty()
+                    ? continueFreeConsult(session, request.getMessage(), imageBase64, imageMimeType)
+                    : continueChatClarify(session, request.getMessage(), imageBase64, imageMimeType, createReviewCaseWhenUnmatched);
         }
         if (activeSession.isPresent()) {
             // sessionId là chuỗi phía client tự sinh và lưu localStorage — trên thiết bị dùng
@@ -558,27 +566,15 @@ public class AiKnowledgeService {
 
         if (outcome.clarifyCandidates() != null && !outcome.clarifyCandidates().isEmpty()) {
             return bootstrapChatClarify(sessionId, userId, sourceChannel, request.getMessage(),
-                    outcome.clarifyCandidates(), createReviewCaseWhenUnmatched);
+                    outcome.clarifyCandidates(), imageBase64, imageMimeType, createReviewCaseWhenUnmatched);
         }
 
-        persistChatLog(userId, sessionId, sourceChannel, request.getMessage(), config.getFallbackMessage(),
-                false, null, null, 0D);
-
-        if (createReviewCaseWhenUnmatched) {
-            createReviewCase(
-                    userId,
-                    sessionId,
-                    sourceChannel,
-                    request.getMessage(),
-                    null,
-                    null,
-                    null,
-                    null,
-                    0D,
-                    AiReviewCaseReason.NO_KNOWLEDGE_MATCH);
-        }
-
-        return buildChatResponse(config.getFallbackMessage(), sessionId, getSuggestedActionLabels());
+        // Khong khop bat ky tri thuc nao da duyet — thay vi tra thang fallback cung, mo phien tu
+        // van tu do voi Gemini (khong bi khoa vao 1 danh sach benh cho truoc). advanceFreeConsult
+        // tu dong roi ve dung config.getFallbackMessage() neu Gemini loi/chua cau hinh, nen day
+        // van la luoi an toan cuoi cung giong hanh vi cu, khong lam mat guardrail.
+        return bootstrapFreeConsult(sessionId, userId, sourceChannel, request.getMessage(),
+                imageBase64, imageMimeType, createReviewCaseWhenUnmatched);
     }
 
     // =========================================================
@@ -596,6 +592,8 @@ public class AiKnowledgeService {
             String sourceChannel,
             String farmerMessage,
             List<PreparedDisease> candidates,
+            String imageBase64,
+            String imageMimeType,
             boolean createReviewCaseWhenUnmatched) {
         List<AiClarifyCandidateSummary> candidateSummaries = candidates.stream()
                 .map(this::toClarifyCandidateSummary)
@@ -615,11 +613,12 @@ public class AiKnowledgeService {
                 .build();
         session = chatClarifySessionRepository.save(session);
 
-        return advanceChatClarify(session, candidateSummaries, farmerMessage, createReviewCaseWhenUnmatched);
+        return advanceChatClarify(session, candidateSummaries, farmerMessage, imageBase64, imageMimeType, createReviewCaseWhenUnmatched);
     }
 
     private AiChatResponse continueChatClarify(
-            AiChatClarifySession session, String farmerAnswer, boolean createReviewCaseWhenUnmatched) {
+            AiChatClarifySession session, String farmerAnswer, String imageBase64, String imageMimeType,
+            boolean createReviewCaseWhenUnmatched) {
         List<AiClarifyTurn> turns = new ArrayList<>(readChatTurns(session));
         turns.add(AiClarifyTurn.builder().role(AiClarifyTurn.ROLE_FARMER).text(farmerAnswer).build());
         session.setConversationJson(writeJson(turns));
@@ -630,17 +629,19 @@ public class AiKnowledgeService {
             return escalateChatClarify(session, farmerAnswer, createReviewCaseWhenUnmatched);
         }
 
-        return advanceChatClarify(session, resolveChatCandidates(session), farmerAnswer, createReviewCaseWhenUnmatched);
+        return advanceChatClarify(session, resolveChatCandidates(session), farmerAnswer, imageBase64, imageMimeType, createReviewCaseWhenUnmatched);
     }
 
     private AiChatResponse advanceChatClarify(
             AiChatClarifySession session,
             List<AiClarifyCandidateSummary> candidates,
             String latestFarmerText,
+            String imageBase64,
+            String imageMimeType,
             boolean createReviewCaseWhenUnmatched) {
         AiClarifyLlmResult llmResult;
         try {
-            llmResult = geminiClarifyClient.clarify(candidates, readChatTurns(session));
+            llmResult = geminiClarifyClient.clarify(candidates, readChatTurns(session), imageBase64, imageMimeType);
         } catch (Exception ex) {
             log.warn("[AiChatClarify] sessionId={} Gemini call fail, escalate: {}", session.getSessionId(), ex.getMessage());
             return escalateChatClarify(session, latestFarmerText, createReviewCaseWhenUnmatched);
@@ -741,6 +742,122 @@ public class AiKnowledgeService {
                 latestFarmerText, CHAT_CLARIFY_ESCALATION_MESSAGE, false, AiKnowledgeMatchType.AMBIGUOUS, null, 0D);
 
         return buildChatResponse(CHAT_CLARIFY_ESCALATION_MESSAGE, session.getSessionId(), getSuggestedActionLabels());
+    }
+
+    // =========================================================
+    // Free consult — khi chat gõ chữ KHÔNG khớp bất kỳ tri thức nào đã duyệt (không phải AMBIGUOUS/
+    // near-miss — hoàn toàn không có candidate). Thay vì trả thẳng fallback cứng, để Gemini tư vấn
+    // sơ bộ mở (không khoá vào danh sách bệnh cho trước) — nhưng KHÔNG BAO GIỜ dùng làm phác đồ
+    // chính thức: buildFreeConsultAnswerHtml luôn tự thêm khuyến cáo liên hệ kỹ sư, không dựa vào
+    // Gemini tự nhớ thêm. Session dùng chung bảng/luồng với chat clarify, chỉ khác candidate list
+    // rỗng "[]" — đó là dấu hiệu để answerChat() phân biệt 2 chế độ khi tiếp tục hội thoại.
+    // =========================================================
+
+    private AiChatResponse bootstrapFreeConsult(
+            String sessionId,
+            Long userId,
+            String sourceChannel,
+            String farmerMessage,
+            String imageBase64,
+            String imageMimeType,
+            boolean createReviewCaseWhenUnmatched) {
+        AiChatClarifySession session = AiChatClarifySession.builder()
+                .sessionId(sessionId)
+                .userId(userId)
+                .sourceChannel(sourceChannel)
+                .candidateDiseaseCodesJson(writeJson(Collections.emptyList()))
+                .conversationJson(writeJson(List.of(
+                        AiClarifyTurn.builder().role(AiClarifyTurn.ROLE_FARMER).text(farmerMessage).build())))
+                .turnCount(0)
+                .status(AiClarifySessionStatus.ACTIVE)
+                .build();
+        session = chatClarifySessionRepository.save(session);
+
+        if (createReviewCaseWhenUnmatched) {
+            AiKnowledgeReviewCase reviewCase = createReviewCase(
+                    userId, sessionId, sourceChannel, farmerMessage,
+                    null, null, null, null, 0D, AiReviewCaseReason.NO_KNOWLEDGE_MATCH);
+            session.setReviewCaseId(reviewCase.getId());
+            session = chatClarifySessionRepository.save(session);
+        }
+
+        return advanceFreeConsult(session, farmerMessage, imageBase64, imageMimeType);
+    }
+
+    private AiChatResponse continueFreeConsult(
+            AiChatClarifySession session, String farmerAnswer, String imageBase64, String imageMimeType) {
+        List<AiClarifyTurn> turns = new ArrayList<>(readChatTurns(session));
+        turns.add(AiClarifyTurn.builder().role(AiClarifyTurn.ROLE_FARMER).text(farmerAnswer).build());
+        session.setConversationJson(writeJson(turns));
+        session = chatClarifySessionRepository.save(session);
+
+        if (session.getTurnCount() >= maxClarifyTurns) {
+            log.info("[AiFreeConsult] sessionId={} cham tran an toan ({} luot), dung tu van mo",
+                    session.getSessionId(), maxClarifyTurns);
+            session.setStatus(AiClarifySessionStatus.ESCALATED);
+            chatClarifySessionRepository.save(session);
+            persistChatLog(session.getUserId(), session.getSessionId(), session.getSourceChannel(),
+                    farmerAnswer, CHAT_CLARIFY_ESCALATION_MESSAGE, false, null, null, 0D);
+            return buildChatResponse(CHAT_CLARIFY_ESCALATION_MESSAGE, session.getSessionId(), getSuggestedActionLabels());
+        }
+
+        return advanceFreeConsult(session, farmerAnswer, imageBase64, imageMimeType);
+    }
+
+    private AiChatResponse advanceFreeConsult(
+            AiChatClarifySession session, String latestFarmerText, String imageBase64, String imageMimeType) {
+        AiKnowledgeChatConfig config = ensureChatConfig();
+        String geminiText;
+        try {
+            geminiText = geminiClarifyClient.freeConsult(readChatTurns(session), imageBase64, imageMimeType);
+        } catch (Exception ex) {
+            log.warn("[AiFreeConsult] sessionId={} Gemini call fail, dung fallback tinh: {}",
+                    session.getSessionId(), ex.getMessage());
+            persistChatLog(session.getUserId(), session.getSessionId(), session.getSourceChannel(),
+                    latestFarmerText, config.getFallbackMessage(), false, null, null, 0D);
+            return buildChatResponse(config.getFallbackMessage(), session.getSessionId(), getSuggestedActionLabels());
+        }
+
+        List<AiClarifyTurn> turns = new ArrayList<>(readChatTurns(session));
+        turns.add(AiClarifyTurn.builder().role(AiClarifyTurn.ROLE_ASSISTANT).text(geminiText).build());
+        session.setConversationJson(writeJson(turns));
+        session.setTurnCount(session.getTurnCount() + 1);
+        chatClarifySessionRepository.save(session);
+
+        String answerHtml = buildFreeConsultAnswerHtml(geminiText, config);
+        persistChatLog(session.getUserId(), session.getSessionId(), session.getSourceChannel(),
+                latestFarmerText, answerHtml, false, null, null, null);
+
+        return buildChatResponse(answerHtml, session.getSessionId(), Collections.emptyList());
+    }
+
+    /**
+     * geminiText la van ban tu do (khong phai HTML admin duyet) — escape roi tu dung <br> cho xuong
+     * dong, KHONG dua thang vao dangerouslySetInnerHTML o FE. Dong khuyen cao lien he ky su luon do
+     * code tu them (khong phu thuoc Gemini co nho nhac hay khong) — day la guardrail chinh cua che
+     * do tu van mo: khong bao gio de nong dan hieu day la phac do da duyet.
+     */
+    private String buildFreeConsultAnswerHtml(String geminiText, AiKnowledgeChatConfig config) {
+        StringBuilder builder = new StringBuilder();
+        builder.append("<p>").append(escapeHtml(geminiText).replace("\n", "<br>")).append("</p>");
+
+        String contactName = trimToNull(config.getFallbackContactName());
+        String contactPhone = trimToNull(config.getFallbackContactPhone());
+        builder.append("<p><em>Đây là gợi ý sơ bộ dựa trên dấu hiệu bạn mô tả, chưa được kỹ sư xác nhận.");
+        if (contactName != null || contactPhone != null) {
+            builder.append(" Vui lòng liên hệ ngay ");
+            if (contactName != null) {
+                builder.append(escapeHtml(contactName));
+            }
+            if (contactPhone != null) {
+                builder.append(contactName != null ? ": " : "").append(escapeHtml(contactPhone));
+            }
+            builder.append(" để được kiểm tra chính xác.");
+        } else {
+            builder.append(" Vui lòng liên hệ kỹ sư nông nghiệp để được kiểm tra chính xác.");
+        }
+        builder.append("</em></p>");
+        return builder.toString();
     }
 
     private boolean isRepeatOfLastAssistantQuestion(AiChatClarifySession session, String newQuestion) {
@@ -926,6 +1043,7 @@ public class AiKnowledgeService {
         entity.setSignsSummary(requiredTrim(request.getSignsSummary(), "Mô tả dấu hiệu không được để trống"));
         entity.setCausesJson(writeJson(defaultList(request.getCauses())));
         entity.setTreatmentStagesJson(writeJson(toKnowledgeStages(defaultList(request.getTreatmentStages()))));
+        entity.setImageUrlsJson(writeJson(defaultList(request.getImageUrls())));
         entity.setEngineerName(trimToNull(request.getEngineerName()));
         entity.setEngineerPhone(trimToNull(request.getEngineerPhone()));
         entity.setConfidenceThreshold(clampThreshold(request.getConfidenceThreshold(), 0.65D));
@@ -1480,6 +1598,18 @@ public class AiKnowledgeService {
         }
         builder.append("</div>");
 
+        List<String> imageUrls = readImageUrls(disease.entity().getImageUrlsJson());
+        if (!imageUrls.isEmpty()) {
+            builder.append("<div style=\"display:flex;gap:8px;flex-wrap:wrap;margin:8px 0;\">");
+            for (String imageUrl : imageUrls) {
+                builder.append("<img src=\"").append(escapeHtml(imageUrl))
+                        .append("\" alt=\"Hình ảnh minh họa ")
+                        .append(escapeHtml(disease.entity().getNameVi()))
+                        .append("\" style=\"max-width:160px;max-height:160px;border-radius:6px;object-fit:cover;\" />");
+            }
+            builder.append("</div>");
+        }
+
         if (trimToNull(disease.entity().getSignsSummary()) != null) {
             builder.append("<p>").append(escapeHtml(disease.entity().getSignsSummary())).append("</p>");
         }
@@ -1637,6 +1767,7 @@ public class AiKnowledgeService {
                 .causes(defaultList(readJsonList(entity.getCausesJson(), new TypeReference<List<String>>() {
                 })))
                 .treatmentStages(toKnowledgeTreatmentStageResponses(entity.getTreatmentStagesJson()))
+                .imageUrls(readImageUrls(entity.getImageUrlsJson()))
                 .engineerName(entity.getEngineerName())
                 .engineerPhone(entity.getEngineerPhone())
                 .confidenceThreshold(entity.getConfidenceThreshold())
@@ -1675,6 +1806,8 @@ public class AiKnowledgeService {
                 .id(config.getId())
                 .greetingMessage(config.getGreetingMessage())
                 .fallbackMessage(config.getFallbackMessage())
+                .fallbackContactName(config.getFallbackContactName())
+                .fallbackContactPhone(config.getFallbackContactPhone())
                 .build();
     }
 
@@ -1928,6 +2061,11 @@ public class AiKnowledgeService {
 
     private <T> List<T> defaultList(List<T> values) {
         return values == null ? Collections.emptyList() : values;
+    }
+
+    private List<String> readImageUrls(String imageUrlsJson) {
+        return defaultList(readJsonList(imageUrlsJson, new TypeReference<List<String>>() {
+        }));
     }
 
     private String resolveCategoryLabel(AiKnowledgeCategory category) {

@@ -23,4 +23,12 @@ public class AiKnowledgeChatConfig extends BaseEntity {
 
     @Column(name = "fallback_message", columnDefinition = "LONGTEXT")
     String fallbackMessage;
+
+    /** Ten ky su lien he mac dinh khi AI tu van tu do (khong khop benh nao trong kho tri thuc). */
+    @Column(name = "fallback_contact_name", length = 150)
+    String fallbackContactName;
+
+    /** SDT ky su lien he mac dinh khi AI tu van tu do (khong khop benh nao trong kho tri thuc). */
+    @Column(name = "fallback_contact_phone", length = 30)
+    String fallbackContactPhone;
 }

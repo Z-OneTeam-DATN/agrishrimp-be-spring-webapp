@@ -53,6 +53,10 @@ public class AiDiseaseKnowledge extends BaseEntity {
     @Column(name = "treatment_stages_json", columnDefinition = "LONGTEXT")
     String treatmentStagesJson;
 
+    /** JSON array URL anh minh hoa benh (Cloudinary) — hien kem phac do khi AI tra loi chat. */
+    @Column(name = "image_urls_json", columnDefinition = "TEXT")
+    String imageUrlsJson;
+
     /** Tên kỹ sư/đội ngũ đứng sau tri thức bệnh này — hiển thị làm nguồn khi AI trả lời chat. */
     @Column(name = "engineer_name", length = 150)
     String engineerName;

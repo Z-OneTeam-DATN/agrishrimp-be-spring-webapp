@@ -13,4 +13,6 @@ public class AiKnowledgeChatConfigRequest {
 
     private String greetingMessage;
     private String fallbackMessage;
+    private String fallbackContactName;
+    private String fallbackContactPhone;
 }
