@@ -14,6 +14,10 @@ public class AiDoctorChatRequest {
     private String message;
     private String sessionId;
     private DiagnosisContext diagnosisContext;
+    /** Anh nong dan gui kem (base64, khong co tien to "data:image/...;base64,") — null neu khong co. */
+    private String imageBase64;
+    /** Mime type cua imageBase64 (vd "image/jpeg"), bo qua neu imageBase64 null. */
+    private String imageMimeType;
 
     @Data
     @Builder

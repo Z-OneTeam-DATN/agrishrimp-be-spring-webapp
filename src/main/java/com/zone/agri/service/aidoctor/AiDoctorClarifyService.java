@@ -196,7 +196,7 @@ public class AiDoctorClarifyService {
 
         AiClarifyLlmResult llmResult;
         try {
-            llmResult = geminiClarifyClient.clarify(candidates, turnsSoFar);
+            llmResult = geminiClarifyClient.clarify(candidates, turnsSoFar, null, null);
         } catch (Exception ex) {
             log.warn("[AiDoctorClarify] diagnosisId={} Gemini call fail, escalate: {}", session.getDiagnosisId(), ex.getMessage());
             escalate(session);

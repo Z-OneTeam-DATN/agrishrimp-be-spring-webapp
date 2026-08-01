@@ -14,4 +14,6 @@ public class AiKnowledgeChatConfigResponse {
     private Long id;
     private String greetingMessage;
     private String fallbackMessage;
+    private String fallbackContactName;
+    private String fallbackContactPhone;
 }
