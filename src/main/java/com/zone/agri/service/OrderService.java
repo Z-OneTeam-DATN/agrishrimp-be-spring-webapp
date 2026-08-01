@@ -8,6 +8,7 @@ import com.zone.agri.dto.response.order.*;
 import com.zone.agri.entity.*;
 import com.zone.agri.entity.enums.FulfillmentStatus;
 import com.zone.agri.entity.enums.InventoryTransferStatus;
+import com.zone.agri.entity.enums.OrderCancelReasonCode;
 import com.zone.agri.entity.enums.OrderStatus;
 import com.zone.agri.entity.enums.PaymentMethod;
 import com.zone.agri.entity.enums.PaymentStatus;
@@ -24,10 +25,18 @@ import com.zone.agri.service.BranchSearchService.BranchWithRealDistance;
 import com.zone.agri.service.InventoryAllocationService.AllocationResult;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import jakarta.persistence.criteria.CriteriaBuilder;
+import jakarta.persistence.criteria.CriteriaQuery;
+import jakarta.persistence.criteria.Join;
+import jakarta.persistence.criteria.JoinType;
+import jakarta.persistence.criteria.Predicate;
+import jakarta.persistence.criteria.Root;
+import jakarta.persistence.criteria.Subquery;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
-import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
@@ -35,7 +44,10 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.context.annotation.Lazy;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.LocalTime;
+import java.time.OffsetDateTime;
 import java.time.temporal.ChronoUnit;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
@@ -73,6 +85,7 @@ public class OrderService {
     private final SettingService settingService;
     private final InventoryTransferRepository inventoryTransferRepository;
     private final InventoryTransferService inventoryTransferService;
+    private final PurchaseRequestService purchaseRequestService;
     private final BackorderService backorderService;
     private final ImmediateReplenishmentService immediateReplenishmentService;
     private final VoucherService voucherService;
@@ -91,6 +104,28 @@ public class OrderService {
     private static final long PREPARE_TTL_MINUTES = 30;
     private static final long PREPARE_CONFIRM_LOCK_TTL_SECONDS = 120;
     private static final long SHIPPING_RECEIVED_CONFIRM_AFTER_DAYS = 7;
+    private static final int PAYOS_RECONCILE_BATCH_SIZE = 30;
+    private static final List<InventoryTransferStatus> ACTIVE_TRANSFER_STATUSES = List.of(
+            InventoryTransferStatus.PENDING,
+            InventoryTransferStatus.SOURCE_CONFIRMED,
+            InventoryTransferStatus.APPROVED,
+            InventoryTransferStatus.SHIPPING,
+            InventoryTransferStatus.INSPECTING);
+    private static final List<PaymentStatus> ADMIN_UNPAID_PAYMENT_STATUSES = List.of(
+            PaymentStatus.UNPAID,
+            PaymentStatus.PENDING,
+            PaymentStatus.PENDING_VERIFICATION,
+            PaymentStatus.PARTIALLY_PAID,
+            PaymentStatus.FAILED,
+            PaymentStatus.EXPIRED,
+            PaymentStatus.REFUND_PENDING);
+    private static final Set<OrderCancelReasonCode> CUSTOMER_CANCEL_REASON_CODES = EnumSet.of(
+            OrderCancelReasonCode.CHANGE_PRODUCT,
+            OrderCancelReasonCode.CHANGE_ADDRESS,
+            OrderCancelReasonCode.FOUND_CHEAPER,
+            OrderCancelReasonCode.OTHER);
+    private static final String LEGACY_CANCEL_REASON_PREFIX = "Cancel reason:";
+    private static final String LEGACY_PAYMENT_EXPIRED_PREFIX = "Payment expired after";
 
     @Value("${order.payment-expiry-minutes:15}")
     private long paymentExpiryMinutes;
@@ -118,7 +153,7 @@ public class OrderService {
     // QUáº¢N LĂ ÄÆ N HĂ€NG CHO USER
     // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
-    @Transactional
+    @Transactional(readOnly = true)
     public List<OrderResponse> getMyOrders(Long userId, OrderStatus status) {
         List<Order> orders;
         if (status != null) {
@@ -126,24 +161,16 @@ public class OrderService {
         } else {
             orders = orderRepository.findByUserIdOrderByCreatedAtDesc(userId);
         }
-        syncPayOSPaymentStatuses(orders);
         return orders.stream().map(o -> mapToOrderResponse(o, true)).collect(Collectors.toList());
     }
 
-    @Transactional
+    @Transactional(readOnly = true)
     public OrderResponse getMyOrderDetail(Long userId, Long orderId) {
         Order order = orderRepository.findById(orderId)
                 .orElseThrow(() -> new NotFoundException("KhĂ´ng tĂ¬m tháº¥y Ä‘Æ¡n hĂ ng ID: " + orderId));
 
         if (!order.getUser().getId().equals(userId)) {
             throw new BadRequestException("Báº¡n khĂ´ng cĂ³ quyá»n xem Ä‘Æ¡n hĂ ng nĂ y!");
-        }
-
-        if (PaymentMethod.PAYOS.equals(order.getPaymentMethod())
-                && isPendingPayosPayment(order)) {
-            if (payOSService.checkPaymentStatus(order)) {
-                payOSService.markOrderPaid(order);
-            }
         }
 
         return mapToOrderResponse(order, true);
@@ -169,42 +196,68 @@ public class OrderService {
     // QUáº¢N LĂ ÄÆ N HĂ€NG CHO ADMIN
     // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
-    @Transactional
-    public Page<OrderResponse> getAdminOrders(String status, String search, Pageable pageable) {
-        List<Order> orders = orderRepository.findAdminOrdersWithFilter(null, search, Pageable.unpaged()).getContent();
-        syncPayOSPaymentStatuses(orders);
+    @Transactional(readOnly = true)
+    public Page<OrderResponse> getAdminOrders(
+            String status,
+            String search,
+            PaymentStatus paymentStatus,
+            String startDate,
+            String endDate,
+            Pageable pageable) {
+        Specification<Order> specification = buildAdminOrderSpecification(
+                status,
+                search,
+                paymentStatus,
+                startDate,
+                endDate);
 
-        List<OrderResponse> filtered = orders.stream()
-                .filter(order -> matchesWorkflowStatusFilter(order, status))
-                .map(order -> mapToOrderResponse(order, false))
-                .toList();
-
-        if (pageable.isUnpaged()) {
-            return new PageImpl<>(filtered);
-        }
-
-        int start = Math.min((int) pageable.getOffset(), filtered.size());
-        int end = Math.min(start + pageable.getPageSize(), filtered.size());
-        return new PageImpl<>(filtered.subList(start, end), pageable, filtered.size());
+        return orderRepository.findAll(specification, pageable)
+                .map(order -> mapToOrderResponse(order, false));
     }
 
-    @Transactional
+    @Transactional(readOnly = true)
+    public AdminOrderSummaryResponse getAdminOrderSummary(
+            String status,
+            String search,
+            PaymentStatus paymentStatus,
+            String startDate,
+            String endDate) {
+        Specification<Order> specification = buildAdminOrderSpecification(
+                status,
+                search,
+                paymentStatus,
+                startDate,
+                endDate);
+
+        List<Order> orders = orderRepository.findAll(specification);
+        long shortageOrders = orders.stream()
+                .filter(this::hasAdminOrderShortage)
+                .count();
+        long unpaidOrders = orders.stream()
+                .filter(this::isAdminOrderUnpaid)
+                .count();
+        BigDecimal totalValue = orders.stream()
+                .map(this::resolveAdminOrderValue)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+        return AdminOrderSummaryResponse.builder()
+                .totalOrders(orders.size())
+                .shortageOrders(shortageOrders)
+                .unpaidOrders(unpaidOrders)
+                .totalValue(totalValue)
+                .build();
+    }
+
+    @Transactional(readOnly = true)
     public OrderResponse getAdminOrderDetail(Long orderId) {
         Order order = orderRepository.findById(orderId)
                 .orElseThrow(() -> new NotFoundException("KhĂ´ng tĂ¬m tháº¥y Ä‘Æ¡n hĂ ng ID: " + orderId));
-
-        if (PaymentMethod.PAYOS.equals(order.getPaymentMethod())
-                && isPendingPayosPayment(order)) {
-            if (payOSService.checkPaymentStatus(order)) {
-                payOSService.markOrderPaid(order);
-            }
-        }
 
         return mapToOrderResponse(order, false);
     }
 
     @Transactional
-    public void cancelMyOrder(Long userId, Long orderId, String cancelReason) {
+    public void cancelMyOrder(Long userId, Long orderId, OrderCancelRequest request) {
         Order order = orderRepository.findById(orderId)
                 .orElseThrow(() -> new NotFoundException("KhĂ´ng tĂ¬m tháº¥y Ä‘Æ¡n hĂ ng ID: " + orderId));
 
@@ -223,6 +276,7 @@ public class OrderService {
         if (!canCustomerCancelOrder(currentStatus)) {
             throw new BadRequestException("Đơn hàng đã được xác nhận hoặc đang xử lý, không thể hủy");
         }
+        NormalizedCancelReason cancelReason = normalizeCustomerCancelReason(request);
         releaseAllocatedInventoryForOrder(order);
         voucherService.restoreVoucherForOrder(order);
         LocalDateTime cancelledAt = LocalDateTime.now();
@@ -239,10 +293,7 @@ public class OrderService {
                 && isPendingPayosPayment(order)) {
             payOSService.cancelPaymentLink(order);
         }
-        if (cancelReason != null && !cancelReason.isBlank()) {
-            String previousNote = order.getNote() != null ? order.getNote() + " | " : "";
-            order.setNote(previousNote + "Cancel reason: " + cancelReason.trim());
-        }
+        applyCancellationReason(order, cancelReason.reasonCode(), cancelReason.reasonText());
         orderRepository.save(order);
         customerService.evaluateAndHandleCustomerReputation(order.getUser().getId());
     }
@@ -272,7 +323,7 @@ public class OrderService {
         validateStatusTransition(currentStatus, newStatus);
 
         if (newStatus == OrderStatus.RECEIVED) {
-            markOrderAsReceived(order, true);
+            markOrderAsReceived(order, false);
             return;
         }
         if (newStatus == OrderStatus.COMPLETED) {
@@ -297,6 +348,7 @@ public class OrderService {
                     && isPendingPayosPayment(order)) {
                 payOSService.cancelPaymentLink(order);
             }
+            ensureCancellationReason(order, OrderCancelReasonCode.ADMIN_CANCELLED, null);
         }
         syncActiveSubOrdersForStatusChange(order, newStatus, statusChangedAt);
         if (newStatus == OrderStatus.SHIPPING
@@ -428,28 +480,44 @@ public class OrderService {
     // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
     @Transactional(readOnly = true)
-    public List<BranchOrderResponse> getBranchOrders(Long branchId, OrderStatus status, String search) {
+    public List<BranchOrderResponse> getBranchOrders(
+            Long branchId,
+            OrderStatus status,
+            String search,
+            String startDate,
+            String endDate) {
         List<SubOrder> subOrders = (status != null)
                 ? subOrderRepository.findByBranchIdAndStatusOrderByCreatedAtDesc(branchId, status)
                 : subOrderRepository.findByBranchIdOrderByCreatedAtDesc(branchId);
 
-        List<SubOrder> filteredSubOrders = subOrders;
+        LocalDateTime startDateTime = parseOrderFilterDateTime(startDate, false);
+        LocalDateTime endDateTime = parseOrderFilterDateTime(endDate, true);
+
+        List<SubOrder> filteredSubOrders = subOrders.stream()
+                .filter(subOrder -> {
+                    LocalDateTime createdAt = resolveBranchOrderCreatedAt(subOrder);
+                    if (createdAt == null) {
+                        return false;
+                    }
+                    if (startDateTime != null && createdAt.isBefore(startDateTime)) {
+                        return false;
+                    }
+                    if (endDateTime != null && createdAt.isAfter(endDateTime)) {
+                        return false;
+                    }
+                    return true;
+                })
+                .collect(Collectors.toList());
+
         if (search != null && !search.isBlank()) {
             String lc = search.toLowerCase();
-            filteredSubOrders = subOrders.stream().filter(s -> {
+            filteredSubOrders = filteredSubOrders.stream().filter(s -> {
                 Order o = s.getOrder();
                 return (o.getCode() != null && o.getCode().toLowerCase().contains(lc))
                         || (o.getUser() != null && o.getUser().getFullName() != null
                                 && o.getUser().getFullName().toLowerCase().contains(lc));
             }).collect(Collectors.toList());
         }
-
-        syncPayOSPaymentStatuses(
-                filteredSubOrders.stream()
-                        .map(SubOrder::getOrder)
-                        .filter(Objects::nonNull)
-                        .distinct()
-                        .collect(Collectors.toList()));
 
         return filteredSubOrders.stream().map(this::mapSubOrderToBranchOrderResponse).collect(Collectors.toList());
     }
@@ -458,7 +526,6 @@ public class OrderService {
     public BranchOrderResponse getBranchOrderDetail(Long branchId, Long orderId) {
         SubOrder subOrder = subOrderRepository.findByOrderIdAndBranchId(orderId, branchId)
                 .orElseThrow(() -> new NotFoundException("KhĂ´ng tĂ¬m tháº¥y Ä‘Æ¡n hĂ ng cho chi nhĂ¡nh nĂ y"));
-        syncPayOSPaymentStatus(subOrder.getOrder());
         return mapSubOrderToBranchOrderResponse(subOrder);
     }
 
@@ -511,6 +578,96 @@ public class OrderService {
         return inventoryTransferService.createReplenishmentTransfersForSubOrder(subOrder).stream()
                 .map(InventoryTransfer::getTransferCode)
                 .toList();
+    }
+
+    @Transactional
+    public ReplenishmentRequestResponse requestReplenishmentForAdminResponse(Long orderId) {
+        Order order = orderRepository.findById(orderId)
+                .orElseThrow(() -> new NotFoundException("Khong tim thay don hang ID: " + orderId));
+
+        List<SubOrder> awaitingSubOrders = order.getSubOrders() == null
+                ? Collections.emptyList()
+                : order.getSubOrders().stream()
+                        .filter(this::canRequestReplenishment)
+                        .toList();
+
+        if (awaitingSubOrders.isEmpty()) {
+            throw new BadRequestException("Don hang nay khong o trang thai cho dieu chuyen bo sung.");
+        }
+
+        List<String> transferCodes = new ArrayList<>();
+        List<String> purchaseRequestCodes = new ArrayList<>();
+        for (SubOrder subOrder : awaitingSubOrders) {
+            processReplenishmentRequest(subOrder, transferCodes, purchaseRequestCodes);
+        }
+
+        return ReplenishmentRequestResponse.builder()
+                .message("Da xu ly yeu cau bo sung cho don hang.")
+                .transferCodes(transferCodes)
+                .purchaseRequestCodes(purchaseRequestCodes)
+                .build();
+    }
+
+    @Transactional
+    public ReplenishmentRequestResponse requestReplenishmentForBranchResponse(Long branchId, Long orderId) {
+        SubOrder subOrder = subOrderRepository.findByOrderIdAndBranchId(orderId, branchId)
+                .orElseThrow(() -> new NotFoundException("Khong tim thay phan don cho chi nhanh nay."));
+
+        if (!canRequestReplenishment(subOrder)) {
+            throw new BadRequestException("Phan don nay khong o trang thai cho dieu chuyen bo sung.");
+        }
+
+        List<String> transferCodes = new ArrayList<>();
+        List<String> purchaseRequestCodes = new ArrayList<>();
+        processReplenishmentRequest(subOrder, transferCodes, purchaseRequestCodes);
+
+        return ReplenishmentRequestResponse.builder()
+                .message("Da xu ly yeu cau bo sung cho phan don.")
+                .transferCodes(transferCodes)
+                .purchaseRequestCodes(purchaseRequestCodes)
+                .build();
+    }
+
+    private void processReplenishmentRequest(
+            SubOrder subOrder,
+            List<String> transferCodes,
+            List<String> purchaseRequestCodes) {
+        List<InventoryTransfer> existingTransfers = inventoryTransferService
+                .findActiveReplenishmentTransfersForSubOrder(subOrder.getId());
+        if (!existingTransfers.isEmpty()) {
+            transferCodes.addAll(existingTransfers.stream()
+                    .map(InventoryTransfer::getTransferCode)
+                    .filter(Objects::nonNull)
+                    .toList());
+            return;
+        }
+
+        List<PurchaseRequest> existingRequests = purchaseRequestService
+                .findActiveAutoReplenishmentRequestsForSubOrder(subOrder.getId());
+        if (!existingRequests.isEmpty()) {
+            purchaseRequestCodes.addAll(existingRequests.stream()
+                    .map(PurchaseRequest::getCode)
+                    .filter(Objects::nonNull)
+                    .toList());
+            return;
+        }
+
+        InventoryTransferService.ReplenishmentDecision decision = inventoryTransferService
+                .planReplenishmentForSubOrder(subOrder);
+        if (decision.type() == InventoryTransferService.ReplenishmentDecisionType.PURCHASE_REQUEST) {
+            purchaseRequestCodes.addAll(purchaseRequestService
+                    .createAutomaticReplenishmentRequestsForSubOrder(subOrder)
+                    .stream()
+                    .map(PurchaseRequest::getCode)
+                    .filter(Objects::nonNull)
+                    .toList());
+            return;
+        }
+
+        transferCodes.addAll(inventoryTransferService.createReplenishmentTransfersForSubOrder(subOrder).stream()
+                .map(InventoryTransfer::getTransferCode)
+                .filter(Objects::nonNull)
+                .toList());
     }
 
     @Transactional
@@ -593,6 +750,7 @@ public class OrderService {
                     && PaymentStatus.UNPAID.equals(order.getPaymentStatus())) {
                 payOSService.cancelPaymentLink(order);
             }
+            ensureCancellationReason(order, OrderCancelReasonCode.SUB_ORDERS_CANCELLED, null);
         }
 
         applyOrderStatus(order, newMasterStatus, LocalDateTime.now());
@@ -606,6 +764,63 @@ public class OrderService {
 
     private boolean canCustomerCancelOrder(OrderStatus status) {
         return status == OrderStatus.PENDING || status == OrderStatus.AWAITING_PAYMENT;
+    }
+
+    private NormalizedCancelReason normalizeCustomerCancelReason(OrderCancelRequest request) {
+        OrderCancelReasonCode reasonCode = OrderCancelReasonCode.from(request != null ? request.getReasonCode() : null)
+                .orElseThrow(() -> new BadRequestException("Ly do huy don khong hop le."));
+
+        if (!CUSTOMER_CANCEL_REASON_CODES.contains(reasonCode)) {
+            throw new BadRequestException("Ly do huy don khong hop le.");
+        }
+
+        String reasonText = normalizeOptionalText(request != null ? request.getOtherReasonText() : null);
+        if (reasonCode == OrderCancelReasonCode.OTHER && reasonText == null) {
+            throw new BadRequestException("Vui long nhap ly do huy chi tiet.");
+        }
+
+        if (reasonCode != OrderCancelReasonCode.OTHER) {
+            reasonText = null;
+        }
+
+        return new NormalizedCancelReason(reasonCode, reasonText);
+    }
+
+    private void applyCancellationReason(Order order, OrderCancelReasonCode reasonCode, String reasonText) {
+        if (order == null) {
+            return;
+        }
+
+        order.setCancelReasonCode(reasonCode);
+        order.setCancelReasonText(normalizeOptionalText(reasonText));
+    }
+
+    private void ensureCancellationReason(Order order, OrderCancelReasonCode reasonCode, String reasonText) {
+        if (order == null) {
+            return;
+        }
+
+        if (order.getCancelReasonCode() == null) {
+            order.setCancelReasonCode(reasonCode);
+        }
+
+        String normalizedReasonText = normalizeOptionalText(reasonText);
+        if ((order.getCancelReasonText() == null || order.getCancelReasonText().isBlank())
+                && normalizedReasonText != null) {
+            order.setCancelReasonText(normalizedReasonText);
+        }
+    }
+
+    private String normalizeOptionalText(String value) {
+        if (value == null) {
+            return null;
+        }
+
+        String normalized = value.trim();
+        return normalized.isEmpty() ? null : normalized;
+    }
+
+    private record NormalizedCancelReason(OrderCancelReasonCode reasonCode, String reasonText) {
     }
 
     @Transactional
@@ -639,8 +854,7 @@ public class OrderService {
                 }
             }
 
-            String previousNote = order.getNote() != null ? order.getNote() + " | " : "";
-            order.setNote(previousNote + "Payment expired after " + paymentExpiryMinutes + " minutes");
+            applyCancellationReason(order, OrderCancelReasonCode.PAYMENT_EXPIRED, null);
             order.setPaymentStatus(PaymentStatus.EXPIRED);
             order.setAutoApproveAt(null);
             orderRepository.save(order);
@@ -689,16 +903,54 @@ public class OrderService {
 
         List<SubOrder> overdueSubOrders = subOrderRepository.findByStatusAndUpdatedAtBefore(OrderStatus.SHIPPING,
                 cutoff);
-        List<Order> overdueLegacyOrders = orderRepository.findByStatusAndCreatedAtBefore(OrderStatus.SHIPPING, cutoff)
+        List<Order> overdueLegacyOrders = orderRepository.findByStatusAndUpdatedAtBefore(OrderStatus.SHIPPING, cutoff)
                 .stream()
                 .filter(order -> order.getSubOrders() == null || order.getSubOrders().isEmpty())
                 .toList();
 
-        if (!overdueSubOrders.isEmpty() || !overdueLegacyOrders.isEmpty()) {
+        if (overdueSubOrders.isEmpty() && overdueLegacyOrders.isEmpty()) {
+            return;
+        }
+
+        LocalDateTime receivedAt = LocalDateTime.now();
+
+        if (!overdueSubOrders.isEmpty()) {
+            overdueSubOrders.forEach(subOrder -> applySubOrderStatus(subOrder, OrderStatus.RECEIVED, receivedAt));
+            subOrderRepository.saveAll(overdueSubOrders);
+
+            overdueSubOrders.stream()
+                    .map(SubOrder::getOrder)
+                    .filter(Objects::nonNull)
+                    .map(Order::getId)
+                    .filter(Objects::nonNull)
+                    .distinct()
+                    .forEach(orderStatusSyncService::syncMasterOrderStatus);
+        }
+
+        for (Order order : overdueLegacyOrders) {
+            markOrderAsReceived(order, false);
+        }
+
+        log.info("Da tu dong xac nhan nhan hang cho {} phan don va {} don legacy SHIPPING qua {} ngay.",
+                overdueSubOrders.size(),
+                overdueLegacyOrders.size(),
+                SHIPPING_RECEIVED_CONFIRM_AFTER_DAYS);
+        /*
             log.warn("CĂƒÂ³ {} phĂ¡ÂºÂ§n Ă„â€˜Ă†Â¡n vĂƒÂ  {} Ă„â€˜Ă†Â¡n legacy Ă„â€˜ang SHIPPING quĂƒÂ¡ {} ngĂƒÂ y, cĂ¡ÂºÂ§n xĂƒÂ¡c nhĂ¡ÂºÂ­n RECEIVED thĂ¡Â»Â§ cĂƒÂ´ng.",
                     overdueSubOrders.size(),
                     overdueLegacyOrders.size(),
                     SHIPPING_RECEIVED_CONFIRM_AFTER_DAYS);
+        }
+        */
+    }
+
+    @Transactional
+    public void reconcilePendingPayOSPayments() {
+        Page<Order> pendingPayosOrders = orderRepository.findPendingPayosOrdersForReconcile(
+                PageRequest.of(0, PAYOS_RECONCILE_BATCH_SIZE));
+
+        for (Order order : pendingPayosOrders.getContent()) {
+            refreshPendingPayOSPayment(order);
         }
     }
 
@@ -783,7 +1035,7 @@ public class OrderService {
                     .max(LocalDateTime::compareTo)
                     .orElse(order.getCreatedAt());
         }
-        return order.getCreatedAt();
+        return order.getUpdatedAt() != null ? order.getUpdatedAt() : order.getCreatedAt();
     }
 
     private LocalDateTime resolveStatusUpdatedAt(SubOrder subOrder) {
@@ -852,15 +1104,7 @@ public class OrderService {
         }
     }
 
-    private void syncPayOSPaymentStatuses(Collection<Order> orders) {
-        if (orders == null || orders.isEmpty()) {
-            return;
-        }
-
-        orders.forEach(this::syncPayOSPaymentStatus);
-    }
-
-    private void syncPayOSPaymentStatus(Order order) {
+    private void refreshPendingPayOSPayment(Order order) {
         if (order == null
                 || !PaymentMethod.PAYOS.equals(order.getPaymentMethod())
                 || !isPendingPayosPayment(order)) {
@@ -914,6 +1158,61 @@ public class OrderService {
     // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
     // MAPPING LOGIC
     // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+
+    private String resolveCancelReasonLabel(Order order) {
+        if (order == null || order.getCancelReasonCode() == null) {
+            return null;
+        }
+
+        return order.getCancelReasonCode().getDisplayName();
+    }
+
+    private String resolveCancelReasonText(Order order) {
+        if (order == null) {
+            return null;
+        }
+
+        String normalizedReasonText = normalizeOptionalText(order.getCancelReasonText());
+        if (normalizedReasonText != null) {
+            return normalizedReasonText;
+        }
+
+        return extractLegacyCancelReason(order.getNote());
+    }
+
+    private String resolveCancelReasonDisplay(Order order) {
+        String cancelReasonLabel = resolveCancelReasonLabel(order);
+        String cancelReasonText = resolveCancelReasonText(order);
+
+        if (cancelReasonLabel == null) {
+            return cancelReasonText;
+        }
+
+        if (cancelReasonText == null || cancelReasonText.equals(cancelReasonLabel)) {
+            return cancelReasonLabel;
+        }
+
+        return cancelReasonLabel + ": " + cancelReasonText;
+    }
+
+    private String extractLegacyCancelReason(String note) {
+        String normalizedNote = normalizeOptionalText(note);
+        if (normalizedNote == null) {
+            return null;
+        }
+
+        int cancelReasonIndex = normalizedNote.lastIndexOf(LEGACY_CANCEL_REASON_PREFIX);
+        if (cancelReasonIndex >= 0) {
+            return normalizeOptionalText(normalizedNote.substring(cancelReasonIndex + LEGACY_CANCEL_REASON_PREFIX.length()));
+        }
+
+        int paymentExpiredIndex = normalizedNote.lastIndexOf(LEGACY_PAYMENT_EXPIRED_PREFIX);
+        if (paymentExpiredIndex >= 0) {
+            return normalizeOptionalText(normalizedNote.substring(paymentExpiredIndex));
+        }
+
+        return null;
+    }
 
     private OrderResponse mapToOrderResponse(Order order, boolean isUserView) {
         List<OrderItemResponse> itemResponses = new ArrayList<>();
@@ -983,6 +1282,10 @@ public class OrderService {
                 .createdAt(order.getCreatedAt())
                 .shippingAddress(order.getShippingAddress())
                 .note(order.getNote())
+                .cancelReasonCode(order.getCancelReasonCode() != null ? order.getCancelReasonCode().name() : null)
+                .cancelReasonLabel(resolveCancelReasonLabel(order))
+                .cancelReasonText(resolveCancelReasonText(order))
+                .cancelReasonDisplay(resolveCancelReasonDisplay(order))
                 .checkoutUrl(order.getPayosCheckoutUrl())
                 .items(itemResponses)
                 .subOrders(subOrderSummaries)
@@ -1007,16 +1310,211 @@ public class OrderService {
                 .build();
     }
 
-    private boolean matchesWorkflowStatusFilter(Order order, String status) {
+    private Specification<Order> buildAdminOrderSpecification(
+            String status,
+            String search,
+            PaymentStatus paymentStatus,
+            String startDate,
+            String endDate) {
+        return (root, query, criteriaBuilder) -> {
+            query.distinct(true);
+
+            List<Predicate> predicates = new ArrayList<>();
+
+            if (search != null && !search.isBlank()) {
+                String keyword = "%" + search.trim().toLowerCase(Locale.ROOT) + "%";
+                Join<Order, User> userJoin = root.join("user", JoinType.LEFT);
+                predicates.add(criteriaBuilder.or(
+                        criteriaBuilder.like(criteriaBuilder.lower(root.get("code")), keyword),
+                        criteriaBuilder.like(criteriaBuilder.lower(userJoin.get("fullName")), keyword),
+                        criteriaBuilder.like(criteriaBuilder.lower(userJoin.get("phoneNumber")), keyword),
+                        criteriaBuilder.like(criteriaBuilder.lower(root.get("receiverPhone")), keyword)));
+            }
+
+            if (paymentStatus != null) {
+                predicates.add(buildAdminPaymentPredicate(root, criteriaBuilder, paymentStatus));
+            }
+
+            LocalDateTime startDateTime = resolveAdminStartDate(startDate);
+            if (startDateTime != null) {
+                predicates.add(criteriaBuilder.greaterThanOrEqualTo(root.get("createdAt"), startDateTime));
+            }
+
+            LocalDateTime endDateTime = resolveAdminEndDate(endDate);
+            if (endDateTime != null) {
+                predicates.add(criteriaBuilder.lessThanOrEqualTo(root.get("createdAt"), endDateTime));
+            }
+
+            Predicate statusPredicate = buildAdminStatusPredicate(status, root, query, criteriaBuilder);
+            if (statusPredicate != null) {
+                predicates.add(statusPredicate);
+            }
+
+            return criteriaBuilder.and(predicates.toArray(Predicate[]::new));
+        };
+    }
+
+    private Predicate buildAdminPaymentPredicate(
+            Root<Order> root,
+            CriteriaBuilder criteriaBuilder,
+            PaymentStatus paymentStatus) {
+        if (paymentStatus == PaymentStatus.UNPAID) {
+            return root.get("paymentStatus").in(ADMIN_UNPAID_PAYMENT_STATUSES);
+        }
+        return criteriaBuilder.equal(root.get("paymentStatus"), paymentStatus);
+    }
+
+    private Predicate buildAdminStatusPredicate(
+            String status,
+            Root<Order> root,
+            CriteriaQuery<?> query,
+            CriteriaBuilder criteriaBuilder) {
         if (status == null || status.isBlank() || "ALL".equalsIgnoreCase(status)) {
-            return true;
+            return null;
         }
 
         String normalized = status.trim().toUpperCase(Locale.ROOT);
-        String workflowStatus = resolveWorkflowStatus(order);
-        String legacyStatus = order != null && order.getStatus() != null ? order.getStatus().name() : "";
+        Predicate activeTransferPredicate = buildActiveTransferPredicate(root, query, criteriaBuilder);
 
-        return normalized.equals(workflowStatus) || normalized.equals(legacyStatus);
+        return switch (normalized) {
+            case "PENDING_PAYMENT", "AWAITING_PAYMENT" -> criteriaBuilder.equal(
+                    root.get("status"),
+                    OrderStatus.AWAITING_PAYMENT);
+            case "PENDING_AUTO_APPROVAL" -> criteriaBuilder.and(
+                    criteriaBuilder.equal(root.get("status"), OrderStatus.PENDING),
+                    criteriaBuilder.isNotNull(root.get("autoApproveAt")));
+            case "PENDING" -> criteriaBuilder.and(
+                    criteriaBuilder.equal(root.get("status"), OrderStatus.PENDING),
+                    criteriaBuilder.isNull(root.get("autoApproveAt")));
+            case "PENDING_SHORTAGE_REVIEW" -> criteriaBuilder.and(
+                    criteriaBuilder.equal(root.get("status"), OrderStatus.AWAITING_REPLENISHMENT),
+                    criteriaBuilder.not(activeTransferPredicate));
+            case "PENDING_TRANSFER" -> criteriaBuilder.and(
+                    criteriaBuilder.equal(root.get("status"), OrderStatus.AWAITING_REPLENISHMENT),
+                    activeTransferPredicate);
+            default -> {
+                try {
+                    yield criteriaBuilder.equal(root.get("status"), OrderStatus.valueOf(normalized));
+                } catch (IllegalArgumentException ex) {
+                    yield criteriaBuilder.disjunction();
+                }
+            }
+        };
+    }
+
+    private Predicate buildActiveTransferPredicate(
+            Root<Order> root,
+            CriteriaQuery<?> query,
+            CriteriaBuilder criteriaBuilder) {
+        Subquery<Long> subquery = query.subquery(Long.class);
+        Root<InventoryTransfer> transferRoot = subquery.from(InventoryTransfer.class);
+
+        subquery.select(criteriaBuilder.literal(1L));
+        subquery.where(
+                criteriaBuilder.like(
+                        transferRoot.get("referenceCode"),
+                        criteriaBuilder.concat(root.get("code"), "-SUB-%")),
+                transferRoot.get("status").in(ACTIVE_TRANSFER_STATUSES));
+
+        return criteriaBuilder.exists(subquery);
+    }
+
+    private LocalDateTime resolveAdminStartDate(String startDate) {
+        return parseOrderFilterDateTime(startDate, false);
+    }
+
+    private LocalDateTime resolveAdminEndDate(String endDate) {
+        return parseOrderFilterDateTime(endDate, true);
+    }
+
+    private boolean hasAdminOrderShortage(Order order) {
+        if (order == null) {
+            return false;
+        }
+
+        if (order.getStatus() == OrderStatus.AWAITING_REPLENISHMENT) {
+            return true;
+        }
+
+        return order.getStockStatus() != null
+                && order.getStockStatus() != StockStatus.FULLY_AVAILABLE;
+    }
+
+    private boolean isAdminOrderUnpaid(Order order) {
+        return order == null || !PaymentStatus.PAID.equals(order.getPaymentStatus());
+    }
+
+    private BigDecimal resolveAdminOrderValue(Order order) {
+        if (order == null) {
+            return BigDecimal.ZERO;
+        }
+
+        if (order.getFinalAmount() != null) {
+            return order.getFinalAmount();
+        }
+
+        if (order.getTotalAmount() != null) {
+            return order.getTotalAmount();
+        }
+
+        return BigDecimal.ZERO;
+    }
+
+    private LocalDateTime resolveBranchOrderCreatedAt(SubOrder subOrder) {
+        if (subOrder == null) {
+            return null;
+        }
+
+        if (subOrder.getOrder() != null && subOrder.getOrder().getCreatedAt() != null) {
+            return subOrder.getOrder().getCreatedAt();
+        }
+
+        return subOrder.getCreatedAt();
+    }
+
+    private LocalDateTime parseOrderFilterDateTime(String rawValue, boolean endOfRange) {
+        if (rawValue == null || rawValue.isBlank()) {
+            return null;
+        }
+
+        String normalized = rawValue.trim();
+        String normalizedDateTime = normalized.contains(" ") && !normalized.contains("T")
+                ? normalized.replace(" ", "T")
+                : normalized;
+
+        try {
+            LocalDate parsedDate = LocalDate.parse(normalized);
+            return endOfRange ? parsedDate.atTime(LocalTime.MAX) : parsedDate.atStartOfDay();
+        } catch (Exception ignored) {
+        }
+
+        try {
+            LocalDateTime parsedDateTime = LocalDateTime.parse(normalizedDateTime);
+            if (endOfRange) {
+                boolean minutePrecision = normalizedDateTime.matches("^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}$");
+                return minutePrecision
+                        ? parsedDateTime.withSecond(59).withNano(999_999_999)
+                        : parsedDateTime.withNano(999_999_999);
+            }
+            return parsedDateTime;
+        } catch (Exception ignored) {
+        }
+
+        try {
+            LocalDateTime parsedOffsetDateTime = OffsetDateTime.parse(normalizedDateTime).toLocalDateTime();
+            return endOfRange ? parsedOffsetDateTime.withNano(999_999_999) : parsedOffsetDateTime;
+        } catch (Exception ignored) {
+        }
+
+        if (normalized.length() >= 10) {
+            try {
+                LocalDate parsedDate = LocalDate.parse(normalized.substring(0, 10));
+                return endOfRange ? parsedDate.atTime(LocalTime.MAX) : parsedDate.atStartOfDay();
+            } catch (Exception ignored) {
+            }
+        }
+
+        throw new BadRequestException("Bo loc thoi gian khong hop le: " + rawValue);
     }
 
     private String resolveWorkflowStatus(Order order) {
@@ -1138,12 +1636,7 @@ public class OrderService {
                 .filter(Objects::nonNull)
                 .anyMatch(subOrder -> inventoryTransferRepository.existsByReferenceCodeAndStatusIn(
                         buildSubOrderReferenceCode(subOrder),
-                        List.of(
-                                InventoryTransferStatus.PENDING,
-                                InventoryTransferStatus.SOURCE_CONFIRMED,
-                                InventoryTransferStatus.APPROVED,
-                                InventoryTransferStatus.SHIPPING,
-                                InventoryTransferStatus.INSPECTING)));
+                        ACTIVE_TRANSFER_STATUSES));
     }
 
     private boolean isPendingPayosPayment(Order order) {

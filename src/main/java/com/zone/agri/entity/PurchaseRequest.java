@@ -55,6 +55,19 @@ public class PurchaseRequest {
     @Column(name = "note", columnDefinition = "TEXT")
     String note;
 
+    @Column(name = "auto_replenishment", nullable = false)
+    @Builder.Default
+    Boolean autoReplenishment = false;
+
+    @Column(name = "linked_sub_order_id")
+    Long linkedSubOrderId;
+
+    @Column(name = "linked_destination_branch_id")
+    Long linkedDestinationBranchId;
+
+    @Column(name = "linked_reference_code", length = 120)
+    String linkedReferenceCode;
+
     @CreationTimestamp
     @Column(name = "created_at", updatable = false)
     LocalDateTime createdAt;

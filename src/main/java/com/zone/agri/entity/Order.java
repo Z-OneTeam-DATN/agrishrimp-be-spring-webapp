@@ -1,6 +1,7 @@
 package com.zone.agri.entity;
 
 import com.zone.agri.entity.enums.FulfillmentStatus;
+import com.zone.agri.entity.enums.OrderCancelReasonCode;
 import com.zone.agri.entity.enums.OrderStatus;
 import com.zone.agri.entity.enums.PaymentMethod;
 import com.zone.agri.entity.enums.PaymentStatus;
@@ -77,6 +78,9 @@ public class Order {
     @Column(name = "created_at")
     LocalDateTime createdAt;
 
+    @Column(name = "updated_at")
+    LocalDateTime updatedAt;
+
     @Column(name = "received_at")
     LocalDateTime receivedAt;
 
@@ -88,6 +92,13 @@ public class Order {
 
     @Column(name = "cancelled_at")
     LocalDateTime cancelledAt;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "cancel_reason_code", length = 50)
+    OrderCancelReasonCode cancelReasonCode;
+
+    @Column(name = "cancel_reason_text", columnDefinition = "TEXT")
+    String cancelReasonText;
 
     @Column(name = "shipping_address", columnDefinition = "TEXT")
     String shippingAddress;

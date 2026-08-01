@@ -27,4 +27,9 @@ public class OrderCompletionScheduler {
     public void autoApproveEligibleOrders() {
         orderService.autoApproveEligibleOrders();
     }
+
+    @Scheduled(fixedDelayString = "${order.payos-reconcile-delay-ms:45000}")
+    public void reconcilePendingPayOSPayments() {
+        orderService.reconcilePendingPayOSPayments();
+    }
 }
