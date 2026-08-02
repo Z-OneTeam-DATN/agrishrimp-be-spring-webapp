@@ -419,7 +419,7 @@ public class InventoryNoteService {
                 .orElseThrow(() -> new NotFoundException("Khong tim thay lenh kiem kho."));
         warehouseContext.assertAccess(note.getBranch().getId());
         if (note.getType() != InventoryNoteType.CHECK) {
-            throw new BadRequestException("Phieu nay khong phai phieu kiem ke.");
+            throw new BadRequestException("Phiếu này không phải phiếu kiểm kê.");
         }
 
         InventoryCheckWorkflowStatus workflowStatus = canonicalStatus(note);
@@ -427,7 +427,7 @@ public class InventoryNoteService {
                 || workflowStatus == InventoryCheckWorkflowStatus.COMPLETED
                 || workflowStatus == InventoryCheckWorkflowStatus.CANCELLED
                 || note.getStatus() == InventoryNoteStatus.COMPLETED) {
-            throw new BadRequestException("Phieu kiem ke da gui duyet hoac hoan tat, khong the chinh sua.");
+            throw new BadRequestException("Phiếu kiểm kê đã gửi duyệt hoặc hoàn tất, không thể chỉnh sửa.");
         }
 
         if (workflowStatus == InventoryCheckWorkflowStatus.DRAFT) {

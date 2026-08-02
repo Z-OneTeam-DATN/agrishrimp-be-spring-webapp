@@ -146,30 +146,32 @@ public class InventoryCheckGuardService {
     }
 
     private String buildConflictMessage(String actionLabel, InventoryCheckBlock block) {
+        String normalizedActionLabel = normalizeActionLabel(actionLabel);
         String branchName = resolveBranchName(block.note());
         String code = resolveCode(block.note());
         if (block.scopeType() == InventoryCheckScopeType.FULL_WAREHOUSE) {
-            return "Khong the " + actionLabel + ". Kho " + branchName
-                    + " dang duoc kiem ke toan kho boi phieu " + code + ".";
+            return "Không thể " + normalizedActionLabel + ". Kho " + branchName
+                    + " đang được kiểm kê toàn kho bởi phiếu " + code + ".";
         }
 
-        return "Khong the " + actionLabel + ". Co " + block.overlapVariantIds().size()
-                + " SKU trung pham vi voi phieu kiem ke " + code + " tai kho " + branchName
+        return "Không thể " + normalizedActionLabel + ". Có " + block.overlapVariantIds().size()
+                + " SKU trùng phạm vi với phiếu kiểm kê " + code + " tại kho " + branchName
                 + formatSkuPreview(block.note(), block.overlapVariantIds()) + ".";
     }
 
     private String buildMutationMessage(String actionLabel, InventoryCheckBlock block) {
+        String normalizedActionLabel = normalizeActionLabel(actionLabel);
         String branchName = resolveBranchName(block.note());
         String code = resolveCode(block.note());
         if (block.scopeType() == InventoryCheckScopeType.FULL_WAREHOUSE) {
-            return "Khong the " + actionLabel + ". Kho " + branchName
-                    + " dang duoc kiem ke. Vui long hoan tat hoac huy phieu kiem ke " + code + " truoc khi tiep tuc.";
+            return "Không thể " + normalizedActionLabel + ". Kho " + branchName
+                    + " đang được kiểm kê. Vui lòng hoàn tất hoặc hủy phiếu kiểm kê " + code + " trước khi tiếp tục.";
         }
 
-        return "Khong the " + actionLabel + ". Co " + block.overlapVariantIds().size()
-                + " san pham trong chung tu dang duoc kiem ke tai kho " + branchName
+        return "Không thể " + normalizedActionLabel + ". Có " + block.overlapVariantIds().size()
+                + " sản phẩm trong chứng từ đang được kiểm kê tại kho " + branchName
                 + formatSkuPreview(block.note(), block.overlapVariantIds())
-                + ". Phieu kiem ke: " + code + ".";
+                + ". Phiếu kiểm kê: " + code + ".";
     }
 
     private String formatSkuPreview(InventoryNote note, Set<Long> overlapVariantIds) {
@@ -193,17 +195,34 @@ public class InventoryCheckGuardService {
             return " (" + preview + ")";
         }
 
-        return " (" + preview + " va " + remaining + " san pham khac)";
+        return " (" + preview + " và " + remaining + " sản phẩm khác)";
     }
 
     private String resolveBranchName(InventoryNote note) {
         return note.getBranch() != null && note.getBranch().getName() != null
                 ? note.getBranch().getName()
-                : "kho hien tai";
+                : "kho hiện tại";
     }
 
     private String resolveCode(InventoryNote note) {
         return note.getCode() != null ? note.getCode() : String.valueOf(note.getId());
+    }
+
+    private String normalizeActionLabel(String actionLabel) {
+        if (actionLabel == null || actionLabel.isBlank()) {
+            return "thực hiện thao tác";
+        }
+
+        return switch (actionLabel.trim().toLowerCase()) {
+            case "bat dau kiem ke" -> "bắt đầu kiểm kê";
+            case "tao phieu dieu chuyen" -> "tạo phiếu điều chuyển";
+            case "sua phieu dieu chuyen" -> "sửa phiếu điều chuyển";
+            case "duyet phieu dieu chuyen" -> "duyệt phiếu điều chuyển";
+            case "xac nhan dieu chuyen" -> "xác nhận điều chuyển";
+            case "tao phieu nhap kho" -> "tạo phiếu nhập kho";
+            case "cap nhat phieu nhap kho" -> "cập nhật phiếu nhập kho";
+            default -> actionLabel;
+        };
     }
 
     private record InventoryCheckBlock(

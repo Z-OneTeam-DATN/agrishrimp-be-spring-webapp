@@ -42,11 +42,14 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.context.annotation.Lazy;
+import vn.payos.type.WebhookData;
 
 import java.math.BigDecimal;
+import java.net.URLEncoder;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
+import java.nio.charset.StandardCharsets;
 import java.time.OffsetDateTime;
 import java.time.temporal.ChronoUnit;
 import java.util.*;
@@ -59,6 +62,9 @@ import java.util.stream.Stream;
 @RequiredArgsConstructor
 @Slf4j
 public class OrderService {
+    private static final Set<PaymentMethod> RESUMABLE_PAYMENT_METHODS = EnumSet.of(
+            PaymentMethod.COD,
+            PaymentMethod.PAYOS);
 
     private final OrderRepository orderRepository;
     private final OrderItemRepository orderItemRepository;
@@ -101,10 +107,20 @@ public class OrderService {
     private static final String PREPARE_CONFIRM_LOCK_PREFIX = "prepare:confirm:lock:";
     private static final String PREPARE_CONFIRM_RESULT_PREFIX = "prepare:confirm:result:";
     private static final String PREPARE_CONFIRM_IDEMPOTENCY_PREFIX = "prepare:confirm:idempotency:";
+    private static final String PAYOS_SESSION_KEY_PREFIX = "payos:session:";
+    private static final String PAYOS_SESSION_ACTIVE_PREFIX = "payos:session:active:";
+    private static final String PAYOS_SESSION_FINALIZE_LOCK_PREFIX = "payos:session:finalize:lock:";
     private static final long PREPARE_TTL_MINUTES = 30;
     private static final long PREPARE_CONFIRM_LOCK_TTL_SECONDS = 120;
+    private static final long PAYOS_SESSION_FINALIZE_LOCK_TTL_SECONDS = 120;
     private static final long SHIPPING_RECEIVED_CONFIRM_AFTER_DAYS = 7;
     private static final int PAYOS_RECONCILE_BATCH_SIZE = 30;
+    private static final String PAYOS_SESSION_STATUS_PENDING = "PENDING";
+    private static final String PAYOS_SESSION_STATUS_PAID = "PAID";
+    private static final String PAYOS_SESSION_STATUS_CANCELLED = "CANCELLED";
+    private static final String PAYOS_SESSION_STATUS_EXPIRED = "EXPIRED";
+    private static final String PAYOS_SESSION_STATUS_ORDER_CREATED = "ORDER_CREATED";
+    private static final String PAYOS_HOLD_REFERENCE_PREFIX = "PAYOS-HOLD-";
     private static final List<InventoryTransferStatus> ACTIVE_TRANSFER_STATUSES = List.of(
             InventoryTransferStatus.PENDING,
             InventoryTransferStatus.SOURCE_CONFIRMED,
@@ -133,6 +149,12 @@ public class OrderService {
     @Value("${order.auto-approve-minutes:5}")
     private long autoApproveMinutes;
 
+    @Value("${payos.return-url}")
+    private String payosReturnUrl;
+
+    @Value("${payos.cancel-url}")
+    private String payosCancelUrl;
+
     private record PreparedQuote(
             List<CartItemDto> cartItems,
             List<SubOrderDraftDto> subOrders,
@@ -147,6 +169,18 @@ public class OrderService {
             Voucher voucher,
             UserVoucher userVoucher,
             BigDecimal discountAmount) {
+    }
+
+    private record VoucherResolution(
+            Voucher voucher,
+            BigDecimal discountAmount,
+            String voucherCode) {
+    }
+
+    private record CreatedOrderData(
+            Order order,
+            List<SubOrderSummaryDto> subOrderSummaries,
+            String voucherCode) {
     }
 
     // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
@@ -164,8 +198,13 @@ public class OrderService {
         return orders.stream().map(o -> mapToOrderResponse(o, true)).collect(Collectors.toList());
     }
 
-    @Transactional(readOnly = true)
+    @Transactional
     public OrderResponse getMyOrderDetail(Long userId, Long orderId) {
+        if (userId != null) {
+            Order ownedOrder = getOwnedOrderForUser(userId, orderId);
+            refreshPendingPayOSPayment(ownedOrder);
+            return mapToOrderResponse(ownedOrder, true);
+        }
         Order order = orderRepository.findById(orderId)
                 .orElseThrow(() -> new NotFoundException("KhĂ´ng tĂ¬m tháº¥y Ä‘Æ¡n hĂ ng ID: " + orderId));
 
@@ -174,6 +213,142 @@ public class OrderService {
         }
 
         return mapToOrderResponse(order, true);
+    }
+
+    @Transactional
+    public String getMyPayosPaymentLink(Long userId, Long orderId) {
+        Order order = getOwnedOrderForUser(userId, orderId);
+        refreshPendingPayOSPayment(order);
+
+        if (!PaymentMethod.PAYOS.equals(order.getPaymentMethod())) {
+            throw new BadRequestException("Don hang nay khong su dung thanh toan PayOS");
+        }
+        if (PaymentStatus.PAID.equals(order.getPaymentStatus())) {
+            throw new BadRequestException("Don hang nay da duoc thanh toan");
+        }
+        if (order.getStatus() != OrderStatus.AWAITING_PAYMENT) {
+            throw new BadRequestException("Don hang nay khong con cho thanh toan");
+        }
+        if (order.getPayosCheckoutUrl() == null || order.getPayosCheckoutUrl().isBlank()) {
+            throw new NotFoundException("Khong tim thay link thanh toan PayOS cho don hang nay");
+        }
+
+        return order.getPayosCheckoutUrl();
+    }
+
+    @Transactional
+    public ConfirmOrderResponse retryPendingPayment(
+            Long userId,
+            Long orderId,
+            RetryPendingPaymentRequest request) {
+        Order order = getOwnedOrderForUser(userId, orderId);
+        refreshPendingPayOSPayment(order);
+
+        if (PaymentStatus.PAID.equals(order.getPaymentStatus())) {
+            return buildConfirmOrderResponse(order, null);
+        }
+        if (order.getStatus() != OrderStatus.AWAITING_PAYMENT) {
+            throw new BadRequestException("Don hang nay khong con o trang thai cho thanh toan");
+        }
+
+        PaymentMethod nextPaymentMethod = request != null && request.getPaymentMethod() != null
+                ? request.getPaymentMethod()
+                : order.getPaymentMethod();
+        if (!RESUMABLE_PAYMENT_METHODS.contains(nextPaymentMethod)) {
+            throw new BadRequestException("Chi ho tro chon lai PayOS hoac COD cho don cho thanh toan");
+        }
+
+        String checkoutUrl = null;
+        if (PaymentMethod.PAYOS.equals(order.getPaymentMethod()) && isPendingPayosPayment(order)) {
+            payOSService.cancelPaymentLink(order);
+        }
+
+        order.setPayosCheckoutUrl(null);
+        order.setPayosPaymentLinkId(null);
+
+        if (PaymentMethod.PAYOS.equals(nextPaymentMethod)) {
+            checkoutUrl = reopenPayosCheckout(order);
+        } else {
+            moveAwaitingPaymentOrderToPending(order, nextPaymentMethod, resolveInitialPaymentStatus(nextPaymentMethod));
+        }
+
+        orderRepository.save(order);
+        return buildConfirmOrderResponse(order, checkoutUrl);
+    }
+
+    @Transactional(readOnly = true)
+    public PrepareOrderResponse getPreparedOrder(Long userId, String prepareToken) {
+        PrepareOrderDraft draft = getDraftFromRedis(prepareToken);
+        if (draft == null) {
+            PayOSCheckoutSession activeSession = getActivePayosSession(prepareToken);
+            if (activeSession != null) {
+                if (!userId.equals(activeSession.getUserId())) {
+                    throw new BadRequestException("Token không hợp lệ");
+                }
+                if (isPendingPayosSession(activeSession) && activeSession.getDraftSnapshot() != null) {
+                    return buildPrepareResponseFromDraft(activeSession.getDraftSnapshot());
+                }
+            }
+            throw new BadRequestException("Token hêt hạn");
+        }
+        if (!userId.equals(draft.getUserId())) {
+            throw new BadRequestException("Token không hợp lệ");
+        }
+        return buildPrepareResponseFromDraft(draft);
+    }
+
+    @Transactional
+    public ConfirmOrderResponse finalizePayosSession(Long userId, String sessionCode) {
+        PayOSCheckoutSession session = getPayosSession(sessionCode);
+        if (session == null) {
+            throw new NotFoundException("Không tìm thấy phiên thanh toán PayOS");
+        }
+        if (!userId.equals(session.getUserId())) {
+            throw new BadRequestException("Bạn không có quyền thao tác phiên thanh toán này");
+        }
+        return finalizePayosSessionInternal(session, true);
+    }
+
+    @Transactional
+    public void cancelPayosSession(Long userId, String sessionCode) {
+        PayOSCheckoutSession session = getPayosSession(sessionCode);
+        if (session == null) {
+            return;
+        }
+        if (!userId.equals(session.getUserId())) {
+            throw new BadRequestException("Ban khong co quyen thao tac phien thanh toan nay");
+        }
+        cancelPayosSessionInternal(session, true);
+    }
+
+    @Transactional
+    public void handlePayosWebhook(WebhookData webhookData) {
+        if (webhookData == null || !"00".equals(webhookData.getCode()) || webhookData.getOrderCode() == null) {
+            return;
+        }
+
+        String sessionCode = String.valueOf(webhookData.getOrderCode());
+        PayOSCheckoutSession session = getPayosSession(sessionCode);
+        if (session != null) {
+            if (PAYOS_SESSION_STATUS_CANCELLED.equals(session.getStatus())
+                    || PAYOS_SESSION_STATUS_EXPIRED.equals(session.getStatus())) {
+                log.warn("Received paid webhook for session {} but it is already {}. Skip auto-create to avoid duplicates.",
+                        sessionCode,
+                        session.getStatus());
+                return;
+            }
+            session = markPayosSessionPaid(session);
+            finalizePayosSessionInternal(session, false);
+            return;
+        }
+
+        Optional<Order> orderOpt = orderRepository.findById(webhookData.getOrderCode());
+        if (orderOpt.isEmpty()) {
+            orderOpt = orderRepository.findByCode("ORD" + webhookData.getOrderCode());
+        }
+        if (orderOpt.isPresent() && !PaymentStatus.PAID.equals(orderOpt.get().getPaymentStatus())) {
+            payOSService.markOrderPaid(orderOpt.get());
+        }
     }
 
     @Transactional
@@ -323,7 +498,8 @@ public class OrderService {
         validateStatusTransition(currentStatus, newStatus);
 
         if (newStatus == OrderStatus.RECEIVED) {
-            markOrderAsReceived(order, false);
+            // Admin is allowed to confirm delivery completion immediately.
+            markOrderAsReceived(order, true);
             return;
         }
         if (newStatus == OrderStatus.COMPLETED) {
@@ -946,6 +1122,8 @@ public class OrderService {
 
     @Transactional
     public void reconcilePendingPayOSPayments() {
+        reconcilePendingPayosSessions();
+
         Page<Order> pendingPayosOrders = orderRepository.findPendingPayosOrdersForReconcile(
                 PageRequest.of(0, PAYOS_RECONCILE_BATCH_SIZE));
 
@@ -1648,6 +1826,837 @@ public class OrderService {
                 || PaymentStatus.UNPAID.equals(order.getPaymentStatus());
     }
 
+    private Order getOwnedOrderForUser(Long userId, Long orderId) {
+        Order order = orderRepository.findById(orderId)
+                .orElseThrow(() -> new NotFoundException("Khong tim thay don hang ID: " + orderId));
+
+        if (order.getUser() == null || !order.getUser().getId().equals(userId)) {
+            throw new BadRequestException("Ban khong co quyen xem hoac thao tac tren don hang nay");
+        }
+
+        return order;
+    }
+
+    private String reopenPayosCheckout(Order order) {
+        LocalDateTime statusChangedAt = LocalDateTime.now();
+        order.setPaymentMethod(PaymentMethod.PAYOS);
+        order.setPaymentStatus(PaymentStatus.PENDING);
+        order.setAutoApproveAt(null);
+        order.setAutoApprovalPaused(Boolean.FALSE);
+        order.setFulfillmentStatus(FulfillmentStatus.NOT_STARTED);
+        applyOrderStatus(order, OrderStatus.AWAITING_PAYMENT, statusChangedAt);
+
+        if (order.getSubOrders() != null) {
+            List<SubOrder> awaitingPaymentSubOrders = order.getSubOrders().stream()
+                    .filter(Objects::nonNull)
+                    .filter(subOrder -> subOrder.getStatus() != OrderStatus.CANCELLED)
+                    .peek(subOrder -> applySubOrderStatus(subOrder, OrderStatus.AWAITING_PAYMENT, statusChangedAt))
+                    .toList();
+            if (!awaitingPaymentSubOrders.isEmpty()) {
+                subOrderRepository.saveAll(awaitingPaymentSubOrders);
+            }
+        }
+
+        try {
+            com.zone.agri.dto.response.payment.PayOSApiResponse.PayOSLinkData payosData = payOSService
+                    .createPaymentLink(order);
+            order.setPayosPaymentLinkId(payosData.getPaymentLinkId());
+            order.setPayosCheckoutUrl(payosData.getCheckoutUrl());
+            return payosData.getCheckoutUrl();
+        } catch (Exception e) {
+            throw new BadRequestException("Loi tao lai PayOS link: " + e.getMessage());
+        }
+    }
+
+    private void moveAwaitingPaymentOrderToPending(
+            Order order,
+            PaymentMethod paymentMethod,
+            PaymentStatus paymentStatus) {
+        boolean hasMissingItems = hasMissingItems(order);
+        LocalDateTime statusChangedAt = LocalDateTime.now();
+
+        order.setPaymentMethod(paymentMethod);
+        order.setPaymentStatus(paymentStatus);
+        order.setFulfillmentStatus(FulfillmentStatus.NOT_STARTED);
+        order.setAutoApprovalPaused(Boolean.FALSE);
+        applyOrderStatus(order, OrderStatus.PENDING, statusChangedAt);
+
+        if (hasMissingItems) {
+            order.setAutoApproveAt(null);
+            if (order.getStockStatus() == null) {
+                order.setStockStatus(StockStatus.PARTIALLY_AVAILABLE);
+            }
+        } else {
+            order.setAutoApproveAt(LocalDateTime.now().plusMinutes(Math.max(1, autoApproveMinutes)));
+            if (order.getStockStatus() == null) {
+                order.setStockStatus(StockStatus.FULLY_AVAILABLE);
+            }
+        }
+
+        if (order.getSubOrders() != null) {
+            List<SubOrder> activatedSubOrders = order.getSubOrders().stream()
+                    .filter(Objects::nonNull)
+                    .filter(subOrder -> subOrder.getStatus() == OrderStatus.AWAITING_PAYMENT)
+                    .peek(subOrder -> applySubOrderStatus(subOrder, OrderStatus.PENDING, statusChangedAt))
+                    .toList();
+            if (!activatedSubOrders.isEmpty()) {
+                subOrderRepository.saveAll(activatedSubOrders);
+            }
+        }
+    }
+
+    private boolean hasMissingItems(Order order) {
+        if (order == null || order.getSubOrders() == null) {
+            return false;
+        }
+
+        return order.getSubOrders().stream()
+                .filter(Objects::nonNull)
+                .flatMap(subOrder -> subOrder.getItems() == null ? Stream.empty() : subOrder.getItems().stream())
+                .anyMatch(item -> Objects.requireNonNullElse(item.getMissingQuantity(), 0) > 0);
+    }
+
+    private ConfirmOrderResponse buildConfirmOrderResponse(Order order, String checkoutUrl) {
+        List<SubOrderSummaryDto> subOrderSummaries = order.getSubOrders() == null
+                ? Collections.emptyList()
+                : order.getSubOrders().stream()
+                        .filter(Objects::nonNull)
+                        .map(subOrder -> SubOrderSummaryDto.builder()
+                                .subOrderId(subOrder.getId())
+                                .branchId(subOrder.getBranch() != null ? subOrder.getBranch().getId() : null)
+                                .branchName(subOrder.getBranch() != null ? subOrder.getBranch().getName() : null)
+                                .status(subOrder.getStatus() != null ? subOrder.getStatus().name() : null)
+                                .subtotal(subOrder.getSubtotal() != null ? subOrder.getSubtotal() : BigDecimal.ZERO)
+                                .shippingFee(subOrder.getShippingFee() != null ? subOrder.getShippingFee() : BigDecimal.ZERO)
+                                .estimatedDays(subOrder.getEstimatedDays())
+                                .carrier(subOrder.getCarrier())
+                                .build())
+                        .toList();
+
+        return buildConfirmOrderResponse(
+                order,
+                checkoutUrl,
+                subOrderSummaries,
+                order.getVoucher() != null ? order.getVoucher().getCode() : null);
+    }
+
+    private ConfirmOrderResponse buildConfirmOrderResponse(
+            Order order,
+            String checkoutUrl,
+            List<SubOrderSummaryDto> subOrderSummaries,
+            String voucherCode) {
+        return ConfirmOrderResponse.builder()
+                .orderId(order.getId())
+                .orderCode(order.getCode())
+                .status(resolveWorkflowStatus(order))
+                .legacyStatus(order.getStatus() != null ? order.getStatus().name() : "")
+                .paymentStatus(resolvePaymentStatus(order))
+                .fulfillmentStatus(resolveFulfillmentStatus(order))
+                .stockStatus(resolveStockStatus(order))
+                .autoApproveAt(order.getAutoApproveAt())
+                .voucherCode(voucherCode)
+                .subOrders(subOrderSummaries)
+                .totalAmount(order.getFinalAmount() != null ? order.getFinalAmount() : BigDecimal.ZERO)
+                .discountAmount(order.getDiscountAmount() != null ? order.getDiscountAmount() : BigDecimal.ZERO)
+                .totalShippingFee(order.getTotalShippingFee() != null ? order.getTotalShippingFee() : BigDecimal.ZERO)
+                .checkoutUrl(checkoutUrl)
+                .build();
+    }
+
+    private PrepareOrderResponse buildPrepareResponseFromDraft(PrepareOrderDraft draft) {
+        SubOrderDraftDto primarySubOrder = draft.getSubOrders() == null || draft.getSubOrders().isEmpty()
+                ? null
+                : draft.getSubOrders().get(0);
+        boolean canPlaceOrder = draft.getSubOrders() != null && !draft.getSubOrders().isEmpty();
+        boolean canFulfill = canPlaceOrder
+                && (draft.getOutOfStockItems() == null || draft.getOutOfStockItems().isEmpty());
+        return PrepareOrderResponse.builder()
+                .prepareToken(draft.getPrepareToken())
+                .expiresAt(draft.getExpiresAt())
+                .addressId(draft.getAddressId())
+                .deliveryAddress(draft.getDeliveryAddress())
+                .deliveryDistrictId(draft.getDeliveryDistrictId())
+                .deliveryWardCode(draft.getDeliveryWardCode())
+                .receiverName(draft.getReceiverName())
+                .receiverPhone(draft.getReceiverPhone())
+                .voucherCode(draft.getVoucherCode())
+                .canFulfill(canFulfill)
+                .canPlaceOrder(canPlaceOrder)
+                .requiresManualApproval(!"FULLY_AVAILABLE".equalsIgnoreCase(String.valueOf(draft.getStockStatus())))
+                .stockStatus(draft.getStockStatus())
+                .primaryBranch(primarySubOrder != null
+                        ? PreparePrimaryBranchDto.builder()
+                                .id(primarySubOrder.getBranchId())
+                                .name(primarySubOrder.getBranchName())
+                                .distanceKm(primarySubOrder.getDistanceKm())
+                                .build()
+                        : null)
+                .suggestedTransfers(draft.getSuggestedTransfers())
+                .subOrders(draft.getSubOrders() != null ? draft.getSubOrders() : Collections.emptyList())
+                .totalSubtotal(draft.getTotalSubtotal() != null ? draft.getTotalSubtotal() : BigDecimal.ZERO)
+                .discountAmount(draft.getDiscountAmount() != null ? draft.getDiscountAmount() : BigDecimal.ZERO)
+                .totalShippingFee(draft.getTotalShippingFee() != null ? draft.getTotalShippingFee() : BigDecimal.ZERO)
+                .totalAmount(draft.getTotalAmount() != null ? draft.getTotalAmount() : BigDecimal.ZERO)
+                .outOfStockItems(draft.getOutOfStockItems() != null ? draft.getOutOfStockItems() : Collections.emptyList())
+                .build();
+    }
+
+    private ConfirmOrderResponse buildPendingPayosSessionResponse(PayOSCheckoutSession session) {
+        PrepareOrderDraft draft = session.getDraftSnapshot();
+        List<SubOrderSummaryDto> subOrderSummaries = draft == null || draft.getSubOrders() == null
+                ? Collections.emptyList()
+                : draft.getSubOrders().stream()
+                        .filter(Objects::nonNull)
+                        .map(subOrder -> SubOrderSummaryDto.builder()
+                                .subOrderId(null)
+                                .branchId(subOrder.getBranchId())
+                                .branchName(subOrder.getBranchName())
+                                .status(OrderStatus.AWAITING_PAYMENT.name())
+                                .subtotal(subOrder.getSubtotal())
+                                .shippingFee(subOrder.getShippingFee())
+                                .estimatedDays(subOrder.getEstimatedDays())
+                                .carrier(subOrder.getCarrier())
+                                .build())
+                        .toList();
+
+        return ConfirmOrderResponse.builder()
+                .orderId(session.getOrderId())
+                .orderCode(session.getOrderCode())
+                .status("PENDING_PAYMENT")
+                .legacyStatus(OrderStatus.AWAITING_PAYMENT.name())
+                .paymentStatus(PaymentStatus.PENDING.name())
+                .fulfillmentStatus(FulfillmentStatus.NOT_STARTED.name())
+                .stockStatus(draft != null ? draft.getStockStatus() : null)
+                .autoApproveAt(null)
+                .voucherCode(draft != null ? draft.getVoucherCode() : null)
+                .subOrders(subOrderSummaries)
+                .totalAmount(session.getTotalAmount() != null ? session.getTotalAmount() : BigDecimal.ZERO)
+                .discountAmount(session.getDiscountAmount() != null ? session.getDiscountAmount() : BigDecimal.ZERO)
+                .totalShippingFee(session.getTotalShippingFee() != null ? session.getTotalShippingFee() : BigDecimal.ZERO)
+                .checkoutUrl(session.getCheckoutUrl())
+                .build();
+    }
+
+    private PayOSCheckoutSession markPayosSessionPaid(PayOSCheckoutSession rawSession) {
+        if (rawSession == null || rawSession.getSessionCode() == null || rawSession.getSessionCode().isBlank()) {
+            return rawSession;
+        }
+
+        PayOSCheckoutSession session = getPayosSession(rawSession.getSessionCode());
+        if (session == null) {
+            session = rawSession;
+        }
+
+        if (PAYOS_SESSION_STATUS_ORDER_CREATED.equals(session.getStatus())
+                || PAYOS_SESSION_STATUS_CANCELLED.equals(session.getStatus())
+                || PAYOS_SESSION_STATUS_EXPIRED.equals(session.getStatus())) {
+            return session;
+        }
+
+        if (!PAYOS_SESSION_STATUS_PAID.equals(session.getStatus())) {
+            session.setStatus(PAYOS_SESSION_STATUS_PAID);
+            savePayosSession(session);
+        }
+
+        return session;
+    }
+
+    private ConfirmOrderResponse createOrReusePayosCheckoutSession(
+            User user,
+            PrepareOrderDraft draft,
+            String normalizedIdempotencyKey,
+            String note) {
+        PayOSCheckoutSession activeSession = getActivePayosSession(draft.getPrepareToken());
+        if (activeSession != null && user.getId().equals(activeSession.getUserId())) {
+            if (PAYOS_SESSION_STATUS_ORDER_CREATED.equals(activeSession.getStatus()) && activeSession.getOrderId() != null) {
+                Order createdOrder = orderRepository.findById(activeSession.getOrderId()).orElse(null);
+                if (createdOrder != null) {
+                    return buildConfirmOrderResponse(createdOrder, null);
+                }
+            }
+            if (PAYOS_SESSION_STATUS_PAID.equals(activeSession.getStatus())) {
+                return finalizePayosSessionInternal(activeSession, true);
+            }
+            if (isPendingPayosSession(activeSession)) {
+                return buildPendingPayosSessionResponse(activeSession);
+            }
+        }
+
+        if (draft.getSubOrders() == null || draft.getSubOrders().isEmpty()) {
+            throw new ConflictException("Khong con du hang de tao phien thanh toan", true);
+        }
+
+        List<CartItemDto> cartSnapshot = normalizeCartItems(draft.getCartItems());
+        PreparedQuote liveQuote = buildPreparedQuote(
+                user.getId(),
+                cartSnapshot,
+                draft.getUserLat(),
+                draft.getUserLng(),
+                draft.getDeliveryAddress(),
+                draft.getDeliveryProvinceId(),
+                draft.getDeliveryDistrictId(),
+                draft.getDeliveryWardCode(),
+                draft.getVoucherCode());
+        if (liveQuote.subOrders().isEmpty()) {
+            throw new ConflictException("Khong con du hang de tao phien thanh toan", true);
+        }
+        ensurePreparedQuoteStillValid(draft, liveQuote);
+        draft = buildDraftWithPreparedQuote(draft, liveQuote);
+
+        BigDecimal totalAmount = draft.getTotalAmount() != null ? draft.getTotalAmount() : BigDecimal.ZERO;
+        if (totalAmount.compareTo(BigDecimal.ZERO) <= 0) {
+            throw new BadRequestException("Tong thanh toan khong hop le");
+        }
+
+        long payosOrderCode = buildPayosOrderCode();
+        String sessionCode = String.valueOf(payosOrderCode);
+        LocalDateTime createdAt = LocalDateTime.now();
+        LocalDateTime expiresAt = createdAt.plusMinutes(Math.max(1, paymentExpiryMinutes));
+
+        PayOSCheckoutSession session = PayOSCheckoutSession.builder()
+                .sessionCode(sessionCode)
+                .payosOrderCode(payosOrderCode)
+                .prepareToken(draft.getPrepareToken())
+                .userId(user.getId())
+                .idempotencyKey(normalizedIdempotencyKey)
+                .note(note)
+                .status(PAYOS_SESSION_STATUS_PENDING)
+                .totalAmount(totalAmount)
+                .discountAmount(draft.getDiscountAmount() != null ? draft.getDiscountAmount() : BigDecimal.ZERO)
+                .totalShippingFee(draft.getTotalShippingFee() != null ? draft.getTotalShippingFee() : BigDecimal.ZERO)
+                .createdAt(createdAt)
+                .expiresAt(expiresAt)
+                .draftSnapshot(draft)
+                .build();
+
+        try {
+            reserveInventoryForPayosSession(session);
+            com.zone.agri.dto.response.payment.PayOSApiResponse.PayOSLinkData payosData = payOSService.createPaymentLink(
+                    session,
+                    buildPayosSessionDescription(sessionCode),
+                    buildPayosSessionReturnUrl(session),
+                    buildPayosSessionCancelUrl(session));
+            session.setPaymentLinkId(payosData.getPaymentLinkId());
+            session.setCheckoutUrl(payosData.getCheckoutUrl());
+            savePayosSession(session);
+            saveActivePayosSession(draft.getPrepareToken(), session.getSessionCode());
+            return buildPendingPayosSessionResponse(session);
+        } catch (Exception e) {
+            try {
+                releaseInventoryForPayosSession(session, "Giai phong hold do tao phien PayOS that bai");
+            } catch (Exception releaseError) {
+                log.warn("Failed to release PayOS hold for session {} after start failure: {}",
+                        session.getSessionCode(),
+                        releaseError.getMessage());
+            }
+
+            if (session.getPayosOrderCode() != null) {
+                try {
+                    payOSService.cancelPaymentLink(session.getPayosOrderCode());
+                } catch (Exception cancelError) {
+                    log.warn("Failed to cancel PayOS link for session {} after start failure: {}",
+                            session.getSessionCode(),
+                            cancelError.getMessage());
+                }
+            }
+
+            throw new BadRequestException("Loi tao PayOS link: " + e.getMessage());
+        }
+    }
+
+    private ConfirmOrderResponse finalizePayosSessionInternal(PayOSCheckoutSession rawSession, boolean requireOwnedUser) {
+        PayOSCheckoutSession session = rawSession;
+        if (session == null) {
+            throw new NotFoundException("Khong tim thay phien thanh toan PayOS");
+        }
+
+            if (PAYOS_SESSION_STATUS_ORDER_CREATED.equals(session.getStatus()) && session.getOrderId() != null) {
+                Order existingOrder = orderRepository.findById(session.getOrderId())
+                        .orElseThrow(() -> new NotFoundException("Khong tim thay don hang da tao tu phien PayOS"));
+                return buildConfirmOrderResponse(existingOrder, null);
+            }
+
+            if (isExpiredPayosSession(session)) {
+                expirePayosSessionInternal(session, true);
+                throw new BadRequestException("Phien thanh toan PayOS da het han");
+            }
+
+            boolean paid = PAYOS_SESSION_STATUS_PAID.equals(session.getStatus());
+            if (!paid && session.getPayosOrderCode() != null && payOSService.checkPaymentStatus(session.getPayosOrderCode())) {
+                session = markPayosSessionPaid(session);
+                paid = true;
+            }
+        if (!paid) {
+            return buildPendingPayosSessionResponse(session);
+        }
+
+        if (!PAYOS_SESSION_STATUS_PAID.equals(session.getStatus())) {
+            session = markPayosSessionPaid(session);
+        }
+
+        String finalizeLockKey = PAYOS_SESSION_FINALIZE_LOCK_PREFIX + session.getSessionCode();
+        Boolean lockAcquired = redisTemplate.opsForValue().setIfAbsent(
+                finalizeLockKey,
+                String.valueOf(session.getUserId()),
+                PAYOS_SESSION_FINALIZE_LOCK_TTL_SECONDS,
+                TimeUnit.SECONDS);
+        if (Boolean.FALSE.equals(lockAcquired)) {
+            PayOSCheckoutSession lockedSession = getPayosSession(session.getSessionCode());
+            if (lockedSession != null
+                    && PAYOS_SESSION_STATUS_ORDER_CREATED.equals(lockedSession.getStatus())
+                    && lockedSession.getOrderId() != null) {
+                Order existingOrder = orderRepository.findById(lockedSession.getOrderId())
+                        .orElseThrow(() -> new NotFoundException("Khong tim thay don hang da tao tu phien PayOS"));
+                return buildConfirmOrderResponse(existingOrder, null);
+            }
+            throw new ConflictException("Dang hoan tat giao dich PayOS, vui long doi giay lat", true);
+        }
+
+        try {
+            session = getPayosSession(session.getSessionCode());
+            if (session == null) {
+                throw new NotFoundException("Khong tim thay phien thanh toan PayOS");
+            }
+            if (PAYOS_SESSION_STATUS_ORDER_CREATED.equals(session.getStatus()) && session.getOrderId() != null) {
+                Order existingOrder = orderRepository.findById(session.getOrderId())
+                        .orElseThrow(() -> new NotFoundException("Khong tim thay don hang da tao tu phien PayOS"));
+                return buildConfirmOrderResponse(existingOrder, null);
+            }
+
+            User user = userRepository.findById(session.getUserId())
+                    .orElseThrow(() -> new NotFoundException("User khong ton tai"));
+            PrepareOrderDraft draft = session.getDraftSnapshot();
+            if (draft == null) {
+                throw new BadRequestException("Khong tim thay du lieu dat hang tam cho phien PayOS");
+            }
+
+            releaseInventoryForPayosSession(session, "Chuyen hold PayOS sang don hang da thanh toan");
+            CreatedOrderData createdOrder = createCommittedOrderFromDraft(
+                    user,
+                    draft,
+                    PaymentMethod.PAYOS,
+                    PaymentStatus.PAID,
+                    OrderStatus.PENDING,
+                    OrderStatus.PENDING,
+                    session.getNote(),
+                    false);
+
+            cleanupPreparedCheckout(draft, user.getId());
+            session.setStatus(PAYOS_SESSION_STATUS_ORDER_CREATED);
+            session.setOrderId(createdOrder.order().getId());
+            session.setOrderCode(createdOrder.order().getCode());
+            savePayosSession(session);
+            clearActivePayosSession(draft.getPrepareToken(), session.getSessionCode());
+
+            return buildConfirmOrderResponse(
+                    createdOrder.order(),
+                    null,
+                    createdOrder.subOrderSummaries(),
+                    createdOrder.voucherCode());
+        } finally {
+            redisTemplate.delete(finalizeLockKey);
+        }
+    }
+
+    private CreatedOrderData createCommittedOrderFromDraft(
+            User user,
+            PrepareOrderDraft draft,
+            PaymentMethod paymentMethod,
+            PaymentStatus paymentStatus,
+            OrderStatus orderStatus,
+            OrderStatus subOrderStatus,
+            String note,
+            boolean strictVoucherValidation) {
+        if (draft.getSubOrders() == null || draft.getSubOrders().isEmpty()) {
+            throw new ConflictException("Khong con du hang de tao don", true);
+        }
+
+        VoucherResolution voucherResolution = resolveVoucherForCommittedOrder(user, draft, strictVoucherValidation);
+        StockStatus initialStockStatus = parseStockStatus(draft.getStockStatus());
+        Branch primaryBranch = draft.getBranchId() != null
+                ? branchRepository.findById(draft.getBranchId()).orElse(null)
+                : null;
+
+        BigDecimal totalSubtotal = draft.getTotalSubtotal() != null ? draft.getTotalSubtotal() : BigDecimal.ZERO;
+        BigDecimal totalShippingFee = draft.getTotalShippingFee() != null ? draft.getTotalShippingFee() : BigDecimal.ZERO;
+        BigDecimal discountAmount = voucherResolution.discountAmount() != null
+                ? voucherResolution.discountAmount()
+                : (draft.getDiscountAmount() != null ? draft.getDiscountAmount() : BigDecimal.ZERO);
+        BigDecimal finalAmount = draft.getTotalAmount() != null
+                ? draft.getTotalAmount()
+                : totalSubtotal.add(totalShippingFee).subtract(discountAmount);
+        if (finalAmount.compareTo(BigDecimal.ZERO) < 0) {
+            finalAmount = BigDecimal.ZERO;
+        }
+
+        Order order = Order.builder()
+                .code("ORD" + System.currentTimeMillis())
+                .user(user)
+                .status(orderStatus)
+                .paymentMethod(paymentMethod)
+                .paymentStatus(paymentStatus)
+                .createdAt(LocalDateTime.now())
+                .totalAmount(totalSubtotal)
+                .discountAmount(discountAmount)
+                .finalAmount(finalAmount)
+                .totalShippingFee(totalShippingFee)
+                .userLat(draft.getUserLat())
+                .userLng(draft.getUserLng())
+                .deliveryAddress(draft.getDeliveryAddress())
+                .shippingAddress(draft.getDeliveryAddress())
+                .receiverName(draft.getReceiverName())
+                .receiverPhone(draft.getReceiverPhone())
+                .deliveryAddressId(draft.getAddressId())
+                .voucher(voucherResolution.voucher())
+                .note(note)
+                .branch(primaryBranch)
+                .stockStatus(initialStockStatus)
+                .fulfillmentStatus(FulfillmentStatus.NOT_STARTED)
+                .autoApproveAt(resolveInitialAutoApproveAt(paymentMethod, initialStockStatus))
+                .autoApprovalPaused(Boolean.FALSE)
+                .build();
+        Order savedOrder = orderRepository.save(order);
+
+        List<SubOrderSummaryDto> subOrderSummaries = new ArrayList<>();
+        List<SubOrder> savedSubOrders = new ArrayList<>();
+        boolean anySubOrderMissing = false;
+
+        for (SubOrderDraftDto subDraft : draft.getSubOrders()) {
+            Branch branch = branchRepository.findById(subDraft.getBranchId())
+                    .orElseThrow(() -> new NotFoundException("Branch khong ton tai"));
+            SubOrder subOrder = SubOrder.builder()
+                    .order(savedOrder)
+                    .branch(branch)
+                    .status(subOrderStatus)
+                    .subtotal(subDraft.getSubtotal())
+                    .shippingFee(subDraft.getShippingFee())
+                    .estimatedDays(subDraft.getEstimatedDays())
+                    .carrier(subDraft.getCarrier())
+                    .build();
+            SubOrder savedSubOrder = subOrderRepository.save(subOrder);
+            savedSubOrders.add(savedSubOrder);
+
+            for (OrderItemDto item : subDraft.getItems()) {
+                ProductVariant variant = variantRepository.findById(item.getProductVariantId())
+                        .orElseThrow(() -> new NotFoundException("San pham khong ton tai"));
+
+                inventoryCheckGuardService.assertStockMutationAllowed(
+                        subDraft.getBranchId(),
+                        List.of(item.getProductVariantId()),
+                        "xac nhan don hang");
+
+                int requestedQuantity = Objects.requireNonNullElse(item.getQuantity(), 0);
+                int allocatedQuantity = Objects.requireNonNullElse(item.getAllocatedQuantity(), 0);
+
+                if (allocatedQuantity > 0) {
+                    allocatedQuantity = orderInventoryReservationService.reserveInventoryUpTo(
+                            subDraft.getBranchId(),
+                            item.getProductVariantId(),
+                            allocatedQuantity,
+                            buildSubOrderReferenceCode(savedSubOrder),
+                            "Giu hang cho phan don " + savedOrder.getCode());
+                }
+
+                int missingQuantity = Math.max(0, requestedQuantity - allocatedQuantity);
+                anySubOrderMissing = anySubOrderMissing || missingQuantity > 0;
+
+                subOrderItemRepository.save(SubOrderItem.builder()
+                        .subOrder(savedSubOrder)
+                        .productVariant(variant)
+                        .quantity(requestedQuantity)
+                        .allocatedQuantity(allocatedQuantity)
+                        .missingQuantity(missingQuantity)
+                        .unitPrice(item.getUnitPrice())
+                        .build());
+            }
+
+            subOrderSummaries.add(SubOrderSummaryDto.builder()
+                    .subOrderId(savedSubOrder.getId())
+                    .branchId(branch.getId())
+                    .branchName(branch.getName())
+                    .status(subOrderStatus.name())
+                    .subtotal(subDraft.getSubtotal())
+                    .shippingFee(subDraft.getShippingFee())
+                    .estimatedDays(subDraft.getEstimatedDays())
+                    .carrier(subDraft.getCarrier())
+                    .build());
+        }
+
+        savedOrder.setSubOrders(savedSubOrders);
+        savedOrder.setStockStatus(anySubOrderMissing ? StockStatus.PARTIALLY_AVAILABLE : StockStatus.FULLY_AVAILABLE);
+        if (anySubOrderMissing) {
+            savedOrder.setAutoApproveAt(null);
+        } else if (orderStatus == OrderStatus.PENDING
+                && (PaymentMethod.COD.equals(paymentMethod)
+                        || PaymentMethod.CASH.equals(paymentMethod)
+                        || PaymentStatus.PAID.equals(paymentStatus))) {
+            savedOrder.setAutoApproveAt(LocalDateTime.now().plusMinutes(Math.max(1, autoApproveMinutes)));
+        }
+        orderRepository.save(savedOrder);
+
+        return new CreatedOrderData(savedOrder, subOrderSummaries, voucherResolution.voucherCode());
+    }
+
+    private VoucherResolution resolveVoucherForCommittedOrder(
+            User user,
+            PrepareOrderDraft draft,
+            boolean strictVoucherValidation) {
+        String voucherCode = voucherService.normalizeVoucherCode(draft.getVoucherCode());
+        if (voucherCode == null) {
+            return new VoucherResolution(null, BigDecimal.ZERO, null);
+        }
+
+        BigDecimal subtotal = draft.getTotalSubtotal() != null ? draft.getTotalSubtotal() : BigDecimal.ZERO;
+        if (strictVoucherValidation) {
+            VoucherService.VoucherOrderEvaluation evaluation = voucherService.validateVoucherForOrder(
+                    user,
+                    voucherCode,
+                    subtotal,
+                    true,
+                    true);
+            return new VoucherResolution(evaluation.voucher(), evaluation.discountAmount(), voucherCode);
+        }
+
+        try {
+            VoucherService.VoucherOrderEvaluation evaluation = voucherService.validateVoucherForOrder(
+                    user,
+                    voucherCode,
+                    subtotal,
+                    true,
+                    false);
+            return new VoucherResolution(evaluation.voucher(), evaluation.discountAmount(), voucherCode);
+        } catch (RuntimeException ex) {
+            log.warn("Voucher {} khong the consume sau khi PayOS da thanh toan: {}", voucherCode, ex.getMessage());
+            return new VoucherResolution(
+                    null,
+                    draft.getDiscountAmount() != null ? draft.getDiscountAmount() : BigDecimal.ZERO,
+                    voucherCode);
+        }
+    }
+
+    private PrepareOrderDraft buildDraftWithPreparedQuote(PrepareOrderDraft draft, PreparedQuote liveQuote) {
+        return PrepareOrderDraft.builder()
+                .prepareToken(draft.getPrepareToken())
+                .userId(draft.getUserId())
+                .addressId(draft.getAddressId())
+                .voucherCode(draft.getVoucherCode())
+                .stockStatus(draft.getStockStatus())
+                .createdAt(draft.getCreatedAt())
+                .expiresAt(draft.getExpiresAt())
+                .branchId(draft.getBranchId())
+                .finalItems(draft.getFinalItems())
+                .suggestedTransfers(draft.getSuggestedTransfers())
+                .cartItems(draft.getCartItems())
+                .receiverName(draft.getReceiverName())
+                .receiverPhone(draft.getReceiverPhone())
+                .userLat(draft.getUserLat())
+                .userLng(draft.getUserLng())
+                .deliveryAddress(draft.getDeliveryAddress())
+                .deliveryDistrictId(draft.getDeliveryDistrictId())
+                .deliveryProvinceId(draft.getDeliveryProvinceId())
+                .deliveryWardCode(draft.getDeliveryWardCode())
+                .subOrders(liveQuote.subOrders())
+                .outOfStockItems(liveQuote.outOfStockItems())
+                .totalSubtotal(liveQuote.totalSubtotal())
+                .discountAmount(liveQuote.discountAmount())
+                .totalShippingFee(liveQuote.totalShippingFee())
+                .totalAmount(liveQuote.totalAmount())
+                .build();
+    }
+
+    private void cleanupPreparedCheckout(PrepareOrderDraft draft, Long userId) {
+        if (draft == null) {
+            return;
+        }
+
+        redisTemplate.delete(PREPARE_KEY_PREFIX + draft.getPrepareToken());
+        clearActivePayosSession(draft.getPrepareToken(), null);
+
+        normalizeCartItems(draft.getCartItems()).stream()
+                .map(CartItemDto::getProductVariantId)
+                .distinct()
+                .forEach(vId -> cartItemRepository.findByUserIdAndProductVariantId(userId, vId)
+                        .ifPresent(cartItemRepository::delete));
+    }
+
+    private String buildPayosHoldReferenceCode(String sessionCode) {
+        return PAYOS_HOLD_REFERENCE_PREFIX + sessionCode;
+    }
+
+    private void reserveInventoryForPayosSession(PayOSCheckoutSession session) {
+        if (session == null || session.getDraftSnapshot() == null || session.getSessionCode() == null) {
+            return;
+        }
+
+        PrepareOrderDraft draft = session.getDraftSnapshot();
+        String holdReferenceCode = buildPayosHoldReferenceCode(session.getSessionCode());
+        if (draft.getSubOrders() == null) {
+            return;
+        }
+
+        for (SubOrderDraftDto subDraft : draft.getSubOrders()) {
+            if (subDraft == null || subDraft.getBranchId() == null || subDraft.getItems() == null) {
+                continue;
+            }
+
+            for (OrderItemDto item : subDraft.getItems()) {
+                if (item == null || item.getProductVariantId() == null) {
+                    continue;
+                }
+
+                int allocatedQuantity = Objects.requireNonNullElse(item.getAllocatedQuantity(), 0);
+                if (allocatedQuantity <= 0) {
+                    continue;
+                }
+
+                inventoryCheckGuardService.assertStockMutationAllowed(
+                        subDraft.getBranchId(),
+                        List.of(item.getProductVariantId()),
+                        "giu hang tam cho phien PayOS");
+
+                orderInventoryReservationService.reserveInventory(
+                        subDraft.getBranchId(),
+                        item.getProductVariantId(),
+                        allocatedQuantity,
+                        holdReferenceCode,
+                        "Giu hang tam cho phien thanh toan PayOS " + session.getSessionCode());
+            }
+        }
+    }
+
+    private void releaseInventoryForPayosSession(PayOSCheckoutSession session, String reason) {
+        if (session == null || session.getSessionCode() == null || session.getSessionCode().isBlank()) {
+            return;
+        }
+        orderInventoryReservationService.releaseReservedInventory(
+                buildPayosHoldReferenceCode(session.getSessionCode()),
+                reason);
+    }
+
+    private void cancelActivePayosSessionForPrepareToken(Long userId, String prepareToken) {
+        PayOSCheckoutSession activeSession = getActivePayosSession(prepareToken);
+        if (activeSession == null || !userId.equals(activeSession.getUserId()) || !isPendingPayosSession(activeSession)) {
+            return;
+        }
+        cancelPayosSessionInternal(activeSession, true);
+    }
+
+    private void cancelPayosSessionInternal(PayOSCheckoutSession rawSession, boolean cancelRemoteLink) {
+        if (rawSession == null || rawSession.getSessionCode() == null || rawSession.getSessionCode().isBlank()) {
+            return;
+        }
+
+        PayOSCheckoutSession session = getPayosSession(rawSession.getSessionCode());
+        if (session == null) {
+            session = rawSession;
+        }
+
+        if (PAYOS_SESSION_STATUS_ORDER_CREATED.equals(session.getStatus())
+                || PAYOS_SESSION_STATUS_PAID.equals(session.getStatus())) {
+            return;
+        }
+
+        if (!PAYOS_SESSION_STATUS_CANCELLED.equals(session.getStatus())) {
+            session.setStatus(PAYOS_SESSION_STATUS_CANCELLED);
+            savePayosSession(session);
+        }
+
+        clearActivePayosSession(session.getPrepareToken(), session.getSessionCode());
+        releaseInventoryForPayosSession(session, "Giai phong hold do huy phien thanh toan PayOS");
+
+        if (cancelRemoteLink && session.getPayosOrderCode() != null) {
+            payOSService.cancelPaymentLink(session.getPayosOrderCode());
+        }
+    }
+
+    private void expirePayosSessionInternal(PayOSCheckoutSession rawSession, boolean cancelRemoteLink) {
+        if (rawSession == null || rawSession.getSessionCode() == null || rawSession.getSessionCode().isBlank()) {
+            return;
+        }
+
+        PayOSCheckoutSession session = getPayosSession(rawSession.getSessionCode());
+        if (session == null) {
+            session = rawSession;
+        }
+
+        if (PAYOS_SESSION_STATUS_ORDER_CREATED.equals(session.getStatus())
+                || PAYOS_SESSION_STATUS_PAID.equals(session.getStatus())) {
+            return;
+        }
+
+        if (!PAYOS_SESSION_STATUS_EXPIRED.equals(session.getStatus())) {
+            session.setStatus(PAYOS_SESSION_STATUS_EXPIRED);
+            savePayosSession(session);
+        }
+
+        clearActivePayosSession(session.getPrepareToken(), session.getSessionCode());
+        releaseInventoryForPayosSession(session, "Giai phong hold do phien thanh toan PayOS het han");
+
+        if (cancelRemoteLink && session.getPayosOrderCode() != null) {
+            payOSService.cancelPaymentLink(session.getPayosOrderCode());
+        }
+    }
+
+    private boolean isPendingPayosSession(PayOSCheckoutSession session) {
+        return session != null
+                && PAYOS_SESSION_STATUS_PENDING.equals(session.getStatus())
+                && !isExpiredPayosSession(session);
+    }
+
+    private boolean isExpiredPayosSession(PayOSCheckoutSession session) {
+        return session != null
+                && session.getExpiresAt() != null
+                && session.getExpiresAt().isBefore(LocalDateTime.now());
+    }
+
+    private long buildPayosOrderCode() {
+        long base = System.currentTimeMillis() * 1000L;
+        int suffix = new Random().nextInt(900) + 100;
+        return base + suffix;
+    }
+
+    private String buildPayosSessionDescription(String sessionCode) {
+        String suffix = sessionCode.length() > 8 ? sessionCode.substring(sessionCode.length() - 8) : sessionCode;
+        return "PAYOS " + suffix;
+    }
+
+    private String buildPayosSessionReturnUrl(PayOSCheckoutSession session) {
+        String baseUrl = payosReturnUrl != null && !payosReturnUrl.isBlank()
+                ? payosReturnUrl
+                : "https://agrishrimp.io.vn/order-success";
+        return appendQueryParams(baseUrl, Map.of(
+                "paymentSession", session.getSessionCode(),
+                "prepareToken", session.getPrepareToken(),
+                "status", "PAID",
+                "paymentMethod", "PAYOS"));
+    }
+
+    private String buildPayosSessionCancelUrl(PayOSCheckoutSession session) {
+        String baseUrl = payosCancelUrl;
+        if (baseUrl == null || baseUrl.isBlank()) {
+            baseUrl = payosReturnUrl;
+        }
+        if (baseUrl == null || baseUrl.isBlank()) {
+            baseUrl = "https://agrishrimp.io.vn/checkout";
+        }
+        String normalizedBaseUrl = baseUrl.replace("/order-cancel", "/checkout")
+                .replace("/order-success", "/checkout");
+        return appendQueryParams(normalizedBaseUrl, Map.of(
+                "prepareToken", session.getPrepareToken(),
+                "paymentSession", session.getSessionCode(),
+                "status", "CANCELLED",
+                "paymentMethod", "PAYOS"));
+    }
+
+    private String appendQueryParams(String baseUrl, Map<String, String> params) {
+        String separator = baseUrl.contains("?") ? "&" : "?";
+        String query = params.entrySet().stream()
+                .filter(entry -> entry.getValue() != null && !entry.getValue().isBlank())
+                .map(entry -> entry.getKey() + "=" + URLEncoder.encode(entry.getValue(), StandardCharsets.UTF_8))
+                .collect(Collectors.joining("&"));
+        return query.isBlank() ? baseUrl : baseUrl + separator + query;
+    }
+
     private boolean isEligibleForAutoApproval(Order order, LocalDateTime now) {
         if (!isEligibleForAutoApprovalBase(order)) {
             return false;
@@ -1958,6 +2967,12 @@ public class OrderService {
         return PrepareOrderResponse.builder()
                 .prepareToken(token)
                 .expiresAt(expiresAt)
+                .addressId(draft.getAddressId())
+                .deliveryAddress(draft.getDeliveryAddress())
+                .deliveryDistrictId(draft.getDeliveryDistrictId())
+                .deliveryWardCode(draft.getDeliveryWardCode())
+                .receiverName(draft.getReceiverName())
+                .receiverPhone(draft.getReceiverPhone())
                 .voucherCode(voucherCode)
                 .canFulfill(allocation.outOfStockItems().isEmpty() && !enrichedSubOrders.isEmpty())
                 .canPlaceOrder(canPlaceOrder)
@@ -2012,6 +3027,73 @@ public class OrderService {
 
     @Transactional
     public ConfirmOrderResponse confirmOrder(Long userId, ConfirmOrderRequest request) {
+        PaymentMethod requestedPaymentMethod = request.getPaymentMethod() != null
+                ? request.getPaymentMethod()
+                : PaymentMethod.COD;
+        if (!PaymentMethod.PAYOS.equals(requestedPaymentMethod)) {
+            cancelActivePayosSessionForPrepareToken(userId, request.getPrepareToken());
+            return confirmOrderLegacy(userId, request);
+        }
+
+        String normalizedIdempotencyKey = normalizeIdempotencyKey(request.getIdempotencyKey());
+        ConfirmOrderResponse idempotentResult = getConfirmResultByIdempotency(userId, normalizedIdempotencyKey);
+        if (idempotentResult != null) {
+            return idempotentResult;
+        }
+
+        String prepareToken = request.getPrepareToken();
+        PayOSCheckoutSession activeSession = getActivePayosSession(prepareToken);
+        if (activeSession != null
+                && userId.equals(activeSession.getUserId())
+                && isPendingPayosSession(activeSession)) {
+            ConfirmOrderResponse response = buildPendingPayosSessionResponse(activeSession);
+            saveConfirmResultByIdempotency(userId, normalizedIdempotencyKey, response);
+            return response;
+        }
+
+        String confirmLockKey = PREPARE_CONFIRM_LOCK_PREFIX + prepareToken;
+        Boolean lockAcquired = redisTemplate.opsForValue().setIfAbsent(
+                confirmLockKey,
+                String.valueOf(userId),
+                PREPARE_CONFIRM_LOCK_TTL_SECONDS,
+                TimeUnit.SECONDS);
+        if (Boolean.FALSE.equals(lockAcquired)) {
+            activeSession = getActivePayosSession(prepareToken);
+            if (activeSession != null
+                    && userId.equals(activeSession.getUserId())
+                    && isPendingPayosSession(activeSession)) {
+                ConfirmOrderResponse response = buildPendingPayosSessionResponse(activeSession);
+                saveConfirmResultByIdempotency(userId, normalizedIdempotencyKey, response);
+                return response;
+            }
+            throw new ConflictException("Đơn hàng đang được xử lý, vui lòng đợi trong giây lát", true);
+        }
+
+        try {
+            PrepareOrderDraft draft = getDraftFromRedis(prepareToken);
+            if (draft == null) {
+                throw new BadRequestException("Token hêt hạn");
+            }
+            if (!userId.equals(draft.getUserId())) {
+                throw new BadRequestException("Token không hợp lệ");
+            }
+
+            User user = userRepository.findById(userId)
+                    .orElseThrow(() -> new NotFoundException("User không tồn tại"));
+            ConfirmOrderResponse response = createOrReusePayosCheckoutSession(
+                    user,
+                    draft,
+                    normalizedIdempotencyKey,
+                    request.getNote());
+            saveConfirmResultByIdempotency(userId, normalizedIdempotencyKey, response);
+            return response;
+        } finally {
+            redisTemplate.delete(confirmLockKey);
+        }
+    }
+
+    @Transactional
+    private ConfirmOrderResponse confirmOrderLegacy(Long userId, ConfirmOrderRequest request) {
         String normalizedIdempotencyKey = normalizeIdempotencyKey(request.getIdempotencyKey());
         ConfirmOrderResponse idempotentResult = getConfirmResultByIdempotency(userId, normalizedIdempotencyKey);
         if (idempotentResult != null) {
@@ -2759,6 +3841,143 @@ public class OrderService {
         }
     }
 
+    private void savePayosSession(PayOSCheckoutSession session) {
+        if (session == null || session.getSessionCode() == null) {
+            return;
+        }
+
+        try {
+            redisTemplate.opsForValue().set(
+                    PAYOS_SESSION_KEY_PREFIX + session.getSessionCode(),
+                    objectMapper.writeValueAsString(session),
+                    getPayosSessionTtlMinutes(),
+                    TimeUnit.MINUTES);
+        } catch (JsonProcessingException e) {
+            throw new RuntimeException("Khong the luu phien PayOS vao Redis");
+        }
+    }
+
+    private PayOSCheckoutSession getPayosSession(String sessionCode) {
+        if (sessionCode == null || sessionCode.isBlank()) {
+            return null;
+        }
+
+        String json = redisTemplate.opsForValue().get(PAYOS_SESSION_KEY_PREFIX + sessionCode);
+        if (json == null) {
+            return null;
+        }
+
+        try {
+            return objectMapper.readValue(json, PayOSCheckoutSession.class);
+        } catch (JsonProcessingException e) {
+            return null;
+        }
+    }
+
+    private void saveActivePayosSession(String prepareToken, String sessionCode) {
+        if (prepareToken == null || prepareToken.isBlank() || sessionCode == null || sessionCode.isBlank()) {
+            return;
+        }
+        redisTemplate.opsForValue().set(
+                PAYOS_SESSION_ACTIVE_PREFIX + prepareToken,
+                sessionCode,
+                getPayosSessionTtlMinutes(),
+                TimeUnit.MINUTES);
+    }
+
+    private PayOSCheckoutSession getActivePayosSession(String prepareToken) {
+        if (prepareToken == null || prepareToken.isBlank()) {
+            return null;
+        }
+
+        String sessionCode = redisTemplate.opsForValue().get(PAYOS_SESSION_ACTIVE_PREFIX + prepareToken);
+        if (sessionCode == null || sessionCode.isBlank()) {
+            return null;
+        }
+
+        PayOSCheckoutSession session = getPayosSession(sessionCode);
+        if (session == null) {
+            redisTemplate.delete(PAYOS_SESSION_ACTIVE_PREFIX + prepareToken);
+            return null;
+        }
+
+        if (isExpiredPayosSession(session) && PAYOS_SESSION_STATUS_PENDING.equals(session.getStatus())) {
+            expirePayosSessionInternal(session, true);
+            session = getPayosSession(sessionCode);
+            if (session == null) {
+                redisTemplate.delete(PAYOS_SESSION_ACTIVE_PREFIX + prepareToken);
+                return null;
+            }
+        }
+
+        if (PAYOS_SESSION_STATUS_CANCELLED.equals(session.getStatus())
+                || PAYOS_SESSION_STATUS_EXPIRED.equals(session.getStatus())
+                || PAYOS_SESSION_STATUS_ORDER_CREATED.equals(session.getStatus())) {
+            redisTemplate.delete(PAYOS_SESSION_ACTIVE_PREFIX + prepareToken);
+        }
+
+        return session;
+    }
+
+    private void clearActivePayosSession(String prepareToken, String sessionCode) {
+        if (prepareToken == null || prepareToken.isBlank()) {
+            return;
+        }
+
+        String key = PAYOS_SESSION_ACTIVE_PREFIX + prepareToken;
+        if (sessionCode == null || sessionCode.isBlank()) {
+            redisTemplate.delete(key);
+            return;
+        }
+
+        String currentSessionCode = redisTemplate.opsForValue().get(key);
+        if (sessionCode.equals(currentSessionCode)) {
+            redisTemplate.delete(key);
+        }
+    }
+
+    private long getPayosSessionTtlMinutes() {
+        return Math.max(PREPARE_TTL_MINUTES, paymentExpiryMinutes + 15);
+    }
+
+    private void reconcilePendingPayosSessions() {
+        Set<String> sessionKeys = redisTemplate.keys(PAYOS_SESSION_KEY_PREFIX + "[0-9]*");
+        if (sessionKeys == null || sessionKeys.isEmpty()) {
+            return;
+        }
+
+        for (String key : sessionKeys) {
+            String sessionCode = key.substring(PAYOS_SESSION_KEY_PREFIX.length());
+            PayOSCheckoutSession session = getPayosSession(sessionCode);
+            if (session == null) {
+                continue;
+            }
+
+            if (PAYOS_SESSION_STATUS_ORDER_CREATED.equals(session.getStatus())
+                    || PAYOS_SESSION_STATUS_CANCELLED.equals(session.getStatus())
+                    || PAYOS_SESSION_STATUS_EXPIRED.equals(session.getStatus())) {
+                continue;
+            }
+
+            if (isExpiredPayosSession(session)) {
+                expirePayosSessionInternal(session, true);
+                continue;
+            }
+
+            if (PAYOS_SESSION_STATUS_PAID.equals(session.getStatus())) {
+                finalizePayosSessionInternal(session, false);
+                continue;
+            }
+
+            if (PAYOS_SESSION_STATUS_PENDING.equals(session.getStatus())
+                    && session.getPayosOrderCode() != null
+                    && payOSService.checkPaymentStatus(session.getPayosOrderCode())) {
+                session = markPayosSessionPaid(session);
+                finalizePayosSessionInternal(session, false);
+            }
+        }
+    }
+
     private void saveConfirmResultToRedis(String token, ConfirmOrderResponse response) {
         try {
             redisTemplate.opsForValue().set(
@@ -2836,6 +4055,9 @@ public class OrderService {
         }
 
         PaymentMethod paymentMethod = req.getPaymentMethod() != null ? req.getPaymentMethod() : PaymentMethod.COD;
+        if (PaymentMethod.PAYOS.equals(paymentMethod)) {
+            throw new BadRequestException("Thanh toan PayOS phai di qua luong /orders/prepare va /orders/confirm moi");
+        }
         OrderStatus legacyInitialStatus = PaymentMethod.PAYOS.equals(paymentMethod)
                 ? OrderStatus.AWAITING_PAYMENT
                 : OrderStatus.PENDING;
