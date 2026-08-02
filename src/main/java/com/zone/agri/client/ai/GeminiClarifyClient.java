@@ -122,7 +122,7 @@ public class GeminiClarifyClient {
     public GeminiClarifyClient(RestTemplateBuilder builder, ObjectMapper objectMapper) {
         this.restTemplate = builder
                 .connectTimeout(Duration.ofSeconds(10))
-                .readTimeout(Duration.ofSeconds(30))
+                .readTimeout(Duration.ofSeconds(45))
                 .build();
         this.objectMapper = objectMapper;
     }
