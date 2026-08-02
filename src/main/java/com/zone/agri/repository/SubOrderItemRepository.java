@@ -50,10 +50,11 @@ public interface SubOrderItemRepository extends JpaRepository<SubOrderItem, Long
                 com.zone.agri.entity.enums.OrderStatus.COMPLETED
             )
               AND COALESCE(soi.missingQuantity, 0) > 0
+              AND (:branchId IS NULL OR so.branch.id = :branchId)
             GROUP BY pv.id, pv.sku, p.name, pv.customSpecs
             ORDER BY SUM(COALESCE(soi.missingQuantity, 0)) DESC, pv.id ASC
             """)
-    List<BackorderReportProjection> getBackorderReport();
+    List<BackorderReportProjection> getBackorderReport(@Param("branchId") Long branchId);
 
     interface BackorderReportProjection {
         Long getProductVariantId();

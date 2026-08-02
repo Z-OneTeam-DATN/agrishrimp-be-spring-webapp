@@ -263,4 +263,71 @@ public interface InventoryRepository extends JpaRepository<Inventory, Long> {
                 }
                 return result;
         }
+
+        // ==============================================================
+        // BÁO CÁO TỒN KHO (Stock summary) — dùng cho /admin/reports/inventory/summary
+        // ==============================================================
+        interface StockSummaryProjection {
+                Long getVariantId();
+
+                String getSku();
+
+                String getProductName();
+
+                String getCategoryName();
+
+                Long getBranchQuantity();
+
+                BigDecimal getBranchValue();
+
+                Long getSystemQuantity();
+
+                BigDecimal getSystemValue();
+        }
+
+        @Query("""
+                        SELECT pv.id AS variantId,
+                               pv.sku AS sku,
+                               p.name AS productName,
+                               c.name AS categoryName,
+                               COALESCE(SUM(CASE WHEN (:branchId IS NULL OR i.branch.id = :branchId) THEN i.quantity ELSE 0 END), 0) AS branchQuantity,
+                               COALESCE(SUM(CASE WHEN (:branchId IS NULL OR i.branch.id = :branchId) THEN i.quantity * COALESCE(i.importPrice, 0) ELSE 0 END), 0) AS branchValue,
+                               COALESCE(SUM(i.quantity), 0) AS systemQuantity,
+                               COALESCE(SUM(i.quantity * COALESCE(i.importPrice, 0)), 0) AS systemValue
+                        FROM Inventory i
+                        JOIN i.productVariant pv
+                        JOIN pv.product p
+                        LEFT JOIN p.category c
+                        GROUP BY pv.id, pv.sku, p.name, c.name
+                        """)
+        List<StockSummaryProjection> findStockSummary(@Param("branchId") Long branchId);
+
+        // Tồn hiện tại (số lượng + giá trị) theo từng biến thể tại 1 chi nhánh cụ thể — dùng để
+        // tính "Tồn cuối kỳ" trong báo cáo xuất nhập tồn (luôn lấy đúng tồn thực tế hiện tại thay
+        // vì dò lại lịch sử giao dịch, vốn có thể thiếu với dữ liệu cũ trước khi bật ghi log).
+        interface VariantStockProjection {
+                Long getVariantId();
+
+                String getSku();
+
+                String getProductName();
+
+                Long getQuantity();
+
+                BigDecimal getValue();
+        }
+
+        @Query("""
+                        SELECT pv.id AS variantId,
+                               pv.sku AS sku,
+                               p.name AS productName,
+                               COALESCE(SUM(i.quantity), 0) AS quantity,
+                               COALESCE(SUM(i.quantity * COALESCE(i.importPrice, 0)), 0) AS value
+                        FROM Inventory i
+                        JOIN i.productVariant pv
+                        JOIN pv.product p
+                        WHERE i.branch.id = :branchId
+                        GROUP BY pv.id, pv.sku, p.name
+                        """)
+        List<VariantStockProjection> findCurrentStockByBranch(@Param("branchId") Long branchId);
 }

@@ -22,6 +22,9 @@ public class ProfitLossInsightService {
     private static final String STATUS_SAFE = "SAFE";
     private static final String STATUS_WARNING = "WARNING";
     private static final String NO_PREVIOUS_DATA = "NO_PREVIOUS_DATA";
+    // Kỳ trước có phát sinh (hasBaselineData=true) nhưng lợi nhuận ròng kỳ trước đúng bằng 0 —
+    // không thể chia cho 0 để ra % thật, nên trả sentinel thay vì bịa "+100%"/"-100%" như trước.
+    private static final String NEW_BASELINE = "NEW_BASELINE";
 
     private final FinancialService financialService;
     private final SettingService settingService;
@@ -173,10 +176,7 @@ public class ProfitLossInsightService {
         }
 
         if (previousValue.compareTo(BigDecimal.ZERO) == 0) {
-            if (current.compareTo(BigDecimal.ZERO) == 0) {
-                return "0.0";
-            }
-            return current.compareTo(BigDecimal.ZERO) > 0 ? "100.0" : "-100.0";
+            return current.compareTo(BigDecimal.ZERO) == 0 ? "0.0" : NEW_BASELINE;
         }
 
         BigDecimal change = current.subtract(previousValue)

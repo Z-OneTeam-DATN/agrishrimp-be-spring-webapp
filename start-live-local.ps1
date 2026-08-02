@@ -213,7 +213,8 @@ if (-not $reuseExistingTunnel -and -not $SkipTunnelSetup) {
         if ([string]::IsNullOrWhiteSpace($plainPassword)) {
             throw "SSH password cannot be empty."
         }
-        Set-Content -LiteralPath $passwordFile -Value $plainPassword -NoNewline
+        $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
+        [System.IO.File]::WriteAllText($passwordFile, $plainPassword, $utf8NoBom)
     }
 
     try {
