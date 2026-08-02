@@ -15,6 +15,12 @@ import lombok.NoArgsConstructor;
 public class PrepareOrderResponse {
     private String prepareToken;
     private LocalDateTime expiresAt;
+    private Long addressId;
+    private String deliveryAddress;
+    private Integer deliveryDistrictId;
+    private String deliveryWardCode;
+    private String receiverName;
+    private String receiverPhone;
     private Boolean canFulfill;
     private Boolean canPlaceOrder;
     private Boolean requiresManualApproval;

@@ -114,6 +114,13 @@ public class OrderController {
         return ResponseEntity.ok(response);
     }
 
+    @Operation(summary = "Lay lai bao gia tam", description = "Khoi phuc prepare draft theo prepareToken de quay lai checkout sau khi huy PayOS.")
+    @GetMapping("/orders/prepare/{prepareToken}")
+    public ResponseEntity<PrepareOrderResponse> getPreparedOrder(@PathVariable String prepareToken) {
+        Long userId = getCurrentUserId();
+        return ResponseEntity.ok(orderService.getPreparedOrder(userId, prepareToken));
+    }
+
     @Operation(summary = "Xác nhận đơn hàng", description = "Bước 2 — Lưu đơn vào DB, trừ tồn kho (có lock tránh race condition), "
             + "tạo SubOrder theo từng chi nhánh.")
     @PostMapping("/orders/confirm")
