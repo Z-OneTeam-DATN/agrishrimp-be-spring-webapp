@@ -55,6 +55,7 @@ import com.zone.agri.repository.AiKnowledgeChatConfigRepository;
 import com.zone.agri.repository.AiKnowledgeChatLogRepository;
 import com.zone.agri.repository.AiKnowledgeReviewCaseRepository;
 import com.zone.agri.repository.ProductRepository;
+import com.zone.agri.service.NotificationService;
 import com.zone.agri.service.aidoctor.AiDoctorProductSuggestionService;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -118,6 +119,7 @@ public class AiKnowledgeService {
     private final ProductRepository productRepository;
     private final AiDoctorProductSuggestionService productSuggestionService;
     private final GeminiClarifyClient geminiClarifyClient;
+    private final NotificationService notificationService;
 
     @Value("${ai.doctor.clarify.max-turns:8}")
     private int maxClarifyTurns;
@@ -1550,7 +1552,7 @@ public class AiKnowledgeService {
             String matchedKnowledgeCode,
             Double matchScore,
             AiReviewCaseReason reason) {
-        return reviewCaseRepository.save(AiKnowledgeReviewCase.builder()
+        AiKnowledgeReviewCase saved = reviewCaseRepository.save(AiKnowledgeReviewCase.builder()
                 .userId(userId)
                 .sessionId(sessionId)
                 .sourceChannel(sourceChannel)
@@ -1563,6 +1565,8 @@ public class AiKnowledgeService {
                 .reason(reason)
                 .status(AiReviewCaseStatus.NEW)
                 .build());
+        notificationService.notifyAgronomistsReviewCaseCreated(saved);
+        return saved;
     }
 
     private AiChatResponse buildChatResponse(String replyHtml, String sessionId, List<String> suggestedActions) {

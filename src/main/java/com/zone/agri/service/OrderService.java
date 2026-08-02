@@ -91,6 +91,7 @@ public class OrderService {
     private final VoucherService voucherService;
     private final OrderStatusSyncService orderStatusSyncService;
     private final OrderInventoryReservationService orderInventoryReservationService;
+    private final NotificationService notificationService;
 
     @Lazy
     private final CustomerService customerService;
@@ -296,6 +297,7 @@ public class OrderService {
         applyCancellationReason(order, cancelReason.reasonCode(), cancelReason.reasonText());
         orderRepository.save(order);
         customerService.evaluateAndHandleCustomerReputation(order.getUser().getId());
+        notificationService.notifyOrderStatusChange(order, currentStatus, OrderStatus.CANCELLED);
     }
 
     @Transactional
@@ -329,6 +331,7 @@ public class OrderService {
         if (newStatus == OrderStatus.COMPLETED) {
             completeReceivedOrder(order);
             customerService.evaluateAndHandleCustomerReputation(order.getUser().getId());
+            notificationService.notifyOrderStatusChange(order, currentStatus, OrderStatus.COMPLETED);
             return;
         }
         LocalDateTime statusChangedAt = LocalDateTime.now();
@@ -365,6 +368,7 @@ public class OrderService {
                 || newStatus == OrderStatus.RETURNED) {
             customerService.evaluateAndHandleCustomerReputation(order.getUser().getId());
         }
+        notificationService.notifyOrderStatusChange(order, currentStatus, newStatus);
     }
 
     private void validateStatusTransition(OrderStatus current, OrderStatus next) {
@@ -862,6 +866,7 @@ public class OrderService {
             if (order.getUser() != null) {
                 customerService.evaluateAndHandleCustomerReputation(order.getUser().getId());
             }
+            notificationService.notifyOrderStatusChange(order, OrderStatus.AWAITING_PAYMENT, OrderStatus.CANCELLED);
         }
     }
 
@@ -1718,6 +1723,7 @@ public class OrderService {
         }
 
         orderRepository.save(order);
+        notificationService.notifyOrderStatusChange(order, OrderStatus.PENDING, OrderStatus.CONFIRMED);
     }
 
     private OrderItemResponse mapItemToResponse(OrderItem item) {

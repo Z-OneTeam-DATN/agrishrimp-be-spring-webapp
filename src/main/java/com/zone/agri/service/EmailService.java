@@ -4,7 +4,10 @@ import com.resend.Resend;
 import com.resend.core.exception.ResendException;
 import com.resend.services.emails.model.CreateEmailOptions;
 import com.resend.services.emails.model.CreateEmailResponse;
+import com.zone.agri.entity.Order;
 import com.zone.agri.entity.PurchaseRequest;
+import com.zone.agri.entity.Voucher;
+import com.zone.agri.entity.enums.OrderStatus;
 import com.zone.agri.exception.BadRequestException;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -222,6 +225,119 @@ public class EmailService {
 
         String htmlContent = buildPurchaseRequestEmailTemplate("Phiếu yêu cầu mua gửi nhà cung cấp", body);
         sendEmail(supplierEmail, subject, htmlContent);
+    }
+
+    public void sendOrderStatusChangeEmail(Order order, OrderStatus newStatus) {
+        String toEmail = order.getUser().getEmail();
+        String name = order.getUser().getFullName();
+        String statusLabel = orderStatusLabel(newStatus);
+
+        String subject = "[AgriShrimp] Đơn hàng %s: %s".formatted(order.getCode(), statusLabel);
+        String body = """
+                <p style="font-size:16px;color:#374151;line-height:1.8;">
+                    Xin chào <strong>%s</strong>,
+                </p>
+                <p style="font-size:15px;color:#374151;line-height:1.8;">
+                    Đơn hàng <strong>%s</strong> của bạn vừa được cập nhật trạng thái:
+                </p>
+
+                <div style="text-align:center;margin:24px 0;">
+                    <span style="display:inline-block;background:#eaf2ff;color:#1e40af;font-size:20px;font-weight:bold;padding:10px 24px;border-radius:50px;">%s</span>
+                </div>
+
+                <p style="font-size:14px;color:#6b7280;line-height:1.7;">
+                    Bạn có thể xem chi tiết đơn hàng và lịch sử cập nhật trong mục "Đơn hàng của tôi" sau khi đăng nhập.
+                </p>
+                """.formatted(name, order.getCode(), statusLabel);
+
+        String htmlContent = buildEmailTemplate("Cập Nhật Đơn Hàng", body, "Xem đơn hàng của tôi →");
+        sendEmail(toEmail, subject, htmlContent);
+    }
+
+    public void sendOrderReplenishmentAlertEmail(String toEmail, String recipientName, Order order) {
+        String branchName = order.getBranch() != null ? order.getBranch().getName() : "—";
+
+        String subject = "[AgriShrimp] ⚠️ Đơn hàng %s đang chờ nhập bù kho".formatted(order.getCode());
+        String body = """
+                <p style="font-size:16px;color:#374151;line-height:1.8;">
+                    Xin chào <strong>%s</strong>,
+                </p>
+                <p style="font-size:15px;color:#374151;line-height:1.8;">
+                    Đơn hàng <strong>%s</strong> (chi nhánh: <strong>%s</strong>) đang tạm dừng do
+                    thiếu hàng trong kho và cần nhập bù để tiếp tục xử lý.
+                </p>
+
+                <div style="background:#fffbeb;border-left:4px solid #f59e0b;border-radius:8px;padding:14px 18px;margin:16px 0;">
+                    <p style="margin:0;font-size:14px;color:#92400e;line-height:1.7;">
+                        ⚠️ Vui lòng kiểm tra và xử lý yêu cầu nhập hàng liên quan sớm để tránh
+                        làm chậm tiến độ giao hàng cho khách.
+                    </p>
+                </div>
+                """.formatted(recipientName, order.getCode(), branchName);
+
+        String htmlContent = buildEmailTemplate("Đơn Hàng Chờ Nhập Bù Kho", body, "Xem đơn hàng →");
+        sendEmail(toEmail, subject, htmlContent);
+    }
+
+    public void sendPurchaseRequestApprovalNeededEmail(String toEmail, String recipientName, PurchaseRequest purchaseRequest) {
+        String branchName = purchaseRequest.getBranch() != null ? purchaseRequest.getBranch().getName() : "—";
+        String requestedBy = purchaseRequest.getCreatedBy() != null ? purchaseRequest.getCreatedBy().getFullName() : "Hệ thống";
+
+        String subject = "[AgriShrimp] Yêu cầu mua %s đang chờ bạn duyệt".formatted(purchaseRequest.getCode());
+        String body = """
+                <p style="font-size:16px;color:#374151;line-height:1.8;">
+                    Xin chào <strong>%s</strong>,
+                </p>
+                <p style="font-size:15px;color:#374151;line-height:1.8;">
+                    Phiếu yêu cầu mua <strong>%s</strong> (kho: <strong>%s</strong>, người lập:
+                    <strong>%s</strong>) vừa được tạo và đang chờ bạn duyệt.
+                </p>
+
+                <div style="background:#fffbeb;border-left:4px solid #f59e0b;border-radius:8px;padding:14px 18px;margin:16px 0;">
+                    <p style="margin:0;font-size:14px;color:#92400e;line-height:1.7;">
+                        ⚠️ Quá trình nhập hàng chỉ tiếp tục sau khi phiếu này được duyệt.
+                    </p>
+                </div>
+                """.formatted(recipientName, purchaseRequest.getCode(), branchName, requestedBy);
+
+        String htmlContent = buildEmailTemplate("Yêu Cầu Mua Chờ Duyệt", body, "Xem phiếu yêu cầu →");
+        sendEmail(toEmail, subject, htmlContent);
+    }
+
+    public void sendVoucherExpiringSoonEmail(String toEmail, String customerName, Voucher voucher, int daysLeft) {
+        String subject = "[AgriShrimp] 🎟️ Voucher %s sắp hết hạn".formatted(voucher.getCode());
+        String body = """
+                <p style="font-size:16px;color:#374151;line-height:1.8;">
+                    Xin chào <strong>%s</strong>,
+                </p>
+                <p style="font-size:15px;color:#374151;line-height:1.8;">
+                    Voucher <strong>%s</strong> bạn đã lưu sẽ hết hạn trong
+                    <strong>%d ngày</strong> nữa và bạn chưa sử dụng.
+                </p>
+
+                <div style="text-align:center;margin:24px 0;">
+                    <span style="display:inline-block;background:#eaf2ff;color:#1e40af;font-size:20px;font-weight:bold;padding:10px 24px;border-radius:50px;letter-spacing:1px;">%s</span>
+                </div>
+
+                <p style="font-size:14px;color:#6b7280;line-height:1.7;">
+                    Đừng bỏ lỡ ưu đãi này — hãy sử dụng voucher trước khi hết hạn nhé!
+                </p>
+                """.formatted(customerName, voucher.getCode(), daysLeft, voucher.getCode());
+
+        String htmlContent = buildEmailTemplate("Voucher Sắp Hết Hạn", body, "Mua sắm ngay →");
+        sendEmail(toEmail, subject, htmlContent);
+    }
+
+    private String orderStatusLabel(OrderStatus status) {
+        return switch (status) {
+            case CONFIRMED -> "Đã xác nhận";
+            case PROCESSING -> "Đang chuẩn bị hàng";
+            case SHIPPING -> "Đang giao hàng";
+            case COMPLETED -> "Đã hoàn tất";
+            case CANCELLED -> "Đã huỷ";
+            case RETURNED -> "Đã hoàn trả";
+            default -> status.name();
+        };
     }
 
     // ─────────────────────────────────────────────────────────────────────────

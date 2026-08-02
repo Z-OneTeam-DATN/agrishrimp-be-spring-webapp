@@ -61,6 +61,9 @@ class CustomerServiceTest {
     @Mock
     private BranchRepository branchRepository;
 
+    @Mock
+    private NotificationService notificationService;
+
     @InjectMocks
     private CustomerService customerService;
 

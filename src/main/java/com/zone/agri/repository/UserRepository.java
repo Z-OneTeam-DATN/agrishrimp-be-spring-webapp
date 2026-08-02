@@ -131,4 +131,12 @@ public interface UserRepository extends JpaRepository<User, Long> {
         @Query("SELECT NEW MAP(u.id AS id, u.fullName AS fullName, u.email AS email, u.phoneNumber AS phoneNumber) " +
                         "FROM User u WHERE u.branch.id = :branchId AND u.role.slug = :slug ORDER BY u.fullName")
         List<Map<String, Object>> findByBranchIdAndRole(@Param("branchId") Long branchId, @Param("slug") String slug);
+
+        // 🟢 Notification recipient resolution: users holding a given permission, scoped to a branch
+        // (or system-wide when branchId is null — same convention as WarehouseContext.isSuperAdmin()).
+        @Query("SELECT DISTINCT u FROM User u JOIN u.role r JOIN r.permissions p WHERE " +
+                        "p.code = :permissionCode AND u.status = com.zone.agri.entity.enums.UserStatus.ACTIVE AND " +
+                        "((:branchId IS NULL AND u.branch IS NULL) OR (:branchId IS NOT NULL AND u.branch.id = :branchId))")
+        List<User> findUsersByPermissionCodeAndBranch(@Param("permissionCode") String permissionCode,
+                        @Param("branchId") Long branchId);
 }
