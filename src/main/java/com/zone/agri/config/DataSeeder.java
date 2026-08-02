@@ -50,7 +50,17 @@ public class DataSeeder implements CommandLineRunner {
         Permission mRpt = pMod("Báo cáo", "REPORT", PermissionGroup.REPORT);
         Permission aRptSale = pAct("Báo cáo doanh thu", "REPORT_REVENUE_VIEW", PermissionGroup.REPORT, mRpt);
         Permission aRptInv = pAct("Báo cáo kho", "REPORT_INVENTORY_VIEW", PermissionGroup.REPORT, mRpt);
+        Permission aRptInvAllBranches = pAct(
+                "Xem báo cáo kho mọi chi nhánh",
+                "REPORT_INVENTORY_VIEW_ALL_BRANCHES",
+                PermissionGroup.REPORT,
+                mRpt);
         Permission aRptFin = pAct("Báo cáo tài chính", "REPORT_FINANCE_VIEW", PermissionGroup.REPORT, mRpt);
+        Permission aRptFinAllBranches = pAct(
+                "Xem báo cáo tài chính mọi chi nhánh",
+                "REPORT_FINANCE_VIEW_ALL_BRANCHES",
+                PermissionGroup.REPORT,
+                mRpt);
 
         Permission mUser = pMod("Quản lý nhân viên", "STAFF", PermissionGroup.ADMINISTRATION);
         Permission aUserV = pAct("Xem nhân viên", "STAFF_VIEW", PermissionGroup.ADMINISTRATION, mUser);
@@ -205,7 +215,7 @@ public class DataSeeder implements CommandLineRunner {
 
         Set<Permission> superAdminPermissions = Set.of(
                 aDashV, aWspaceV,
-                aRptSale, aRptInv, aRptFin,
+                aRptSale, aRptInv, aRptInvAllBranches, aRptFin, aRptFinAllBranches,
                 aUserV, aUserC, aUserU, aUserD,
                 aRoleV, aRoleC, aRoleU, aRoleD,
                 aBranchV, aBranchC, aBranchU, aBranchD,

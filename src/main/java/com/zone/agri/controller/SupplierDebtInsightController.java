@@ -6,6 +6,7 @@ import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import com.zone.agri.common.AuthUtils;
 import com.zone.agri.dto.response.supplier.SupplierDebtInsightResponse;
 import com.zone.agri.security.annotation.RequirePermission;
 import com.zone.agri.service.SupplierDebtInsightService;
@@ -32,14 +33,20 @@ public class SupplierDebtInsightController {
         log.info("Requesting Supplier Debt Insights for branchId: {}, startDate: {}, endDate: {}, compareTrend: {}", 
                 branchId, startDate, endDate, compareWithPreviousPeriod);
 
-        Long finalBranchId = null;
+        Long requestedBranchId = null;
         if (!"ALL".equalsIgnoreCase(branchId) && !"all".equalsIgnoreCase(branchId)) {
             try {
-                finalBranchId = Long.parseLong(branchId);
+                requestedBranchId = Long.parseLong(branchId);
             } catch (NumberFormatException e) {
                 log.warn("Invalid branch ID: {}, fallback to ALL", branchId);
             }
         }
+
+        // Ép về đúng chi nhánh của người dùng (nếu có), giống mọi endpoint tài chính khác —
+        // tránh IDOR: trước đây branchId lấy thẳng từ URL không qua kiểm tra, một tài khoản bị
+        // khoá vào 1 chi nhánh có thể đổi URL để xem công nợ chi nhánh khác.
+        Long finalBranchId = AuthUtils.resolveRequestedOrUserBranch(
+                requestedBranchId, "REPORT_FINANCE_VIEW", "REPORT_FINANCE_VIEW_ALL_BRANCHES");
 
         SupplierDebtInsightResponse response = supplierDebtInsightService
                 .getSupplierDebtInsights(startDate, endDate, finalBranchId, compareWithPreviousPeriod);

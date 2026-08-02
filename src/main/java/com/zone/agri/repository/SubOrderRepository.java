@@ -44,7 +44,8 @@ public interface SubOrderRepository extends JpaRepository<SubOrder, Long> {
 
     // ── Truy vấn theo chi nhánh (dùng cho quản lý kho / chi nhánh) ──
 
-    @Query("SELECT s FROM SubOrder s WHERE s.branch.id = :branchId ORDER BY s.createdAt DESC")
+    @Query("SELECT s FROM SubOrder s LEFT JOIN FETCH s.order o LEFT JOIN FETCH o.user " +
+            "WHERE s.branch.id = :branchId ORDER BY s.createdAt DESC")
     List<SubOrder> findByBranchIdOrderByCreatedAtDesc(@Param("branchId") Long branchId);
 
     @Query("SELECT s FROM SubOrder s WHERE s.branch.id = :branchId AND s.status = :status ORDER BY s.createdAt DESC")
@@ -72,6 +73,12 @@ public interface SubOrderRepository extends JpaRepository<SubOrder, Long> {
             "AND s.branch.id = :branchId")
     long countAllByBranchIdExceptCancelled(@Param("branchId") Long branchId);
 
+    // Đếm luỹ kế tính đến 1 thời điểm — dùng để so sánh "Tổng đơn hàng" hôm nay với hôm qua.
+    @Query("SELECT COUNT(s) FROM SubOrder s WHERE s.status <> com.zone.agri.entity.enums.OrderStatus.CANCELLED " +
+            "AND s.createdAt <= :endDate AND s.branch.id = :branchId")
+    long countAllByBranchIdExceptCancelledBefore(@Param("endDate") java.time.LocalDateTime endDate,
+                                                 @Param("branchId") Long branchId);
+
     @Query("SELECT COUNT(s) FROM SubOrder s WHERE s.status IN (com.zone.agri.entity.enums.OrderStatus.COMPLETED, com.zone.agri.entity.enums.OrderStatus.RECEIVED, com.zone.agri.entity.enums.OrderStatus.SHIPPING) " +
             "AND s.createdAt BETWEEN :startDate AND :endDate " +
             "AND s.branch.id = :branchId")
@@ -83,6 +90,37 @@ public interface SubOrderRepository extends JpaRepository<SubOrder, Long> {
             "AND s.createdAt BETWEEN :startDate AND :endDate " +
             "AND s.branch.id = :branchId")
     java.math.BigDecimal sumRevenueByBranchId(@Param("startDate") java.time.LocalDateTime startDate,
+                                              @Param("endDate") java.time.LocalDateTime endDate,
+                                              @Param("branchId") Long branchId);
+
+    interface DashboardRevenueRow {
+        java.time.LocalDateTime getCreatedAt();
+
+        java.math.BigDecimal getSubtotal();
+
+        java.math.BigDecimal getShippingFee();
+
+        java.math.BigDecimal getOrderSubtotal();
+
+        java.math.BigDecimal getOrderDiscountAmount();
+    }
+
+    // Trả về từng dòng SubOrder kèm subtotal/discount của Order cha để DashboardService
+    // phân bổ giảm giá theo tỉ lệ (giống allocateDiscount trong FinancialService) thay vì
+    // tính doanh thu chi nhánh mà bỏ qua voucher giảm giá.
+    @Query("""
+            SELECT s.createdAt AS createdAt,
+                   COALESCE(s.subtotal, 0) AS subtotal,
+                   COALESCE(s.shippingFee, 0) AS shippingFee,
+                   COALESCE(o.totalAmount, 0) AS orderSubtotal,
+                   COALESCE(o.discountAmount, 0) AS orderDiscountAmount
+            FROM SubOrder s
+            JOIN s.order o
+            WHERE s.status IN (com.zone.agri.entity.enums.OrderStatus.COMPLETED, com.zone.agri.entity.enums.OrderStatus.RECEIVED, com.zone.agri.entity.enums.OrderStatus.SHIPPING)
+              AND s.createdAt BETWEEN :startDate AND :endDate
+              AND (:branchId IS NULL OR s.branch.id = :branchId)
+            """)
+    List<DashboardRevenueRow> findRevenueRows(@Param("startDate") java.time.LocalDateTime startDate,
                                               @Param("endDate") java.time.LocalDateTime endDate,
                                               @Param("branchId") Long branchId);
 
@@ -206,10 +244,14 @@ public interface SubOrderRepository extends JpaRepository<SubOrder, Long> {
             @Param("startDate") LocalDateTime startDate,
             @Param("branchId") Long branchId);
 
+    // JOIN FETCH order.user/s.branch — mapSubOrderToCashbookEntry() đọc parentOrder.getUser() và
+    // subOrder.getBranch() cho mỗi dòng; thiếu fetch join gây N+1 lazy-load khi sinh sổ quỹ.
     @Query("""
         SELECT s
         FROM SubOrder s
         JOIN FETCH s.order o
+        LEFT JOIN FETCH o.user
+        LEFT JOIN FETCH s.branch
         WHERE o.paymentStatus = com.zone.agri.entity.enums.PaymentStatus.PAID
           AND o.status NOT IN (com.zone.agri.entity.enums.OrderStatus.CANCELLED, com.zone.agri.entity.enums.OrderStatus.RETURNED)
           AND s.status NOT IN (com.zone.agri.entity.enums.OrderStatus.CANCELLED, com.zone.agri.entity.enums.OrderStatus.RETURNED)
@@ -230,6 +272,8 @@ public interface SubOrderRepository extends JpaRepository<SubOrder, Long> {
         SELECT s
         FROM SubOrder s
         JOIN FETCH s.order o
+        LEFT JOIN FETCH o.user
+        LEFT JOIN FETCH s.branch
         WHERE o.paymentStatus = com.zone.agri.entity.enums.PaymentStatus.PAID
           AND o.status NOT IN (com.zone.agri.entity.enums.OrderStatus.CANCELLED, com.zone.agri.entity.enums.OrderStatus.RETURNED)
           AND s.status NOT IN (com.zone.agri.entity.enums.OrderStatus.CANCELLED, com.zone.agri.entity.enums.OrderStatus.RETURNED)
@@ -244,4 +288,43 @@ public interface SubOrderRepository extends JpaRepository<SubOrder, Long> {
     List<SubOrder> findPaidSubOrdersBefore(
             @Param("endDate") LocalDateTime endDate,
             @Param("branchId") Long branchId);
+
+    interface CustomerDebtSubOrderProjection {
+        Long getCustomerId();
+
+        String getCustomerName();
+
+        String getCustomerPhone();
+
+        java.math.BigDecimal getSubtotal();
+
+        java.math.BigDecimal getShippingFee();
+
+        java.math.BigDecimal getOrderSubtotal();
+
+        java.math.BigDecimal getOrderDiscountAmount();
+    }
+
+    // Công nợ khách hàng (đơn đã tách chi nhánh) — giảm giá phân bổ theo tỉ lệ subtotal giống hệt
+    // allocateDiscount trong FinancialService để khớp với Lãi lỗ/Sổ quỹ.
+    @Query("""
+            SELECT o.user.id AS customerId,
+                   o.user.fullName AS customerName,
+                   o.user.phoneNumber AS customerPhone,
+                   COALESCE(s.subtotal, 0) AS subtotal,
+                   COALESCE(s.shippingFee, 0) AS shippingFee,
+                   COALESCE(o.totalAmount, 0) AS orderSubtotal,
+                   COALESCE(o.discountAmount, 0) AS orderDiscountAmount
+            FROM SubOrder s
+            JOIN s.order o
+            WHERE o.user IS NOT NULL
+              AND o.paymentStatus IN :unpaidStatuses
+              AND s.status NOT IN (com.zone.agri.entity.enums.OrderStatus.CANCELLED, com.zone.agri.entity.enums.OrderStatus.RETURNED)
+              AND s.createdAt <= :endDate
+              AND (:branchId IS NULL OR s.branch.id = :branchId)
+            """)
+    List<CustomerDebtSubOrderProjection> findSubOrderCustomerDebtRows(
+            @Param("endDate") LocalDateTime endDate,
+            @Param("branchId") Long branchId,
+            @Param("unpaidStatuses") List<com.zone.agri.entity.enums.PaymentStatus> unpaidStatuses);
 }

@@ -2,6 +2,7 @@ package com.zone.agri.service;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.zone.agri.common.AuthUtils;
 import com.zone.agri.dto.response.geo.DeliveryInfo;
 import com.zone.agri.dto.request.order.*;
 import com.zone.agri.dto.response.order.*;
@@ -710,8 +711,9 @@ public class OrderService {
     }
 
     @Transactional(readOnly = true)
-    public List<MissingItemReportDto> getBackorderReport() {
-        return subOrderItemRepository.getBackorderReport().stream()
+    public List<MissingItemReportDto> getBackorderReport(Long branchId) {
+        Long finalBranchId = AuthUtils.resolveRequestedOrUserBranch(branchId, "ORDER_VIEW");
+        return subOrderItemRepository.getBackorderReport(finalBranchId).stream()
                 .map(row -> MissingItemReportDto.builder()
                         .productVariantId(row.getProductVariantId())
                         .sku(row.getSku())

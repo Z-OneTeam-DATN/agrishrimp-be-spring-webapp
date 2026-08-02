@@ -13,4 +13,6 @@ public class CustomerInsightsResponse {
     private Long totalCustomers;
     private Long activeCustomers;
     private Long newCustomersThisMonth;
+    private Long todayVisitors;
+    private Long todayPageViews;
 }

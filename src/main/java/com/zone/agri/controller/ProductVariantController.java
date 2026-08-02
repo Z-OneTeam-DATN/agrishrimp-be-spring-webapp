@@ -25,8 +25,9 @@ public class ProductVariantController {
     @GetMapping("/low-stock")
     public ResponseEntity<List<LowStockReportResponse>> getLowStockReport(
             @RequestParam(required = false) Long branchId) {
-
-        return ResponseEntity.ok(variantService.getLowStockReport(branchId));
+        Long finalBranchId = com.zone.agri.common.AuthUtils.resolveRequestedOrUserBranch(
+                branchId, "REPORT_INVENTORY_VIEW", "REPORT_INVENTORY_VIEW_ALL_BRANCHES");
+        return ResponseEntity.ok(variantService.getLowStockReport(finalBranchId));
     }
 
     @Operation(summary = "Tìm kiếm biến thể sản phẩm (Dùng cho tạo đơn/chuyển kho)")

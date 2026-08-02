@@ -4,25 +4,28 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+
 import java.math.BigDecimal;
 
 @Data
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-public class DailyBusinessResultsResponse {
-    private BigDecimal todayRevenue;
-    private BigDecimal yesterdayRevenue;
+public class MonthlyBusinessResultsResponse {
+    private String yearMonth;
+
+    private BigDecimal currentMonthRevenue;
+    private BigDecimal previousMonthRevenue;
     private double revenueChangePercent;
     private boolean revenueIsNew;
 
-    private BigDecimal todayProfit;
-    private BigDecimal yesterdayProfit;
+    private BigDecimal currentMonthProfit;
+    private BigDecimal previousMonthProfit;
     private double profitChangePercent;
     private boolean profitIsNew;
 
-    private long todayOrders;
-    private long yesterdayOrders;
+    private long currentMonthOrders;
+    private long previousMonthOrders;
     private double orderChangePercent;
     private boolean orderIsNew;
 }

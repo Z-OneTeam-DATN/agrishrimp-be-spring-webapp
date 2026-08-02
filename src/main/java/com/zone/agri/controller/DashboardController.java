@@ -41,6 +41,15 @@ public class DashboardController {
         return ResponseEntity.ok(dashboardService.getDailyResults(branchId));
     }
 
+    @Operation(summary = "Kết quả kinh doanh theo tháng (so với tháng trước)")
+    @GetMapping("/monthly-results")
+    public ResponseEntity<MonthlyBusinessResultsResponse> getMonthlyResults(
+            @RequestParam(required = false) Long branchId,
+            @RequestParam(required = false)
+            @org.springframework.format.annotation.DateTimeFormat(pattern = "yyyy-MM") java.time.YearMonth yearMonth) {
+        return ResponseEntity.ok(dashboardService.getMonthlyResults(branchId, yearMonth));
+    }
+
     @Operation(summary = "Hoạt động gần đây")
     @GetMapping("/recent-activities")
     public ResponseEntity<List<RecentActivityResponse>> getRecentActivities(

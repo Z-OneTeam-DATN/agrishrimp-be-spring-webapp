@@ -245,6 +245,20 @@ public class SchemaUpdateConfig implements BeanPostProcessor {
                             """);
 
             executeSql(stmt,
+                    "Create site_visits when missing",
+                    """
+                            CREATE TABLE IF NOT EXISTS site_visits (
+                                id BIGINT PRIMARY KEY AUTO_INCREMENT,
+                                visitor_id VARCHAR(64) NOT NULL,
+                                path VARCHAR(500) NULL,
+                                user_agent VARCHAR(500) NULL,
+                                visited_at DATETIME NOT NULL,
+                                INDEX idx_site_visits_visited_at (visited_at),
+                                INDEX idx_site_visits_visitor_id (visitor_id)
+                            )
+                            """);
+
+            executeSql(stmt,
                     "Patch suppliers adds created_by_user_id",
                     "ALTER TABLE suppliers ADD COLUMN created_by_user_id BIGINT NULL");
 

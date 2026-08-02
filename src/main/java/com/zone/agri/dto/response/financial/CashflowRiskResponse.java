@@ -16,7 +16,9 @@ public class CashflowRiskResponse {
     private BigDecimal projectedBalance;
     private BigDecimal shortfallAmount;
     private List<PrioritizedDebtDto> prioritizedDebts;
-    private List<BreakdownItemDto> breakdown;
+    // Số ngày cửa sổ dự phóng nợ đến hạn thật sự dùng để tính totalDebtDueInWindow — frontend
+    // cần số này để hiển thị nhãn đúng (trước đây hardcode "14 ngày" dù cấu hình có thể khác).
+    private int windowDays;
     private List<String> warnings;
     private boolean insufficientData;
 }

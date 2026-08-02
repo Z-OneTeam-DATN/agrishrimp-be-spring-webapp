@@ -71,6 +71,13 @@ public interface UserRepository extends JpaRepository<User, Long> {
                         "AND (:branchId IS NULL OR u.branch.id = :branchId)")
         long countCustomers(@Param("branchId") Long branchId);
 
+        // Đếm luỹ kế tính đến 1 thời điểm — dùng để so sánh "Khách hàng" hôm nay với hôm qua.
+        @Query("SELECT COUNT(u) FROM User u WHERE u.role.slug = 'USER' " +
+                        "AND (:branchId IS NULL OR u.branch.id = :branchId) " +
+                        "AND u.createdAt <= :endDate")
+        long countCustomersBefore(@Param("branchId") Long branchId,
+                        @Param("endDate") java.time.LocalDateTime endDate);
+
         @Query("SELECT COUNT(u) FROM User u WHERE u.role.slug = 'USER' " +
                         "AND (:branchId IS NULL OR u.branch.id = :branchId) " +
                         "AND u.status = :status")

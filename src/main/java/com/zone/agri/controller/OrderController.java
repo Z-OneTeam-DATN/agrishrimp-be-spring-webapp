@@ -186,9 +186,10 @@ public class OrderController {
     @Operation(summary = "Báo cáo nợ đơn", description = "Tổng hợp các sản phẩm đang thiếu hàng trong các phần đơn chờ điều chuyển bổ sung.")
     @RequirePermission("ORDER_VIEW")
     @GetMapping("/admin/backorders")
-    public ResponseEntity<List<MissingItemReportDto>> getBackorderReport() {
+    public ResponseEntity<List<MissingItemReportDto>> getBackorderReport(
+            @RequestParam(required = false) Long branchId) {
         verifyAdminAccess();
-        return ResponseEntity.ok(orderService.getBackorderReport());
+        return ResponseEntity.ok(orderService.getBackorderReport(branchId));
     }
 
     @Operation(summary = "Cập nhật trạng thái đơn hàng (Admin)", description = "Admin duyệt đơn, đóng gói, giao hàng theo quy trình.")

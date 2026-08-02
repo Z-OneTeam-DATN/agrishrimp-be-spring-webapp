@@ -5,26 +5,33 @@ import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.Comparator;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.zone.agri.common.AuthUtils;
+import com.zone.agri.dto.response.customer.CustomerDebtResponse;
 import com.zone.agri.dto.response.financial.CashbookEntryResponse;
 import com.zone.agri.dto.response.financial.CashbookReportResponse;
 import com.zone.agri.dto.response.financial.CashbookSummaryResponse;
 import com.zone.agri.dto.response.financial.ProfitLossResponse;
 import com.zone.agri.dto.response.supplier.SupplierDebtResponse;
+import com.zone.agri.entity.Customer;
 import com.zone.agri.entity.InventoryReceiptPayment;
 import com.zone.agri.entity.Order;
 import com.zone.agri.entity.SubOrder;
 import com.zone.agri.entity.enums.InventoryNoteType;
+import com.zone.agri.entity.enums.PaymentStatus;
+import com.zone.agri.repository.CustomerRepository;
 import com.zone.agri.repository.InventoryReceiptPaymentRepository;
 import com.zone.agri.repository.InventoryTransactionRepository;
 import com.zone.agri.repository.OrderRepository;
@@ -40,11 +47,47 @@ public class FinancialService {
     private final OrderRepository orderRepository;
     private final SubOrderRepository subOrderRepository;
     private final SupplierRepository supplierRepository;
+    private final CustomerRepository customerRepository;
     private final InventoryReceiptPaymentRepository inventoryReceiptPaymentRepository;
     private final InventoryTransactionRepository inventoryTransactionRepository;
 
+    // Đơn ở các trạng thái thanh toán này (chưa PAID) và chưa huỷ/trả được coi là khách còn nợ.
+    // Hệ thống chưa lưu vết thanh toán từng phần (PARTIALLY_PAID tồn tại trong enum nhưng chưa bao
+    // giờ được gán ở đâu), nên nợ tính nhị phân: hoặc nợ đủ finalAmount, hoặc không nợ (đã PAID).
+    private static final List<PaymentStatus> CUSTOMER_UNPAID_STATUSES = List.of(
+            PaymentStatus.UNPAID,
+            PaymentStatus.PENDING,
+            PaymentStatus.PENDING_VERIFICATION,
+            PaymentStatus.PARTIALLY_PAID,
+            PaymentStatus.FAILED,
+            PaymentStatus.EXPIRED,
+            PaymentStatus.REFUND_PENDING);
+
+    // Mở trang Lãi lỗ gọi getProfitLossReport 2 lần (kỳ này + kỳ trước) và
+    // ProfitLossInsightService gọi lại thêm 2 lần nữa cho cùng 2 kỳ đó — cache ngắn hạn để 4 lệnh
+    // gọi trong cùng 1 lượt tải trang chỉ tính toán thật 1 lần cho mỗi (kỳ, chi nhánh).
+    private static final long PROFIT_LOSS_CACHE_TTL_MILLIS = 30_000;
+    private final Map<String, CachedProfitLoss> profitLossCache = new ConcurrentHashMap<>();
+
+    private record CachedProfitLoss(ProfitLossResponse response, long expiresAtMillis) {
+    }
+
     public ProfitLossResponse getProfitLossReport(LocalDate startDate, LocalDate endDate, Long branchId) {
         Long finalBranchId = resolveBranchId(branchId);
+        String cacheKey = startDate + "|" + endDate + "|" + finalBranchId;
+        long now = System.currentTimeMillis();
+
+        CachedProfitLoss cached = profitLossCache.get(cacheKey);
+        if (cached != null && cached.expiresAtMillis() > now) {
+            return cached.response();
+        }
+
+        ProfitLossResponse response = computeProfitLossReport(startDate, endDate, finalBranchId);
+        profitLossCache.put(cacheKey, new CachedProfitLoss(response, now + PROFIT_LOSS_CACHE_TTL_MILLIS));
+        return response;
+    }
+
+    private ProfitLossResponse computeProfitLossReport(LocalDate startDate, LocalDate endDate, Long finalBranchId) {
         LocalDateTime start = startDate != null
                 ? startDate.atStartOfDay()
                 : LocalDateTime.of(2000, 1, 1, 0, 0);
@@ -178,6 +221,88 @@ public class FinancialService {
                 .sorted(Comparator
                         .comparing(SupplierDebtResponse::getTotalDebt, Comparator.reverseOrder())
                         .thenComparing(item -> Objects.toString(item.getSupplierName(), "")))
+                .toList();
+    }
+
+    public List<CustomerDebtResponse> getCustomerDebts(
+            String search,
+            LocalDate endDate,
+            Long branchId,
+            Long staffId,
+            String debtFilter) {
+        Long finalBranchId = resolveBranchId(branchId);
+        String normalizedSearch = normalizeSearch(search);
+        LocalDateTime snapshotDate = endDate != null
+                ? endDate.atTime(23, 59, 59)
+                : LocalDateTime.now();
+
+        Map<Long, BigDecimal> debtByCustomer = new LinkedHashMap<>();
+        Map<Long, String> nameById = new HashMap<>();
+        Map<Long, String> phoneById = new HashMap<>();
+
+        for (OrderRepository.CustomerDebtOrderProjection row : orderRepository
+                .findLegacyCustomerDebtRows(snapshotDate, finalBranchId, CUSTOMER_UNPAID_STATUSES)) {
+            debtByCustomer.merge(row.getCustomerId(), getSafeBigDecimal(row.getFinalAmount()), BigDecimal::add);
+            nameById.putIfAbsent(row.getCustomerId(), row.getCustomerName());
+            phoneById.putIfAbsent(row.getCustomerId(), row.getCustomerPhone());
+        }
+
+        for (SubOrderRepository.CustomerDebtSubOrderProjection row : subOrderRepository
+                .findSubOrderCustomerDebtRows(snapshotDate, finalBranchId, CUSTOMER_UNPAID_STATUSES)) {
+            BigDecimal subtotal = getSafeBigDecimal(row.getSubtotal());
+            BigDecimal shippingFee = getSafeBigDecimal(row.getShippingFee());
+            BigDecimal allocatedDiscount = allocateDiscount(
+                    subtotal, getSafeBigDecimal(row.getOrderSubtotal()), getSafeBigDecimal(row.getOrderDiscountAmount()));
+            BigDecimal amount = subtotal.add(shippingFee).subtract(allocatedDiscount);
+
+            debtByCustomer.merge(row.getCustomerId(), amount, BigDecimal::add);
+            nameById.putIfAbsent(row.getCustomerId(), row.getCustomerName());
+            phoneById.putIfAbsent(row.getCustomerId(), row.getCustomerPhone());
+        }
+
+        Map<Long, Customer> customerByUserId = customerRepository.findByUserIdIn(debtByCustomer.keySet()).stream()
+                .filter(c -> c.getUser() != null)
+                .collect(Collectors.toMap(c -> c.getUser().getId(), c -> c, (left, right) -> left));
+
+        String searchLower = normalizedSearch != null ? normalizedSearch.toLowerCase() : null;
+
+        return debtByCustomer.entrySet().stream()
+                .map(entry -> {
+                    Long customerId = entry.getKey();
+                    Customer customer = customerByUserId.get(customerId);
+                    String name = firstNonBlank(
+                            customer != null ? customer.getName() : null,
+                            nameById.get(customerId));
+                    String phone = firstNonBlank(
+                            customer != null ? customer.getPhone() : null,
+                            phoneById.get(customerId));
+                    String staffName = customer != null && customer.getStaffAssigned() != null
+                            ? customer.getStaffAssigned().getFullName()
+                            : null;
+                    Long staffAssignedId = customer != null && customer.getStaffAssigned() != null
+                            ? customer.getStaffAssigned().getId()
+                            : null;
+
+                    return new Object[] {
+                            CustomerDebtResponse.builder()
+                                    .id(customerId)
+                                    .customerName(name)
+                                    .phone(phone)
+                                    .staffAssignedName(staffName)
+                                    .totalDebt(maxZero(entry.getValue()))
+                                    .build(),
+                            staffAssignedId
+                    };
+                })
+                .filter(pair -> staffId == null || staffId.equals(pair[1]))
+                .map(pair -> (CustomerDebtResponse) pair[0])
+                .filter(item -> matchesDebtFilter(item.getTotalDebt(), debtFilter))
+                .filter(item -> searchLower == null
+                        || Objects.toString(item.getCustomerName(), "").toLowerCase().contains(searchLower)
+                        || Objects.toString(item.getPhone(), "").contains(normalizedSearch))
+                .sorted(Comparator
+                        .comparing(CustomerDebtResponse::getTotalDebt, Comparator.reverseOrder())
+                        .thenComparing(item -> Objects.toString(item.getCustomerName(), "")))
                 .toList();
     }
 
@@ -479,7 +604,8 @@ public class FinancialService {
     }
 
     private Long resolveBranchId(Long requestBranchId) {
-        return AuthUtils.resolveRequestedOrUserBranch(requestBranchId, "REPORT_FINANCE_VIEW");
+        return AuthUtils.resolveRequestedOrUserBranch(
+                requestBranchId, "REPORT_FINANCE_VIEW", "REPORT_FINANCE_VIEW_ALL_BRANCHES");
     }
 
     private static final class FinancialAccumulator {

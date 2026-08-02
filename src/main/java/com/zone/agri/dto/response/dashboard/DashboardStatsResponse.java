@@ -15,4 +15,11 @@ public class DashboardStatsResponse {
     private BigDecimal totalRevenue;
     private Long totalCustomers;
     private Long totalProducts;
+
+    private double revenueChangePercent;
+    private boolean revenueIsNew;
+    private double ordersChangePercent;
+    private boolean ordersIsNew;
+    private double customersChangePercent;
+    private boolean customersIsNew;
 }

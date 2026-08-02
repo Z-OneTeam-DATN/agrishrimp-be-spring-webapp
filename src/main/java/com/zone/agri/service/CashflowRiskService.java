@@ -7,6 +7,7 @@ import java.time.LocalDateTime;
 import java.util.*;
 import java.util.stream.Collectors;
 
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 import com.zone.agri.dto.response.financial.*;
@@ -34,6 +35,14 @@ public class CashflowRiskService {
     public void clearCache() {
         cache.clear();
         log.info("Evicted Cashflow risk analysis cache");
+    }
+
+    // Cache key gồm ngày hiện tại nên entry của ngày cũ không bao giờ được đọc lại — nhưng cũng
+    // không tự mất đi, tích luỹ dần theo thời gian chạy (không TTL/eviction thật). Dọn định kỳ mỗi
+    // đêm để tránh phình bộ nhớ dần qua nhiều ngày chạy liên tục.
+    @Scheduled(cron = "0 0 0 * * ?")
+    public void evictStaleCacheDaily() {
+        clearCache();
     }
 
     public CashflowRiskResponse analyzeCashflowRisk(Long branchId, Integer customWindowDays) {
@@ -231,12 +240,6 @@ public class CashflowRiskService {
             warnings.add(String.format("Dự kiến thiếu %s đồng để trả nợ NCC trong %d ngày tới.", df.format(shortfallAmount), windowDays));
         }
 
-        // 7. Create breakdown items
-        List<BreakdownItemDto> breakdown = new ArrayList<>();
-        breakdown.add(new BreakdownItemDto("OPENING_BALANCE", currentBalance, "Số dư Sổ quỹ hiện tại"));
-        breakdown.add(new BreakdownItemDto("EXPECTED_INFLOW", expectedInflow, "Dòng tiền thu dự kiến"));
-        breakdown.add(new BreakdownItemDto("DEBT_DUE_IN_WINDOW", totalDebtDueInWindow, String.format("Tổng nợ đến hạn trong %d ngày tới", windowDays)));
-
         CashflowRiskResponse response = CashflowRiskResponse.builder()
                 .riskLevel(riskLevel)
                 .currentBalance(currentBalance)
@@ -245,7 +248,7 @@ public class CashflowRiskService {
                 .projectedBalance(projectedBalance)
                 .shortfallAmount(shortfallAmount)
                 .prioritizedDebts(prioritizedDebts)
-                .breakdown(breakdown)
+                .windowDays(windowDays)
                 .warnings(warnings)
                 .insufficientData(false)
                 .build();

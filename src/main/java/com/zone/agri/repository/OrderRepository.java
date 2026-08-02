@@ -15,6 +15,7 @@ import org.springframework.stereotype.Repository;
 
 import com.zone.agri.entity.Order;
 import com.zone.agri.entity.enums.OrderStatus;
+import com.zone.agri.entity.enums.PaymentStatus;
 
 @Repository
 public interface OrderRepository extends JpaRepository<Order, Long>, JpaSpecificationExecutor<Order> {
@@ -123,7 +124,8 @@ public interface OrderRepository extends JpaRepository<Order, Long>, JpaSpecific
                      "AND (:branchId IS NULL OR o.branch.id = :branchId)")
        long countByStatus(@Param("status") OrderStatus status, @Param("branchId") Long branchId);
 
-       @Query("SELECT o FROM Order o WHERE (:branchId IS NULL OR o.branch.id = :branchId) ORDER BY o.createdAt DESC")
+       @Query("SELECT o FROM Order o LEFT JOIN FETCH o.user " +
+                     "WHERE (:branchId IS NULL OR o.branch.id = :branchId) ORDER BY o.createdAt DESC")
        List<Order> findRecentOrders(@Param("branchId") Long branchId, Pageable pageable);
 
        List<Order> findAllByOrderByCreatedAtDesc();
@@ -131,6 +133,13 @@ public interface OrderRepository extends JpaRepository<Order, Long>, JpaSpecific
        @Query("SELECT COUNT(o) FROM Order o WHERE o.status <> com.zone.agri.entity.enums.OrderStatus.CANCELLED " +
                      "AND (:branchId IS NULL OR o.branch.id = :branchId)")
        long countAllOrdersExceptCancelled(@Param("branchId") Long branchId);
+
+       // Đếm luỹ kế tính đến 1 thời điểm — dùng để so sánh "Tổng đơn hàng" hôm nay với hôm qua.
+       @Query("SELECT COUNT(o) FROM Order o WHERE o.status <> com.zone.agri.entity.enums.OrderStatus.CANCELLED " +
+                     "AND o.createdAt <= :endDate " +
+                     "AND (:branchId IS NULL OR o.branch.id = :branchId)")
+       long countAllOrdersExceptCancelledBefore(@Param("endDate") LocalDateTime endDate,
+                     @Param("branchId") Long branchId);
 
        @Query("SELECT COUNT(o) FROM Order o WHERE o.status IN (com.zone.agri.entity.enums.OrderStatus.COMPLETED, com.zone.agri.entity.enums.OrderStatus.RECEIVED, com.zone.agri.entity.enums.OrderStatus.SHIPPING) "
                      +
@@ -159,6 +168,47 @@ public interface OrderRepository extends JpaRepository<Order, Long>, JpaSpecific
        default BigDecimal sumTotalRevenue(LocalDateTime startDate, LocalDateTime endDate, Long branchId) {
               return sumRecognizedFinalAmount(startDate, endDate, branchId);
        }
+
+       // Đơn hàng cũ (trước khi có luồng tách đơn theo chi nhánh) không có SubOrder nào —
+       // finalAmount của Order đã là số cuối cùng đúng (đã trừ giảm giá, đã gồm ship) nên dùng trực tiếp.
+       @Query("SELECT SUM(o.finalAmount) FROM Order o WHERE o.status IN (com.zone.agri.entity.enums.OrderStatus.COMPLETED, com.zone.agri.entity.enums.OrderStatus.RECEIVED, com.zone.agri.entity.enums.OrderStatus.SHIPPING) "
+                     +
+                     "AND o.subOrders IS EMPTY " +
+                     "AND o.createdAt BETWEEN :startDate AND :endDate " +
+                     "AND (:branchId IS NULL OR o.branch.id = :branchId)")
+       BigDecimal sumLegacyRevenue(@Param("startDate") LocalDateTime startDate,
+                     @Param("endDate") LocalDateTime endDate,
+                     @Param("branchId") Long branchId);
+
+       interface LegacyRevenueRow {
+              LocalDateTime getCreatedAt();
+
+              BigDecimal getFinalAmount();
+       }
+
+       // Trả về từng dòng thay vì 1 số tổng — cho phép tính "tổng đến hôm nay" và "tổng đến hôm qua"
+       // từ CÙNG 1 lần fetch (lọc theo createdAt trong Java), thay vì phải quét lại toàn bộ lịch sử
+       // 2 lần trên DB. Quan trọng vì DB chạy qua SSH tunnel từ xa, mỗi round-trip đều tốn độ trễ.
+       @Query("SELECT o.createdAt AS createdAt, COALESCE(o.finalAmount, 0) AS finalAmount " +
+                     "FROM Order o WHERE o.status IN (com.zone.agri.entity.enums.OrderStatus.COMPLETED, com.zone.agri.entity.enums.OrderStatus.RECEIVED, com.zone.agri.entity.enums.OrderStatus.SHIPPING) "
+                     +
+                     "AND o.subOrders IS EMPTY " +
+                     "AND o.createdAt BETWEEN :startDate AND :endDate " +
+                     "AND (:branchId IS NULL OR o.branch.id = :branchId)")
+       List<LegacyRevenueRow> findLegacyRevenueRows(@Param("startDate") LocalDateTime startDate,
+                     @Param("endDate") LocalDateTime endDate,
+                     @Param("branchId") Long branchId);
+
+       @Query("SELECT CAST(o.createdAt AS date) as date, SUM(o.finalAmount) as revenue, COUNT(o) as orderCount " +
+                     "FROM Order o WHERE o.status IN (com.zone.agri.entity.enums.OrderStatus.COMPLETED, com.zone.agri.entity.enums.OrderStatus.RECEIVED, com.zone.agri.entity.enums.OrderStatus.SHIPPING) "
+                     +
+                     "AND o.subOrders IS EMPTY " +
+                     "AND o.createdAt BETWEEN :startDate AND :endDate " +
+                     "AND (:branchId IS NULL OR o.branch.id = :branchId) " +
+                     "GROUP BY CAST(o.createdAt AS date)")
+       List<Object[]> getLegacyDailyStats(@Param("startDate") LocalDateTime startDate,
+                     @Param("endDate") LocalDateTime endDate,
+                     @Param("branchId") Long branchId);
 
        @Query("SELECT SUM(ABS(it.quantityChange) * i.importPrice) " +
                      "FROM Order o " +
@@ -262,8 +312,12 @@ public interface OrderRepository extends JpaRepository<Order, Long>, JpaSpecific
                       @Param("endDate") LocalDateTime endDate,
                       @Param("branchId") Long branchId);
 
+       // Chỉ tính đơn COD chưa đối soát — đúng như nhãn UI "Dòng tiền thu dự kiến (COD chưa đối
+       // soát)". Trước đây cộng mọi đơn UNPAID bất kể phương thức thanh toán, kể cả chuyển khoản
+       // chưa trả (không phải "sắp thu được tiền"), khiến ước tính dòng tiền vào bị thổi phồng.
        @Query("SELECT COALESCE(SUM(o.finalAmount), 0) FROM Order o " +
               "WHERE o.paymentStatus = com.zone.agri.entity.enums.PaymentStatus.UNPAID " +
+              "AND o.paymentMethod = com.zone.agri.entity.enums.PaymentMethod.COD " +
               "AND o.status NOT IN (com.zone.agri.entity.enums.OrderStatus.CANCELLED, com.zone.agri.entity.enums.OrderStatus.RETURNED) " +
               "AND (:branchId IS NULL OR o.branch.id = :branchId)")
        BigDecimal sumUnpaidOrdersAmount(@Param("branchId") Long branchId);
@@ -286,9 +340,13 @@ public interface OrderRepository extends JpaRepository<Order, Long>, JpaSpecific
             @Param("startDate") LocalDateTime startDate,
             @Param("branchId") Long branchId);
 
+    // JOIN FETCH user/branch — mapOrderToCashbookEntry() đọc order.getUser()/getBranch() cho
+    // mỗi dòng; thiếu fetch join gây N+1 lazy-load (1 query phụ mỗi đơn) khi sinh sổ quỹ.
     @Query("""
         SELECT o
         FROM Order o
+        LEFT JOIN FETCH o.user
+        LEFT JOIN FETCH o.branch
         WHERE o.paymentStatus = com.zone.agri.entity.enums.PaymentStatus.PAID
           AND o.status NOT IN (com.zone.agri.entity.enums.OrderStatus.CANCELLED, com.zone.agri.entity.enums.OrderStatus.RETURNED)
           AND (:branchId IS NULL OR o.branch.id = :branchId)
@@ -308,6 +366,8 @@ public interface OrderRepository extends JpaRepository<Order, Long>, JpaSpecific
     @Query("""
         SELECT o
         FROM Order o
+        LEFT JOIN FETCH o.user
+        LEFT JOIN FETCH o.branch
         WHERE o.paymentStatus = com.zone.agri.entity.enums.PaymentStatus.PAID
           AND o.status NOT IN (com.zone.agri.entity.enums.OrderStatus.CANCELLED, com.zone.agri.entity.enums.OrderStatus.RETURNED)
           AND (:branchId IS NULL OR o.branch.id = :branchId)
@@ -322,4 +382,35 @@ public interface OrderRepository extends JpaRepository<Order, Long>, JpaSpecific
     List<Order> findPaidLegacyOrdersBefore(
             @Param("endDate") LocalDateTime endDate,
             @Param("branchId") Long branchId);
+
+    interface CustomerDebtOrderProjection {
+        Long getCustomerId();
+
+        String getCustomerName();
+
+        String getCustomerPhone();
+
+        BigDecimal getFinalAmount();
+    }
+
+    // Công nợ khách hàng (đơn "cũ" không tách chi nhánh) — nợ nhị phân: đơn chưa PAID và chưa
+    // huỷ/trả thì tính đủ finalAmount là nợ, không có mức thanh toán một phần (hệ thống hiện chưa
+    // lưu vết thanh toán từng phần cho khách hàng, khác với sổ công nợ NCC).
+    @Query("""
+            SELECT o.user.id AS customerId,
+                   o.user.fullName AS customerName,
+                   o.user.phoneNumber AS customerPhone,
+                   COALESCE(o.finalAmount, 0) AS finalAmount
+            FROM Order o
+            WHERE o.user IS NOT NULL
+              AND o.paymentStatus IN :unpaidStatuses
+              AND o.status NOT IN (com.zone.agri.entity.enums.OrderStatus.CANCELLED, com.zone.agri.entity.enums.OrderStatus.RETURNED)
+              AND o.subOrders IS EMPTY
+              AND o.createdAt <= :endDate
+              AND (:branchId IS NULL OR o.branch.id = :branchId)
+            """)
+    List<CustomerDebtOrderProjection> findLegacyCustomerDebtRows(
+            @Param("endDate") LocalDateTime endDate,
+            @Param("branchId") Long branchId,
+            @Param("unpaidStatuses") List<PaymentStatus> unpaidStatuses);
 }
