@@ -239,7 +239,7 @@ public class BlogService {
 
             mentionName = resolveCommentAuthorName(parent.getUser());
             String mentionPrefix = "@" + mentionName;
-            if (!content.startsWith(mentionPrefix)) {
+            if (!content.startsWith("@")) {
                 content = mentionPrefix + " " + content;
             }
         }
