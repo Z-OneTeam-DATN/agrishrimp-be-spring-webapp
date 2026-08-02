@@ -166,3 +166,4 @@ gemini:
   generate-content-path: ${GEMINI_GENERATE_CONTENT_PATH:/v1beta/models}
   api-key: ${GEMINI_API_KEY:}
   model: ${GEMINI_MODEL:}
+  narrative-join-timeout-seconds: ${GEMINI_NARRATIVE_JOIN_TIMEOUT_SECONDS:20}
