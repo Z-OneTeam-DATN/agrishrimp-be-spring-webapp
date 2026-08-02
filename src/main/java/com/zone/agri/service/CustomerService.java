@@ -28,6 +28,7 @@ import com.zone.agri.entity.Customer;
 import com.zone.agri.entity.Role;
 import com.zone.agri.entity.User;
 import com.zone.agri.entity.UserAddress;
+import com.zone.agri.entity.enums.NotificationType;
 import com.zone.agri.entity.enums.AuthProvider;
 import com.zone.agri.entity.enums.CustomerStatus;
 import com.zone.agri.entity.enums.UserStatus;
@@ -62,6 +63,7 @@ public class CustomerService {
     private final UserAddressRepository userAddressRepository;
     private final OrderRepository orderRepository;
     private final BranchRepository branchRepository;
+    private final NotificationService notificationService;
 
     private record CustomerRiskAssessment(long settledOrders, double reputationScore, String riskLevel,
             boolean onlinePaymentOnly) {
@@ -447,6 +449,10 @@ public class CustomerService {
             } catch (Exception e) {
                 log.error("Loi gui mail canh bao: {}", e.getMessage());
             }
+            notificationService.sendNotification(userId, "Cảnh báo tỉ lệ nhận hàng thấp",
+                    "Tỉ lệ nhận hàng của bạn hiện ở mức " + String.format("%.1f", riskAssessment.reputationScore())
+                            + "%. Vui lòng chú ý nhận hàng đúng hẹn để tránh bị tạm khoá tài khoản.",
+                    NotificationType.SYSTEM, null);
         }
     }
 

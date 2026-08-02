@@ -27,6 +27,7 @@ public class OrderStatusSyncService {
     private final SubOrderRepository subOrderRepository;
     private final VoucherService voucherService;
     private final PayOSService payOSService;
+    private final NotificationService notificationService;
 
     @Lazy
     private final CustomerService customerService;
@@ -35,6 +36,7 @@ public class OrderStatusSyncService {
     public void syncMasterOrderStatus(Long orderId) {
         Order order = orderRepository.findById(orderId)
                 .orElseThrow(() -> new NotFoundException("Khong tim thay don hang tong"));
+        OrderStatus previousStatus = order.getStatus();
 
         List<SubOrder> allSubs = subOrderRepository.findByOrderId(orderId);
         if (allSubs.isEmpty()) {
@@ -90,6 +92,7 @@ public class OrderStatusSyncService {
                 && order.getUser() != null) {
             customerService.evaluateAndHandleCustomerReputation(order.getUser().getId());
         }
+        notificationService.notifyOrderStatusChange(order, previousStatus, nextStatus);
     }
 
     private void applyOrderStatus(Order order, OrderStatus status, LocalDateTime changedAt) {

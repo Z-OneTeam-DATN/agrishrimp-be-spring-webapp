@@ -24,6 +24,7 @@ public class ReviewService {
     private final ProductRepository productRepository;
     private final OrderRepository orderRepository;
     private final UserRepository userRepository;
+    private final NotificationService notificationService;
 
     @Transactional
     public ReviewResponse createReview(Long userId, ReviewRequest request) {
@@ -77,6 +78,8 @@ public class ReviewService {
 
         // 7. Cập nhật rating trung bình và số lượng đánh giá của sản phẩm
         updateProductRating(product);
+
+        notificationService.notifyAdminsNewReviewPosted(savedReview);
 
         return mapToResponse(savedReview);
     }

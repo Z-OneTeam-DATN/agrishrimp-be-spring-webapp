@@ -39,6 +39,7 @@ public class PurchaseRequestService {
     private final EmailService emailService;
     private final SubOrderRepository subOrderRepository;
     private final InventoryTransferService inventoryTransferService;
+    private final NotificationService notificationService;
 
     // ─────────────────────────────────────────────────────────────────────────
     // HELPER
@@ -354,6 +355,10 @@ public class PurchaseRequestService {
             pr.setApprovedAt(LocalDateTime.now());
         }
         pr = purchaseRequestRepository.save(pr);
+
+        if (pr.getStatus() == PurchaseRequestStatus.PENDING_APPROVAL) {
+            notificationService.notifyPurchaseRequestNeedsApproval(pr);
+        }
 
         return mapToResponse(pr);
     }

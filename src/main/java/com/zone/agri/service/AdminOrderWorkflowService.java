@@ -29,6 +29,7 @@ public class AdminOrderWorkflowService {
 
     private final OrderRepository orderRepository;
     private final OrderInventoryReservationService orderInventoryReservationService;
+    private final NotificationService notificationService;
 
     @Transactional
     public void approvePackingAndShip(Long orderId) {
@@ -61,5 +62,6 @@ public class AdminOrderWorkflowService {
                 "Xuat kho don hang " + order.getCode() + " khi admin chuyen sang giao hang");
         order.setStatus(OrderStatus.SHIPPING);
         orderRepository.save(order);
+        notificationService.notifyOrderStatusChange(order, currentStatus, OrderStatus.SHIPPING);
     }
 }
