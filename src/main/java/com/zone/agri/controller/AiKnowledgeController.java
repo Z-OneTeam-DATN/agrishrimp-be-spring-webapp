@@ -137,13 +137,13 @@ public class AiKnowledgeController {
     }
 
     @GetMapping("/config")
-    @RequirePermission("AI_KNOWLEDGE_VIEW")
+    @RequirePermission({"AI_KNOWLEDGE_VIEW", "AI_KNOWLEDGE_APPROVE"})
     public ResponseEntity<AiKnowledgeChatConfigResponse> getConfig() {
         return ResponseEntity.ok(aiKnowledgeService.getChatConfig());
     }
 
     @PutMapping("/config")
-    @RequirePermission("AI_KNOWLEDGE_UPDATE")
+    @RequirePermission({"AI_KNOWLEDGE_UPDATE", "AI_KNOWLEDGE_APPROVE"})
     public ResponseEntity<AiKnowledgeChatConfigResponse> updateConfig(@RequestBody AiKnowledgeChatConfigRequest request) {
         return ResponseEntity.ok(aiKnowledgeService.updateChatConfig(request));
     }
