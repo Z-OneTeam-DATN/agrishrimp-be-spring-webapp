@@ -826,7 +826,7 @@ public class AiKnowledgeService {
         session.setTurnCount(session.getTurnCount() + 1);
         chatClarifySessionRepository.save(session);
 
-        String answerHtml = buildFreeConsultAnswerHtml(geminiText, config);
+        String answerHtml = buildFreeConsultAnswerHtml(geminiText, config, isGreetingOnly(latestFarmerText));
         persistChatLog(session.getUserId(), session.getSessionId(), session.getSourceChannel(),
                 latestFarmerText, answerHtml, false, null, null, null);
 
@@ -839,9 +839,28 @@ public class AiKnowledgeService {
      * code tu them (khong phu thuoc Gemini co nho nhac hay khong) — day la guardrail chinh cua che
      * do tu van mo: khong bao gio de nong dan hieu day la phac do da duyet.
      */
-    private String buildFreeConsultAnswerHtml(String geminiText, AiKnowledgeChatConfig config) {
+    private static final Set<String> GREETING_ONLY_PHRASES = Set.of(
+            "xin chao", "chao", "chao ban", "chao bac", "chao anh", "chao chi",
+            "chao bac si", "chao bac si tom", "hi", "hello", "hey", "alo");
+
+    /**
+     * Loi chao suong (khong kem trieu chung/cau hoi gi) thi bo qua dong khuyen cao lien he ky su —
+     * dong do chi hop ly khi Gemini vua dua ra nhan dinh/goi y benh dua tren dau hieu nguoi dung mo
+     * ta, khong phai khi ca cuoc hoi thoai moi chi la loi chao. Doi sanh CHINH XAC sau khi chuan hoa
+     * (bo dau, ha chu, bo ky tu la) de tranh bo sot dong khuyen cao voi nhung tin nhan vua chao vua
+     * co trieu chung thuc, vd "chao ban, tom bi do dau" van giu nguyen khuyen cao.
+     */
+    private boolean isGreetingOnly(String farmerText) {
+        return GREETING_ONLY_PHRASES.contains(AiKnowledgeTextUtils.normalize(farmerText));
+    }
+
+    private String buildFreeConsultAnswerHtml(String geminiText, AiKnowledgeChatConfig config, boolean isGreetingOnly) {
         StringBuilder builder = new StringBuilder();
         builder.append("<p>").append(escapeHtml(geminiText).replace("\n", "<br>")).append("</p>");
+
+        if (isGreetingOnly) {
+            return builder.toString();
+        }
 
         String contactName = trimToNull(config.getFallbackContactName());
         String contactPhone = trimToNull(config.getFallbackContactPhone());

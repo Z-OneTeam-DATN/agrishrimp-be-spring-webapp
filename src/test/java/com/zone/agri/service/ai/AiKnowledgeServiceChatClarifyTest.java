@@ -581,6 +581,17 @@ class AiKnowledgeServiceChatClarifyTest {
     }
 
     @Test
+    void freeConsult_greetingOnlyMessage_skipsEngineerContactFooter() {
+        when(geminiClarifyClient.freeConsult(anyList(), any(), any()))
+                .thenReturn("Chao ban! Minh la Bac si Tom day, ao tom nha minh hom nay khoe khong?");
+
+        AiChatResponse response = chat("Xin chào", "sess-" + UUID.randomUUID(), null);
+
+        assertThat(response.getReply()).contains("Bac si Tom day");
+        assertThat(response.getReply()).doesNotContain("chưa được kỹ sư xác nhận");
+    }
+
+    @Test
     void freeConsult_createsReviewCase_forEngineerToConsiderAddingKnowledge() {
         long before = reviewCaseRepository.count();
         when(geminiClarifyClient.freeConsult(anyList(), any(), any())).thenReturn("Mot vai kha nang...");
