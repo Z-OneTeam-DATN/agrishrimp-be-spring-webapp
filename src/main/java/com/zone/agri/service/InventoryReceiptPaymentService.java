@@ -10,6 +10,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.zone.agri.common.AuthUtils;
+import com.zone.agri.common.RoleUtils;
 import com.zone.agri.dto.request.inventory.ReceiptPaymentRequest;
 import com.zone.agri.dto.response.inventory.ReceiptPaymentResponse;
 import com.zone.agri.entity.InventoryNote;
@@ -44,11 +45,24 @@ public class InventoryReceiptPaymentService {
         return userRepository.findByEmail(auth.getName()).orElse(null);
     }
 
+    private boolean canReadReceiptsAcrossBranches() {
+        com.zone.agri.dto.response.user.UserDetail user = AuthUtils.getUserDetail();
+        String roleSlug = user != null && user.getRole() != null ? user.getRole().getSlug() : null;
+        return RoleUtils.isAdminLikeRole(roleSlug)
+                || RoleUtils.hasAdminLikeAuthority(AuthUtils.getAuthorities());
+    }
+
+    private void assertReceiptReadAccess(InventoryNote note) {
+        if (!canReadReceiptsAcrossBranches()) {
+            warehouseContext.assertAccess(note.getBranch().getId());
+        }
+    }
+
     @Transactional(readOnly = true)
     public List<ReceiptPaymentResponse> getReceiptPayments(Long receiptId) {
         InventoryNote note = inventoryNoteRepository.findById(receiptId)
                 .orElseThrow(() -> new NotFoundException("Không tìm thấy phiếu nhập ID: " + receiptId));
-        warehouseContext.assertAccess(note.getBranch().getId());
+        assertReceiptReadAccess(note);
 
         return inventoryReceiptPaymentRepository.findByReceiptIdWithDetails(receiptId).stream()
                 .map(this::mapToResponse)
