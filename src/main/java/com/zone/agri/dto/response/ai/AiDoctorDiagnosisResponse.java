@@ -42,6 +42,14 @@ public class AiDoctorDiagnosisResponse {
     private String purchaseUrl;
 
     /**
+     * Narrative HTML: mô tả ảnh của Gemini + câu trích dẫn độ tin cậy/tên bệnh từ YOLO
+     * do code ghép sẵn ở BE. Chỉ set ở response của POST /diagnosis — EPHEMERAL, không
+     * lưu vào AiDoctorDiagnosisHistory nên luôn absent khi đọc lại qua GET /diagnosis/{id}
+     * hoặc GET /history. An toàn cho dangerouslySetInnerHTML, cùng hợp đồng với AiChatResponse.reply.
+     */
+    private String aiDescription;
+
+    /**
      * Thời điểm lưu history.
      * Null với POST response (excluded by NON_NULL).
      * Set với GET /diagnosis/{id} response.

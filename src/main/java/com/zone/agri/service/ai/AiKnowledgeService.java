@@ -920,7 +920,8 @@ public class AiKnowledgeService {
             String diagnosisImageUrl,
             String userSymptoms,
             String sessionId,
-            Long userId) {
+            Long userId,
+            String geminiImageDescription) {
         ApprovedKnowledgeSnapshot snapshot = getApprovedSnapshot();
         PreparedDisease directDisease = findDiseaseByPrediction(finalPrediction, snapshot);
         double confidence = finalPrediction.getConfidencePercent() == null ? 0D : finalPrediction.getConfidencePercent() / 100D;
@@ -947,7 +948,8 @@ public class AiKnowledgeService {
                         diagnosisImageUrl,
                         resolvedDisease,
                         userSymptoms,
-                        "DISEASE");
+                        "DISEASE",
+                        geminiImageDescription);
             }
 
             createReviewCase(
@@ -962,7 +964,7 @@ public class AiKnowledgeService {
                     diseaseScore,
                     AiReviewCaseReason.LOW_CONFIDENCE);
 
-            return buildLowConfidenceDiagnosisResponse(predictResponse, finalPrediction, diagnosisImageUrl);
+            return buildLowConfidenceDiagnosisResponse(predictResponse, finalPrediction, diagnosisImageUrl, geminiImageDescription);
         }
 
         createReviewCase(
@@ -976,7 +978,7 @@ public class AiKnowledgeService {
                 null,
                 confidence,
                 AiReviewCaseReason.NO_KNOWLEDGE_MATCH);
-        return buildLowConfidenceDiagnosisResponse(predictResponse, finalPrediction, diagnosisImageUrl);
+        return buildLowConfidenceDiagnosisResponse(predictResponse, finalPrediction, diagnosisImageUrl, geminiImageDescription);
     }
 
     @Transactional(readOnly = true)
@@ -1481,7 +1483,8 @@ public class AiKnowledgeService {
             String diagnosisImageUrl,
             PreparedDisease disease,
             String userSymptoms,
-            String status) {
+            String status,
+            String geminiImageDescription) {
         return AiDoctorDiagnosisResponse.builder()
                 .diagnosisId("diag_" + UUID.randomUUID().toString().replace("-", "").substring(0, 12))
                 .status(status)
@@ -1497,13 +1500,15 @@ public class AiKnowledgeService {
                 })))
                 .signsSummary(disease.entity().getSignsSummary())
                 .treatmentStages(toTreatmentStageResponses(disease.entity().getTreatmentStagesJson()))
+                .aiDescription(buildDiagnosisNarrativeHtml(geminiImageDescription, finalPrediction, disease, false))
                 .build();
     }
 
     private AiDoctorDiagnosisResponse buildLowConfidenceDiagnosisResponse(
             AiPredictResponse predictResponse,
             AiPredictionItem finalPrediction,
-            String diagnosisImageUrl) {
+            String diagnosisImageUrl,
+            String geminiImageDescription) {
         return AiDoctorDiagnosisResponse.builder()
                 .diagnosisId("diag_" + UUID.randomUUID().toString().replace("-", "").substring(0, 12))
                 .status("DISEASE")
@@ -1519,6 +1524,7 @@ public class AiKnowledgeService {
                         + "Vui lòng mô tả rõ các biểu hiện như giảm ăn, đường ruột, màu gan tụy hoặc tình trạng bơi lờ đờ.")
                 .treatmentStages(Collections.emptyList())
                 .needsClarification(true)
+                .aiDescription(buildDiagnosisNarrativeHtml(geminiImageDescription, finalPrediction, null, true))
                 .build();
     }
 
@@ -1602,6 +1608,43 @@ public class AiKnowledgeService {
                 .limit(4)
                 .map(AiDoctorChatPromptResponse::getQuestion)
                 .toList();
+    }
+
+    /**
+     * Ghep 1 doan HTML tu nhien cho luong chan doan qua anh (YOLO): mo ta cua Gemini (neu goi thanh
+     * cong) + 1 cau trich dan % tin cay/ten benh do CODE tu dung (khong bao gio giao cho LLM), roi
+     * moi toi noi dung an toan da co san — hoac phac do da duyet nguyen ven (khong needsClarification)
+     * hoac cau chuyen tiep tinh (needsClarification) khong kem dieu tri. Day la lop trinh bay them,
+     * khong thay doi bat ky logic nguong/quyet dinh nao cua enrichDiagnosis.
+     */
+    private String buildDiagnosisNarrativeHtml(
+            String geminiImageDescription,
+            AiPredictionItem finalPrediction,
+            PreparedDisease resolvedDisease,
+            boolean needsClarification) {
+        StringBuilder builder = new StringBuilder();
+
+        if (trimToNull(geminiImageDescription) != null) {
+            builder.append("<p>").append(escapeHtml(geminiImageDescription).replace("\n", "<br>")).append("</p>");
+        }
+
+        String citedName = resolvedDisease != null
+                ? resolvedDisease.entity().getNameVi()
+                : finalPrediction.getVietnameseName();
+        Double confidencePercent = finalPrediction.getConfidencePercent();
+        if (trimToNull(citedName) != null && confidencePercent != null) {
+            builder.append("<p>Dựa trên mô hình nhận diện, mình nghi ngờ khoảng ")
+                    .append(String.format("%.0f", confidencePercent))
+                    .append("% khả năng đây là <strong>").append(escapeHtml(citedName)).append("</strong>.</p>");
+        }
+
+        if (needsClarification) {
+            builder.append("<p>Để chắc chắn hơn, bạn mô tả kỹ thêm dấu hiệu giúp mình nhé.</p>");
+        } else if (resolvedDisease != null) {
+            builder.append(buildDiseaseAnswerHtml(resolvedDisease));
+        }
+
+        return builder.toString();
     }
 
     private String buildDiseaseAnswerHtml(PreparedDisease disease) {

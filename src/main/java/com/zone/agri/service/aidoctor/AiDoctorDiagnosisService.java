@@ -2,6 +2,7 @@ package com.zone.agri.service.aidoctor;
 
 import com.zone.agri.common.CloudinaryService;
 import com.zone.agri.client.ai.AiDiagnosisClient;
+import com.zone.agri.client.ai.GeminiClarifyClient;
 import com.zone.agri.dto.ai.AiPredictResponse;
 import com.zone.agri.dto.ai.AiPredictionItem;
 import com.zone.agri.dto.response.ai.AiDoctorDiagnosisResponse;
@@ -13,13 +14,17 @@ import com.zone.agri.repository.AiDoctorDiagnosisHistoryRepository;
 import com.zone.agri.service.ai.AiKnowledgeService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.util.Base64;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 /**
@@ -38,9 +43,16 @@ public class AiDoctorDiagnosisService {
     private final AiDoctorDiagnosisHistoryService diagnosisHistoryService;
     private final AiDoctorDiagnosisHistoryRepository historyRepository;
     private final AiKnowledgeService aiKnowledgeService;
+    private final GeminiClarifyClient geminiClarifyClient;
 
     private static final long MAX_IMAGE_SIZE_BYTES = 5_000_000L;
     private static final int MAX_SYMPTOMS_LENGTH = 500;
+
+    // Nam duoi read-timeout rieng cua Gemini (45s) de con du gio cho YOLO + Cloudinary trong tran
+    // 90s timeout /diagnosis phia FE — khong de mot cuoc goi Gemini cham lam FE tu bo request du
+    // BE cuoi cung van se tra ket qua dung.
+    @Value("${gemini.narrative-join-timeout-seconds:20}")
+    private int narrativeJoinTimeoutSeconds;
 
     public AiDoctorDiagnosisResponse diagnose(MultipartFile image, String userSymptoms, Long userId) {
         return diagnose(image, userSymptoms, userId, null);
@@ -66,6 +78,11 @@ public class AiDoctorDiagnosisService {
 
         log.info("[AiDoctor] traceId={} start: userId={}, file={}, symptomsLen={}",
                 traceId, userId, image.getOriginalFilename(), normalizedSymptoms.length());
+
+        // 1a. Bat song song mo ta anh tu Gemini ngay tu dau (doc bytes 1 lan tren thread hien tai
+        // roi truyen byte[] thuan vao task async — khong doc MultipartFile tu thread khac, vi
+        // AiDiagnosisClient.predict(image) cung dang doc chinh MultipartFile nay dong thoi ben duoi).
+        CompletableFuture<String> narrativeFuture = kickOffNarrativeDescription(image, normalizedSymptoms, traceId);
 
         // 2. AI predict-image (fail → toàn bộ request fail, không graceful)
         AiPredictResponse predictResponse = aiDiagnosisClient.predict(image);
@@ -104,13 +121,16 @@ public class AiDoctorDiagnosisService {
         log.info("[AiDoctor] traceId={} predict OK: diseaseCode={}, confidence={}% ",
                 traceId, diseaseCode, finalPrediction.getConfidencePercent());
 
+        String narrativeText = resolveNarrativeGracefully(narrativeFuture, traceId);
+
         AiDoctorDiagnosisResponse response = aiKnowledgeService.enrichDiagnosis(
                 predictResponse,
                 finalPrediction,
                 diagnosisImageUrl,
                 normalizedSymptoms,
                 sessionId != null ? sessionId : "diag_" + traceId,
-                userId);
+                userId,
+                narrativeText);
 
         if (userId != null && "DISEASE".equalsIgnoreCase(response.getStatus())) {
             try {
@@ -154,6 +174,34 @@ public class AiDoctorDiagnosisService {
         log.info("[AiDoctor-Prescription] diagnosisId={}, diseaseCode={}, stages={}",
                 diagnosisId, diseaseCode, response.getTreatmentStages() != null ? response.getTreatmentStages().size() : 0);
         return response;
+    }
+
+    private CompletableFuture<String> kickOffNarrativeDescription(MultipartFile image, String userSymptoms, String traceId) {
+        byte[] imageBytes;
+        String contentType;
+        try {
+            imageBytes = image.getBytes();
+            contentType = image.getContentType();
+        } catch (Exception e) {
+            log.warn("[AiDoctor] traceId={} doc bytes anh cho Gemini narrative fail (graceful): {}",
+                    traceId, e.getMessage());
+            return CompletableFuture.completedFuture(null);
+        }
+
+        String imageBase64 = Base64.getEncoder().encodeToString(imageBytes);
+        String mimeType = (contentType != null && !contentType.isBlank()) ? contentType : "image/jpeg";
+        return CompletableFuture.supplyAsync(
+                () -> geminiClarifyClient.describeImage(userSymptoms, imageBase64, mimeType));
+    }
+
+    private String resolveNarrativeGracefully(CompletableFuture<String> narrativeFuture, String traceId) {
+        try {
+            return narrativeFuture.get(narrativeJoinTimeoutSeconds, TimeUnit.SECONDS);
+        } catch (Exception e) {
+            log.warn("[AiDoctor] traceId={} Gemini narrative fail/timeout (graceful): {}",
+                    traceId, e.getMessage());
+            return null;
+        }
     }
 
     private String uploadAnnotatedImageGracefully(AiPredictResponse predictResponse, String traceId) {
