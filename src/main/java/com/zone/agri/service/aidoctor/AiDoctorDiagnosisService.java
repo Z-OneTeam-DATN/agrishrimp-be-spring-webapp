@@ -110,18 +110,23 @@ public class AiDoctorDiagnosisService {
         }
 
         AiPredictionItem finalPrediction = predictResponse.getFinalPrediction();
+        String narrativeText = resolveNarrativeGracefully(narrativeFuture, traceId);
 
         if (finalPrediction == null || finalPrediction.getDiseaseCode() == null) {
-            log.warn("[AiDoctor] traceId={} AI không nhận ra bệnh", traceId);
-            throw new BadRequestException(
-                    "Không thể nhận dạng bệnh từ ảnh. Vui lòng chụp ảnh rõ hơn và thử lại.");
+            log.warn("[AiDoctor] traceId={} AI khong nhan ra benh, chuyen sang goi y Gemini tu do", traceId);
+            return aiKnowledgeService.buildUnrecognizedDiagnosisResponse(
+                    predictResponse,
+                    finalPrediction,
+                    diagnosisImageUrl,
+                    normalizedSymptoms,
+                    sessionId != null ? sessionId : "diag_" + traceId,
+                    userId,
+                    narrativeText);
         }
 
         String diseaseCode = finalPrediction.getDiseaseCode();
         log.info("[AiDoctor] traceId={} predict OK: diseaseCode={}, confidence={}% ",
                 traceId, diseaseCode, finalPrediction.getConfidencePercent());
-
-        String narrativeText = resolveNarrativeGracefully(narrativeFuture, traceId);
 
         AiDoctorDiagnosisResponse response = aiKnowledgeService.enrichDiagnosis(
                 predictResponse,

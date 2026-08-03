@@ -236,6 +236,37 @@ class AiDoctorDiagnosisServiceTest {
     }
 
     // =========================================================
+    // 4b. finalPrediction null (YOLO khong nhan ra benh cu the tu anh) -> goi Gemini goi y tu do
+    // (nhu free-consult) + luon kem lien he ky su, thay vi throw BadRequestException nhu truoc.
+    // =========================================================
+
+    @Test
+    void finalPredictionNull_callsGeminiFreeSuggestion_returnsUnrecognizedStatus_insteadOfThrowing() {
+        when(aiDiagnosisClient.predict(any())).thenReturn(predictResponse("DISEASE", null));
+        when(geminiClarifyClient.describeImage(any(), any(), any())).thenReturn("Anh mo, kho nhan dinh ro.");
+        when(geminiClarifyClient.freeConsult(any(), any(), any()))
+                .thenReturn("Co the do moi truong bien dong, ban theo doi them vai ngay nhe.");
+
+        AiDoctorDiagnosisResponse response = aiDoctorDiagnosisService.diagnose(fakeImage(), "", 1L, "sess-8");
+
+        assertThat(response.getStatus()).isEqualTo("UNRECOGNIZED");
+        assertThat(response.getAiDescription()).contains("Co the do moi truong bien dong, ban theo doi them vai ngay nhe.");
+        assertThat(response.getAiDescription()).contains("chưa được kỹ sư xác nhận");
+    }
+
+    @Test
+    void finalPredictionNull_geminiSuggestionFails_stillReturnsGracefully() {
+        when(aiDiagnosisClient.predict(any())).thenReturn(predictResponse("DISEASE", null));
+        when(geminiClarifyClient.freeConsult(any(), any(), any()))
+                .thenThrow(new RuntimeException("simulated Gemini outage"));
+
+        AiDoctorDiagnosisResponse response = aiDoctorDiagnosisService.diagnose(fakeImage(), "", 1L, "sess-9");
+
+        assertThat(response.getStatus()).isEqualTo("UNRECOGNIZED");
+        assertThat(response.getAiDescription()).isNotBlank();
+    }
+
+    // =========================================================
     // 5) History van luu dung cac cot nhu truoc - khong co cot moi nao cho narrative (EPHEMERAL)
     // =========================================================
 

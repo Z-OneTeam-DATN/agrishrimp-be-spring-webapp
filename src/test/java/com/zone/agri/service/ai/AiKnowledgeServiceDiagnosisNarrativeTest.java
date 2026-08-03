@@ -1,6 +1,8 @@
 package com.zone.agri.service.ai;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zone.agri.client.ai.GeminiClarifyClient;
@@ -173,11 +175,15 @@ class AiKnowledgeServiceDiagnosisNarrativeTest {
     }
 
     // =========================================================
-    // 3) Khong khop bat ky tri thuc nao: mo ta rot ve dung ten/confidence tho cua YOLO
+    // 3) Khong khop bat ky tri thuc nao: khong con la needsClarification chung chung nua — goi
+    // Gemini goi y tu do (nhu free-consult) + luon kem lien he ky su, tra ve nhu 1 cau tra loi cuoi.
     // =========================================================
 
     @Test
-    void noKnowledgeMatchAtAll_aiDescriptionFallsBackToRawYoloNameAndConfidence() {
+    void noKnowledgeMatchAtAll_callsGeminiFreeSuggestion_returnsUnrecognizedStatus() {
+        when(geminiClarifyClient.freeConsult(any(), any(), any()))
+                .thenReturn("Co the do soc moi truong hoac nhiem khuan ngoai da.");
+
         AiPredictionItem finalPrediction = prediction("DIS_NONE_XYZ", "Benh khong xac dinh XYZ", "Unknown XYZ", 55.0D);
 
         long reviewCasesBefore = reviewCaseRepository.count();
@@ -185,13 +191,31 @@ class AiKnowledgeServiceDiagnosisNarrativeTest {
                 predictResponse(finalPrediction), finalPrediction, "http://img/3.jpg", "",
                 "sess-" + System.nanoTime(), 1L, "Anh khong ro nhieu chi tiet.");
 
-        assertThat(response.getNeedsClarification()).isTrue();
+        assertThat(response.getStatus()).isEqualTo("UNRECOGNIZED");
+        assertThat(response.getNeedsClarification()).isNull();
         assertThat(response.getAiDescription()).contains("Anh khong ro nhieu chi tiet.");
         assertThat(response.getAiDescription()).contains("55%");
         assertThat(response.getAiDescription()).contains("Benh khong xac dinh XYZ");
+        assertThat(response.getAiDescription()).contains("Co the do soc moi truong hoac nhiem khuan ngoai da.");
+        assertThat(response.getAiDescription()).contains("chưa được kỹ sư xác nhận");
         assertThat(reviewCaseRepository.count()).isEqualTo(reviewCasesBefore + 1);
         AiKnowledgeReviewCase latest = reviewCaseRepository.findTop100ByOrderByCreatedAtDesc().get(0);
         assertThat(latest.getReason()).isEqualTo(AiReviewCaseReason.NO_KNOWLEDGE_MATCH);
+    }
+
+    @Test
+    void noKnowledgeMatchAtAll_geminiSuggestionFails_gracefullyFallsBackToConfiguredMessage() {
+        when(geminiClarifyClient.freeConsult(any(), any(), any()))
+                .thenThrow(new RuntimeException("simulated Gemini outage"));
+
+        AiPredictionItem finalPrediction = prediction("DIS_NONE_FAIL", "Benh khong xac dinh FAIL", "Unknown FAIL", 33.0D);
+
+        AiDoctorDiagnosisResponse response = aiKnowledgeService.enrichDiagnosis(
+                predictResponse(finalPrediction), finalPrediction, "http://img/3b.jpg", "",
+                "sess-" + System.nanoTime(), 1L, null);
+
+        assertThat(response.getStatus()).isEqualTo("UNRECOGNIZED");
+        assertThat(response.getAiDescription()).isNotBlank();
     }
 
     // =========================================================

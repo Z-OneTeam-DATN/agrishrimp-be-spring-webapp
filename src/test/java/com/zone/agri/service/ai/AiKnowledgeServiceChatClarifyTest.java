@@ -226,6 +226,21 @@ class AiKnowledgeServiceChatClarifyTest {
     }
 
     @Test
+    void clearDirectMatch_neverLeaksTreatmentProtocol_onlyInvitesImage() throws Exception {
+        seedDiseaseWithProtocol("DIS_D", "Benh D", "directkw", 0.3D);
+
+        String sessionId = "sess-" + UUID.randomUUID();
+        AiChatResponse response = chat("tom bi directkw", sessionId, null);
+
+        assertThat(response.getReply()).contains("Benh D");
+        assertThat(response.getReply()).contains("Dau hieu dac trung cua Benh D");
+        assertThat(response.getReply()).doesNotContain(
+                "Giai doan 1: On dinh moi truong", "Giam soc cho tom", "Tang cuong oxy hoa tan",
+                "Vi sinh xu ly day ao", "Moi truong bien dong", "Mat do nuoi qua cao");
+        assertThat(response.getReply()).contains("gửi kèm 1 tấm ảnh");
+    }
+
+    @Test
     void continueClarify_appendsFarmerAnswer_thenDecides() {
         seedDisease("DIS_A", "Benh A", "ambigkw", 0.5D);
         seedDisease("DIS_B", "Benh B", "ambigkw", 0.5D);
@@ -367,22 +382,21 @@ class AiKnowledgeServiceChatClarifyTest {
     }
 
     @Test
-    void geminiDecision_finalAnswerUsesExactApprovedProtocol_neverLlmGeneratedTreatmentText() throws Exception {
+    void geminiDecision_neverLeaksTreatmentProtocol_onlyInvitesImageToUnlockIt() throws Exception {
         seedDiseaseWithProtocol("DIS_A", "Benh A", "ambigkw", 0.5D);
         seedDisease("DIS_B", "Benh B", "ambigkw", 0.5D);
         // Gemini CHI duoc phep tra ve diseaseCode (schema-locked: responseType/questionText/
-        // diseaseCode) — khong co truong nao de no tu viet phac do. Neu he thong lo dua van ban
-        // cua Gemini vao phan phac do thi test nay se fail vi khong tim thay dung noi dung DB.
+        // diseaseCode) — khong co truong nao de no tu viet phac do. Du Gemini da DECIDED, chat chu
+        // KHONG BAO GIO duoc tu lo phac do — phai co anh di qua YOLO/enrichDiagnosis moi mo khoa.
         when(geminiClarifyClient.clarify(anyList(), anyList(), any(), any())).thenReturn(decision("DIS_A"));
 
         AiChatResponse response = chat("tom bi ambigkw hom nay", "sess-" + UUID.randomUUID(), null);
 
-        assertThat(response.getReply()).contains("Giai doan 1: On dinh moi truong");
-        assertThat(response.getReply()).contains("Giam soc cho tom");
-        assertThat(response.getReply()).contains("Tang cuong oxy hoa tan");
-        assertThat(response.getReply()).contains("Vi sinh xu ly day ao");
-        assertThat(response.getReply()).contains("Moi truong bien dong");
-        assertThat(response.getReply()).contains("Mat do nuoi qua cao");
+        assertThat(response.getReply()).contains("Benh A");
+        assertThat(response.getReply()).doesNotContain(
+                "Giai doan 1: On dinh moi truong", "Giam soc cho tom", "Tang cuong oxy hoa tan",
+                "Vi sinh xu ly day ao", "Moi truong bien dong", "Mat do nuoi qua cao");
+        assertThat(response.getReply()).contains("gửi kèm 1 tấm ảnh");
     }
 
     // =========================================================
