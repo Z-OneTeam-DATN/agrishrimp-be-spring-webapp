@@ -76,27 +76,27 @@ public class ProfitLossInsightService {
                 "REVENUE",
                 safe(current.getGrossRevenue()),
                 safe(previous.getGrossRevenue()),
-                "Doanh thu goc tien hang duoc ghi nhan trong ky."));
+                "Doanh thu gốc tiền hàng được ghi nhận trong kỳ."));
         items.add(buildItem(
                 "COGS",
                 safe(current.getCogs()),
                 safe(previous.getCogs()),
-                "Gia von hang ban da ghi nhan theo cac don da phat sinh doanh thu."));
+                "Giá vốn hàng bán đã ghi nhận theo các đơn đã phát sinh doanh thu."));
         items.add(buildItem(
                 "SHIPPING",
                 netShippingImpact(current),
                 netShippingImpact(previous),
-                "Tac dong rong tu phi ship thu khach tru phi ship hoan tra."));
+                "Tác động ròng từ phí ship thu khách trừ phí ship hoàn trả."));
         items.add(buildItem(
                 "DISCOUNT",
                 netDiscountImpact(current),
                 netDiscountImpact(previous),
-                "Tac dong rong tu chiet khau sau khi cong lai phan duoc hoan."));
+                "Tác động ròng từ chiết khấu sau khi cộng lại phần được hoàn."));
         items.add(buildItem(
                 "RETURNS",
                 safe(current.getReturnedGoods()),
                 safe(previous.getReturnedGoods()),
-                "Gia tri hang ban bi tra lai lam giam hieu qua loi nhuan."));
+                "Giá trị hàng bán bị trả lại làm giảm hiệu quả lợi nhuận."));
         return items;
     }
 
@@ -124,27 +124,27 @@ public class ProfitLossInsightService {
         List<String> warnings = new ArrayList<>();
 
         if (current.getNetRevenue() == null || current.getNetRevenue().compareTo(BigDecimal.ZERO) <= 0) {
-            warnings.add("Doanh thu thuan khong duong, can kiem tra doanh thu ghi nhan va cac khoan giam tru.");
+            warnings.add("Doanh thu thuần không dương, cần kiểm tra doanh thu ghi nhận và các khoản giảm trừ.");
         }
 
         if (STATUS_WARNING.equals(cogsRatioStatus)) {
             warnings.add(String.format(
-                    "Ty le gia von/doanh thu thuan dang o muc %s%%, vuot nguong canh bao.",
+                    "Tỷ lệ giá vốn/doanh thu thuần đang ở mức %s%%, vượt ngưỡng cảnh báo.",
                     toDisplayNumber(cogsRatio)));
         }
 
         if (STATUS_WARNING.equals(returnRatioStatus)) {
             warnings.add(String.format(
-                    "Ty le hang tra lai dang o muc %s%%, can ra soat chat luong don hang va van hanh giao nhan.",
+                    "Tỷ lệ hàng trả lại đang ở mức %s%%, cần rà soát chất lượng đơn hàng và vận hành giao nhận.",
                     toDisplayNumber(returnRatio)));
         }
 
         if (safe(current.getNetProfit()).compareTo(BigDecimal.ZERO) < 0) {
-            warnings.add("Loi nhuan rong dang am trong ky hien tai.");
+            warnings.add("Lợi nhuận ròng đang âm trong kỳ hiện tại.");
         }
 
         if (hasBaselineData(previous) && safe(current.getNetProfit()).compareTo(safe(previous.getNetProfit())) < 0) {
-            warnings.add("Loi nhuan rong giam so voi ky truoc.");
+            warnings.add("Lợi nhuận ròng giảm so với kỳ trước.");
         }
 
         return warnings;
