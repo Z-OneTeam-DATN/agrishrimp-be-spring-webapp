@@ -5,17 +5,22 @@ import com.zone.agri.dto.ai.AiChatResponse;
 import com.zone.agri.dto.request.ai.AiDoctorChatRequest;
 import com.zone.agri.dto.request.ai.AiDoctorClarifyRequest;
 import com.zone.agri.dto.response.ai.AiDoctorClarifyResponse;
+import com.zone.agri.dto.response.ai.AiDoctorDailyRecordDetailResponse;
+import com.zone.agri.dto.response.ai.AiDoctorDailyRecordListResponse;
 import com.zone.agri.dto.response.ai.AiDoctorDiagnosisResponse;
 import com.zone.agri.dto.response.ai.AiDoctorHistoryListResponse;
 import com.zone.agri.dto.response.user.UserDetail;
 import com.zone.agri.exception.CustomAuthenticationException;
 import com.zone.agri.service.ai.AiKnowledgeService;
 import com.zone.agri.service.aidoctor.AiDoctorClarifyService;
+import com.zone.agri.service.aidoctor.AiDoctorDailyRecordService;
 import com.zone.agri.service.aidoctor.AiDoctorDiagnosisHistoryService;
 import com.zone.agri.service.aidoctor.AiDoctorDiagnosisService;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
+import java.time.LocalDate;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -38,6 +43,7 @@ public class AiDoctorController {
     private final AiDoctorDiagnosisHistoryService historyService;
     private final AiKnowledgeService aiKnowledgeService;
     private final AiDoctorClarifyService clarifyService;
+    private final AiDoctorDailyRecordService dailyRecordService;
 
     @PostMapping(value = "/diagnosis", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<AiDoctorDiagnosisResponse> diagnose(
@@ -80,6 +86,19 @@ public class AiDoctorController {
             @RequestBody(required = false) AiDoctorClarifyRequest request) {
         UserDetail user = requireUser();
         return ResponseEntity.ok(clarifyService.continueClarify(id, request, user.getId(), "AI_DOCTOR_PRIVATE"));
+    }
+
+    @GetMapping("/daily-records")
+    public ResponseEntity<AiDoctorDailyRecordListResponse> getDailyRecordDates() {
+        UserDetail user = requireUser();
+        return ResponseEntity.ok(dailyRecordService.getDailyRecordDates(user.getId()));
+    }
+
+    @GetMapping("/daily-records/{date}")
+    public ResponseEntity<AiDoctorDailyRecordDetailResponse> getDailyRecordDetail(
+            @PathVariable @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
+        UserDetail user = requireUser();
+        return ResponseEntity.ok(dailyRecordService.getDailyRecordDetail(user.getId(), date));
     }
 
     private UserDetail requireUser() {
