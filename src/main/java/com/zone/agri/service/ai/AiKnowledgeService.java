@@ -297,7 +297,7 @@ public class AiKnowledgeService {
         entity.setName(disease.getNameVi());
         entity.setCategory(disease.getCategory());
         entity.setKeywordsRaw(buildDiseaseDerivedKeywords(disease));
-        entity.setAnswerHtml(buildDiseaseAnswerHtml(prepared));
+        entity.setAnswerHtml(buildRequestImageAnswerHtml(prepared));
         entity.setEnabled(defaultBoolean(disease.getEnabled(), true));
         entity.setMatchThreshold(clampThreshold(entity.getMatchThreshold(), 0.35D));
         entity.setPriority(defaultInt(disease.getPriority(), 0));
@@ -711,7 +711,7 @@ public class AiKnowledgeService {
         session.setDecidedDiseaseCode(disease.entity().getCode());
         chatClarifySessionRepository.save(session);
 
-        String answerHtml = buildDiseaseAnswerHtml(disease);
+        String answerHtml = buildRequestImageAnswerHtml(disease);
         persistChatLog(session.getUserId(), session.getSessionId(), session.getSourceChannel(),
                 latestFarmerText, answerHtml, true, AiKnowledgeMatchType.DISEASE_KNOWLEDGE, disease.entity().getCode(), 1D);
 
@@ -913,7 +913,11 @@ public class AiKnowledgeService {
                 .toList();
     }
 
-    @Transactional(readOnly = true)
+    // KHONG @Transactional: nhanh NO_KNOWLEDGE_MATCH goi buildUnrecognizedDiagnosisResponse(...),
+    // ben trong co goi Gemini qua HTTP (freeConsult) — giu mot transaction readOnly mo suot thoi
+    // gian do se giu connection DB khong can thiet, cung ly do da tranh o answerChat/
+    // AiDoctorClarifyService.continueClarify. getApprovedSnapshot()/createReviewCase() ben duoi tu
+    // co transaction rieng o tang repository/service, khong phu thuoc mot transaction bao ngoai.
     public AiDoctorDiagnosisResponse enrichDiagnosis(
             AiPredictResponse predictResponse,
             AiPredictionItem finalPrediction,
@@ -967,18 +971,8 @@ public class AiKnowledgeService {
             return buildLowConfidenceDiagnosisResponse(predictResponse, finalPrediction, diagnosisImageUrl, geminiImageDescription);
         }
 
-        createReviewCase(
-                userId,
-                sessionId,
-                "AI_DOCTOR_DIAGNOSIS",
-                userSymptoms,
-                userSymptoms,
-                diagnosisImageUrl,
-                finalPrediction.getDiseaseCode(),
-                null,
-                confidence,
-                AiReviewCaseReason.NO_KNOWLEDGE_MATCH);
-        return buildLowConfidenceDiagnosisResponse(predictResponse, finalPrediction, diagnosisImageUrl, geminiImageDescription);
+        return buildUnrecognizedDiagnosisResponse(
+                predictResponse, finalPrediction, diagnosisImageUrl, userSymptoms, sessionId, userId, geminiImageDescription);
     }
 
     @Transactional(readOnly = true)
@@ -1276,7 +1270,7 @@ public class AiKnowledgeService {
                         .matchType(AiKnowledgeMatchType.DISEASE_KNOWLEDGE)
                         .knowledgeCode(disease.entity().getCode())
                         .score(1D)
-                        .answerHtml(buildDiseaseAnswerHtml(disease))
+                        .answerHtml(buildRequestImageAnswerHtml(disease))
                         .build();
             }
         }
@@ -1289,7 +1283,7 @@ public class AiKnowledgeService {
                         .matchType(AiKnowledgeMatchType.DISEASE_KNOWLEDGE)
                         .knowledgeCode(namedDiseaseScore.disease().entity().getCode())
                         .score(namedDiseaseScore.score())
-                        .answerHtml(buildDiseaseAnswerHtml(namedDiseaseScore.disease()))
+                        .answerHtml(buildRequestImageAnswerHtml(namedDiseaseScore.disease()))
                         .build();
             }
         }
@@ -1322,7 +1316,7 @@ public class AiKnowledgeService {
                     .matchType(AiKnowledgeMatchType.DISEASE_KNOWLEDGE)
                     .knowledgeCode(diseaseMatch.disease().entity().getCode())
                     .score(diseaseMatch.score())
-                    .answerHtml(buildDiseaseAnswerHtml(diseaseMatch.disease()))
+                    .answerHtml(buildRequestImageAnswerHtml(diseaseMatch.disease()))
                     .build();
         }
 
@@ -1528,6 +1522,88 @@ public class AiKnowledgeService {
                 .build();
     }
 
+    /**
+     * YOLO khong nhan ra benh cu the nao — hoac finalPrediction null hoan toan (goi truc tiep tu
+     * AiDoctorDiagnosisService khi predict khong tra ve diseaseCode gi), hoac co disease
+     * code/ten nhung khong khop bat ky tri thuc da duyet nao (nhanh NO_KNOWLEDGE_MATCH cua
+     * enrichDiagnosis). Ca 2 truong hop deu khong con candidate nao de mo AiDoctorClarifySession
+     * hoi them (se escalate ngay lap tuc, ra 2 bubble du thua/mau thuan nhau) — nen thay vao do
+     * goi Gemini tu van tu do (nhu free-consult) roi luon tu dong kem disclaimer + lien he ky su
+     * mac dinh, tra ve nhu 1 cau tra loi cuoi (khong set needsClarification).
+     *
+     * KHONG @Transactional — goi Gemini qua HTTP (freeConsult, toi ~45s), giu mot transaction mo
+     * suot thoi gian do se giu connection DB khong can thiet, cung ly do da tranh o answerChat/
+     * AiDoctorClarifyService.continueClarify.
+     */
+    public AiDoctorDiagnosisResponse buildUnrecognizedDiagnosisResponse(
+            AiPredictResponse predictResponse,
+            AiPredictionItem finalPrediction,
+            String diagnosisImageUrl,
+            String userSymptoms,
+            String sessionId,
+            Long userId,
+            String geminiImageDescription) {
+        AiKnowledgeChatConfig config = ensureChatConfig();
+        String farmerContext = buildFarmerContextForImageSuggestion(userSymptoms, geminiImageDescription);
+
+        String geminiText;
+        try {
+            // Khong gui lai anh goc lan 2 — geminiImageDescription da duoc Gemini "nhin" qua
+            // describeImage() 1 lan roi, dung lai lam ngu canh text de tranh goi Gemini vision
+            // 2 lan/request (ton phi + do tre).
+            geminiText = geminiClarifyClient.freeConsult(
+                    List.of(AiClarifyTurn.builder().role(AiClarifyTurn.ROLE_FARMER).text(farmerContext).build()),
+                    null, null);
+        } catch (Exception ex) {
+            log.warn("[AiUnrecognized] Gemini goi y that bai, dung fallback tinh: {}", ex.getMessage());
+            geminiText = null;
+        }
+
+        StringBuilder html = new StringBuilder(
+                buildImageObservationPrefixHtml(geminiImageDescription, finalPrediction, null));
+        html.append(trimToNull(geminiText) != null
+                ? buildFreeConsultAnswerHtml(geminiText, config, false)
+                : "<p>" + escapeHtml(config.getFallbackMessage()) + "</p>");
+
+        createReviewCase(
+                userId,
+                sessionId,
+                "AI_DOCTOR_DIAGNOSIS",
+                userSymptoms,
+                userSymptoms,
+                diagnosisImageUrl,
+                finalPrediction != null ? finalPrediction.getDiseaseCode() : null,
+                null,
+                finalPrediction != null && finalPrediction.getConfidencePercent() != null
+                        ? finalPrediction.getConfidencePercent() / 100D : 0D,
+                AiReviewCaseReason.NO_KNOWLEDGE_MATCH);
+
+        return AiDoctorDiagnosisResponse.builder()
+                .diagnosisId("unrec_" + UUID.randomUUID().toString().replace("-", "").substring(0, 12))
+                .status("UNRECOGNIZED")
+                .imageUrl(diagnosisImageUrl)
+                .topPredictions(toTopPredictions(predictResponse))
+                .aiDescription(html.toString())
+                .build();
+    }
+
+    private String buildFarmerContextForImageSuggestion(String userSymptoms, String geminiImageDescription) {
+        StringBuilder text = new StringBuilder();
+        if (trimToNull(userSymptoms) != null) {
+            text.append(userSymptoms.trim());
+        }
+        if (trimToNull(geminiImageDescription) != null) {
+            if (text.length() > 0) {
+                text.append(". ");
+            }
+            text.append("Quan sát từ ảnh: ").append(geminiImageDescription.trim());
+        }
+        if (text.length() == 0) {
+            text.append("Đây là ảnh tôm của tôi, hệ thống nhận diện tự động chưa xác định được bệnh cụ thể, bạn xem giúp tôi với.");
+        }
+        return text.toString();
+    }
+
     private List<TopPredictionResponse> toTopPredictions(AiPredictResponse predictResponse) {
         if (predictResponse == null || predictResponse.getTopPredictions() == null) {
             return Collections.emptyList();
@@ -1622,21 +1698,8 @@ public class AiKnowledgeService {
             AiPredictionItem finalPrediction,
             PreparedDisease resolvedDisease,
             boolean needsClarification) {
-        StringBuilder builder = new StringBuilder();
-
-        if (trimToNull(geminiImageDescription) != null) {
-            builder.append("<p>").append(escapeHtml(geminiImageDescription).replace("\n", "<br>")).append("</p>");
-        }
-
-        String citedName = resolvedDisease != null
-                ? resolvedDisease.entity().getNameVi()
-                : finalPrediction.getVietnameseName();
-        Double confidencePercent = finalPrediction.getConfidencePercent();
-        if (trimToNull(citedName) != null && confidencePercent != null) {
-            builder.append("<p>Dựa trên mô hình nhận diện, mình nghi ngờ khoảng ")
-                    .append(String.format("%.0f", confidencePercent))
-                    .append("% khả năng đây là <strong>").append(escapeHtml(citedName)).append("</strong>.</p>");
-        }
+        StringBuilder builder = new StringBuilder(
+                buildImageObservationPrefixHtml(geminiImageDescription, finalPrediction, resolvedDisease));
 
         if (needsClarification) {
             builder.append("<p>Để chắc chắn hơn, bạn mô tả kỹ thêm dấu hiệu giúp mình nhé.</p>");
@@ -1647,10 +1710,38 @@ public class AiKnowledgeService {
         return builder.toString();
     }
 
-    private String buildDiseaseAnswerHtml(PreparedDisease disease) {
-        List<String> causes = defaultList(readJsonList(disease.entity().getCausesJson(), new TypeReference<List<String>>() {
-        }));
-        List<TreatmentStageResponse> treatmentStages = toTreatmentStageResponses(disease.entity().getTreatmentStagesJson());
+    /**
+     * Mo ta cua Gemini (neu goi thanh cong) + 1 cau trich dan % tin cay/ten benh do CODE tu dung
+     * (khong bao gio giao cho LLM) — dung chung cho buildDiagnosisNarrativeHtml va
+     * buildUnrecognizedDiagnosisResponse.
+     */
+    private String buildImageObservationPrefixHtml(
+            String geminiImageDescription, AiPredictionItem finalPrediction, PreparedDisease resolvedDisease) {
+        StringBuilder builder = new StringBuilder();
+
+        if (trimToNull(geminiImageDescription) != null) {
+            builder.append("<p>").append(escapeHtml(geminiImageDescription).replace("\n", "<br>")).append("</p>");
+        }
+
+        String citedName = resolvedDisease != null
+                ? resolvedDisease.entity().getNameVi()
+                : (finalPrediction != null ? finalPrediction.getVietnameseName() : null);
+        Double confidencePercent = finalPrediction != null ? finalPrediction.getConfidencePercent() : null;
+        if (trimToNull(citedName) != null && confidencePercent != null) {
+            builder.append("<p>Dựa trên mô hình nhận diện, mình nghi ngờ khoảng ")
+                    .append(String.format("%.0f", confidencePercent))
+                    .append("% khả năng đây là <strong>").append(escapeHtml(citedName)).append("</strong>.</p>");
+        }
+
+        return builder.toString();
+    }
+
+    /**
+     * Cau mo dau + ten benh (+ ten EN) + anh minh hoa + signsSummary — phan "nhan dien" dung chung
+     * cho ca buildDiseaseAnswerHtml (phac do day du, chi mo khi da co anh) va
+     * buildRequestImageAnswerHtml (chat chu, chi xac nhan nghi van + moi gui anh).
+     */
+    private String buildDiseaseIdentityHtml(PreparedDisease disease) {
         StringBuilder builder = new StringBuilder();
         // "Dựa trên dấu hiệu" chứ không cố định "theo ảnh": hàm này dùng chung cho cả trả lời
         // chat gõ chữ (thường không kèm ảnh) lẫn ngữ cảnh đã có ảnh chẩn đoán trước đó.
@@ -1679,6 +1770,27 @@ public class AiKnowledgeService {
         if (trimToNull(disease.entity().getSignsSummary()) != null) {
             builder.append("<p>").append(escapeHtml(disease.entity().getSignsSummary())).append("</p>");
         }
+
+        return builder.toString();
+    }
+
+    /**
+     * Dung cho chat chu: xac nhan ten benh nghi ngo + dau hieu de nong dan tu doi chieu, nhung
+     * KHONG kem nguyen nhan/phac do/lien he ky su — nhung noi dung do chi mo khi da co anh xac
+     * nhan qua enrichDiagnosis (dung YOLO), khong bao gio phat sinh chi tu mo ta chu.
+     */
+    private String buildRequestImageAnswerHtml(PreparedDisease disease) {
+        return buildDiseaseIdentityHtml(disease)
+                + "<p>Để đưa ra phác đồ điều trị chính xác, tôi cần xem thêm ảnh thực tế của tôm. "
+                + "Bạn vui lòng gửi kèm 1 tấm ảnh rõ nét (thân, mang, đường ruột...) để tôi chẩn đoán "
+                + "và tư vấn cách điều trị phù hợp nhé.</p>";
+    }
+
+    private String buildDiseaseAnswerHtml(PreparedDisease disease) {
+        List<String> causes = defaultList(readJsonList(disease.entity().getCausesJson(), new TypeReference<List<String>>() {
+        }));
+        List<TreatmentStageResponse> treatmentStages = toTreatmentStageResponses(disease.entity().getTreatmentStagesJson());
+        StringBuilder builder = new StringBuilder(buildDiseaseIdentityHtml(disease));
 
         if (!causes.isEmpty()) {
             builder.append("<p><strong>Nguyên nhân thường gặp:</strong></p><ul>");
