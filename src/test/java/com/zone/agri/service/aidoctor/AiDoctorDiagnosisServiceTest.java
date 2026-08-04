@@ -3,6 +3,8 @@ package com.zone.agri.service.aidoctor;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -221,14 +223,14 @@ class AiDoctorDiagnosisServiceTest {
     void nonShrimpStatus_returnsGeminiNarrative_insteadOfGenericBadRequest() {
         when(aiDiagnosisClient.predict(any())).thenReturn(predictResponse("NON_SHRIMP", null));
         when(geminiClarifyClient.describeImage(any(), any(), any())).thenReturn("Day la anh mot chiec la, khong phai tom.");
-        when(geminiClarifyClient.freeConsult(any(), any(), any()))
-                .thenReturn("Ban gui giup minh tam anh con tom ro net hon nhe.");
 
         AiDoctorDiagnosisResponse response = aiDoctorDiagnosisService.diagnose(fakeImage(), "", 1L, "sess-5");
 
         assertThat(response.getStatus()).isEqualTo("UNRECOGNIZED");
         assertThat(response.getAiDescription()).contains("Day la anh mot chiec la, khong phai tom.");
-        assertThat(response.getAiDescription()).contains("Ban gui giup minh tam anh con tom ro net hon nhe.");
+        // Khong duoc goi Gemini lan 2 (freeConsult) — chi 1 doan van duy nhat, tranh 2 doan Gemini
+        // doc lap ghep vao nhau moi doan lai tu chao rieng (bi thua/lap y).
+        verify(geminiClarifyClient, never()).freeConsult(any(), any(), any());
     }
 
     @Test
