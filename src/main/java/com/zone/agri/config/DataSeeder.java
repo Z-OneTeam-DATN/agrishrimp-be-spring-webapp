@@ -241,16 +241,29 @@ public class DataSeeder implements CommandLineRunner {
                 aAiKnowledgeView, aAiKnowledgeCreate, aAiKnowledgeUpdate,
                 aAiKnowledgeApprove, aAiImportKnowledge, aAiCaseReview);
 
+        // Ca ADMIN lan SUPER_ADMIN deu isSystem=true (full quyen, khong ai sua/xoa duoc quyen cua
+        // 2 vai tro nay — RoleService.updateRole/deleteRole da chan cung role isSystem tu truoc,
+        // khong can them guard rieng). ADMIN va SUPER_ADMIN dung chung 1 tap quyen full nhu nhau,
+        // chi khac nhau ten hien thi/tai khoan dang nhap theo yeu cau ban giao (2 tai khoan rieng).
         Role superAdminRole = saveRole("SUPER_ADMIN", "Siêu quản trị", true, superAdminPermissions);
+        Role adminRole = saveRole("ADMIN", "Quản trị viên", true, superAdminPermissions);
 
-        // Chỉ bootstrap 1 tài khoản gốc để đăng nhập lần đầu; các vai trò khác
-        // sẽ được quản trị viên tự tạo trong màn quản lý vai trò.
+        // Chi bootstrap 2 tai khoan goc de dang nhap lan dau; cac vai tro/tai khoan khac se do
+        // quan tri vien tu tao trong man quan ly nhan su. Mat khau mac dinh CAN doi ngay sau lan
+        // dang nhap dau tien khi ban giao — day chi la mat khau khoi tao tam thoi.
         ensureUser(
                 "superadmin@agrishrimp.vn",
                 "Super Admin",
                 "0901000001",
                 "123456",
                 superAdminRole,
+                UserStatus.ACTIVE);
+        ensureUser(
+                "admin@agrishrimp.vn",
+                "Admin",
+                "0901000002",
+                "123456",
+                adminRole,
                 UserStatus.ACTIVE);
 
         if (hasExistingRoles) {
@@ -309,7 +322,7 @@ public class DataSeeder implements CommandLineRunner {
             String rawPassword,
             Role role,
             UserStatus status) {
-        findBootstrapUser(email, phoneNumber)
+        findBootstrapUser(email, phoneNumber, role.getSlug())
                 .map(existingUser -> {
                     existingUser.setFullName(fullName);
                     if (!userRepository.existsByEmailAndIdNot(email, existingUser.getId())) {
@@ -344,9 +357,9 @@ public class DataSeeder implements CommandLineRunner {
                         .build()));
     }
 
-    private Optional<User> findBootstrapUser(String email, String phoneNumber) {
+    private Optional<User> findBootstrapUser(String email, String phoneNumber, String roleSlug) {
         return userRepository.findByEmail(email)
                 .or(() -> userRepository.findByPhoneNumber(phoneNumber))
-                .or(() -> userRepository.findFirstByRole_SlugOrderByIdAsc("SUPER_ADMIN"));
+                .or(() -> userRepository.findFirstByRole_SlugOrderByIdAsc(roleSlug));
     }
 }
