@@ -2,6 +2,7 @@ package com.zone.agri.controller;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zone.agri.dto.request.blog.BlogCategoryRequest;
+import com.zone.agri.dto.request.blog.BlogPostRejectRequest;
 import com.zone.agri.dto.request.blog.BlogPostRequest;
 import com.zone.agri.dto.request.blog.BlogTagRequest;
 import com.zone.agri.dto.response.blog.BlogCategoryResponse;
@@ -129,6 +130,21 @@ public class AdminBlogController {
     public ResponseEntity<ApiResponse<Void>> draft(@PathVariable Long id) {
         blogService.changeStatus(id, "DRAFT");
         return ResponseEntity.ok(ApiResponse.success(null, "Đã chuyển về nháp"));
+    }
+
+    @PatchMapping("/posts/{id}/approve")
+    @RequirePermission("BLOG_APPROVE")
+    public ResponseEntity<ApiResponse<Void>> approvePost(@PathVariable Long id) {
+        blogService.approve(id);
+        return ResponseEntity.ok(ApiResponse.success(null, "Đã duyệt và xuất bản bài viết"));
+    }
+
+    @PatchMapping("/posts/{id}/reject")
+    @RequirePermission("BLOG_APPROVE")
+    public ResponseEntity<ApiResponse<Void>> rejectPost(
+            @PathVariable Long id, @RequestBody(required = false) BlogPostRejectRequest req) {
+        blogService.reject(id, req != null ? req.getReason() : null);
+        return ResponseEntity.ok(ApiResponse.success(null, "Đã từ chối, chuyển về nháp"));
     }
 
     @DeleteMapping("/posts/{id}")

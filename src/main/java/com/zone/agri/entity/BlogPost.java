@@ -56,6 +56,10 @@ public class BlogPost {
     @Column(name = "updated_at")
     LocalDateTime updatedAt;
 
+    /** Ly do tu choi / yeu cau chinh sua tu admin — hien cho tac gia xem tren form sua. Null khi chua tung bi tu choi. */
+    @Column(name = "review_note", columnDefinition = "TEXT")
+    String reviewNote;
+
     // --- Quan hệ ---
 
     @ManyToOne(fetch = FetchType.LAZY)

@@ -438,6 +438,10 @@ public class SchemaUpdateConfig implements BeanPostProcessor {
                     "Patch ai_disease_knowledge adds review_note",
                     "ALTER TABLE ai_disease_knowledge ADD COLUMN review_note TEXT NULL");
 
+            executeSql(stmt,
+                    "Patch blog_posts adds review_note",
+                    "ALTER TABLE blog_posts ADD COLUMN review_note TEXT NULL");
+
             log.info("All schema patches executed successfully.");
         } catch (Exception e) {
             log.error("Failed to run database schema patches", e);

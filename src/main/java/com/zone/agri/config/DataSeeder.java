@@ -184,6 +184,7 @@ public class DataSeeder implements CommandLineRunner {
         Permission aBlogC = pAct("Tạo blog", "BLOG_CREATE", PermissionGroup.SETTING, mBlog);
         Permission aBlogE = pAct("Sửa blog", "BLOG_EDIT", PermissionGroup.SETTING, mBlog);
         Permission aBlogD = pAct("Xóa blog", "BLOG_DELETE", PermissionGroup.SETTING, mBlog);
+        Permission aBlogA = pAct("Duyệt blog", "BLOG_APPROVE", PermissionGroup.SETTING, mBlog);
 
         Permission mSet = pMod("Cài đặt hệ thống", "SETTING", PermissionGroup.SETTING);
         Permission aSetV = pAct("Xem cài đặt", "SETTING_VIEW", PermissionGroup.SETTING, mSet);
@@ -233,7 +234,7 @@ public class DataSeeder implements CommandLineRunner {
                 aDriverV, aDriverC, aDriverU, aDriverD,
                 aOrdV, aOrdC, aOrdU, aOrdD, aOrdCnf, aOrdShip, aOrdX, aOrdDone, aOrdRefund, aOrdExport,
                 aBannerV, aBannerC, aBannerE, aBannerD,
-                aBlogV, aBlogC, aBlogE, aBlogD,
+                aBlogV, aBlogC, aBlogE, aBlogD, aBlogA,
                 aSetV, aSetU,
                 aChatV, aChatM,
                 aCustomerAdvisorUse,

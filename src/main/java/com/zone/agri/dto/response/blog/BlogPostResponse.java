@@ -18,6 +18,7 @@ public class BlogPostResponse {
     private String content;
     private String thumbnailUrl;
     private String status;
+    private String reviewNote;
     private Long viewCount;
     private LocalDateTime publishedAt;
     private LocalDateTime createdAt;

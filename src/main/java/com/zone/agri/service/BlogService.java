@@ -2,6 +2,7 @@ package com.zone.agri.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zone.agri.common.CloudinaryService;
+import com.zone.agri.common.RoleUtils;
 import com.zone.agri.dto.request.blog.BlogCategoryRequest;
 import com.zone.agri.dto.request.blog.BlogCommentRequest;
 import com.zone.agri.dto.request.blog.BlogPostRequest;
@@ -21,6 +22,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.security.core.Authentication;
+import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -263,7 +265,7 @@ public class BlogService {
                 .slug(slug)
                 .excerpt(req.getExcerpt())
                 .content(req.getContent())
-                .status(parseStatus(req.getStatus()))
+                .status(resolveRequestedStatus(req.getStatus()))
                 .build();
 
         if (post.getStatus() == BlogPostStatus.PUBLISHED) post.setPublishedAt(LocalDateTime.now());
@@ -292,7 +294,7 @@ public class BlogService {
             post.setSlug(resolveSlug(req.getSlug(), req.getTitle(), post.getId()));
         }
 
-        BlogPostStatus newStatus = parseStatus(req.getStatus());
+        BlogPostStatus newStatus = resolveRequestedStatus(req.getStatus());
         if (newStatus != post.getStatus()) {
             post.setStatus(newStatus);
             if (newStatus == BlogPostStatus.PUBLISHED && post.getPublishedAt() == null)
@@ -321,6 +323,25 @@ public class BlogService {
         post.setStatus(newStatus);
         if (newStatus == BlogPostStatus.PUBLISHED && post.getPublishedAt() == null)
             post.setPublishedAt(LocalDateTime.now());
+        postRepo.save(post);
+    }
+
+    @Transactional
+    public void approve(Long id) {
+        BlogPost post = postRepo.findById(id)
+                .orElseThrow(() -> new NotFoundException("Bài viết không tồn tại: " + id));
+        post.setStatus(BlogPostStatus.PUBLISHED);
+        post.setReviewNote(null);
+        if (post.getPublishedAt() == null) post.setPublishedAt(LocalDateTime.now());
+        postRepo.save(post);
+    }
+
+    @Transactional
+    public void reject(Long id, String reason) {
+        BlogPost post = postRepo.findById(id)
+                .orElseThrow(() -> new NotFoundException("Bài viết không tồn tại: " + id));
+        post.setStatus(BlogPostStatus.DRAFT);
+        post.setReviewNote(normalizeNullableText(reason));
         postRepo.save(post);
     }
 
@@ -497,6 +518,29 @@ public class BlogService {
         catch (Exception e) { return BlogPostStatus.DRAFT; }
     }
 
+    /**
+     * Ky su co BLOG_CREATE/BLOG_EDIT nhung khong co BLOG_APPROVE khong duoc tu xuat ban — moi yeu
+     * cau PUBLISHED tu nguoi khong co quyen duyet se bi ha xuong IN_REVIEW de admin duyet lai. Admin
+     * (ROLE_ADMIN/ROLE_SUPER_ADMIN) hoac ai co BLOG_APPROVE khong bi anh huong, giu nguyen hanh vi
+     * "Xuat ban ngay" hien tai.
+     */
+    private boolean canPublishDirectly() {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth == null) return false;
+        Set<String> authorities = auth.getAuthorities().stream()
+                .map(GrantedAuthority::getAuthority)
+                .collect(Collectors.toSet());
+        return RoleUtils.hasAdminLikeAuthority(authorities) || authorities.contains("BLOG_APPROVE");
+    }
+
+    private BlogPostStatus resolveRequestedStatus(String rawStatus) {
+        BlogPostStatus requested = parseStatus(rawStatus);
+        if (requested == BlogPostStatus.PUBLISHED && !canPublishDirectly()) {
+            return BlogPostStatus.IN_REVIEW;
+        }
+        return requested;
+    }
+
     private BlogCategoryStatus parseCategoryStatus(String value) {
         if (value == null || value.isBlank()) return BlogCategoryStatus.ACTIVE;
         try { return BlogCategoryStatus.valueOf(value.trim().toUpperCase()); }
@@ -587,6 +631,7 @@ public class BlogService {
                 .content(includeContent ? p.getContent() : null)
                 .thumbnailUrl(p.getThumbnailUrl())
                 .status(p.getStatus() != null ? p.getStatus().name() : null)
+                .reviewNote(p.getReviewNote())
                 .viewCount(p.getViewCount())
                 .publishedAt(p.getPublishedAt())
                 .createdAt(p.getCreatedAt())
