@@ -5,7 +5,7 @@ import com.zone.agri.dto.ai.AiChatResponse;
 import com.zone.agri.dto.request.ai.AiDoctorChatRequest;
 import com.zone.agri.dto.request.ai.AiDoctorClarifyRequest;
 import com.zone.agri.dto.response.ai.AiDoctorClarifyResponse;
-import com.zone.agri.dto.response.ai.AiDoctorDailyRecordDetailResponse;
+import com.zone.agri.dto.response.ai.AiDoctorConversationTurnResponse;
 import com.zone.agri.dto.response.ai.AiDoctorDailyRecordListResponse;
 import com.zone.agri.dto.response.ai.AiDoctorDiagnosisResponse;
 import com.zone.agri.dto.response.ai.AiDoctorHistoryListResponse;
@@ -18,6 +18,7 @@ import com.zone.agri.service.aidoctor.AiDoctorDiagnosisHistoryService;
 import com.zone.agri.service.aidoctor.AiDoctorDiagnosisService;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import java.time.LocalDate;
+import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.format.annotation.DateTimeFormat;
@@ -94,11 +95,11 @@ public class AiDoctorController {
         return ResponseEntity.ok(dailyRecordService.getDailyRecordDates(user.getId()));
     }
 
-    @GetMapping("/daily-records/{date}")
-    public ResponseEntity<AiDoctorDailyRecordDetailResponse> getDailyRecordDetail(
+    @GetMapping("/conversation/{date}")
+    public ResponseEntity<List<AiDoctorConversationTurnResponse>> getConversation(
             @PathVariable @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
         UserDetail user = requireUser();
-        return ResponseEntity.ok(dailyRecordService.getDailyRecordDetail(user.getId(), date));
+        return ResponseEntity.ok(dailyRecordService.getConversation(user.getId(), date));
     }
 
     private UserDetail requireUser() {

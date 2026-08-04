@@ -1,24 +1,19 @@
 package com.zone.agri.service.aidoctor;
 
-import com.zone.agri.dto.response.ai.AiClarifyCandidateSummary;
-import com.zone.agri.dto.response.ai.AiDoctorDailyRecordDetailResponse;
+import com.zone.agri.dto.response.ai.AiDoctorConversationTurnResponse;
 import com.zone.agri.dto.response.ai.AiDoctorDailyRecordListResponse;
-import com.zone.agri.dto.response.ai.AiDoctorHistoryItemResponse;
 import com.zone.agri.dto.response.ai.DiseaseResponse;
 import com.zone.agri.entity.AiDoctorDiagnosisHistory;
 import com.zone.agri.entity.AiKnowledgeChatLog;
-import com.zone.agri.entity.enums.AiKnowledgeMatchType;
 import com.zone.agri.repository.AiDoctorDiagnosisHistoryRepository;
 import com.zone.agri.repository.AiKnowledgeChatLogRepository;
-import com.zone.agri.service.ai.AiKnowledgeService;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.Collections;
-import java.util.LinkedHashSet;
+import java.util.Comparator;
 import java.util.List;
-import java.util.Optional;
 import java.util.TreeSet;
-import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -41,7 +36,6 @@ public class AiDoctorDailyRecordService {
 
     private final AiKnowledgeChatLogRepository chatLogRepository;
     private final AiDoctorDiagnosisHistoryRepository diagnosisHistoryRepository;
-    private final AiKnowledgeService aiKnowledgeService;
 
     @Transactional(readOnly = true)
     public AiDoctorDailyRecordListResponse getDailyRecordDates(Long userId) {
@@ -61,56 +55,39 @@ public class AiDoctorDailyRecordService {
                 .build();
     }
 
+    /**
+     * Phat lai (replay) dung thu tu cac bong bong chat cua 1 NGAY (hom nay hoac 1 ngay da qua) — de
+     * FE khoi phuc lai giao dien thay vi mat sach du lieu, hoac xem lai dung 1 ngay trong sidebar.
+     * Khong bao gom cac luot hoi-dap lam ro benh (AiDoctorClarifySession luu o bang khac, gioi han
+     * co chu dich cua tinh nang nay).
+     */
     @Transactional(readOnly = true)
-    public AiDoctorDailyRecordDetailResponse getDailyRecordDetail(Long userId, LocalDate date) {
+    public List<AiDoctorConversationTurnResponse> getConversation(Long userId, LocalDate date) {
         LocalDateTime startOfDay = date.atStartOfDay();
         LocalDateTime endOfDay = date.plusDays(1).atStartOfDay();
 
-        List<AiKnowledgeChatLog> chatLogs = chatLogRepository
-                .findByUserIdAndSourceChannelAndCreatedAtGreaterThanEqualAndCreatedAtLessThanOrderByCreatedAtAsc(
-                        userId, PRIVATE_SOURCE_CHANNEL, startOfDay, endOfDay);
-
-        List<String> symptomsDescribed = chatLogs.stream()
-                .map(AiKnowledgeChatLog::getQuestionText)
-                .filter(text -> text != null && !text.isBlank())
-                .toList();
-
-        List<DiseaseResponse> diseasesDiscussed = chatLogs.stream()
-                .filter(log -> Boolean.TRUE.equals(log.getMatched()) && log.getMatchedType() == AiKnowledgeMatchType.DISEASE_KNOWLEDGE)
-                .map(AiKnowledgeChatLog::getMatchedKnowledgeCode)
-                .filter(code -> code != null && !code.isBlank())
-                .collect(Collectors.toCollection(LinkedHashSet::new))
-                .stream()
-                .map(aiKnowledgeService::findApprovedCandidate)
-                .flatMap(Optional::stream)
-                .map(this::toDiseaseResponse)
-                .toList();
-
-        List<AiDoctorHistoryItemResponse> diagnoses = diagnosisHistoryRepository
+        List<AiDoctorConversationTurnResponse> turns = new ArrayList<>();
+        chatLogRepository.findByUserIdAndSourceChannelAndCreatedAtGreaterThanEqualAndCreatedAtLessThanOrderByCreatedAtAsc(
+                        userId, PRIVATE_SOURCE_CHANNEL, startOfDay, endOfDay)
+                .forEach(log -> turns.add(toChatTurn(log)));
+        diagnosisHistoryRepository
                 .findByUserIdAndCreatedAtGreaterThanEqualAndCreatedAtLessThanOrderByCreatedAtAsc(userId, startOfDay, endOfDay)
-                .stream()
-                .map(this::toHistoryItemResponse)
-                .toList();
+                .forEach(history -> turns.add(toDiagnosisTurn(history)));
 
-        return AiDoctorDailyRecordDetailResponse.builder()
-                .date(date.toString())
-                .symptomsDescribed(symptomsDescribed)
-                .diseasesDiscussed(diseasesDiscussed)
-                .diagnoses(diagnoses)
+        turns.sort(Comparator.comparing(AiDoctorConversationTurnResponse::getCreatedAt));
+        return turns;
+    }
+
+    private AiDoctorConversationTurnResponse toChatTurn(AiKnowledgeChatLog log) {
+        return AiDoctorConversationTurnResponse.builder()
+                .type("CHAT")
+                .createdAt(log.getCreatedAt())
+                .questionText(log.getQuestionText())
+                .answerHtml(log.getAnswerText())
                 .build();
     }
 
-    private DiseaseResponse toDiseaseResponse(AiClarifyCandidateSummary candidate) {
-        return DiseaseResponse.builder()
-                .code(candidate.getDiseaseCode())
-                .nameVi(candidate.getNameVi())
-                .nameEn(candidate.getNameEn())
-                .build();
-    }
-
-    // Copy tu AiDoctorDiagnosisHistoryService.toHistoryItemResponse — chu dinh khong tai su dung
-    // truc tiep de tranh coupling 2 service khong lien quan truc tiep ve muc dich.
-    private AiDoctorHistoryItemResponse toHistoryItemResponse(AiDoctorDiagnosisHistory history) {
+    private AiDoctorConversationTurnResponse toDiagnosisTurn(AiDoctorDiagnosisHistory history) {
         DiseaseResponse disease = DiseaseResponse.builder()
                 .code(history.getFinalDiseaseCode())
                 .nameVi(history.getFinalDiseaseNameVi())
@@ -118,11 +95,14 @@ public class AiDoctorDailyRecordService {
                 .confidencePercent(history.getFinalConfidencePercent())
                 .build();
 
-        return AiDoctorHistoryItemResponse.builder()
-                .diagnosisId(String.valueOf(history.getId()))
+        return AiDoctorConversationTurnResponse.builder()
+                .type("DIAGNOSIS")
                 .createdAt(history.getCreatedAt())
+                .diagnosisId(String.valueOf(history.getId()))
+                .userSymptoms(history.getUserSymptoms())
                 .imageUrl(history.getImageUrl())
                 .disease(disease)
+                .signsSummary(history.getSignsSummary())
                 .needsClarification(history.getNeedsClarification())
                 .build();
     }
