@@ -150,12 +150,10 @@ public class SalesReportService {
 
         return switch (type) {
             case "revenue_time" -> buildRevenueTimeDetail(trend);
-            case "revenue_employee" -> buildRevenueEmployeeDetail(subOrders, employeeNames);
             case "delivery_detail" -> buildDeliveryDetail(subOrders);
             case "returns_by_order" -> buildReturnByOrderDetail(subOrders);
             case "returns_by_product" -> buildReturnByProductDetail(subOrders);
             case "payment_time" -> buildPaymentTimeDetail(subOrders);
-            case "payment_employee" -> buildPaymentEmployeeDetail(subOrders, employeeNames);
             case "payment_method" -> buildPaymentMethodDetail(subOrders);
             case "payment_branch" -> buildPaymentBranchDetail(subOrders);
             case "order_stats" -> buildOrderStatsDetail(subOrders);
@@ -191,47 +189,6 @@ public class SalesReportService {
                         "totalProfit", trend.stream().map(SalesReportSummaryResponse.TrendPoint::getProfit).reduce(BigDecimal.ZERO, BigDecimal::add),
                         "totalOrders", trend.stream().mapToLong(SalesReportSummaryResponse.TrendPoint::getOrderCount).sum()
                 )
-        );
-    }
-
-    private SalesReportDetailResponse buildRevenueEmployeeDetail(List<SubOrder> subOrders, Map<Long, String> employeeNames) {
-        List<Map<String, Object>> rows = subOrders.stream()
-                .filter(item -> SUCCESS_STATUSES.contains(item.getStatus()))
-                .collect(Collectors.groupingBy(
-                        item -> item.getCreatedByUserId() == null ? 0L : item.getCreatedByUserId(),
-                        LinkedHashMap::new,
-                        Collectors.toList()))
-                .entrySet().stream()
-                .map(entry -> {
-                    List<SubOrder> items = entry.getValue();
-                    BigDecimal revenue = items.stream().map(this::getSubOrderAmount).reduce(BigDecimal.ZERO, BigDecimal::add);
-                    long orderCount = items.size();
-                    BigDecimal avg = orderCount == 0 ? BigDecimal.ZERO :
-                            revenue.divide(BigDecimal.valueOf(orderCount), 2, RoundingMode.HALF_UP);
-                    return row(
-                            "employeeName", employeeNames.getOrDefault(entry.getKey(), "Hệ thống"),
-                            "branchNames", items.stream().map(item -> item.getBranch() != null ? item.getBranch().getName() : "N/A").distinct().collect(Collectors.joining(", ")),
-                            "orderCount", orderCount,
-                            "revenue", revenue,
-                            "averageOrderValue", avg
-                    );
-                })
-                .sorted((a, b) -> new BigDecimal(String.valueOf(b.get("revenue"))).compareTo(new BigDecimal(String.valueOf(a.get("revenue")))))
-                .toList();
-
-        return detail(
-                "revenue_employee",
-                "Báo cáo doanh thu theo nhân viên",
-                "Tổng hợp số đơn và doanh thu do từng nhân viên tạo trong kỳ.",
-                columns(
-                        column("employeeName", "Nhân viên", "left"),
-                        column("branchNames", "Chi nhánh", "left"),
-                        column("orderCount", "Số đơn", "right"),
-                        column("revenue", "Doanh thu", "right"),
-                        column("averageOrderValue", "Trung bình/đơn", "right")
-                ),
-                rows,
-                row("employees", rows.size())
         );
     }
 
@@ -371,44 +328,6 @@ public class SalesReportService {
                 row("totalPaidAmount", rows.stream()
                         .map(item -> (BigDecimal) item.get("paidAmount"))
                         .reduce(BigDecimal.ZERO, BigDecimal::add))
-        );
-    }
-
-    private SalesReportDetailResponse buildPaymentEmployeeDetail(List<SubOrder> subOrders, Map<Long, String> employeeNames) {
-        List<Map<String, Object>> rows = subOrders.stream()
-                .filter(item -> SUCCESS_STATUSES.contains(item.getStatus()))
-                .collect(Collectors.groupingBy(
-                        item -> item.getCreatedByUserId() == null ? 0L : item.getCreatedByUserId(),
-                        LinkedHashMap::new,
-                        Collectors.toList()))
-                .entrySet().stream()
-                .map(entry -> {
-                    List<SubOrder> items = entry.getValue();
-                    BigDecimal paidAmount = items.stream()
-                            .filter(item -> item.getOrder() != null && item.getOrder().getPaymentStatus() == PaymentStatus.PAID)
-                            .map(this::getSubOrderAmount)
-                            .reduce(BigDecimal.ZERO, BigDecimal::add);
-                    return row(
-                            "employeeName", employeeNames.getOrDefault(entry.getKey(), "Hệ thống"),
-                            "paidOrders", items.stream().filter(item -> item.getOrder() != null && item.getOrder().getPaymentStatus() == PaymentStatus.PAID).count(),
-                            "unpaidOrders", items.stream().filter(item -> item.getOrder() == null || item.getOrder().getPaymentStatus() != PaymentStatus.PAID).count(),
-                            "paidAmount", paidAmount
-                    );
-                })
-                .toList();
-
-        return detail(
-                "payment_employee",
-                "Báo cáo thanh toán theo nhân viên",
-                "Tổng hợp hiệu quả thu tiền theo nhân viên tạo đơn.",
-                columns(
-                        column("employeeName", "Nhân viên", "left"),
-                        column("paidOrders", "Đơn đã thu", "right"),
-                        column("unpaidOrders", "Đơn chưa thu", "right"),
-                        column("paidAmount", "Giá trị đã thu", "right")
-                ),
-                rows,
-                row("employees", rows.size())
         );
     }
 

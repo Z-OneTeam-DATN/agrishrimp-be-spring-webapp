@@ -1,6 +1,7 @@
 package com.zone.agri.service;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -8,6 +9,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -94,7 +96,9 @@ public class EmployeeService {
         sendEmailSilently(savedEmployee, rawPassword);
 
         log.info("Employee created successfully with ID: {}", savedEmployee.getId());
-        return mapToResponse(savedEmployee);
+        // Nhan vien vua tao chac chan chua co du lieu nao o dau ca — khoi can chay dynamic schema
+        // check tren 1 ID chua ton tai truoc do trong bat ky bang nao.
+        return mapToResponse(savedEmployee, false);
     }
 
     private UserStatus parseStatus(String status) {
@@ -164,8 +168,15 @@ public class EmployeeService {
         String normalizedPermissionCode = permissionCode != null && !permissionCode.isBlank()
                 ? permissionCode.trim().toUpperCase()
                 : null;
-        return userRepository.findAllEmployeesWithFilter(searchKeyword, roleId, branchId, normalizedPermissionCode, userStatus, pageable)
-                .map(this::mapToResponse);
+        Page<User> employeePage = userRepository.findAllEmployeesWithFilter(
+                searchKeyword, roleId, branchId, normalizedPermissionCode, userStatus, pageable);
+
+        // Kiem tra "co du lieu phat sinh" theo LO cho ca trang thay vi tung nhan vien mot — dua
+        // N nhan vien x M bang candidate ve chi con M truy van cho ca trang, khong phai N x M.
+        List<Long> pageEmployeeIds = employeePage.getContent().stream().map(User::getId).toList();
+        Set<Long> employeeIdsWithData = findEmployeeIdsWithGeneratedData(pageEmployeeIds);
+
+        return employeePage.map(user -> mapToResponse(user, employeeIdsWithData.contains(user.getId())));
     }
 
     @Transactional
@@ -306,8 +317,13 @@ public class EmployeeService {
     }
 
     private EmployeeResponse mapToResponse(User user) {
+        return mapToResponse(user, hasGeneratedDataSafe(user.getId()));
+    }
+
+    private EmployeeResponse mapToResponse(User user, boolean hasGeneratedData) {
         // Tự động sinh mã nhân viên dựa vào ID (Ví dụ: NV-0012)
         String employeeCode = String.format("NV-%04d", user.getId());
+        boolean isSystemAccount = user.getRole() != null && Boolean.TRUE.equals(user.getRole().getIsSystem());
 
         return EmployeeResponse.builder()
                 .id(user.getId())
@@ -332,7 +348,68 @@ public class EmployeeService {
                         .displayName(user.getRole().getDisplayName())
                         .slug(user.getRole().getSlug())
                         .build() : null)
+                .isSystemAccount(isSystemAccount)
+                .hasGeneratedData(hasGeneratedData)
                 .build();
+    }
+
+    /**
+     * Ban khong throw cua findBlockingReferences — dung de HIEN THI (an/hien nut xoa), khong phai
+     * de chan hanh dong. Neu kiem tra loi (vd truc trac schema), fail CLOSED: coi nhu co du lieu
+     * de khong lo hien nham nut xoa cho 1 nhan vien thuc ra khong xoa duoc.
+     */
+    private boolean hasGeneratedDataSafe(Long employeeId) {
+        try {
+            return !findBlockingReferences(employeeId).isEmpty();
+        } catch (Exception ex) {
+            return true;
+        }
+    }
+
+    /**
+     * Ban theo LO cua findBlockingReferences — dung cho danh sach nhan vien (getEmployees) de
+     * tranh chay N x M truy van (N nhan vien, M bang candidate) khi chi can hien/an nut xoa. Gop
+     * lai thanh M truy van GROUP theo ca trang, bat ke trang co bao nhieu nhan vien.
+     */
+    private Set<Long> findEmployeeIdsWithGeneratedData(List<Long> employeeIds) {
+        if (employeeIds.isEmpty()) {
+            return Set.of();
+        }
+
+        try {
+            String schemaName = jdbcTemplate.queryForObject("SELECT DATABASE()", String.class);
+            if (schemaName == null || schemaName.isBlank()) {
+                throw new IllegalStateException("Database schema is empty");
+            }
+
+            List<TableColumnRef> candidates = new ArrayList<>();
+            candidates.addAll(loadForeignKeyReferences(schemaName));
+            candidates.addAll(loadAuditAndLegacyReferences(schemaName));
+
+            Set<Long> employeeIdsWithData = new HashSet<>();
+            String placeholders = employeeIds.stream().map(id -> "?").collect(Collectors.joining(","));
+
+            for (TableColumnRef reference : candidates) {
+                if (employeeIdsWithData.size() == employeeIds.size()) {
+                    break;
+                }
+                if (!isSafeIdentifier(reference.tableName()) || !isSafeIdentifier(reference.columnName())) {
+                    continue;
+                }
+
+                List<Long> matchedIds = jdbcTemplate.queryForList(
+                        "SELECT DISTINCT `" + reference.columnName() + "` FROM `" + reference.tableName()
+                                + "` WHERE `" + reference.columnName() + "` IN (" + placeholders + ")",
+                        Long.class,
+                        employeeIds.toArray());
+                employeeIdsWithData.addAll(matchedIds);
+            }
+
+            return employeeIdsWithData;
+        } catch (Exception ex) {
+            log.error("Khong the kiem tra hang loat du lieu phat sinh cho danh sach nhan vien", ex);
+            return new HashSet<>(employeeIds);
+        }
     }
 
     private User getMutableEmployee(Long employeeId) {

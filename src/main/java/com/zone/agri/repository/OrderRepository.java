@@ -382,35 +382,4 @@ public interface OrderRepository extends JpaRepository<Order, Long>, JpaSpecific
     List<Order> findPaidLegacyOrdersBefore(
             @Param("endDate") LocalDateTime endDate,
             @Param("branchId") Long branchId);
-
-    interface CustomerDebtOrderProjection {
-        Long getCustomerId();
-
-        String getCustomerName();
-
-        String getCustomerPhone();
-
-        BigDecimal getFinalAmount();
-    }
-
-    // Công nợ khách hàng (đơn "cũ" không tách chi nhánh) — nợ nhị phân: đơn chưa PAID và chưa
-    // huỷ/trả thì tính đủ finalAmount là nợ, không có mức thanh toán một phần (hệ thống hiện chưa
-    // lưu vết thanh toán từng phần cho khách hàng, khác với sổ công nợ NCC).
-    @Query("""
-            SELECT o.user.id AS customerId,
-                   o.user.fullName AS customerName,
-                   o.user.phoneNumber AS customerPhone,
-                   COALESCE(o.finalAmount, 0) AS finalAmount
-            FROM Order o
-            WHERE o.user IS NOT NULL
-              AND o.paymentStatus IN :unpaidStatuses
-              AND o.status NOT IN (com.zone.agri.entity.enums.OrderStatus.CANCELLED, com.zone.agri.entity.enums.OrderStatus.RETURNED)
-              AND o.subOrders IS EMPTY
-              AND o.createdAt <= :endDate
-              AND (:branchId IS NULL OR o.branch.id = :branchId)
-            """)
-    List<CustomerDebtOrderProjection> findLegacyCustomerDebtRows(
-            @Param("endDate") LocalDateTime endDate,
-            @Param("branchId") Long branchId,
-            @Param("unpaidStatuses") List<PaymentStatus> unpaidStatuses);
 }
