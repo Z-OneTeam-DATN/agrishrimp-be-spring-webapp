@@ -33,6 +33,7 @@ public class AiDiseaseKnowledgeResponse {
     private Integer priority;
     private Boolean canonical;
     private AiKnowledgeStatus status;
+    private String reviewNote;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }

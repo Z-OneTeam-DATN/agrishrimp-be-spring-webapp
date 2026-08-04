@@ -434,6 +434,10 @@ public class SchemaUpdateConfig implements BeanPostProcessor {
                     "Drop obsolete column zalo_id from users",
                     "ALTER TABLE users DROP COLUMN zalo_id");
 
+            executeSql(stmt,
+                    "Patch ai_disease_knowledge adds review_note",
+                    "ALTER TABLE ai_disease_knowledge ADD COLUMN review_note TEXT NULL");
+
             log.info("All schema patches executed successfully.");
         } catch (Exception e) {
             log.error("Failed to run database schema patches", e);

@@ -262,6 +262,7 @@ public class AiKnowledgeService {
         AiDiseaseKnowledge entity = diseaseKnowledgeRepository.findById(id)
                 .orElseThrow(() -> notFound("Không tìm thấy tri thức bệnh với ID: " + id));
         entity.setStatus(AiKnowledgeStatus.APPROVED);
+        entity.setReviewNote(null);
         AiDiseaseKnowledge saved = diseaseKnowledgeRepository.save(entity);
         syncKeywordAnswerSetFromDisease(saved);
         evictApprovedSnapshot();
@@ -269,10 +270,26 @@ public class AiKnowledgeService {
     }
 
     @Transactional
-    public AiDiseaseKnowledgeResponse rejectDiseaseKnowledge(Long id) {
+    public AiDiseaseKnowledgeResponse rejectDiseaseKnowledge(Long id, String reason) {
         AiDiseaseKnowledge entity = diseaseKnowledgeRepository.findById(id)
                 .orElseThrow(() -> notFound("Không tìm thấy tri thức bệnh với ID: " + id));
         entity.setStatus(AiKnowledgeStatus.DRAFT);
+        entity.setReviewNote(trimToNull(reason));
+        AiDiseaseKnowledge saved = diseaseKnowledgeRepository.save(entity);
+        syncKeywordAnswerSetFromDisease(saved);
+        evictApprovedSnapshot();
+        return toDiseaseKnowledgeResponse(saved);
+    }
+
+    /**
+     * Chi doi co enabled — KHONG tai dung applyDiseaseKnowledge()/PUT full-record vi ham do luon
+     * ha APPROVED ve IN_REVIEW moi lan luu, se khien 1 lan an/hien don gian bi bat duyet lai.
+     */
+    @Transactional
+    public AiDiseaseKnowledgeResponse setDiseaseKnowledgeVisibility(Long id, boolean enabled) {
+        AiDiseaseKnowledge entity = diseaseKnowledgeRepository.findById(id)
+                .orElseThrow(() -> notFound("Không tìm thấy tri thức bệnh với ID: " + id));
+        entity.setEnabled(enabled);
         AiDiseaseKnowledge saved = diseaseKnowledgeRepository.save(entity);
         syncKeywordAnswerSetFromDisease(saved);
         evictApprovedSnapshot();
@@ -1979,6 +1996,7 @@ public class AiKnowledgeService {
                 .priority(entity.getPriority())
                 .canonical(entity.getCanonical())
                 .status(entity.getStatus())
+                .reviewNote(entity.getReviewNote())
                 .createdAt(entity.getCreatedAt())
                 .updatedAt(entity.getUpdatedAt())
                 .build();

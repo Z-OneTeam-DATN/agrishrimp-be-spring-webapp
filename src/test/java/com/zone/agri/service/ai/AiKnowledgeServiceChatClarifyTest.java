@@ -297,6 +297,37 @@ class AiKnowledgeServiceChatClarifyTest {
     }
 
     @Test
+    void reject_withReason_savesReviewNoteAndResetsStatusToDraft() {
+        AiDiseaseKnowledge disease = seedDisease("DIS_REJECT", "Benh tu choi", "kwreject", 0.5D);
+
+        var response = aiKnowledgeService.rejectDiseaseKnowledge(disease.getId(), "Bo sung lieu luong cu the");
+
+        assertThat(response.getStatus()).isEqualTo(AiKnowledgeStatus.DRAFT);
+        assertThat(response.getReviewNote()).isEqualTo("Bo sung lieu luong cu the");
+    }
+
+    @Test
+    void approve_afterPriorRejection_clearsReviewNote() {
+        AiDiseaseKnowledge disease = seedDisease("DIS_APPROVE_CLEAR", "Benh duyet lai", "kwapproveclear", 0.5D);
+        aiKnowledgeService.rejectDiseaseKnowledge(disease.getId(), "Ly do cu can sua");
+
+        var response = aiKnowledgeService.approveDiseaseKnowledge(disease.getId());
+
+        assertThat(response.getStatus()).isEqualTo(AiKnowledgeStatus.APPROVED);
+        assertThat(response.getReviewNote()).isNull();
+    }
+
+    @Test
+    void setVisibility_onApprovedDisease_flipsEnabledWithoutTouchingStatus() {
+        AiDiseaseKnowledge disease = seedDisease("DIS_VISIBILITY", "Benh an hien", "kwvisibility", 0.5D);
+
+        var response = aiKnowledgeService.setDiseaseKnowledgeVisibility(disease.getId(), false);
+
+        assertThat(response.getEnabled()).isFalse();
+        assertThat(response.getStatus()).isEqualTo(AiKnowledgeStatus.APPROVED);
+    }
+
+    @Test
     void decisionForDiseaseNoLongerApproved_isRejected_escalates() {
         AiDiseaseKnowledge diseaseA = seedDisease("DIS_A", "Benh A", "ambigkw", 0.5D);
         seedDisease("DIS_B", "Benh B", "ambigkw", 0.5D);
@@ -305,7 +336,7 @@ class AiKnowledgeServiceChatClarifyTest {
         String sessionId = "sess-" + UUID.randomUUID();
         // Mo phien voi DIS_A dang APPROVED, nhung truoc khi Gemini chot, ky su go duyet DIS_A —
         // di qua dung service method (rejectDiseaseKnowledge) de no tu evict cache nhu ngoai doi that.
-        aiKnowledgeService.rejectDiseaseKnowledge(diseaseA.getId());
+        aiKnowledgeService.rejectDiseaseKnowledge(diseaseA.getId(), null);
 
         AiChatResponse response = chat("tom bi ambigkw hom nay", sessionId, null);
 
