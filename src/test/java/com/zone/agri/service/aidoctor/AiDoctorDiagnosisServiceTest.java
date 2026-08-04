@@ -218,11 +218,17 @@ class AiDoctorDiagnosisServiceTest {
     }
 
     @Test
-    void nonShrimpStatus_throwsBadRequest_unaffectedByNarrativeAddition() {
+    void nonShrimpStatus_returnsGeminiNarrative_insteadOfGenericBadRequest() {
         when(aiDiagnosisClient.predict(any())).thenReturn(predictResponse("NON_SHRIMP", null));
+        when(geminiClarifyClient.describeImage(any(), any(), any())).thenReturn("Day la anh mot chiec la, khong phai tom.");
+        when(geminiClarifyClient.freeConsult(any(), any(), any()))
+                .thenReturn("Ban gui giup minh tam anh con tom ro net hon nhe.");
 
-        assertThatThrownBy(() -> aiDoctorDiagnosisService.diagnose(fakeImage(), "", 1L, "sess-5"))
-                .isInstanceOf(BadRequestException.class);
+        AiDoctorDiagnosisResponse response = aiDoctorDiagnosisService.diagnose(fakeImage(), "", 1L, "sess-5");
+
+        assertThat(response.getStatus()).isEqualTo("UNRECOGNIZED");
+        assertThat(response.getAiDescription()).contains("Day la anh mot chiec la, khong phai tom.");
+        assertThat(response.getAiDescription()).contains("Ban gui giup minh tam anh con tom ro net hon nhe.");
     }
 
     @Test

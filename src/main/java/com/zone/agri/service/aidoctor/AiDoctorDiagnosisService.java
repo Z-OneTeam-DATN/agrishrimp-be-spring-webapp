@@ -96,9 +96,22 @@ public class AiDoctorDiagnosisService {
                     "Ảnh quá mờ hoặc chất lượng thấp. Vui lòng chụp lại ảnh rõ hơn.");
         }
         if ("NON_SHRIMP".equals(aiStatus)) {
-            log.info("[AiDoctor] traceId={} NON_SHRIMP image", traceId);
-            throw new BadRequestException(
-                    "Không phát hiện tôm trong ảnh. Vui lòng điều chỉnh góc chụp và thử lại.");
+            log.info("[AiDoctor] traceId={} NON_SHRIMP image, tra loi than thien bang mo ta cua Gemini "
+                    + "thay vi bao loi chung chung", traceId);
+            // Truoc day throw BadRequestException ngay tai day — bo qua luon narrativeFuture da kich
+            // hoat song song o tren (Gemini van bi goi nhung ket qua bi vut di), khien nguoi dung chi
+            // thay 1 toast loi chung chung thay vi duoc bac si AI mo ta that su thay gi trong anh. Gio
+            // dung lai narrativeText (nhu nhanh UNRECOGNIZED ben duoi) de tra ve 1 bong bong chat than
+            // thien, dua tren nhung gi Gemini thuc su doc duoc tu anh.
+            String narrativeText = resolveNarrativeGracefully(narrativeFuture, traceId);
+            return aiKnowledgeService.buildUnrecognizedDiagnosisResponse(
+                    predictResponse,
+                    null,
+                    diagnosisImageUrl,
+                    normalizedSymptoms,
+                    sessionId != null ? sessionId : "diag_" + traceId,
+                    userId,
+                    narrativeText);
         }
         if ("HEALTHY".equals(aiStatus)) {
             log.info("[AiDoctor] traceId={} HEALTHY shrimp", traceId);
