@@ -47,7 +47,13 @@ public class InventoryService {
     private final ApplicationContext applicationContext; // Dùng để lazy-get PurchaseRequestService tránh circular dep
 
     private Long resolveImportListBranchId() {
-        return canApproveImportsAcrossBranches() ? null : warehouseContext.resolveWarehouseId();
+        return canReadImportsAcrossBranches() ? null : warehouseContext.resolveWarehouseId();
+    }
+
+    private void assertImportReadAccess(InventoryNote note) {
+        if (!canReadImportsAcrossBranches()) {
+            warehouseContext.assertAccess(note.getBranch().getId());
+        }
     }
 
     private void assertImportReadOrApproveAccess(InventoryNote note) {
@@ -59,6 +65,13 @@ public class InventoryService {
     private boolean canApproveImportsAcrossBranches() {
         return hasAuthority("IMPORT_APPROVE")
                 && RoleUtils.hasAdminLikeAuthority(AuthUtils.getAuthorities());
+    }
+
+    private boolean canReadImportsAcrossBranches() {
+        com.zone.agri.dto.response.user.UserDetail user = AuthUtils.getUserDetail();
+        String roleSlug = user != null && user.getRole() != null ? user.getRole().getSlug() : null;
+        return RoleUtils.isAdminLikeRole(roleSlug)
+                || RoleUtils.hasAdminLikeAuthority(AuthUtils.getAuthorities());
     }
     private static final Set<InventoryNoteStatus> OPEN_RECEIPT_STATUSES = Set.of(
             InventoryNoteStatus.PENDING,
@@ -504,7 +517,7 @@ public class InventoryService {
     public InventoryReceiptResponse getReceiptById(Long id) {
         InventoryNote note = noteRepository.findById(id)
                 .orElseThrow(() -> new NotFoundException("Không tìm thấy phiếu ID: " + id));
-        assertImportReadOrApproveAccess(note);
+        assertImportReadAccess(note);
         return mapToResponse(note);
     }
 
