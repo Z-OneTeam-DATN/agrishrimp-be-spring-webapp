@@ -1587,6 +1587,31 @@ public class AiKnowledgeService {
                 .build();
     }
 
+    /**
+     * Anh gui len KHONG PHAI anh tom (mon an da nau chin, anh khong lien quan...) — co chu dich
+     * KHONG dung buildUnrecognizedDiagnosisResponse: ham do goi THEM 1 lan freeConsult() rieng,
+     * ghep 2 doan van Gemini sinh ra doc lap voi nhau (moi doan lai tu chao rieng) → cau tra loi
+     * bi thua/lap y (vd 2 lan "Chao ban"). O day chi dung DUNG 1 lan mo ta anh da co san tu
+     * describeImage() (khong goi Gemini lan 2), va khong tao review case — khong co gi de ky su
+     * xem xet tu 1 buc anh khong lien quan den chan doan.
+     */
+    public AiDoctorDiagnosisResponse buildNonShrimpImageResponse(
+            AiPredictResponse predictResponse, String diagnosisImageUrl, String geminiImageDescription) {
+        String observationHtml = trimToNull(geminiImageDescription) != null
+                ? buildImageObservationPrefixHtml(geminiImageDescription, null, null)
+                : "";
+        String html = observationHtml
+                + "<p>Ảnh này mình chưa thấy tôm trong đó, bà con gửi lại giúp mình 1 tấm ảnh chụp rõ con tôm để mình xem kỹ hơn nhé!</p>";
+
+        return AiDoctorDiagnosisResponse.builder()
+                .diagnosisId("nonshrimp_" + UUID.randomUUID().toString().replace("-", "").substring(0, 12))
+                .status("UNRECOGNIZED")
+                .imageUrl(diagnosisImageUrl)
+                .topPredictions(toTopPredictions(predictResponse))
+                .aiDescription(html)
+                .build();
+    }
+
     private String buildFarmerContextForImageSuggestion(String userSymptoms, String geminiImageDescription) {
         StringBuilder text = new StringBuilder();
         if (trimToNull(userSymptoms) != null) {
