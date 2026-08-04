@@ -108,6 +108,10 @@ services:
     image: ghcr.io/z-oneteam-datn/agrishrimp-be-spring-webapp:latest
     container_name: agrishrimp-api
     restart: unless-stopped
+    # Khong co limit nay, MaxRAMPercentage=75.0 (Dockerfile) tinh tren RAM CA VPS thay vi ngan
+    # sach rieng cho service nay — la nguyen nhan JVM heap ceiling bi thoi phong qua muc can thiet.
+    mem_limit: 768m
+    mem_reservation: 384m
     ports:
       - "127.0.0.1:8004:8004"    # bind localhost only — Nginx sẽ proxy
     env_file:
