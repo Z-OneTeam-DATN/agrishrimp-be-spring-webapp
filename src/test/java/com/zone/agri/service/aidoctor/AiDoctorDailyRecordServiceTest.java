@@ -96,13 +96,20 @@ class AiDoctorDailyRecordServiceTest {
     }
 
     private void seedDiagnosisHistory(Long userId, String diseaseCode, String nameVi, LocalDateTime createdAt) {
+        seedDiagnosisHistory(userId, diseaseCode, nameVi, "DISEASE", null, createdAt);
+    }
+
+    private void seedDiagnosisHistory(Long userId, String diseaseCode, String nameVi, String status,
+            String aiDescription, LocalDateTime createdAt) {
         AiDoctorDiagnosisHistory saved = diagnosisHistoryRepository.save(AiDoctorDiagnosisHistory.builder()
                 .userId(userId)
                 .imageUrl("http://img/test.jpg")
                 .finalDiseaseCode(diseaseCode)
-                .finalDiseaseNameVi(nameVi)
-                .finalConfidencePercent(90.0)
+                .finalDiseaseNameVi(diseaseCode != null ? nameVi : null)
+                .finalConfidencePercent(diseaseCode != null ? 90.0 : null)
                 .needsClarification(false)
+                .status(status)
+                .aiDescription(aiDescription)
                 .build());
         forceCreatedAt("miniapp_diagnosis_history", saved.getId(), createdAt);
     }
@@ -187,5 +194,46 @@ class AiDoctorDailyRecordServiceTest {
         List<AiDoctorConversationTurnResponse> turns = dailyRecordService.getConversation(9999L, LocalDate.of(2026, 1, 1));
 
         assertThat(turns).isEmpty();
+    }
+
+    @Test
+    void conversation_healthyDiagnosis_replaysWithStatusAndNoDisease() {
+        Long userId = 3001L;
+        LocalDate date = LocalDate.of(2026, 6, 25);
+        seedDiagnosisHistory(userId, null, null, "HEALTHY", null, date.atTime(9, 0));
+
+        List<AiDoctorConversationTurnResponse> turns = dailyRecordService.getConversation(userId, date);
+
+        assertThat(turns).hasSize(1);
+        assertThat(turns.get(0).getStatus()).isEqualTo("HEALTHY");
+        assertThat(turns.get(0).getDisease()).isNull();
+    }
+
+    @Test
+    void conversation_unrecognizedDiagnosis_replaysWithAiDescription() {
+        Long userId = 3002L;
+        LocalDate date = LocalDate.of(2026, 6, 26);
+        seedDiagnosisHistory(userId, null, null, "UNRECOGNIZED", "Day khong phai anh tom.", date.atTime(9, 0));
+
+        List<AiDoctorConversationTurnResponse> turns = dailyRecordService.getConversation(userId, date);
+
+        assertThat(turns).hasSize(1);
+        assertThat(turns.get(0).getStatus()).isEqualTo("UNRECOGNIZED");
+        assertThat(turns.get(0).getDisease()).isNull();
+        assertThat(turns.get(0).getAiDescription()).isEqualTo("Day khong phai anh tom.");
+    }
+
+    @Test
+    void conversation_legacyNullStatus_defaultsToDisease() {
+        Long userId = 3003L;
+        LocalDate date = LocalDate.of(2026, 6, 27);
+        // Mo phong ban ghi cu truoc patch nay — chua tung co status.
+        seedDiagnosisHistory(userId, "DIS_LEGACY", "Benh legacy", null, null, date.atTime(9, 0));
+
+        List<AiDoctorConversationTurnResponse> turns = dailyRecordService.getConversation(userId, date);
+
+        assertThat(turns).hasSize(1);
+        assertThat(turns.get(0).getStatus()).isEqualTo("DISEASE");
+        assertThat(turns.get(0).getDisease().getCode()).isEqualTo("DIS_LEGACY");
     }
 }

@@ -70,6 +70,8 @@ public class AiDoctorDiagnosisHistoryService {
                 .treatmentStagesJson(toJson(response.getTreatmentStages()))
                 .purchaseUrl(response.getPurchaseUrl())
                 .needsClarification(response.getNeedsClarification())
+                .status(response.getStatus())
+                .aiDescription(response.getAiDescription())
                 .build();
 
         AiDoctorDiagnosisHistory saved = historyRepository.save(history);

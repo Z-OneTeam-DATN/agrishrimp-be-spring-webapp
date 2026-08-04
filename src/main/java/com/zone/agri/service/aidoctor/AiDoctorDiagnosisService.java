@@ -87,7 +87,7 @@ public class AiDoctorDiagnosisService {
         // 2. AI predict-image (fail → toàn bộ request fail, không graceful)
         AiPredictResponse predictResponse = aiDiagnosisClient.predict(image);
         String aiStatus = predictResponse.getStatus();
-        String diagnosisImageUrl = uploadAnnotatedImageGracefully(predictResponse, traceId);
+        String diagnosisImageUrl = uploadAnnotatedImageGracefully(image, predictResponse, traceId);
 
         // 2a. Xử lý sớm các trạng thái đặc biệt từ AI
         if ("BLURRY".equals(aiStatus)) {
@@ -106,15 +106,20 @@ public class AiDoctorDiagnosisService {
             // doan Gemini doc lap lai voi nhau nen bi thua/lap y (2 lan "Chao ban") khi anh khong
             // phai anh tom benh, vi ban than buc anh khong co gi de "tu van" them.
             String narrativeText = resolveNarrativeGracefully(narrativeFuture, traceId);
-            return aiKnowledgeService.buildNonShrimpImageResponse(predictResponse, diagnosisImageUrl, narrativeText);
+            AiDoctorDiagnosisResponse response =
+                    aiKnowledgeService.buildNonShrimpImageResponse(predictResponse, diagnosisImageUrl, narrativeText);
+            saveHistoryGracefully(response, userId, normalizedSymptoms, traceId);
+            return response;
         }
         if ("HEALTHY".equals(aiStatus)) {
             log.info("[AiDoctor] traceId={} HEALTHY shrimp", traceId);
-            return AiDoctorDiagnosisResponse.builder()
+            AiDoctorDiagnosisResponse response = AiDoctorDiagnosisResponse.builder()
                     .diagnosisId("healthy_" + traceId)
                     .status("HEALTHY")
                     .imageUrl(diagnosisImageUrl)
                     .build();
+            saveHistoryGracefully(response, userId, normalizedSymptoms, traceId);
+            return response;
         }
 
         AiPredictionItem finalPrediction = predictResponse.getFinalPrediction();
@@ -122,7 +127,7 @@ public class AiDoctorDiagnosisService {
 
         if (finalPrediction == null || finalPrediction.getDiseaseCode() == null) {
             log.warn("[AiDoctor] traceId={} AI khong nhan ra benh, chuyen sang goi y Gemini tu do", traceId);
-            return aiKnowledgeService.buildUnrecognizedDiagnosisResponse(
+            AiDoctorDiagnosisResponse response = aiKnowledgeService.buildUnrecognizedDiagnosisResponse(
                     predictResponse,
                     finalPrediction,
                     diagnosisImageUrl,
@@ -130,6 +135,8 @@ public class AiDoctorDiagnosisService {
                     sessionId != null ? sessionId : "diag_" + traceId,
                     userId,
                     narrativeText);
+            saveHistoryGracefully(response, userId, normalizedSymptoms, traceId);
+            return response;
         }
 
         String diseaseCode = finalPrediction.getDiseaseCode();
@@ -145,17 +152,28 @@ public class AiDoctorDiagnosisService {
                 userId,
                 narrativeText);
 
-        if (userId != null && "DISEASE".equalsIgnoreCase(response.getStatus())) {
-            try {
-                Long historyId = diagnosisHistoryService.saveDiagnosisHistory(response, userId, normalizedSymptoms);
-                response.setDiagnosisId(String.valueOf(historyId));
-            } catch (Exception e) {
-                log.error("[AiDoctor] traceId={} History save fail (graceful): {}", traceId, e.getMessage());
-            }
-        }
+        // Luu history cho MOI outcome (khong chi DISEASE nua) — enrichDiagnosis co the tu tra ve
+        // UNRECOGNIZED ben trong no (nhanh confidence/match khong dat nguong), van can luu de phat
+        // lai duoc trong "So kham"/khoi phuc chat hom nay.
+        saveHistoryGracefully(response, userId, normalizedSymptoms, traceId);
 
         log.info("[AiDoctor] traceId={} done: userId={}, diagnosisId={}", traceId, userId, response.getDiagnosisId());
         return response;
+    }
+
+    /**
+     * Luu 1 ban ghi history cho BAT KY outcome nao (DISEASE/HEALTHY/UNRECOGNIZED) khi user da dang
+     * nhap — de "So kham"/khoi phuc chat hom nay co du lieu phat lai. Guest (userId null) khong
+     * luu, giong hanh vi cu.
+     */
+    private void saveHistoryGracefully(AiDoctorDiagnosisResponse response, Long userId, String userSymptoms, String traceId) {
+        if (userId == null) return;
+        try {
+            Long historyId = diagnosisHistoryService.saveDiagnosisHistory(response, userId, userSymptoms);
+            response.setDiagnosisId(String.valueOf(historyId));
+        } catch (Exception e) {
+            log.error("[AiDoctor] traceId={} History save fail (graceful): {}", traceId, e.getMessage());
+        }
     }
 
     // =========================================================
@@ -217,17 +235,28 @@ public class AiDoctorDiagnosisService {
         }
     }
 
-    private String uploadAnnotatedImageGracefully(AiPredictResponse predictResponse, String traceId) {
+    /**
+     * Uu tien upload anh DA ANNOTATE (co box YOLO) tu AI service. Neu AI service khong tra
+     * annotatedImage (khong phai luc nao cung co) hoac Cloudinary loi, fallback sang upload ANH
+     * GOC nguoi dung gui — dam bao imageUrl gan nhu luon co de "So kham"/khoi phuc chat con anh de
+     * phat lai, thay vi de trong null nhu truoc (anh chi song sot qua clientImageUrl phia FE, mat
+     * han sau khi rong trang vi cache do khong bao gio gui len BE).
+     */
+    private String uploadAnnotatedImageGracefully(MultipartFile image, AiPredictResponse predictResponse, String traceId) {
         String annotatedImage = predictResponse.getAnnotatedImage();
-        if (annotatedImage == null || annotatedImage.isBlank()) {
-            return null;
+        if (annotatedImage != null && !annotatedImage.isBlank()) {
+            try {
+                return cloudinaryService.uploadImage(annotatedImage, "ai-doctor/diagnosis");
+            } catch (Exception e) {
+                log.warn("[AiDoctor] traceId={} upload annotated image fail, fallback anh goc (graceful): {}",
+                        traceId, e.getMessage());
+            }
         }
 
         try {
-            return cloudinaryService.uploadImage(annotatedImage, "ai-doctor/diagnosis");
+            return cloudinaryService.upload(image, "ai-doctor/diagnosis").secureUrl();
         } catch (Exception e) {
-            log.warn("[AiDoctor] traceId={} upload annotated image fail (graceful): {}",
-                    traceId, e.getMessage());
+            log.warn("[AiDoctor] traceId={} upload anh goc fail (graceful): {}", traceId, e.getMessage());
             return null;
         }
     }

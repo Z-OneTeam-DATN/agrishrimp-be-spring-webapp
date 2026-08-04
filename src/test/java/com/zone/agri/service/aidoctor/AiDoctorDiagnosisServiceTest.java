@@ -40,9 +40,9 @@ import org.springframework.transaction.annotation.Transactional;
  *
  * Trọng tâm: (1) response mới có cả aiDescription lẫn các trường cấu trúc cũ; (2) graceful
  * degradation khi Gemini lỗi/timeout — đây là điều bắt buộc phải đúng vì narrative chạy song
- * song với YOLO, không được phép làm hỏng hoặc làm chậm bất thường luồng chẩn đoán chính; (3) các
- * trạng thái đặc biệt (BLURRY/NON_SHRIMP/HEALTHY) không bị ảnh hưởng; (4) history vẫn lưu đúng các
- * cột như trước, không có cột mới nào cho narrative (thiết kế có chủ đích: EPHEMERAL).
+ * song với YOLO, không được phép làm hỏng hoặc làm chậm bất thường luồng chẩn đoán chính; (3) MỌI
+ * outcome (DISEASE/HEALTHY/UNRECOGNIZED/NON_SHRIMP) đều được lưu vào history khi có userId — để
+ * "Sổ khám"/khôi phục chat hôm nay phát lại được, kể cả các case không có bệnh cụ thể.
  */
 @SpringBootTest
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
@@ -231,6 +231,13 @@ class AiDoctorDiagnosisServiceTest {
         // Khong duoc goi Gemini lan 2 (freeConsult) — chi 1 doan van duy nhat, tranh 2 doan Gemini
         // doc lap ghep vao nhau moi doan lai tu chao rieng (bi thua/lap y).
         verify(geminiClarifyClient, never()).freeConsult(any(), any(), any());
+
+        // Phai luu history de "So kham"/khoi phuc chat hom nay phat lai duoc bong bong nay.
+        AiDoctorDiagnosisHistory saved = historyRepository.findByIdAndUserId(Long.valueOf(response.getDiagnosisId()), 1L)
+                .orElseThrow();
+        assertThat(saved.getStatus()).isEqualTo("UNRECOGNIZED");
+        assertThat(saved.getAiDescription()).contains("Day la anh mot chiec la, khong phai tom.");
+        assertThat(saved.getFinalDiseaseCode()).isNull();
     }
 
     @Test
@@ -241,6 +248,11 @@ class AiDoctorDiagnosisServiceTest {
 
         assertThat(response.getStatus()).isEqualTo("HEALTHY");
         assertThat(response.getAiDescription()).isNull();
+
+        AiDoctorDiagnosisHistory saved = historyRepository.findByIdAndUserId(Long.valueOf(response.getDiagnosisId()), 1L)
+                .orElseThrow();
+        assertThat(saved.getStatus()).isEqualTo("HEALTHY");
+        assertThat(saved.getFinalDiseaseCode()).isNull();
     }
 
     // =========================================================
@@ -260,6 +272,11 @@ class AiDoctorDiagnosisServiceTest {
         assertThat(response.getStatus()).isEqualTo("UNRECOGNIZED");
         assertThat(response.getAiDescription()).contains("Co the do moi truong bien dong, ban theo doi them vai ngay nhe.");
         assertThat(response.getAiDescription()).contains("chưa được kỹ sư xác nhận");
+
+        AiDoctorDiagnosisHistory saved = historyRepository.findByIdAndUserId(Long.valueOf(response.getDiagnosisId()), 1L)
+                .orElseThrow();
+        assertThat(saved.getStatus()).isEqualTo("UNRECOGNIZED");
+        assertThat(saved.getAiDescription()).contains("Co the do moi truong bien dong, ban theo doi them vai ngay nhe.");
     }
 
     @Test
@@ -275,14 +292,14 @@ class AiDoctorDiagnosisServiceTest {
     }
 
     // =========================================================
-    // 5) History van luu dung cac cot nhu truoc - khong co cot moi nao cho narrative (EPHEMERAL)
+    // 5) History luu dung cot cho DISEASE, ke ca status/aiDescription moi them (truoc day
+    // aiDescription co chu dich KHONG duoc luu — EPHEMERAL; nay doi lai de phuc vu phat lai o
+    // "So kham"/khoi phuc chat hom nay, ap dung dong nhat cho moi status chu khong rieng gi
+    // HEALTHY/UNRECOGNIZED).
     // =========================================================
 
     @Test
-    void historyRow_hasNoAiDescriptionColumn_ephemeralFieldNeverPersisted() throws Exception {
-        assertThatThrownBy(() -> AiDoctorDiagnosisHistory.class.getDeclaredField("aiDescription"))
-                .isInstanceOf(NoSuchFieldException.class);
-
+    void historyRow_persistsStatusAndAiDescription_forDiseaseOutcome() throws Exception {
         seedDiseaseWithProtocol("DIS_HIST", "Benh history test", "histkeyword", 0.4D, 0.65D);
         AiPredictionItem finalPrediction = prediction("DIS_HIST", "Benh history test", "History test", 90.0D);
         when(aiDiagnosisClient.predict(any())).thenReturn(predictResponse("DISEASE", finalPrediction));
@@ -294,5 +311,17 @@ class AiDoctorDiagnosisServiceTest {
         AiDoctorDiagnosisHistory saved = historyRepository.findByIdAndUserId(historyId, 42L).orElseThrow();
         assertThat(saved.getFinalDiseaseCode()).isEqualTo("DIS_HIST");
         assertThat(saved.getUserId()).isEqualTo(42L);
+        assertThat(saved.getStatus()).isEqualTo("DISEASE");
+        assertThat(saved.getAiDescription()).contains("Mo ta luu history.");
+    }
+
+    @Test
+    void diagnose_guestUser_doesNotSaveHistory() {
+        when(aiDiagnosisClient.predict(any())).thenReturn(predictResponse("HEALTHY", null));
+
+        AiDoctorDiagnosisResponse response = aiDoctorDiagnosisService.diagnose(fakeImage(), "", null, "sess-guest");
+
+        assertThat(response.getStatus()).isEqualTo("HEALTHY");
+        assertThat(response.getDiagnosisId()).startsWith("healthy_");
     }
 }

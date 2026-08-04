@@ -325,6 +325,14 @@ public class SchemaUpdateConfig implements BeanPostProcessor {
                     "ALTER TABLE conversations ADD COLUMN last_sender_id BIGINT NULL");
 
             executeSql(stmt,
+                    "Patch miniapp_diagnosis_history adds status",
+                    "ALTER TABLE miniapp_diagnosis_history ADD COLUMN status VARCHAR(20) NULL");
+
+            executeSql(stmt,
+                    "Patch miniapp_diagnosis_history adds ai_description",
+                    "ALTER TABLE miniapp_diagnosis_history ADD COLUMN ai_description TEXT NULL");
+
+            executeSql(stmt,
                     "Seed default cashflow risk settings in system_settings if missing",
                     """
                             INSERT IGNORE INTO system_settings (setting_key, setting_value, description) VALUES

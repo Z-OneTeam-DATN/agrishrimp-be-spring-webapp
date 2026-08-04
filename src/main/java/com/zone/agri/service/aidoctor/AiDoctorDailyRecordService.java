@@ -88,12 +88,16 @@ public class AiDoctorDailyRecordService {
     }
 
     private AiDoctorConversationTurnResponse toDiagnosisTurn(AiDoctorDiagnosisHistory history) {
-        DiseaseResponse disease = DiseaseResponse.builder()
-                .code(history.getFinalDiseaseCode())
-                .nameVi(history.getFinalDiseaseNameVi())
-                .nameEn(history.getFinalDiseaseNameEn())
-                .confidencePercent(history.getFinalConfidencePercent())
-                .build();
+        // HEALTHY/UNRECOGNIZED khong co finalDiseaseCode — khong build disease "rong" (toan null),
+        // de FE biet ro rang khong co benh cu the nao thay vi hien 1 object rong.
+        DiseaseResponse disease = history.getFinalDiseaseCode() != null
+                ? DiseaseResponse.builder()
+                        .code(history.getFinalDiseaseCode())
+                        .nameVi(history.getFinalDiseaseNameVi())
+                        .nameEn(history.getFinalDiseaseNameEn())
+                        .confidencePercent(history.getFinalConfidencePercent())
+                        .build()
+                : null;
 
         return AiDoctorConversationTurnResponse.builder()
                 .type("DIAGNOSIS")
@@ -104,6 +108,10 @@ public class AiDoctorDailyRecordService {
                 .disease(disease)
                 .signsSummary(history.getSignsSummary())
                 .needsClarification(history.getNeedsClarification())
+                // Ban ghi cu truoc patch nay chi tung luu DISEASE nen status co the null — coi null
+                // nhu "DISEASE" de khong vo du lieu lich su cu.
+                .status(history.getStatus() != null ? history.getStatus() : "DISEASE")
+                .aiDescription(history.getAiDescription())
                 .build();
     }
 }
