@@ -62,6 +62,12 @@ public class EmployeeResponse {
     @Schema(description = "Ngày tạo")
     private LocalDateTime createdAt;
 
+    @Schema(description = "true nếu là tài khoản vai trò hệ thống (SUPER_ADMIN/ADMIN) — không thể khóa hay xóa")
+    private Boolean isSystemAccount;
+
+    @Schema(description = "true nếu nhân viên đã phát sinh dữ liệu trong hệ thống — chỉ có thể tạm khóa, không thể xóa vĩnh viễn")
+    private Boolean hasGeneratedData;
+
     @Data
     @Builder
     @NoArgsConstructor
