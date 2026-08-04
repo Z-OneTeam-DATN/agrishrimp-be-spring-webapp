@@ -54,6 +54,9 @@ public class EmployeeService {
     private static final String DEFAULT_PASSWORD = "123456"; // Mật khẩu mặc định
     private static final Set<String> EMPLOYEE_STATUSES = Set.of(UserStatus.ACTIVE.name(), UserStatus.INACTIVE.name());
     private static final Pattern SAFE_SQL_IDENTIFIER = Pattern.compile("^[A-Za-z0-9_]+$");
+    /** Vai trò chỉ dùng workspace (kỹ sư nông nghiệp / tư vấn khách hàng) — trung lập toàn hệ thống, không gán chi nhánh nào. */
+    private static final Set<String> BRANCHLESS_WORKSPACE_PERMISSION_CODES =
+            Set.of("AGRONOMIST_WORKSPACE_USE", "CUSTOMER_ADVISOR_USE");
 
     @Transactional
     public EmployeeResponse createEmployee(EmployeeCreateRequest request) {
@@ -62,9 +65,8 @@ public class EmployeeService {
         // 1. Validate
         validateUniqueFields(null, request.getEmail(), request.getPhoneNumber(), request.getCitizenId());
 
-        Branch branch = branchRepository.findById(request.getBranchId())
-                .orElseThrow(() -> new NotFoundException("Không tìm thấy chi nhánh"));
         Role role = resolveAssignableRole(request.getRoleId());
+        Branch branch = resolveBranch(request.getBranchId(), role);
 
         // 2. Password handling
         String rawPassword = (request.getPassword() != null && !request.getPassword().isBlank())
@@ -233,9 +235,8 @@ public class EmployeeService {
                 request.getPhoneNumber(),
                 existingEmployee.getCitizenId());
 
-        Branch branch = branchRepository.findById(request.getBranchId())
-                .orElseThrow(() -> new NotFoundException("Không tìm thấy chi nhánh"));
         Role role = resolveAssignableRole(request.getRoleId());
+        Branch branch = resolveBranch(request.getBranchId(), role);
 
         existingEmployee.setFullName(request.getFullName());
         existingEmployee.setPhoneNumber(request.getPhoneNumber());
@@ -264,6 +265,23 @@ public class EmployeeService {
         }
 
         return role;
+    }
+
+    private boolean isBranchlessWorkspaceRole(Role role) {
+        if (role == null || role.getPermissions() == null) return false;
+        return role.getPermissions().stream()
+                .anyMatch(permission -> BRANCHLESS_WORKSPACE_PERMISSION_CODES.contains(permission.getCode()));
+    }
+
+    private Branch resolveBranch(Long branchId, Role role) {
+        if (branchId == null) {
+            if (!isBranchlessWorkspaceRole(role)) {
+                throw new BadRequestException("Chi nhánh làm việc không được để trống");
+            }
+            return null;
+        }
+        return branchRepository.findById(branchId)
+                .orElseThrow(() -> new NotFoundException("Không tìm thấy chi nhánh"));
     }
 
     private boolean canAssignRole(Role role) {

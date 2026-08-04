@@ -41,7 +41,8 @@ public class EmployeeCreateRequest {
 
     private String addressDetail;
 
-    @NotNull(message = "Chi nhánh làm việc không được để trống")
+    // Bat buoc hay khong tuy vai tro (workspace ky su/tu van thi khong can chi nhanh) — kiem tra o
+    // EmployeeService.resolveBranch(...), khong dat @NotNull o day nua.
     private Long branchId;
 
     @NotNull(message = "Vai trò không được để trống")
