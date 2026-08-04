@@ -89,4 +89,8 @@ public class AiDiseaseKnowledge extends BaseEntity {
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 30)
     AiKnowledgeStatus status = AiKnowledgeStatus.DRAFT;
+
+    /** Ly do tu choi / yeu cau chinh sua tu admin — hien cho ky su xem tren form sua. Null khi chua tung bi tu choi. */
+    @Column(name = "review_note", columnDefinition = "TEXT")
+    String reviewNote;
 }

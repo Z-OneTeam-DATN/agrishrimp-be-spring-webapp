@@ -1,7 +1,9 @@
 package com.zone.agri.controller;
 
 import com.zone.agri.dto.ai.AiChatResponse;
+import com.zone.agri.dto.request.ai.AiDiseaseKnowledgeRejectRequest;
 import com.zone.agri.dto.request.ai.AiDiseaseKnowledgeRequest;
+import com.zone.agri.dto.request.ai.AiDiseaseKnowledgeVisibilityRequest;
 import com.zone.agri.dto.request.ai.AiDoctorChatRequest;
 import com.zone.agri.dto.request.ai.AiKeywordAnswerSetRequest;
 import com.zone.agri.dto.request.ai.AiKnowledgeCategoryRequest;
@@ -132,8 +134,20 @@ public class AiKnowledgeController {
 
     @PatchMapping("/diseases/{id}/reject")
     @RequirePermission("AI_KNOWLEDGE_APPROVE")
-    public ResponseEntity<AiDiseaseKnowledgeResponse> rejectDisease(@PathVariable Long id) {
-        return ResponseEntity.ok(aiKnowledgeService.rejectDiseaseKnowledge(id));
+    public ResponseEntity<AiDiseaseKnowledgeResponse> rejectDisease(
+            @PathVariable Long id,
+            @RequestBody(required = false) AiDiseaseKnowledgeRejectRequest request) {
+        String reason = request != null ? request.getReason() : null;
+        return ResponseEntity.ok(aiKnowledgeService.rejectDiseaseKnowledge(id, reason));
+    }
+
+    @PatchMapping("/diseases/{id}/visibility")
+    @RequirePermission("AI_KNOWLEDGE_APPROVE")
+    public ResponseEntity<AiDiseaseKnowledgeResponse> setDiseaseVisibility(
+            @PathVariable Long id,
+            @RequestBody AiDiseaseKnowledgeVisibilityRequest request) {
+        return ResponseEntity.ok(
+                aiKnowledgeService.setDiseaseKnowledgeVisibility(id, Boolean.TRUE.equals(request.getEnabled())));
     }
 
     @GetMapping("/config")
