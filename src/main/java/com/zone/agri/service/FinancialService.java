@@ -18,8 +18,6 @@ import java.util.stream.Collectors;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import com.zone.agri.common.AuthUtils;
-import com.zone.agri.dto.response.customer.CustomerDebtResponse;
 import com.zone.agri.dto.response.financial.CashbookEntryResponse;
 import com.zone.agri.dto.response.financial.CashbookReportResponse;
 import com.zone.agri.dto.response.financial.CashbookSummaryResponse;
@@ -221,88 +219,6 @@ public class FinancialService {
                 .sorted(Comparator
                         .comparing(SupplierDebtResponse::getTotalDebt, Comparator.reverseOrder())
                         .thenComparing(item -> Objects.toString(item.getSupplierName(), "")))
-                .toList();
-    }
-
-    public List<CustomerDebtResponse> getCustomerDebts(
-            String search,
-            LocalDate endDate,
-            Long branchId,
-            Long staffId,
-            String debtFilter) {
-        Long finalBranchId = resolveBranchId(branchId);
-        String normalizedSearch = normalizeSearch(search);
-        LocalDateTime snapshotDate = endDate != null
-                ? endDate.atTime(23, 59, 59)
-                : LocalDateTime.now();
-
-        Map<Long, BigDecimal> debtByCustomer = new LinkedHashMap<>();
-        Map<Long, String> nameById = new HashMap<>();
-        Map<Long, String> phoneById = new HashMap<>();
-
-        for (OrderRepository.CustomerDebtOrderProjection row : orderRepository
-                .findLegacyCustomerDebtRows(snapshotDate, finalBranchId, CUSTOMER_UNPAID_STATUSES)) {
-            debtByCustomer.merge(row.getCustomerId(), getSafeBigDecimal(row.getFinalAmount()), BigDecimal::add);
-            nameById.putIfAbsent(row.getCustomerId(), row.getCustomerName());
-            phoneById.putIfAbsent(row.getCustomerId(), row.getCustomerPhone());
-        }
-
-        for (SubOrderRepository.CustomerDebtSubOrderProjection row : subOrderRepository
-                .findSubOrderCustomerDebtRows(snapshotDate, finalBranchId, CUSTOMER_UNPAID_STATUSES)) {
-            BigDecimal subtotal = getSafeBigDecimal(row.getSubtotal());
-            BigDecimal shippingFee = getSafeBigDecimal(row.getShippingFee());
-            BigDecimal allocatedDiscount = allocateDiscount(
-                    subtotal, getSafeBigDecimal(row.getOrderSubtotal()), getSafeBigDecimal(row.getOrderDiscountAmount()));
-            BigDecimal amount = subtotal.add(shippingFee).subtract(allocatedDiscount);
-
-            debtByCustomer.merge(row.getCustomerId(), amount, BigDecimal::add);
-            nameById.putIfAbsent(row.getCustomerId(), row.getCustomerName());
-            phoneById.putIfAbsent(row.getCustomerId(), row.getCustomerPhone());
-        }
-
-        Map<Long, Customer> customerByUserId = customerRepository.findByUserIdIn(debtByCustomer.keySet()).stream()
-                .filter(c -> c.getUser() != null)
-                .collect(Collectors.toMap(c -> c.getUser().getId(), c -> c, (left, right) -> left));
-
-        String searchLower = normalizedSearch != null ? normalizedSearch.toLowerCase() : null;
-
-        return debtByCustomer.entrySet().stream()
-                .map(entry -> {
-                    Long customerId = entry.getKey();
-                    Customer customer = customerByUserId.get(customerId);
-                    String name = firstNonBlank(
-                            customer != null ? customer.getName() : null,
-                            nameById.get(customerId));
-                    String phone = firstNonBlank(
-                            customer != null ? customer.getPhone() : null,
-                            phoneById.get(customerId));
-                    String staffName = customer != null && customer.getStaffAssigned() != null
-                            ? customer.getStaffAssigned().getFullName()
-                            : null;
-                    Long staffAssignedId = customer != null && customer.getStaffAssigned() != null
-                            ? customer.getStaffAssigned().getId()
-                            : null;
-
-                    return new Object[] {
-                            CustomerDebtResponse.builder()
-                                    .id(customerId)
-                                    .customerName(name)
-                                    .phone(phone)
-                                    .staffAssignedName(staffName)
-                                    .totalDebt(maxZero(entry.getValue()))
-                                    .build(),
-                            staffAssignedId
-                    };
-                })
-                .filter(pair -> staffId == null || staffId.equals(pair[1]))
-                .map(pair -> (CustomerDebtResponse) pair[0])
-                .filter(item -> matchesDebtFilter(item.getTotalDebt(), debtFilter))
-                .filter(item -> searchLower == null
-                        || Objects.toString(item.getCustomerName(), "").toLowerCase().contains(searchLower)
-                        || Objects.toString(item.getPhone(), "").contains(normalizedSearch))
-                .sorted(Comparator
-                        .comparing(CustomerDebtResponse::getTotalDebt, Comparator.reverseOrder())
-                        .thenComparing(item -> Objects.toString(item.getCustomerName(), "")))
                 .toList();
     }
 
