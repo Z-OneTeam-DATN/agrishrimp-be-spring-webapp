@@ -25,12 +25,17 @@ public class AiDoctorConversationTurnResponse {
     /** answerText đã lưu sẵn — chính là HTML đã hiển thị lúc đó. */
     private String answerHtml;
 
-    // --- DIAGNOSIS (chỉ ảnh đã lưu History — status HEALTHY/UNRECOGNIZED không bao giờ được
-    // lưu History nên không bao giờ xuất hiện ở đây, khỏi phải xử lý 2 case đó). ---
+    // --- DIAGNOSIS ---
     private String diagnosisId;
     private String userSymptoms;
     private String imageUrl;
     private DiseaseResponse disease;
     private String signsSummary;
     private Boolean needsClarification;
+
+    /** DISEASE | HEALTHY | UNRECOGNIZED — null (bản ghi cũ trước patch) được BE coi là DISEASE. */
+    private String status;
+
+    /** Narrative HTML — chỉ có giá trị khi status HEALTHY/UNRECOGNIZED (DISEASE dùng signsSummary). */
+    private String aiDescription;
 }

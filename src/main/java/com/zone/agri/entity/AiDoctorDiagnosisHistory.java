@@ -104,4 +104,18 @@ public class AiDoctorDiagnosisHistory extends BaseEntity {
      */
     @Column(name = "needs_clarification")
     Boolean needsClarification;
+
+    /**
+     * DISEASE | HEALTHY | UNRECOGNIZED — bản ghi trước patch này chỉ từng lưu DISEASE nên có thể
+     * null; đọc lại phải coi null như "DISEASE" để không vỡ dữ liệu cũ.
+     */
+    @Column(name = "status", length = 20)
+    String status;
+
+    /**
+     * Narrative HTML (Gemini describeImage + freeConsult) — chỉ cần cho HEALTHY/UNRECOGNIZED, vì
+     * DISEASE đã có signsSummary/causes/treatmentStages cấu trúc làm nguồn thay thế khi phát lại.
+     */
+    @Column(name = "ai_description", columnDefinition = "TEXT")
+    String aiDescription;
 }
