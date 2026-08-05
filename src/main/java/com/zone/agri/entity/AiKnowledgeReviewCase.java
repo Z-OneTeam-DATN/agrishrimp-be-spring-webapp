@@ -46,7 +46,9 @@ public class AiKnowledgeReviewCase extends BaseEntity {
     @Column(name = "ai_suggested_disease_code", length = 120)
     String aiSuggestedDiseaseCode;
 
-    @Column(name = "matched_knowledge_code", length = 120)
+    // length 500: co the chua nhieu ma phac do cach nhau boi dau phay (agronomist chon nhieu phac do
+    // cho cung 1 dau hieu/cau hoi), khong chi 1 ma duy nhat nhu truoc.
+    @Column(name = "matched_knowledge_code", length = 500)
     String matchedKnowledgeCode;
 
     @Column(name = "match_score")
