@@ -304,6 +304,54 @@ public class EmailService {
         sendEmail(toEmail, subject, htmlContent);
     }
 
+    public void sendPasswordResetEmail(String toEmail, String name, String resetLink) {
+        String subject = "[AgriShrimp] Yêu cầu đặt lại mật khẩu";
+        String body = """
+                <p style="font-size:16px;color:#374151;line-height:1.8;">
+                    Xin chào <strong>%s</strong>,
+                </p>
+                <p style="font-size:15px;color:#374151;line-height:1.8;">
+                    Chúng tôi nhận được yêu cầu đặt lại mật khẩu cho tài khoản <strong>AgriShrimp</strong> của bạn.
+                    Nhấn vào nút bên dưới để đặt mật khẩu mới.
+                </p>
+
+                <div style="background:#fffbeb;border-left:4px solid #f59e0b;border-radius:8px;padding:14px 18px;margin:16px 0;">
+                    <p style="margin:0;font-size:14px;color:#92400e;line-height:1.7;">
+                        ⚠️ Liên kết này chỉ có hiệu lực trong <strong>15 phút</strong> và chỉ dùng được một lần.
+                    </p>
+                </div>
+
+                <p style="font-size:13px;color:#9ca3af;line-height:1.7;">
+                    Nếu bạn không yêu cầu đặt lại mật khẩu, vui lòng bỏ qua email này — mật khẩu hiện tại của bạn vẫn an toàn.
+                </p>
+                """.formatted(name);
+
+        String htmlContent = buildEmailTemplate("Đặt Lại Mật Khẩu", body, resetLink, "Đặt lại mật khẩu →");
+        sendEmail(toEmail, subject, htmlContent);
+    }
+
+    public void sendPasswordResetGoogleAccountNotice(String toEmail, String name) {
+        String subject = "[AgriShrimp] Tài khoản của bạn đăng nhập bằng Google";
+        String body = """
+                <p style="font-size:16px;color:#374151;line-height:1.8;">
+                    Xin chào <strong>%s</strong>,
+                </p>
+                <p style="font-size:15px;color:#374151;line-height:1.8;">
+                    Chúng tôi nhận được yêu cầu đặt lại mật khẩu cho email này, nhưng tài khoản của bạn được tạo bằng
+                    <strong>Đăng nhập Google</strong> nên không có mật khẩu riêng để đặt lại.
+                </p>
+
+                <div style="background:#f0f9ff;border-left:4px solid #1e40af;border-radius:8px;padding:14px 18px;margin:16px 0;">
+                    <p style="margin:0;font-size:14px;color:#1e40af;line-height:1.7;">
+                        Vui lòng dùng nút <strong>"Tiếp tục với Google"</strong> ở trang đăng nhập để truy cập tài khoản.
+                    </p>
+                </div>
+                """.formatted(name);
+
+        String htmlContent = buildEmailTemplate("Tài Khoản Đăng Nhập Google", body, "Đăng nhập ngay →");
+        sendEmail(toEmail, subject, htmlContent);
+    }
+
     public void sendVoucherExpiringSoonEmail(String toEmail, String customerName, Voucher voucher, int daysLeft) {
         String subject = "[AgriShrimp] 🎟️ Voucher %s sắp hết hạn".formatted(voucher.getCode());
         String body = """
@@ -390,6 +438,10 @@ public class EmailService {
     }
 
     private String buildEmailTemplate(String headerTitle, String bodyHtml, String ctaText) {
+        return buildEmailTemplate(headerTitle, bodyHtml, LOGIN_URL, ctaText);
+    }
+
+    private String buildEmailTemplate(String headerTitle, String bodyHtml, String ctaUrl, String ctaText) {
         return """
                 <!DOCTYPE html>
                 <html lang="vi">
@@ -458,7 +510,7 @@ public class EmailService {
 
                 </body>
                 </html>
-                """.formatted(headerTitle, bodyHtml, LOGIN_URL, ctaText);
+                """.formatted(headerTitle, bodyHtml, ctaUrl, ctaText);
     }
 
     // ─────────────────────────────────────────────────────────────────────────

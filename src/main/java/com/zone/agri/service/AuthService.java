@@ -1,8 +1,10 @@
 package com.zone.agri.service;
 
 import com.zone.agri.dto.response.auth.AuthResponse;
+import com.zone.agri.dto.request.auth.ForgotPasswordRequest;
 import com.zone.agri.dto.request.auth.GoogleLoginRequest;
 import com.zone.agri.dto.request.auth.LoginRequest;
+import com.zone.agri.dto.request.auth.ResetPasswordRequest;
 import com.zone.agri.dto.request.auth.SignupRequest;
 import com.zone.agri.entity.Role;
 import com.zone.agri.entity.User;
@@ -19,6 +21,7 @@ import com.zone.agri.utils.JwtUtils;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.*;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -42,17 +45,19 @@ public class AuthService {
     private final CaptchaService captchaService;
     private final JwtUtils jwtUtils;
     private final CustomUserDetailsService userDetailsService;
+    private final EmailService emailService;
 
     private final RestTemplate restTemplate;
 
-    private static final Pattern EMAIL_PATTERN = Pattern.compile("^[\\w-\\.]+@([\\w-]+\\.)+[\\w-]{2,4}$");
+    @Value("${app.web-base-url:https://agrishrimp.io.vn}")
+    private String webBaseUrl;
 
-    private static final Pattern PHONE_PATTERN = Pattern.compile("^\\d{10}$");
+    private static final Pattern EMAIL_PATTERN = Pattern.compile("^[\\w-\\.]+@([\\w-]+\\.)+[\\w-]{2,4}$");
 
     private static final String ROLE_USER = "USER";
 
     // =========================================================
-    // ĐĂNG NHẬP (LOCAL: email/phone + password + captcha)
+    // ĐĂNG NHẬP (LOCAL: email + password + captcha)
     // =========================================================
     @Transactional(readOnly = true)
     public AuthResponse login(LoginRequest request, HttpServletRequest httpRequest) {
@@ -64,9 +69,8 @@ public class AuthService {
 
         String contact = request.getContact().trim();
 
-        // 2. Tìm user theo email hoặc SĐT
+        // 2. Tìm user theo email (khong con ho tro dang nhap bang SDT)
         User user = userRepository.findByEmail(contact)
-                .or(() -> userRepository.findByPhoneNumber(contact))
                 .orElseThrow(() -> new CustomAuthenticationException("Email hoặc mật khẩu không chính xác"));
 
         // 3. Kiểm tra provider (chỉ LOCAL mới đăng nhập bằng password)
@@ -105,22 +109,14 @@ public class AuthService {
         }
 
         String contact = request.getContact().trim();
-        String email = null;
-        String phone = null;
 
-        // 3. Phân loại và kiểm tra trùng lặp
-        if (EMAIL_PATTERN.matcher(contact).matches()) {
-            email = contact;
-            if (userRepository.existsByEmail(email)) {
-                throw new ConflictException("Email này đã được sử dụng", true);
-            }
-        } else if (PHONE_PATTERN.matcher(contact).matches()) {
-            phone = contact;
-            if (userRepository.existsByPhoneNumber(phone)) {
-                throw new ConflictException("Số điện thoại này đã được sử dụng", true);
-            }
-        } else {
-            throw new BadRequestException("Email hoặc số điện thoại không hợp lệ");
+        // 3. Chi chap nhan Email (khong con ho tro dang ky bang SDT)
+        if (!EMAIL_PATTERN.matcher(contact).matches()) {
+            throw new BadRequestException("Email không hợp lệ");
+        }
+        String email = contact;
+        if (userRepository.existsByEmail(email)) {
+            throw new ConflictException("Email này đã được sử dụng", true);
         }
 
         // 4. Lấy role mặc định USER
@@ -131,7 +127,6 @@ public class AuthService {
         User newUser = User.builder()
                 .fullName(request.getFullName().trim())
                 .email(email)
-                .phoneNumber(phone)
                 .passwordHash(passwordEncoder.encode(request.getPassword()))
                 .status(UserStatus.ACTIVE)
                 .role(defaultRole)
@@ -142,9 +137,60 @@ public class AuthService {
         userRepository.save(newUser);
 
         // 6. Tạo token
-        String username = (email != null) ? email : phone;
-        CustomUserDetail userDetails = (CustomUserDetail) userDetailsService.loadUserByUsername(username);
+        CustomUserDetail userDetails = (CustomUserDetail) userDetailsService.loadUserByUsername(email);
         return buildAuthResponse(userDetails, newUser);
+    }
+
+    // =========================================================
+    // QUEN MAT KHAU: gui email chua link dat lai mat khau
+    // Luon tra ve thanh cong (khong tiet lo email co ton tai hay khong) de tranh bi do email
+    // (user enumeration). Tai khoan dang nhap qua Google se nhan email thong bao rieng vi khong
+    // co mat khau de dat lai.
+    // =========================================================
+    @Transactional(readOnly = true)
+    public void forgotPassword(ForgotPasswordRequest request, HttpServletRequest httpServletRequest) {
+        if (!captchaService.verifyCaptcha(request.getCaptchaToken(), httpServletRequest)) {
+            throw new BadRequestException("Xác thực Captcha thất bại");
+        }
+
+        String email = request.getEmail().trim();
+        userRepository.findByEmail(email).ifPresent(user -> {
+            if (user.getProvider() == AuthProvider.GOOGLE) {
+                emailService.sendPasswordResetGoogleAccountNotice(email, user.getFullName());
+                return;
+            }
+            String token = jwtUtils.generatePasswordResetToken(email);
+            String resetLink = webBaseUrl + "/reset-password/confirm?token=" + token;
+            emailService.sendPasswordResetEmail(email, user.getFullName(), resetLink);
+        });
+    }
+
+    // =========================================================
+    // DAT LAI MAT KHAU: xac thuc token ngan han roi cap nhat mat khau moi
+    // =========================================================
+    @Transactional
+    public void resetPassword(ResetPasswordRequest request) {
+        if (!request.getNewPassword().equals(request.getConfirmPassword())) {
+            throw new BadRequestException("Mật khẩu xác nhận không khớp");
+        }
+
+        String token = request.getToken();
+        if (!jwtUtils.validateToken(token) || !jwtUtils.isPasswordResetToken(token)) {
+            throw new BadRequestException("Liên kết đặt lại mật khẩu không hợp lệ hoặc đã hết hạn");
+        }
+
+        String email = jwtUtils.extractUsername(token);
+        User user = userRepository.findByEmail(email)
+                .orElseThrow(() -> new BadRequestException("Liên kết đặt lại mật khẩu không hợp lệ hoặc đã hết hạn"));
+
+        user.setPasswordHash(passwordEncoder.encode(request.getNewPassword()));
+        // Tang tokenVersion de vo hieu hoa moi access/refresh token da phat hanh truoc do — buoc
+        // dang nhap lai tren tat ca thiet bi (quan trong: day la luong khoi phuc tai khoan, rat
+        // co the dang co phien dang nhap la cua ke gia mao can bi day ra ngay).
+        user.setTokenVersion((user.getTokenVersion() == null ? 0 : user.getTokenVersion()) + 1);
+        userRepository.save(user);
+
+        jwtUtils.revokeToken(token);
     }
 
     // =========================================================

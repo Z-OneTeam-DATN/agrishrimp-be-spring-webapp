@@ -1,6 +1,8 @@
 package com.zone.agri.config;
 
+import com.zone.agri.security.CustomUserDetail;
 import com.zone.agri.utils.JwtUtils;
+import java.util.Objects;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.messaging.Message;
@@ -30,8 +32,14 @@ public class WebSocketAuthInterceptor implements ChannelInterceptor {
                 String token = authHeader.substring(7);
                 if (jwtUtils.validateToken(token)) {
                     Authentication auth = jwtUtils.setAuthentication(token);
-                    accessor.setUser(auth);
-                    log.debug("WebSocket authenticated: {}", auth.getName());
+                    CustomUserDetail principal = (CustomUserDetail) auth.getPrincipal();
+                    if (Objects.equals(jwtUtils.extractTokenVersion(token), principal.getUserDetail().getTokenVersion())
+                        && principal.isEnabled()) {
+                        accessor.setUser(auth);
+                        log.debug("WebSocket authenticated: {}", auth.getName());
+                    } else {
+                        log.warn("WebSocket: token stale or account locked");
+                    }
                 } else {
                     log.warn("WebSocket: invalid token");
                 }
