@@ -75,6 +75,29 @@ public interface OrderRepository extends JpaRepository<Order, Long>, JpaSpecific
        boolean existsCompletedOrderWithProduct(@Param("orderId") Long orderId, @Param("userId") Long userId,
                      @Param("productId") Long productId);
 
+       // "Completed" duoc dinh nghia giong het ProductRecommendationBatchService.fetchCompletedBasketRows
+       // (UNION order_items + sub_order_items, ca 2 deu yeu cau status COMPLETED) — de nhat quan voi chinh
+       // du lieu product_recommendations dang doc, tranh lech dinh nghia "da mua" giua 2 noi.
+       @Query(value = """
+                     SELECT DISTINCT basket.product_id
+                     FROM (
+                         SELECT pv.product_id AS product_id
+                         FROM orders o
+                         JOIN order_items oi ON oi.order_id = o.id
+                         JOIN product_variants pv ON pv.id = oi.product_variant_id
+                         WHERE o.status = 'COMPLETED' AND o.user_id = :userId
+                         UNION
+                         SELECT pv.product_id AS product_id
+                         FROM sub_orders so
+                         JOIN orders o ON o.id = so.order_id
+                         JOIN sub_order_items soi ON soi.sub_order_id = so.id
+                         JOIN product_variants pv ON pv.id = soi.product_variant_id
+                         WHERE o.status = 'COMPLETED' AND so.status = 'COMPLETED' AND o.user_id = :userId
+                     ) basket
+                     WHERE basket.product_id IS NOT NULL
+                     """, nativeQuery = true)
+       List<Long> findDistinctPurchasedProductIdsByUserId(@Param("userId") Long userId);
+
        List<Order> findByUserIdOrderByCreatedAtDesc(Long userId);
 
        List<Order> findByStatusAndCreatedAtBefore(OrderStatus status, LocalDateTime createdAt);
