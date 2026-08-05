@@ -539,6 +539,21 @@ public class AiKnowledgeService {
             Long userId,
             String sourceChannel,
             boolean createReviewCaseWhenUnmatched) {
+        return answerChat(request, userId, sourceChannel, createReviewCaseWhenUnmatched, null);
+    }
+
+    /**
+     * Overload danh cho trang "Chat thu nghiem" — cho phep xem truoc 1 phac do chua duyet
+     * (previewDiseaseCode) bang cach chen no vao snapshot khi khop tri thuc. Moi duong chat/chan
+     * doan that cua khach hang deu di qua overload 4-tham-so o tren (previewDiseaseCode luon null),
+     * khong bao gio bi anh huong.
+     */
+    public AiChatResponse answerChat(
+            AiDoctorChatRequest request,
+            Long userId,
+            String sourceChannel,
+            boolean createReviewCaseWhenUnmatched,
+            String previewDiseaseCode) {
         String normalizedMessage = AiKnowledgeTextUtils.normalize(request.getMessage());
         AiKnowledgeChatConfig config = ensureChatConfig();
         String sessionId = trimToNull(request.getSessionId()) != null
@@ -569,7 +584,7 @@ public class AiKnowledgeService {
                     sessionId, activeSession.get().getUserId(), userId);
         }
 
-        ApprovedKnowledgeSnapshot snapshot = getApprovedSnapshot();
+        ApprovedKnowledgeSnapshot snapshot = getSnapshotForPreview(previewDiseaseCode);
         MatchOutcome outcome = resolveBestMatch(
                 normalizedMessage,
                 request.getDiagnosisContext() != null ? request.getDiagnosisContext().getDiseaseCode() : null,
@@ -943,7 +958,27 @@ public class AiKnowledgeService {
             String sessionId,
             Long userId,
             String geminiImageDescription) {
-        ApprovedKnowledgeSnapshot snapshot = getApprovedSnapshot();
+        return enrichDiagnosis(predictResponse, finalPrediction, diagnosisImageUrl, userSymptoms,
+                sessionId, userId, geminiImageDescription, null, true);
+    }
+
+    /**
+     * Overload danh cho luong test anh ("Chat thu nghiem") — cho phep xem truoc 1 phac do chua duyet
+     * (previewDiseaseCode) va tuy chon khong tao review case that (allowReviewCase=false) de khong lam
+     * nhieu hang doi "Cau hoi chua dap" cua khach that. Duong chan doan that (AiDoctorDiagnosisService
+     * .diagnose) luon goi overload 7-tham-so o tren, khong bao gio bi anh huong.
+     */
+    public AiDoctorDiagnosisResponse enrichDiagnosis(
+            AiPredictResponse predictResponse,
+            AiPredictionItem finalPrediction,
+            String diagnosisImageUrl,
+            String userSymptoms,
+            String sessionId,
+            Long userId,
+            String geminiImageDescription,
+            String previewDiseaseCode,
+            boolean allowReviewCase) {
+        ApprovedKnowledgeSnapshot snapshot = getSnapshotForPreview(previewDiseaseCode);
         PreparedDisease directDisease = findDiseaseByPrediction(finalPrediction, snapshot);
         double confidence = finalPrediction.getConfidencePercent() == null ? 0D : finalPrediction.getConfidencePercent() / 100D;
 
@@ -973,23 +1008,25 @@ public class AiKnowledgeService {
                         geminiImageDescription);
             }
 
-            createReviewCase(
-                    userId,
-                    sessionId,
-                    "AI_DOCTOR_DIAGNOSIS",
-                    userSymptoms,
-                    userSymptoms,
-                    diagnosisImageUrl,
-                    finalPrediction.getDiseaseCode(),
-                    resolvedDisease.entity().getCode(),
-                    diseaseScore,
-                    AiReviewCaseReason.LOW_CONFIDENCE);
+            if (allowReviewCase) {
+                createReviewCase(
+                        userId,
+                        sessionId,
+                        "AI_DOCTOR_DIAGNOSIS",
+                        userSymptoms,
+                        userSymptoms,
+                        diagnosisImageUrl,
+                        finalPrediction.getDiseaseCode(),
+                        resolvedDisease.entity().getCode(),
+                        diseaseScore,
+                        AiReviewCaseReason.LOW_CONFIDENCE);
+            }
 
             return buildLowConfidenceDiagnosisResponse(predictResponse, finalPrediction, diagnosisImageUrl, geminiImageDescription);
         }
 
         return buildUnrecognizedDiagnosisResponse(
-                predictResponse, finalPrediction, diagnosisImageUrl, userSymptoms, sessionId, userId, geminiImageDescription);
+                predictResponse, finalPrediction, diagnosisImageUrl, userSymptoms, sessionId, userId, geminiImageDescription, allowReviewCase);
     }
 
     @Transactional(readOnly = true)
@@ -1560,6 +1597,19 @@ public class AiKnowledgeService {
             String sessionId,
             Long userId,
             String geminiImageDescription) {
+        return buildUnrecognizedDiagnosisResponse(predictResponse, finalPrediction, diagnosisImageUrl,
+                userSymptoms, sessionId, userId, geminiImageDescription, true);
+    }
+
+    public AiDoctorDiagnosisResponse buildUnrecognizedDiagnosisResponse(
+            AiPredictResponse predictResponse,
+            AiPredictionItem finalPrediction,
+            String diagnosisImageUrl,
+            String userSymptoms,
+            String sessionId,
+            Long userId,
+            String geminiImageDescription,
+            boolean allowReviewCase) {
         AiKnowledgeChatConfig config = ensureChatConfig();
         String farmerContext = buildFarmerContextForImageSuggestion(userSymptoms, geminiImageDescription);
 
@@ -1582,18 +1632,20 @@ public class AiKnowledgeService {
                 ? buildFreeConsultAnswerHtml(geminiText, config, false)
                 : "<p>" + escapeHtml(config.getFallbackMessage()) + "</p>");
 
-        createReviewCase(
-                userId,
-                sessionId,
-                "AI_DOCTOR_DIAGNOSIS",
-                userSymptoms,
-                userSymptoms,
-                diagnosisImageUrl,
-                finalPrediction != null ? finalPrediction.getDiseaseCode() : null,
-                null,
-                finalPrediction != null && finalPrediction.getConfidencePercent() != null
-                        ? finalPrediction.getConfidencePercent() / 100D : 0D,
-                AiReviewCaseReason.NO_KNOWLEDGE_MATCH);
+        if (allowReviewCase) {
+            createReviewCase(
+                    userId,
+                    sessionId,
+                    "AI_DOCTOR_DIAGNOSIS",
+                    userSymptoms,
+                    userSymptoms,
+                    diagnosisImageUrl,
+                    finalPrediction != null ? finalPrediction.getDiseaseCode() : null,
+                    null,
+                    finalPrediction != null && finalPrediction.getConfidencePercent() != null
+                            ? finalPrediction.getConfidencePercent() / 100D : 0D,
+                    AiReviewCaseReason.NO_KNOWLEDGE_MATCH);
+        }
 
         return AiDoctorDiagnosisResponse.builder()
                 .diagnosisId("unrec_" + UUID.randomUUID().toString().replace("-", "").substring(0, 12))
@@ -1923,6 +1975,29 @@ public class AiKnowledgeService {
             approvedSnapshotLoadedAt = now;
             return current;
         }
+    }
+
+    /**
+     * Snapshot rieng cho trang "Chat thu nghiem" — giong het snapshot that (chi APPROVED+enabled),
+     * nhung neu previewDiseaseCode duoc chi dinh va chua nam trong do (dang DRAFT/IN_REVIEW/DISABLED)
+     * thi chen them dung 1 ban ghi do vao truoc khi tra ve. KHONG bao gio duoc goi tu duong chat/chan
+     * doan that cua khach hang — chi dung o overload danh rieng cho test.
+     */
+    private ApprovedKnowledgeSnapshot getSnapshotForPreview(String previewDiseaseCode) {
+        ApprovedKnowledgeSnapshot approved = getApprovedSnapshot();
+        if (previewDiseaseCode == null || previewDiseaseCode.isBlank()) return approved;
+
+        boolean alreadyApproved = approved.diseaseEntries().stream()
+                .anyMatch(d -> d.entity().getCode().equalsIgnoreCase(previewDiseaseCode));
+        if (alreadyApproved) return approved;
+
+        AiDiseaseKnowledge entity = diseaseKnowledgeRepository.findByCode(previewDiseaseCode.toUpperCase(Locale.ROOT))
+                .orElseThrow(() -> notFound("Không tìm thấy phác đồ: " + previewDiseaseCode));
+        PreparedDisease preview = new PreparedDisease(entity, entity.getCategory(),
+                prepareKeywords(entity.getNameVi(), entity.getAliasesRaw(), entity.getSymptomKeywordsRaw()));
+        List<PreparedDisease> merged = new ArrayList<>(approved.diseaseEntries());
+        merged.add(preview);
+        return new ApprovedKnowledgeSnapshot(approved.keywordEntries(), merged);
     }
 
     private void evictApprovedSnapshot() {

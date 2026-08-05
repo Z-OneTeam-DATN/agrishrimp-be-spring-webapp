@@ -11,6 +11,7 @@ import com.zone.agri.dto.request.ai.AiKnowledgeChatConfigRequest;
 import com.zone.agri.dto.request.ai.AiKnowledgeImportApplyRequest;
 import com.zone.agri.dto.request.ai.AiReviewCaseUpdateRequest;
 import com.zone.agri.dto.response.ai.AiDiseaseKnowledgeResponse;
+import com.zone.agri.dto.response.ai.AiDoctorDiagnosisResponse;
 import com.zone.agri.dto.response.ai.AiKnowledgeCategoryResponse;
 import com.zone.agri.dto.response.ai.AiKnowledgeChatConfigResponse;
 import com.zone.agri.dto.response.ai.AiKnowledgeImportPreviewResponse;
@@ -19,6 +20,7 @@ import com.zone.agri.dto.response.ai.AiKeywordAnswerSetResponse;
 import com.zone.agri.entity.enums.AiReviewCaseStatus;
 import com.zone.agri.security.annotation.RequirePermission;
 import com.zone.agri.service.ai.AiKnowledgeService;
+import com.zone.agri.service.aidoctor.AiDoctorDiagnosisService;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ContentDisposition;
@@ -44,6 +46,7 @@ import org.springframework.web.multipart.MultipartFile;
 public class AiKnowledgeController {
 
     private final AiKnowledgeService aiKnowledgeService;
+    private final AiDoctorDiagnosisService diagnosisService;
 
     @GetMapping("/categories")
     @RequirePermission("AI_KNOWLEDGE_VIEW")
@@ -209,6 +212,16 @@ public class AiKnowledgeController {
     @PostMapping("/test-chat")
     @RequirePermission({"AI_KNOWLEDGE_VIEW", "AI_CASE_REVIEW"})
     public ResponseEntity<AiChatResponse> testChat(@RequestBody AiDoctorChatRequest request) {
-        return ResponseEntity.ok(aiKnowledgeService.answerChat(request, null, "AI_KNOWLEDGE_TESTER", false));
+        return ResponseEntity.ok(aiKnowledgeService.answerChat(
+                request, null, "AI_KNOWLEDGE_TESTER", false, request.getPreviewDiseaseCode()));
+    }
+
+    @PostMapping(value = "/test-diagnose", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @RequirePermission({"AI_KNOWLEDGE_VIEW", "AI_CASE_REVIEW"})
+    public ResponseEntity<AiDoctorDiagnosisResponse> testDiagnose(
+            @RequestPart("image") MultipartFile image,
+            @RequestPart(value = "userSymptoms", required = false) String userSymptoms,
+            @RequestPart(value = "previewDiseaseCode", required = false) String previewDiseaseCode) {
+        return ResponseEntity.ok(diagnosisService.diagnoseForTest(image, userSymptoms, previewDiseaseCode));
     }
 }
