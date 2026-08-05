@@ -18,6 +18,8 @@ public class AiDoctorChatRequest {
     private String imageBase64;
     /** Mime type cua imageBase64 (vd "image/jpeg"), bo qua neu imageBase64 null. */
     private String imageMimeType;
+    /** CHI dung boi endpoint noi bo /ai-knowledge/test-chat de xem truoc 1 phac do chua duyet — chat that bo qua field nay. */
+    private String previewDiseaseCode;
 
     @Data
     @Builder

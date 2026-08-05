@@ -114,6 +114,21 @@ class AiKnowledgeServiceChatClarifyTest {
                 .build());
     }
 
+    private AiDiseaseKnowledge seedDraftDisease(String code, String nameVi, String symptomKeyword, double matchThreshold) {
+        return diseaseKnowledgeRepository.save(AiDiseaseKnowledge.builder()
+                .code(code)
+                .nameVi(nameVi)
+                .symptomKeywordsRaw(symptomKeyword)
+                .signsSummary("Trieu chung test cho " + nameVi)
+                .confidenceThreshold(0.65D)
+                .matchThreshold(matchThreshold)
+                .enabled(true)
+                .priority(0)
+                .canonical(false)
+                .status(AiKnowledgeStatus.DRAFT)
+                .build());
+    }
+
     private AiDiseaseKnowledge seedDiseaseWithProtocol(String code, String nameVi, String symptomKeyword, double matchThreshold)
             throws Exception {
         String causesJson = objectMapper.writeValueAsString(List.of("Moi truong bien dong", "Mat do nuoi qua cao"));
@@ -294,6 +309,30 @@ class AiKnowledgeServiceChatClarifyTest {
         Optional<AiChatClarifySession> active = chatClarifySessionRepository
                 .findFirstBySessionIdAndStatusOrderByIdDesc(sessionId, AiClarifySessionStatus.ACTIVE);
         assertThat(active).isEmpty();
+    }
+
+    @Test
+    void answerChat_withoutPreview_doesNotMatchDraftDisease() {
+        seedDraftDisease("DIS_DRAFT_CHAT", "Benh nhap chat chua duyet", "trieuchungdacbietchat", 0.4D);
+
+        AiChatResponse response = chat("tom bi trieuchungdacbietchat hom nay", "sess-" + UUID.randomUUID(), null);
+
+        assertThat(response.getReply()).doesNotContain("Benh nhap chat chua duyet");
+    }
+
+    @Test
+    void answerChat_withPreviewDiseaseCode_matchesDraftDisease() {
+        AiDiseaseKnowledge draft = seedDraftDisease(
+                "DIS_DRAFT_CHAT_PREVIEW", "Benh nhap chat xem truoc", "trieuchungxemtruoc", 0.4D);
+        AiDoctorChatRequest request = AiDoctorChatRequest.builder()
+                .message("tom bi trieuchungxemtruoc hom nay")
+                .sessionId("sess-" + UUID.randomUUID())
+                .build();
+
+        AiChatResponse response = aiKnowledgeService.answerChat(
+                request, null, "AI_KNOWLEDGE_TESTER", false, draft.getCode());
+
+        assertThat(response.getReply()).contains("Benh nhap chat xem truoc");
     }
 
     @Test

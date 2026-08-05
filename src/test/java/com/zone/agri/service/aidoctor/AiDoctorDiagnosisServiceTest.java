@@ -19,6 +19,7 @@ import com.zone.agri.entity.enums.AiKnowledgeStatus;
 import com.zone.agri.exception.BadRequestException;
 import com.zone.agri.repository.AiDiseaseKnowledgeRepository;
 import com.zone.agri.repository.AiDoctorDiagnosisHistoryRepository;
+import com.zone.agri.repository.AiKnowledgeReviewCaseRepository;
 import com.zone.agri.service.ai.AiKnowledgeService;
 import java.util.List;
 import java.util.Map;
@@ -81,6 +82,9 @@ class AiDoctorDiagnosisServiceTest {
     private AiDoctorDiagnosisHistoryRepository historyRepository;
 
     @Autowired
+    private AiKnowledgeReviewCaseRepository reviewCaseRepository;
+
+    @Autowired
     private ObjectMapper objectMapper;
 
     @MockitoBean
@@ -116,6 +120,30 @@ class AiDoctorDiagnosisServiceTest {
                 .priority(0)
                 .canonical(false)
                 .status(AiKnowledgeStatus.APPROVED)
+                .build());
+    }
+
+    private void seedDraftDiseaseWithProtocol(String code, String nameVi, String symptomKeyword,
+            double matchThreshold, double confidenceThreshold) throws Exception {
+        String causesJson = objectMapper.writeValueAsString(List.of("Moi truong bien dong"));
+        String stagesJson = objectMapper.writeValueAsString(List.of(Map.of(
+                "stageTitle", "Giai doan 1: Xu ly ban dau",
+                "instructions", List.of("Theo doi tom"),
+                "productIds", List.of(),
+                "extraProductNames", List.of())));
+        diseaseKnowledgeRepository.save(AiDiseaseKnowledge.builder()
+                .code(code)
+                .nameVi(nameVi)
+                .symptomKeywordsRaw(symptomKeyword)
+                .signsSummary("Dau hieu dac trung cua " + nameVi)
+                .causesJson(causesJson)
+                .treatmentStagesJson(stagesJson)
+                .confidenceThreshold(confidenceThreshold)
+                .matchThreshold(matchThreshold)
+                .enabled(true)
+                .priority(0)
+                .canonical(false)
+                .status(AiKnowledgeStatus.DRAFT)
                 .build());
     }
 
@@ -323,5 +351,60 @@ class AiDoctorDiagnosisServiceTest {
 
         assertThat(response.getStatus()).isEqualTo("HEALTHY");
         assertThat(response.getDiagnosisId()).startsWith("healthy_");
+    }
+
+    // =========================================================
+    // Chat thu nghiem — diagnoseForTest: xem truoc phac do chua duyet, khong tao review case that
+    // =========================================================
+
+    @Test
+    void diagnoseForTest_withoutPreview_draftDiseaseIsUnrecognized() throws Exception {
+        seedDraftDiseaseWithProtocol("DIS_DRAFT_IMG", "Benh nhap chua duyet qua anh", "draftimgkeyword", 0.4D, 0.65D);
+        AiPredictionItem finalPrediction = prediction("DIS_DRAFT_IMG", "Benh nhap chua duyet qua anh", "Draft img", 90.0D);
+        when(aiDiagnosisClient.predict(any())).thenReturn(predictResponse("DISEASE", finalPrediction));
+        when(geminiClarifyClient.describeImage(any(), any(), any())).thenReturn("Mo ta anh.");
+
+        AiDoctorDiagnosisResponse response = aiDoctorDiagnosisService.diagnose(fakeImage(), "", 1L, "sess-draft-1");
+
+        assertThat(response.getStatus()).isEqualTo("UNRECOGNIZED");
+    }
+
+    @Test
+    void diagnoseForTest_withPreviewDiseaseCode_matchesDraftDisease() throws Exception {
+        seedDraftDiseaseWithProtocol("DIS_DRAFT_PREVIEW", "Benh nhap xem truoc qua anh", "previewimgkeyword", 0.4D, 0.65D);
+        AiPredictionItem finalPrediction = prediction("DIS_DRAFT_PREVIEW", "Benh nhap xem truoc qua anh", "Preview img", 90.0D);
+        when(aiDiagnosisClient.predict(any())).thenReturn(predictResponse("DISEASE", finalPrediction));
+        when(geminiClarifyClient.describeImage(any(), any(), any())).thenReturn("Mo ta anh preview.");
+
+        AiDoctorDiagnosisResponse response = aiDoctorDiagnosisService.diagnoseForTest(fakeImage(), "", "DIS_DRAFT_PREVIEW");
+
+        assertThat(response.getStatus()).isEqualTo("DISEASE");
+        assertThat(response.getDisease().getCode()).isEqualTo("DIS_DRAFT_PREVIEW");
+    }
+
+    @Test
+    void diagnoseForTest_guestAlways_neverSavesHistory() throws Exception {
+        seedDraftDiseaseWithProtocol("DIS_DRAFT_NOHIST", "Benh nhap khong luu history", "nohistkeyword", 0.4D, 0.65D);
+        AiPredictionItem finalPrediction = prediction("DIS_DRAFT_NOHIST", "Benh nhap khong luu history", "No hist", 90.0D);
+        when(aiDiagnosisClient.predict(any())).thenReturn(predictResponse("DISEASE", finalPrediction));
+        when(geminiClarifyClient.describeImage(any(), any(), any())).thenReturn("Mo ta anh.");
+
+        AiDoctorDiagnosisResponse response = aiDoctorDiagnosisService.diagnoseForTest(fakeImage(), "", "DIS_DRAFT_NOHIST");
+
+        assertThat(response.getStatus()).isEqualTo("DISEASE");
+        assertThat(historyRepository.findAll()).isEmpty();
+    }
+
+    @Test
+    void diagnoseForTest_lowConfidenceMatch_doesNotCreateRealReviewCase() throws Exception {
+        seedDraftDiseaseWithProtocol("DIS_DRAFT_LOWCONF", "Benh nhap do tin cay thap", "lowconfkeyword", 0.99D, 0.99D);
+        AiPredictionItem finalPrediction = prediction("DIS_DRAFT_LOWCONF", "Benh nhap do tin cay thap", "Low conf", 10.0D);
+        when(aiDiagnosisClient.predict(any())).thenReturn(predictResponse("DISEASE", finalPrediction));
+        when(geminiClarifyClient.describeImage(any(), any(), any())).thenReturn("Mo ta anh.");
+        long reviewCaseCountBefore = reviewCaseRepository.count();
+
+        aiDoctorDiagnosisService.diagnoseForTest(fakeImage(), "", "DIS_DRAFT_LOWCONF");
+
+        assertThat(reviewCaseRepository.count()).isEqualTo(reviewCaseCountBefore);
     }
 }

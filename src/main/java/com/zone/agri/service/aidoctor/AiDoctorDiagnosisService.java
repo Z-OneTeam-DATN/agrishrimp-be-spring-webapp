@@ -59,6 +59,21 @@ public class AiDoctorDiagnosisService {
     }
 
     public AiDoctorDiagnosisResponse diagnose(MultipartFile image, String userSymptoms, Long userId, String sessionId) {
+        return diagnoseInternal(image, userSymptoms, userId, sessionId, null, true);
+    }
+
+    /**
+     * Danh cho trang "Chat thu nghiem" — goi DUNG luong that ben duoi (YOLO + Gemini that, cung
+     * enrichDiagnosis), chi khac: userId luon null (khong luu history/So kham), khong tao review
+     * case that (allowReviewCase=false, tranh lam nhieu hang doi "Cau hoi chua dap"), va cho phep
+     * xem truoc 1 phac do chua duyet qua previewDiseaseCode.
+     */
+    public AiDoctorDiagnosisResponse diagnoseForTest(MultipartFile image, String userSymptoms, String previewDiseaseCode) {
+        return diagnoseInternal(image, userSymptoms, null, null, previewDiseaseCode, false);
+    }
+
+    private AiDoctorDiagnosisResponse diagnoseInternal(MultipartFile image, String userSymptoms, Long userId,
+            String sessionId, String previewDiseaseCode, boolean allowReviewCase) {
 
         String traceId = UUID.randomUUID().toString().replace("-", "").substring(0, 12);
 
@@ -134,7 +149,8 @@ public class AiDoctorDiagnosisService {
                     normalizedSymptoms,
                     sessionId != null ? sessionId : "diag_" + traceId,
                     userId,
-                    narrativeText);
+                    narrativeText,
+                    allowReviewCase);
             saveHistoryGracefully(response, userId, normalizedSymptoms, traceId);
             return response;
         }
@@ -150,7 +166,9 @@ public class AiDoctorDiagnosisService {
                 normalizedSymptoms,
                 sessionId != null ? sessionId : "diag_" + traceId,
                 userId,
-                narrativeText);
+                narrativeText,
+                previewDiseaseCode,
+                allowReviewCase);
 
         // Luu history cho MOI outcome (khong chi DISEASE nua) — enrichDiagnosis co the tu tra ve
         // UNRECOGNIZED ben trong no (nhanh confidence/match khong dat nguong), van can luu de phat
