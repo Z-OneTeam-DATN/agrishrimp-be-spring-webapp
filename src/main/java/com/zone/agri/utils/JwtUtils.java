@@ -45,6 +45,10 @@ public class JwtUtils {
 
     private static final String TOKEN_PREFIX = "revoked_token:";
     private static final String BEARER_PREFIX = "Bearer ";
+    private static final String PURPOSE_CLAIM = "purpose";
+    private static final String PASSWORD_RESET_PURPOSE = "PWD_RESET";
+    private static final long PASSWORD_RESET_EXPIRATION_SECONDS = 15 * 60;
+    private static final String TOKEN_VERSION_CLAIM = "tokenVersion";
 
     public String generateAccessToken(UserDetails userDetails) {
         CustomUserDetail customUserDetail = (CustomUserDetail) userDetails;
@@ -53,14 +57,53 @@ public class JwtUtils {
         claims.put("userId", customUserDetail.getUserDetail().getId());
         claims.put("fullName", customUserDetail.getUserDetail().getFullName());
         claims.put("warehouseId", customUserDetail.getUserDetail().getBranchId());
-        claims.put("roleSlug", customUserDetail.getUserDetail().getRole() != null 
+        claims.put("roleSlug", customUserDetail.getUserDetail().getRole() != null
             ? customUserDetail.getUserDetail().getRole().getSlug() : null);
+        claims.put(TOKEN_VERSION_CLAIM, customUserDetail.getUserDetail().getTokenVersion());
 
         return buildToken(customUserDetail.getUsername(), claims, accessExpiration);
     }
 
+    // Kem theo tokenVersion tai thoi diem phat hanh de endpoint /auth/refresh co the phat hien
+    // refresh token da "cu" (phat hanh truoc mot lan doi mat khau) va tu choi cap access token moi.
     public String generateRefreshToken(UserDetails userDetails) {
-        return buildToken(userDetails.getUsername(), new HashMap<>(), refreshExpiration);
+        CustomUserDetail customUserDetail = (CustomUserDetail) userDetails;
+
+        Map<String, Object> claims = new HashMap<>();
+        claims.put(TOKEN_VERSION_CLAIM, customUserDetail.getUserDetail().getTokenVersion());
+
+        return buildToken(customUserDetail.getUsername(), claims, refreshExpiration);
+    }
+
+    // Doc claim tokenVersion tu token; token cu phat hanh truoc khi co co che nay se khong co claim
+    // -> mac dinh 0 de khop voi gia tri mac dinh cua User.tokenVersion, tranh dang xuat hang loat
+    // ngay sau khi trien khai tinh nang.
+    public Integer extractTokenVersion(String token) {
+        try {
+            Claims claims = parseClaimsFromToken(token);
+            Object value = claims.get(TOKEN_VERSION_CLAIM);
+            return value instanceof Number number ? number.intValue() : 0;
+        } catch (JwtException e) {
+            return 0;
+        }
+    }
+
+    // Token ngan han (15 phut) dung cho luong "quen mat khau": subject = email, kem claim
+    // "purpose" de phan biet voi access/refresh token binh thuong. Sau khi dat lai mat khau
+    // thanh cong, token nay bi revokeToken() dua vao blacklist Redis de khong the dung lai (replay).
+    public String generatePasswordResetToken(String email) {
+        Map<String, Object> claims = new HashMap<>();
+        claims.put(PURPOSE_CLAIM, PASSWORD_RESET_PURPOSE);
+        return buildToken(email, claims, PASSWORD_RESET_EXPIRATION_SECONDS);
+    }
+
+    public boolean isPasswordResetToken(String token) {
+        try {
+            Claims claims = parseClaimsFromToken(token);
+            return PASSWORD_RESET_PURPOSE.equals(claims.get(PURPOSE_CLAIM));
+        } catch (JwtException e) {
+            return false;
+        }
     }
 
     public Authentication setAuthentication(String token) {

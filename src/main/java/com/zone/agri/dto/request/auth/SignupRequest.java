@@ -12,7 +12,7 @@ public class SignupRequest {
     @Size(min = 2, max = 100, message = "Họ tên phải từ 2 đến 100 ký tự")
     private String fullName;
 
-    @NotBlank(message = "Email hoặc SĐT không được để trống")
+    @NotBlank(message = "Email không được để trống")
     private String contact;
 
     @NotBlank(message = "Mật khẩu không được để trống")

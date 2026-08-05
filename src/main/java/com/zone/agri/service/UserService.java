@@ -113,6 +113,9 @@ public class UserService {
 
         // 3. Mã hóa và lưu mật khẩu mới
         user.setPasswordHash(passwordEncoder.encode(request.getNewPassword()));
+        // 4. Tang tokenVersion de vo hieu hoa moi access/refresh token da phat hanh truoc do —
+        // buoc dang nhap lai tren tat ca thiet bi (bao gom ca phien hien tai sau request nay).
+        user.setTokenVersion((user.getTokenVersion() == null ? 0 : user.getTokenVersion()) + 1);
         userRepository.save(user);
 
         log.info("User {} đã đổi mật khẩu thành công", contact);

@@ -48,6 +48,7 @@ public class CustomUserDetailsService implements UserDetailsService {
                 .updatedAt(user.getUpdatedAt())
                 .branchId(user.getBranch() != null ? user.getBranch().getId() : null)
                 .role(user.getRole() != null ? new RoleDto(user.getRole()) : null)
+                .tokenVersion(user.getTokenVersion() != null ? user.getTokenVersion() : 0)
                 .build();
 
         // 4. Xử lý trạng thái tài khoản

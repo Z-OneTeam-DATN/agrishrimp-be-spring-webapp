@@ -66,6 +66,14 @@ public class User extends BaseEntity {
     @Column(name = "deleted_at")
     private LocalDateTime deletedAt;
 
+    // Tang moi lan doi mat khau (doi mat khau khi da dang nhap, hoac dat lai mat khau qua email)
+    // de vo hieu hoa moi access/refresh token da phat hanh truoc do — buoc dang nhap lai tren
+    // TAT CA thiet bi. JwtUtils nhung gia tri nay vao claim cua token; JWTFilter va endpoint
+    // /auth/refresh doi chieu voi gia tri hien tai trong DB, lech la coi nhu token het hieu luc.
+    @Builder.Default
+    @Column(name = "token_version", nullable = false, columnDefinition = "int default 0")
+    private Integer tokenVersion = 0;
+
     // --- KHÓA NGOẠI ---
 
     @OneToOne(mappedBy = "user")
