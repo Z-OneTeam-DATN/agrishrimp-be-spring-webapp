@@ -38,6 +38,10 @@ public class SupplierResponse {
     private Integer checkingProductCount;
     private List<SupplierWarningResponse> warnings;
 
+    private java.time.LocalDate issueDate;
+    private String taxAuthority;
+    private String mainBusinessSector;
+
     public static SupplierResponse fromEntity(Supplier supplier) {
         return SupplierResponse.builder()
                 .id(supplier.getId())
@@ -54,6 +58,9 @@ public class SupplierResponse {
                 .updatedAt(supplier.getUpdatedAt())
                 .createdByUserId(supplier.getCreatedByUserId())
                 .updatedByUserId(supplier.getUpdatedByUserId())
+                .issueDate(supplier.getIssueDate())
+                .taxAuthority(supplier.getTaxAuthority())
+                .mainBusinessSector(supplier.getMainBusinessSector())
                 .build();
     }
 }

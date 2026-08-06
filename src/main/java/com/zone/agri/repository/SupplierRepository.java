@@ -19,6 +19,8 @@ import com.zone.agri.entity.enums.SupplierStatus;
 @Repository
 public interface SupplierRepository extends JpaRepository<Supplier, Long> {
 
+        List<Supplier> findByStatus(SupplierStatus status);
+
         boolean existsByTaxCode(String taxCode);
 
         boolean existsByTaxCodeAndIdNot(String taxCode, Long id);
@@ -74,6 +76,12 @@ public interface SupplierRepository extends JpaRepository<Supplier, Long> {
                 BigDecimal getTotalAmount();
 
                 BigDecimal getPaidAmount();
+
+                LocalDateTime getCreatedAt();
+
+                Long getCreatedById();
+
+                String getCreatedByName();
         }
 
         @Query("SELECT s.id AS id, s.code AS supplierCode, s.name AS supplierName, s.phone AS phone " +
@@ -84,7 +92,10 @@ public interface SupplierRepository extends JpaRepository<Supplier, Long> {
 
         @Query("SELECT i.supplier.id AS supplierId, i.supplier.code AS supplierCode, i.supplier.name AS supplierName, i.supplier.phone AS phone, i.id AS noteId, i.type AS noteType, " +
                         "COALESCE(i.totalAmount, 0) AS totalAmount, " +
-                        "COALESCE((SELECT SUM(p.amount) FROM InventoryReceiptPayment p WHERE p.inventoryNote.id = i.id AND p.paymentDate <= :endDate), 0) AS paidAmount " +
+                        "COALESCE((SELECT SUM(p.amount) FROM InventoryReceiptPayment p WHERE p.inventoryNote.id = i.id AND p.paymentDate <= :endDate), 0) AS paidAmount, " +
+                        "i.createdAt AS createdAt, " +
+                        "i.createdBy.id AS createdById, " +
+                        "i.createdBy.fullName AS createdByName " +
                         "FROM InventoryNote i " +
                         "WHERE i.supplier IS NOT NULL " +
                         "AND i.status = com.zone.agri.entity.enums.InventoryNoteStatus.COMPLETED " +

@@ -27,6 +27,7 @@ public class CategoryService {
     private final ProductRepository productRepository;
     private final CloudinaryService cloudinaryService;
 
+    @Transactional(readOnly = true)
     public List<CategoryDTO> getAllCategories(String keyword, CategoryStatus status) {
         List<Category> categories = categoryRepository.searchCategories(keyword, status);
         // Pre-calculate counts in batch if needed or at least minimize overhead
@@ -83,9 +84,20 @@ public class CategoryService {
         return convertToDTO(categoryRepository.save(category));
     }
 
+    private String toSlug(String input) {
+        if (input == null)
+            return "";
+        String normalized = java.text.Normalizer.normalize(input, java.text.Normalizer.Form.NFD);
+        return normalized.replaceAll("[\\p{InCombiningDiacriticalMarks}]", "")
+                .toLowerCase(java.util.Locale.ENGLISH)
+                .replaceAll("[^a-z0-9\\s]", "")
+                .replaceAll("\\s+", "-");
+    }
+
     private void handleImageUpload(Category category, String imageUrl) {
         if (imageUrl != null && imageUrl.startsWith("data:image")) {
-            category.setImageUrl(cloudinaryService.uploadImage(imageUrl));
+            String slug = toSlug(category.getName());
+            category.setImageUrl(cloudinaryService.uploadImage(imageUrl, "categories", slug));
         } else {
             category.setImageUrl(imageUrl);
         }
@@ -175,6 +187,7 @@ public class CategoryService {
         return dto;
     }
 
+    @Transactional(readOnly = true)
     public List<CategoryDTO> getPublicCategories() {
         List<Category> categories = categoryRepository.findByStatus(CategoryStatus.ACTIVE);
         if (categories == null)
@@ -185,6 +198,7 @@ public class CategoryService {
                 .collect(Collectors.toList());
     }
 
+    @Transactional(readOnly = true)
     public CategoryDTO getCategoryById(Long id) {
         Category category = categoryRepository.findById(id)
                 .orElseThrow(() -> new NotFoundException("Không tìm thấy danh mục với ID: " + id));

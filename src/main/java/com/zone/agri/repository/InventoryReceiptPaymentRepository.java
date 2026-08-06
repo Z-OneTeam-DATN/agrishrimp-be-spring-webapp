@@ -82,4 +82,6 @@ public interface InventoryReceiptPaymentRepository extends JpaRepository<Invento
             @Param("endDate") LocalDateTime endDate,
             @Param("branchId") Long branchId
     );
+
+    boolean existsBySupplierId(Long supplierId);
 }

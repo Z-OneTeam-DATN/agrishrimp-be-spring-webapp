@@ -5,15 +5,17 @@ import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.Comparator;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
-
-import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import com.zone.agri.common.AuthUtils;
 import com.zone.agri.dto.response.financial.CashbookEntryResponse;
@@ -21,9 +23,13 @@ import com.zone.agri.dto.response.financial.CashbookReportResponse;
 import com.zone.agri.dto.response.financial.CashbookSummaryResponse;
 import com.zone.agri.dto.response.financial.ProfitLossResponse;
 import com.zone.agri.dto.response.supplier.SupplierDebtResponse;
-import com.zone.agri.dto.response.user.UserDetail;
+import com.zone.agri.entity.Customer;
 import com.zone.agri.entity.InventoryReceiptPayment;
+import com.zone.agri.entity.Order;
+import com.zone.agri.entity.SubOrder;
 import com.zone.agri.entity.enums.InventoryNoteType;
+import com.zone.agri.entity.enums.PaymentStatus;
+import com.zone.agri.repository.CustomerRepository;
 import com.zone.agri.repository.InventoryReceiptPaymentRepository;
 import com.zone.agri.repository.InventoryTransactionRepository;
 import com.zone.agri.repository.OrderRepository;
@@ -39,11 +45,47 @@ public class FinancialService {
     private final OrderRepository orderRepository;
     private final SubOrderRepository subOrderRepository;
     private final SupplierRepository supplierRepository;
+    private final CustomerRepository customerRepository;
     private final InventoryReceiptPaymentRepository inventoryReceiptPaymentRepository;
     private final InventoryTransactionRepository inventoryTransactionRepository;
 
+    // Đơn ở các trạng thái thanh toán này (chưa PAID) và chưa huỷ/trả được coi là khách còn nợ.
+    // Hệ thống chưa lưu vết thanh toán từng phần (PARTIALLY_PAID tồn tại trong enum nhưng chưa bao
+    // giờ được gán ở đâu), nên nợ tính nhị phân: hoặc nợ đủ finalAmount, hoặc không nợ (đã PAID).
+    private static final List<PaymentStatus> CUSTOMER_UNPAID_STATUSES = List.of(
+            PaymentStatus.UNPAID,
+            PaymentStatus.PENDING,
+            PaymentStatus.PENDING_VERIFICATION,
+            PaymentStatus.PARTIALLY_PAID,
+            PaymentStatus.FAILED,
+            PaymentStatus.EXPIRED,
+            PaymentStatus.REFUND_PENDING);
+
+    // Mở trang Lãi lỗ gọi getProfitLossReport 2 lần (kỳ này + kỳ trước) và
+    // ProfitLossInsightService gọi lại thêm 2 lần nữa cho cùng 2 kỳ đó — cache ngắn hạn để 4 lệnh
+    // gọi trong cùng 1 lượt tải trang chỉ tính toán thật 1 lần cho mỗi (kỳ, chi nhánh).
+    private static final long PROFIT_LOSS_CACHE_TTL_MILLIS = 30_000;
+    private final Map<String, CachedProfitLoss> profitLossCache = new ConcurrentHashMap<>();
+
+    private record CachedProfitLoss(ProfitLossResponse response, long expiresAtMillis) {
+    }
+
     public ProfitLossResponse getProfitLossReport(LocalDate startDate, LocalDate endDate, Long branchId) {
         Long finalBranchId = resolveBranchId(branchId);
+        String cacheKey = startDate + "|" + endDate + "|" + finalBranchId;
+        long now = System.currentTimeMillis();
+
+        CachedProfitLoss cached = profitLossCache.get(cacheKey);
+        if (cached != null && cached.expiresAtMillis() > now) {
+            return cached.response();
+        }
+
+        ProfitLossResponse response = computeProfitLossReport(startDate, endDate, finalBranchId);
+        profitLossCache.put(cacheKey, new CachedProfitLoss(response, now + PROFIT_LOSS_CACHE_TTL_MILLIS));
+        return response;
+    }
+
+    private ProfitLossResponse computeProfitLossReport(LocalDate startDate, LocalDate endDate, Long finalBranchId) {
         LocalDateTime start = startDate != null
                 ? startDate.atStartOfDay()
                 : LocalDateTime.of(2000, 1, 1, 0, 0);
@@ -55,7 +97,7 @@ public class FinancialService {
         Set<String> recognizedReferenceCodes = new LinkedHashSet<>();
 
         List<OrderRepository.LegacyFinancialOrderProjection> legacyOrders = orderRepository
-                .findLegacyFinancialOrders(end, finalBranchId);
+                .findLegacyFinancialOrders(start, end, finalBranchId);
         for (OrderRepository.LegacyFinancialOrderProjection order : legacyOrders) {
             processFinancialFlow(
                     getSafeBigDecimal(order.getProductAmount()),
@@ -71,7 +113,7 @@ public class FinancialService {
         }
 
         List<SubOrderRepository.FinancialSubOrderProjection> subOrders = subOrderRepository
-                .findFinancialSubOrders(end, finalBranchId);
+                .findFinancialSubOrders(start, end, finalBranchId);
         for (SubOrderRepository.FinancialSubOrderProjection subOrder : subOrders) {
             BigDecimal allocatedDiscount = allocateDiscount(
                     getSafeBigDecimal(subOrder.getSubtotal()),
@@ -180,12 +222,14 @@ public class FinancialService {
                 .toList();
     }
 
+    @Transactional(readOnly = true)
     public CashbookReportResponse getCashbookReport(LocalDate startDate, LocalDate endDate, Long branchId) {
         Long finalBranchId = resolveBranchId(branchId);
         LocalDateTime start = startDate != null ? startDate.atStartOfDay() : null;
         LocalDateTime end = endDate != null ? endDate.atTime(23, 59, 59) : LocalDateTime.now();
 
-        List<CashbookEntryResponse> entries = inventoryReceiptPaymentRepository
+        // 1. Load supplier payments (Expenses - OUT)
+        List<CashbookEntryResponse> outEntries = inventoryReceiptPaymentRepository
                 .findAllWithFilters(start, end, finalBranchId)
                 .stream()
                 .map(this::mapCashbookEntry)
@@ -196,9 +240,64 @@ public class FinancialService {
                 : BigDecimal.ZERO;
         BigDecimal totalExpense = getSafeBigDecimal(
                 inventoryReceiptPaymentRepository.sumAmountInRange(start, end, finalBranchId));
-        BigDecimal openingBalance = openingExpense.negate();
+
+        // 2. Load paid customer orders (Income - IN)
+        BigDecimal orderOpeningBalance = BigDecimal.ZERO;
+        List<Order> paidLegacyOrders = new java.util.ArrayList<>();
+        List<SubOrder> paidSubOrders = new java.util.ArrayList<>();
+
+        if (start != null) {
+            BigDecimal legacyBefore = getSafeBigDecimal(orderRepository.sumPaidLegacyOrdersAmountBefore(start, finalBranchId));
+
+            List<SubOrderRepository.SubOrderAmountProjection> subBeforeProjs =
+                    subOrderRepository.findPaidSubOrderAmountsBefore(start, finalBranchId);
+            BigDecimal subBeforeSum = BigDecimal.ZERO;
+            for (SubOrderRepository.SubOrderAmountProjection proj : subBeforeProjs) {
+                BigDecimal subtotal = getSafeBigDecimal(proj.getSubtotal());
+                BigDecimal shippingFee = getSafeBigDecimal(proj.getShippingFee());
+                BigDecimal orderSubtotal = getSafeBigDecimal(proj.getOrderSubtotal());
+                BigDecimal orderDiscount = getSafeBigDecimal(proj.getOrderDiscountAmount());
+                BigDecimal allocatedDiscount = allocateDiscount(subtotal, orderSubtotal, orderDiscount);
+                subBeforeSum = subBeforeSum.add(subtotal.add(shippingFee).subtract(allocatedDiscount));
+            }
+
+            orderOpeningBalance = legacyBefore.add(subBeforeSum);
+
+            paidLegacyOrders = orderRepository.findPaidLegacyOrdersInRange(start, end, finalBranchId);
+            paidSubOrders = subOrderRepository.findPaidSubOrdersInRange(start, end, finalBranchId);
+        } else {
+            paidLegacyOrders = orderRepository.findPaidLegacyOrdersBefore(end, finalBranchId);
+            paidSubOrders = subOrderRepository.findPaidSubOrdersBefore(end, finalBranchId);
+        }
+
         BigDecimal totalIncome = BigDecimal.ZERO;
+        List<CashbookEntryResponse> inEntries = new java.util.ArrayList<>();
+
+        for (Order o : paidLegacyOrders) {
+            BigDecimal amt = getSafeBigDecimal(o.getFinalAmount());
+            totalIncome = totalIncome.add(amt);
+            inEntries.add(mapOrderToCashbookEntry(o));
+        }
+
+        for (SubOrder s : paidSubOrders) {
+            BigDecimal subtotal = getSafeBigDecimal(s.getSubtotal());
+            BigDecimal shippingFee = getSafeBigDecimal(s.getShippingFee());
+            BigDecimal orderSubtotal = getSafeBigDecimal(s.getOrder().getTotalAmount());
+            BigDecimal orderDiscount = getSafeBigDecimal(s.getOrder().getDiscountAmount());
+            BigDecimal allocatedDiscount = allocateDiscount(subtotal, orderSubtotal, orderDiscount);
+            BigDecimal subOrderFinalAmount = subtotal.add(shippingFee).subtract(allocatedDiscount);
+
+            totalIncome = totalIncome.add(subOrderFinalAmount);
+            inEntries.add(mapSubOrderToCashbookEntry(s));
+        }
+
+        BigDecimal openingBalance = orderOpeningBalance.subtract(openingExpense);
         BigDecimal closingBalance = openingBalance.add(totalIncome).subtract(totalExpense);
+
+        List<CashbookEntryResponse> combinedEntries = new java.util.ArrayList<>();
+        combinedEntries.addAll(outEntries);
+        combinedEntries.addAll(inEntries);
+        combinedEntries.sort((a, b) -> b.getDate().compareTo(a.getDate()));
 
         return CashbookReportResponse.builder()
                 .summary(CashbookSummaryResponse.builder()
@@ -207,7 +306,68 @@ public class FinancialService {
                         .totalExpense(totalExpense)
                         .closingBalance(closingBalance)
                         .build())
-                .entries(entries)
+                .entries(combinedEntries)
+                .build();
+    }
+
+    private CashbookEntryResponse mapOrderToCashbookEntry(Order order) {
+        LocalDateTime paymentDateTime = order.getPaymentMethod() == com.zone.agri.entity.enums.PaymentMethod.COD
+                ? (order.getReceivedAt() != null ? order.getReceivedAt() : (order.getCompletedAt() != null ? order.getCompletedAt() : order.getCreatedAt()))
+                : order.getCreatedAt();
+        LocalDate paymentLocalDate = paymentDateTime.toLocalDate();
+        String partnerName = order.getUser() != null ? order.getUser().getFullName() : "";
+
+        return CashbookEntryResponse.builder()
+                .id("order-income-" + order.getId())
+                .date(paymentLocalDate)
+                .branchId(order.getBranch() != null ? order.getBranch().getId() : null)
+                .direction("IN")
+                .source("CUSTOMER_ORDER")
+                .code(order.getCode())
+                .title("Thu tiền bán lẻ")
+                .description("Thu tiền đơn hàng " + order.getCode())
+                .branchName(order.getBranch() != null ? order.getBranch().getName() : "")
+                .partnerName(partnerName)
+                .creatorName("Hệ thống")
+                .paymentMethod(order.getPaymentMethod() != null ? order.getPaymentMethod().name() : "")
+                .amount(getSafeBigDecimal(order.getFinalAmount()))
+                .debtAmount(BigDecimal.ZERO)
+                .paymentAmount(getSafeBigDecimal(order.getFinalAmount()))
+                .build();
+    }
+
+    private CashbookEntryResponse mapSubOrderToCashbookEntry(SubOrder subOrder) {
+        Order parentOrder = subOrder.getOrder();
+        LocalDateTime paymentDateTime = parentOrder.getPaymentMethod() == com.zone.agri.entity.enums.PaymentMethod.COD
+                ? (subOrder.getReceivedAt() != null ? subOrder.getReceivedAt() : (subOrder.getCompletedAt() != null ? subOrder.getCompletedAt() : subOrder.getCreatedAt()))
+                : parentOrder.getCreatedAt();
+        LocalDate paymentLocalDate = paymentDateTime.toLocalDate();
+
+        BigDecimal subtotal = getSafeBigDecimal(subOrder.getSubtotal());
+        BigDecimal shippingFee = getSafeBigDecimal(subOrder.getShippingFee());
+        BigDecimal orderSubtotal = getSafeBigDecimal(parentOrder.getTotalAmount());
+        BigDecimal orderDiscount = getSafeBigDecimal(parentOrder.getDiscountAmount());
+        BigDecimal allocatedDiscount = allocateDiscount(subtotal, orderSubtotal, orderDiscount);
+        BigDecimal subOrderFinalAmount = subtotal.add(shippingFee).subtract(allocatedDiscount);
+
+        String partnerName = parentOrder.getUser() != null ? parentOrder.getUser().getFullName() : "";
+
+        return CashbookEntryResponse.builder()
+                .id("suborder-income-" + subOrder.getId())
+                .date(paymentLocalDate)
+                .branchId(subOrder.getBranch() != null ? subOrder.getBranch().getId() : null)
+                .direction("IN")
+                .source("CUSTOMER_ORDER")
+                .code(parentOrder.getCode() + "-SUB-" + subOrder.getId())
+                .title("Thu tiền bán lẻ")
+                .description("Thu tiền đơn con thuộc đơn " + parentOrder.getCode())
+                .branchName(subOrder.getBranch() != null ? subOrder.getBranch().getName() : "")
+                .partnerName(partnerName)
+                .creatorName("Hệ thống")
+                .paymentMethod(parentOrder.getPaymentMethod() != null ? parentOrder.getPaymentMethod().name() : "")
+                .amount(subOrderFinalAmount)
+                .debtAmount(BigDecimal.ZERO)
+                .paymentAmount(subOrderFinalAmount)
                 .build();
     }
 
@@ -360,30 +520,8 @@ public class FinancialService {
     }
 
     private Long resolveBranchId(Long requestBranchId) {
-        UserDetail currentUser = AuthUtils.getUserDetail();
-        if (currentUser == null) {
-            throw new AccessDeniedException("Nguoi dung chua dang nhap.");
-        }
-
-        String roleSlug = normalizeRoleSlug(currentUser);
-        if ("ADMIN".equals(roleSlug) || "SUPER_ADMIN".equals(roleSlug)) {
-            return requestBranchId;
-        }
-
-        Long userBranchId = currentUser.getBranchId();
-        if (userBranchId == null) {
-            throw new AccessDeniedException("Nguoi dung khong thuoc chi nhanh nao.");
-        }
-
-        return userBranchId;
-    }
-
-    private String normalizeRoleSlug(UserDetail userDetail) {
-        if (userDetail.getRole() == null || userDetail.getRole().getSlug() == null) {
-            return "";
-        }
-        String slug = userDetail.getRole().getSlug().trim().toUpperCase();
-        return slug.startsWith("ROLE_") ? slug.substring(5) : slug;
+        return AuthUtils.resolveRequestedOrUserBranch(
+                requestBranchId, "REPORT_FINANCE_VIEW", "REPORT_FINANCE_VIEW_ALL_BRANCHES");
     }
 
     private static final class FinancialAccumulator {

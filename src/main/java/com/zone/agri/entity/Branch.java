@@ -42,14 +42,23 @@ public class Branch extends BaseEntity {
     @Column(name = "address_detail", columnDefinition = "TEXT")
     String addressDetail;
 
+    @Column(name = "full_address", columnDefinition = "TEXT")
+    String fullAddress;
+
+    @Column(name = "map_display_name", columnDefinition = "TEXT")
+    String mapDisplayName;
+
     @Column(name = "province_id")
     Integer provinceId;
 
-    @Column(name = "district_id")
-    Integer districtId;
+    @Column(name = "province_name", length = 100)
+    String provinceName;
 
     @Column(name = "ward_id")
     Integer wardId;
+
+    @Column(name = "ward_name", length = 100)
+    String wardName;
 
     @Enumerated(EnumType.STRING)
     @Column(length = 20)
@@ -68,10 +77,6 @@ public class Branch extends BaseEntity {
     /** Mã phường/xã theo hệ thống GHN (string, khác wardId Integer) */
     @Column(name = "ward_code", length = 20)
     String wardCode;
-
-    /** Timestamp lần geocode gần nhất */
-    @Column(name = "geocoded_at")
-    Instant geocodedAt;
 
 //  KHÓA NGOẠI
     @OneToMany(mappedBy = "branch", fetch = FetchType.LAZY)

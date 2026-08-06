@@ -2,17 +2,21 @@ package com.zone.agri.service;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.zone.agri.dto.response.geo.CoordinateDto;
+import com.zone.agri.common.AuthUtils;
 import com.zone.agri.dto.response.geo.DeliveryInfo;
 import com.zone.agri.dto.request.order.*;
 import com.zone.agri.dto.response.order.*;
 import com.zone.agri.entity.*;
+import com.zone.agri.entity.enums.FulfillmentStatus;
+import com.zone.agri.entity.enums.InventoryTransferStatus;
+import com.zone.agri.entity.enums.OrderCancelReasonCode;
 import com.zone.agri.entity.enums.OrderStatus;
 import com.zone.agri.entity.enums.PaymentMethod;
 import com.zone.agri.entity.enums.PaymentStatus;
+import com.zone.agri.entity.enums.StockStatus;
 import com.zone.agri.entity.enums.TransactionType;
 import com.zone.agri.entity.enums.VoucherStatus;
-import com.zone.agri.entity.enums.VoucherDiscountType; // Thêm Enum này để kiểm tra loại Voucher
+import com.zone.agri.entity.enums.VoucherDiscountType; // ThĂªm Enum nĂ y Ä‘á»ƒ kiá»ƒm tra loáº¡i Voucher
 import com.zone.agri.exception.BadRequestException;
 import com.zone.agri.exception.ConflictException;
 import com.zone.agri.exception.Forbidden;
@@ -22,16 +26,32 @@ import com.zone.agri.service.BranchSearchService.BranchWithRealDistance;
 import com.zone.agri.service.InventoryAllocationService.AllocationResult;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import jakarta.persistence.criteria.CriteriaBuilder;
+import jakarta.persistence.criteria.CriteriaQuery;
+import jakarta.persistence.criteria.Join;
+import jakarta.persistence.criteria.JoinType;
+import jakarta.persistence.criteria.Predicate;
+import jakarta.persistence.criteria.Root;
+import jakarta.persistence.criteria.Subquery;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.context.annotation.Lazy;
+import vn.payos.type.WebhookData;
 
 import java.math.BigDecimal;
+import java.net.URLEncoder;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.LocalTime;
+import java.nio.charset.StandardCharsets;
+import java.time.OffsetDateTime;
 import java.time.temporal.ChronoUnit;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
@@ -43,6 +63,9 @@ import java.util.stream.Stream;
 @RequiredArgsConstructor
 @Slf4j
 public class OrderService {
+    private static final Set<PaymentMethod> RESUMABLE_PAYMENT_METHODS = EnumSet.of(
+            PaymentMethod.COD,
+            PaymentMethod.PAYOS);
 
     private final OrderRepository orderRepository;
     private final OrderItemRepository orderItemRepository;
@@ -54,6 +77,7 @@ public class OrderService {
     private final SubOrderRepository subOrderRepository;
     private final SubOrderItemRepository subOrderItemRepository;
     private final InventoryTransactionRepository transactionRepository;
+    private final InventoryCheckGuardService inventoryCheckGuardService;
 
     private final UserAddressRepository userAddressRepository;
     private final ReviewRepository reviewRepository;
@@ -66,10 +90,15 @@ public class OrderService {
     private final ShippingService shippingService;
     private final PayOSService payOSService;
     private final SettingService settingService;
-    private final GeocodingService geocodingService;
+    private final InventoryTransferRepository inventoryTransferRepository;
     private final InventoryTransferService inventoryTransferService;
+    private final PurchaseRequestService purchaseRequestService;
     private final BackorderService backorderService;
     private final ImmediateReplenishmentService immediateReplenishmentService;
+    private final VoucherService voucherService;
+    private final OrderStatusSyncService orderStatusSyncService;
+    private final OrderInventoryReservationService orderInventoryReservationService;
+    private final NotificationService notificationService;
 
     @Lazy
     private final CustomerService customerService;
@@ -79,9 +108,54 @@ public class OrderService {
     private static final String PREPARE_KEY_PREFIX = "prepare:";
     private static final String PREPARE_CONFIRM_LOCK_PREFIX = "prepare:confirm:lock:";
     private static final String PREPARE_CONFIRM_RESULT_PREFIX = "prepare:confirm:result:";
+    private static final String PREPARE_CONFIRM_IDEMPOTENCY_PREFIX = "prepare:confirm:idempotency:";
+    private static final String PAYOS_SESSION_KEY_PREFIX = "payos:session:";
+    private static final String PAYOS_SESSION_ACTIVE_PREFIX = "payos:session:active:";
+    private static final String PAYOS_SESSION_FINALIZE_LOCK_PREFIX = "payos:session:finalize:lock:";
     private static final long PREPARE_TTL_MINUTES = 30;
     private static final long PREPARE_CONFIRM_LOCK_TTL_SECONDS = 120;
+    private static final long PAYOS_SESSION_FINALIZE_LOCK_TTL_SECONDS = 120;
     private static final long SHIPPING_RECEIVED_CONFIRM_AFTER_DAYS = 7;
+    private static final int PAYOS_RECONCILE_BATCH_SIZE = 30;
+    private static final String PAYOS_SESSION_STATUS_PENDING = "PENDING";
+    private static final String PAYOS_SESSION_STATUS_PAID = "PAID";
+    private static final String PAYOS_SESSION_STATUS_CANCELLED = "CANCELLED";
+    private static final String PAYOS_SESSION_STATUS_EXPIRED = "EXPIRED";
+    private static final String PAYOS_SESSION_STATUS_ORDER_CREATED = "ORDER_CREATED";
+    private static final String PAYOS_HOLD_REFERENCE_PREFIX = "PAYOS-HOLD-";
+    private static final List<InventoryTransferStatus> ACTIVE_TRANSFER_STATUSES = List.of(
+            InventoryTransferStatus.PENDING,
+            InventoryTransferStatus.SOURCE_CONFIRMED,
+            InventoryTransferStatus.APPROVED,
+            InventoryTransferStatus.SHIPPING,
+            InventoryTransferStatus.INSPECTING);
+    private static final List<PaymentStatus> ADMIN_UNPAID_PAYMENT_STATUSES = List.of(
+            PaymentStatus.UNPAID,
+            PaymentStatus.PENDING,
+            PaymentStatus.PENDING_VERIFICATION,
+            PaymentStatus.PARTIALLY_PAID,
+            PaymentStatus.FAILED,
+            PaymentStatus.EXPIRED,
+            PaymentStatus.REFUND_PENDING);
+    private static final Set<OrderCancelReasonCode> CUSTOMER_CANCEL_REASON_CODES = EnumSet.of(
+            OrderCancelReasonCode.CHANGE_PRODUCT,
+            OrderCancelReasonCode.CHANGE_ADDRESS,
+            OrderCancelReasonCode.FOUND_CHEAPER,
+            OrderCancelReasonCode.OTHER);
+    private static final String LEGACY_CANCEL_REASON_PREFIX = "Cancel reason:";
+    private static final String LEGACY_PAYMENT_EXPIRED_PREFIX = "Payment expired after";
+
+    @Value("${order.payment-expiry-minutes:15}")
+    private long paymentExpiryMinutes;
+
+    @Value("${order.auto-approve-minutes:5}")
+    private long autoApproveMinutes;
+
+    @Value("${payos.return-url}")
+    private String payosReturnUrl;
+
+    @Value("${payos.cancel-url}")
+    private String payosCancelUrl;
 
     private record PreparedQuote(
             List<CartItemDto> cartItems,
@@ -99,107 +173,289 @@ public class OrderService {
             BigDecimal discountAmount) {
     }
 
-    // ══════════════════════════════════════════════════════════════════════
-    // QUẢN LÝ ĐƠN HÀNG CHO USER
-    // ══════════════════════════════════════════════════════════════════════
+    private record VoucherResolution(
+            Voucher voucher,
+            BigDecimal discountAmount,
+            String voucherCode) {
+    }
 
+    private record CreatedOrderData(
+            Order order,
+            List<SubOrderSummaryDto> subOrderSummaries,
+            String voucherCode) {
+    }
+
+    // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+    // QUáº¢N LĂ ÄÆ N HĂ€NG CHO USER
+    // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+
+    @Transactional(readOnly = true)
     public List<OrderResponse> getMyOrders(Long userId, OrderStatus status) {
         List<Order> orders;
         if (status != null) {
-            if (status == OrderStatus.PROCESSING) {
-                orders = orderRepository.findByUserIdOrderByCreatedAtDesc(userId).stream()
-                        .filter(o -> o.getStatus() == OrderStatus.PROCESSING
-                                || o.getStatus() == OrderStatus.AWAITING_REPLENISHMENT)
-                        .collect(Collectors.toList());
-            } else if (status == OrderStatus.AWAITING_REPLENISHMENT) {
-                orders = new ArrayList<>();
-            } else {
-                orders = orderRepository.findByUserIdAndStatusOrderByCreatedAtDesc(userId, status);
-            }
+            orders = orderRepository.findByUserIdAndStatusOrderByCreatedAtDesc(userId, status);
         } else {
             orders = orderRepository.findByUserIdOrderByCreatedAtDesc(userId);
         }
-        syncPayOSPaymentStatuses(orders);
         return orders.stream().map(o -> mapToOrderResponse(o, true)).collect(Collectors.toList());
     }
 
+    @Transactional
     public OrderResponse getMyOrderDetail(Long userId, Long orderId) {
+        if (userId != null) {
+            Order ownedOrder = getOwnedOrderForUser(userId, orderId);
+            refreshPendingPayOSPayment(ownedOrder);
+            return mapToOrderResponse(ownedOrder, true);
+        }
         Order order = orderRepository.findById(orderId)
-                .orElseThrow(() -> new NotFoundException("Không tìm thấy đơn hàng ID: " + orderId));
+                .orElseThrow(() -> new NotFoundException("KhĂ´ng tĂ¬m tháº¥y Ä‘Æ¡n hĂ ng ID: " + orderId));
 
         if (!order.getUser().getId().equals(userId)) {
-            throw new BadRequestException("Bạn không có quyền xem đơn hàng này!");
-        }
-
-        if (PaymentMethod.PAYOS.equals(order.getPaymentMethod())
-                && PaymentStatus.UNPAID.equals(order.getPaymentStatus())) {
-            if (payOSService.checkPaymentStatus(order)) {
-                payOSService.markOrderPaid(order);
-            }
+            throw new BadRequestException("Báº¡n khĂ´ng cĂ³ quyá»n xem Ä‘Æ¡n hĂ ng nĂ y!");
         }
 
         return mapToOrderResponse(order, true);
     }
 
     @Transactional
+    public String getMyPayosPaymentLink(Long userId, Long orderId) {
+        Order order = getOwnedOrderForUser(userId, orderId);
+        refreshPendingPayOSPayment(order);
+
+        if (!PaymentMethod.PAYOS.equals(order.getPaymentMethod())) {
+            throw new BadRequestException("Don hang nay khong su dung thanh toan PayOS");
+        }
+        if (PaymentStatus.PAID.equals(order.getPaymentStatus())) {
+            throw new BadRequestException("Don hang nay da duoc thanh toan");
+        }
+        if (order.getStatus() != OrderStatus.AWAITING_PAYMENT) {
+            throw new BadRequestException("Don hang nay khong con cho thanh toan");
+        }
+        if (order.getPayosCheckoutUrl() == null || order.getPayosCheckoutUrl().isBlank()) {
+            throw new NotFoundException("Khong tim thay link thanh toan PayOS cho don hang nay");
+        }
+
+        return order.getPayosCheckoutUrl();
+    }
+
+    @Transactional
+    public ConfirmOrderResponse retryPendingPayment(
+            Long userId,
+            Long orderId,
+            RetryPendingPaymentRequest request) {
+        Order order = getOwnedOrderForUser(userId, orderId);
+        refreshPendingPayOSPayment(order);
+
+        if (PaymentStatus.PAID.equals(order.getPaymentStatus())) {
+            return buildConfirmOrderResponse(order, null);
+        }
+        if (order.getStatus() != OrderStatus.AWAITING_PAYMENT) {
+            throw new BadRequestException("Don hang nay khong con o trang thai cho thanh toan");
+        }
+
+        PaymentMethod nextPaymentMethod = request != null && request.getPaymentMethod() != null
+                ? request.getPaymentMethod()
+                : order.getPaymentMethod();
+        if (!RESUMABLE_PAYMENT_METHODS.contains(nextPaymentMethod)) {
+            throw new BadRequestException("Chi ho tro chon lai PayOS hoac COD cho don cho thanh toan");
+        }
+
+        String checkoutUrl = null;
+        if (PaymentMethod.PAYOS.equals(order.getPaymentMethod()) && isPendingPayosPayment(order)) {
+            payOSService.cancelPaymentLink(order);
+        }
+
+        order.setPayosCheckoutUrl(null);
+        order.setPayosPaymentLinkId(null);
+
+        if (PaymentMethod.PAYOS.equals(nextPaymentMethod)) {
+            checkoutUrl = reopenPayosCheckout(order);
+        } else {
+            moveAwaitingPaymentOrderToPending(order, nextPaymentMethod, resolveInitialPaymentStatus(nextPaymentMethod));
+        }
+
+        orderRepository.save(order);
+        return buildConfirmOrderResponse(order, checkoutUrl);
+    }
+
+    @Transactional(readOnly = true)
+    public PrepareOrderResponse getPreparedOrder(Long userId, String prepareToken) {
+        PrepareOrderDraft draft = getDraftFromRedis(prepareToken);
+        if (draft == null) {
+            PayOSCheckoutSession activeSession = getActivePayosSession(prepareToken);
+            if (activeSession != null) {
+                if (!userId.equals(activeSession.getUserId())) {
+                    throw new BadRequestException("Token không hợp lệ");
+                }
+                if (isPendingPayosSession(activeSession) && activeSession.getDraftSnapshot() != null) {
+                    return buildPrepareResponseFromDraft(activeSession.getDraftSnapshot());
+                }
+            }
+            throw new BadRequestException("Token hêt hạn");
+        }
+        if (!userId.equals(draft.getUserId())) {
+            throw new BadRequestException("Token không hợp lệ");
+        }
+        return buildPrepareResponseFromDraft(draft);
+    }
+
+    @Transactional
+    public ConfirmOrderResponse finalizePayosSession(Long userId, String sessionCode) {
+        PayOSCheckoutSession session = getPayosSession(sessionCode);
+        if (session == null) {
+            throw new NotFoundException("Không tìm thấy phiên thanh toán PayOS");
+        }
+        if (!userId.equals(session.getUserId())) {
+            throw new BadRequestException("Bạn không có quyền thao tác phiên thanh toán này");
+        }
+        return finalizePayosSessionInternal(session, true);
+    }
+
+    @Transactional
+    public void cancelPayosSession(Long userId, String sessionCode) {
+        PayOSCheckoutSession session = getPayosSession(sessionCode);
+        if (session == null) {
+            return;
+        }
+        if (!userId.equals(session.getUserId())) {
+            throw new BadRequestException("Ban khong co quyen thao tac phien thanh toan nay");
+        }
+        cancelPayosSessionInternal(session, true);
+    }
+
+    @Transactional
+    public void handlePayosWebhook(WebhookData webhookData) {
+        if (webhookData == null || !"00".equals(webhookData.getCode()) || webhookData.getOrderCode() == null) {
+            return;
+        }
+
+        String sessionCode = String.valueOf(webhookData.getOrderCode());
+        PayOSCheckoutSession session = getPayosSession(sessionCode);
+        if (session != null) {
+            if (PAYOS_SESSION_STATUS_CANCELLED.equals(session.getStatus())
+                    || PAYOS_SESSION_STATUS_EXPIRED.equals(session.getStatus())) {
+                log.warn("Received paid webhook for session {} but it is already {}. Skip auto-create to avoid duplicates.",
+                        sessionCode,
+                        session.getStatus());
+                return;
+            }
+            session = markPayosSessionPaid(session);
+            finalizePayosSessionInternal(session, false);
+            return;
+        }
+
+        Optional<Order> orderOpt = orderRepository.findById(webhookData.getOrderCode());
+        if (orderOpt.isEmpty()) {
+            orderOpt = orderRepository.findByCode("ORD" + webhookData.getOrderCode());
+        }
+        if (orderOpt.isPresent() && !PaymentStatus.PAID.equals(orderOpt.get().getPaymentStatus())) {
+            payOSService.markOrderPaid(orderOpt.get());
+        }
+    }
+
+    @Transactional
     public void confirmReceivedByCustomer(Long userId, Long orderId) {
         Order order = orderRepository.findById(orderId)
-                .orElseThrow(() -> new NotFoundException("Không tìm thấy đơn hàng ID: " + orderId));
+                .orElseThrow(() -> new NotFoundException("KhĂ´ng tĂ¬m tháº¥y Ä‘Æ¡n hĂ ng ID: " + orderId));
 
         if (order.getUser() == null || !order.getUser().getId().equals(userId)) {
-            throw new Forbidden("Bạn không có quyền thao tác trên đơn hàng này");
+            throw new Forbidden("Báº¡n khĂ´ng cĂ³ quyá»n thao tĂ¡c trĂªn Ä‘Æ¡n hĂ ng nĂ y");
         }
 
         if (order.getStatus() != OrderStatus.SHIPPING) {
-            throw new BadRequestException("Chỉ có thể xác nhận khi đơn hàng đang giao.");
+            throw new BadRequestException("Chá»‰ cĂ³ thá»ƒ xĂ¡c nháº­n khi Ä‘Æ¡n hĂ ng Ä‘ang giao.");
         }
 
         markOrderAsReceived(order, true);
     }
 
-    // ══════════════════════════════════════════════════════════════════════
-    // QUẢN LÝ ĐƠN HÀNG CHO ADMIN
-    // ══════════════════════════════════════════════════════════════════════
+    // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+    // QUáº¢N LĂ ÄÆ N HĂ€NG CHO ADMIN
+    // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
-    public Page<OrderResponse> getAdminOrders(OrderStatus status, String search, Pageable pageable) {
-        Page<Order> orderPage = orderRepository.findAdminOrdersWithFilter(status, search, pageable);
+    @Transactional(readOnly = true)
+    public Page<OrderResponse> getAdminOrders(
+            String status,
+            String search,
+            PaymentStatus paymentStatus,
+            String startDate,
+            String endDate,
+            Pageable pageable) {
+        Specification<Order> specification = buildAdminOrderSpecification(
+                status,
+                search,
+                paymentStatus,
+                startDate,
+                endDate);
 
-        syncPayOSPaymentStatuses(orderPage.getContent());
-        return orderPage.map(o -> mapToOrderResponse(o, false));
+        return orderRepository.findAll(specification, pageable)
+                .map(order -> mapToOrderResponse(order, false));
     }
 
+    @Transactional(readOnly = true)
+    public AdminOrderSummaryResponse getAdminOrderSummary(
+            String status,
+            String search,
+            PaymentStatus paymentStatus,
+            String startDate,
+            String endDate) {
+        Specification<Order> specification = buildAdminOrderSpecification(
+                status,
+                search,
+                paymentStatus,
+                startDate,
+                endDate);
+
+        List<Order> orders = orderRepository.findAll(specification);
+        long shortageOrders = orders.stream()
+                .filter(this::hasAdminOrderShortage)
+                .count();
+        long unpaidOrders = orders.stream()
+                .filter(this::isAdminOrderUnpaid)
+                .count();
+        BigDecimal totalValue = orders.stream()
+                .map(this::resolveAdminOrderValue)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+        return AdminOrderSummaryResponse.builder()
+                .totalOrders(orders.size())
+                .shortageOrders(shortageOrders)
+                .unpaidOrders(unpaidOrders)
+                .totalValue(totalValue)
+                .build();
+    }
+
+    @Transactional(readOnly = true)
     public OrderResponse getAdminOrderDetail(Long orderId) {
         Order order = orderRepository.findById(orderId)
-                .orElseThrow(() -> new NotFoundException("Không tìm thấy đơn hàng ID: " + orderId));
-
-        if (PaymentMethod.PAYOS.equals(order.getPaymentMethod())
-                && PaymentStatus.UNPAID.equals(order.getPaymentStatus())) {
-            if (payOSService.checkPaymentStatus(order)) {
-                payOSService.markOrderPaid(order);
-            }
-        }
+                .orElseThrow(() -> new NotFoundException("KhĂ´ng tĂ¬m tháº¥y Ä‘Æ¡n hĂ ng ID: " + orderId));
 
         return mapToOrderResponse(order, false);
     }
 
     @Transactional
-    public void cancelMyOrder(Long userId, Long orderId, String cancelReason) {
+    public void cancelMyOrder(Long userId, Long orderId, OrderCancelRequest request) {
         Order order = orderRepository.findById(orderId)
-                .orElseThrow(() -> new NotFoundException("Không tìm thấy đơn hàng ID: " + orderId));
+                .orElseThrow(() -> new NotFoundException("KhĂ´ng tĂ¬m tháº¥y Ä‘Æ¡n hĂ ng ID: " + orderId));
 
         if (!order.getUser().getId().equals(userId)) {
-            throw new BadRequestException("Bạn không có quyền hủy đơn hàng này");
+            throw new BadRequestException("Báº¡n khĂ´ng cĂ³ quyá»n há»§y Ä‘Æ¡n hĂ ng nĂ y");
         }
-        if (order.getStatus() == OrderStatus.CANCELLED || order.getStatus() == OrderStatus.COMPLETED
-                || order.getStatus() == OrderStatus.RETURNED) {
-            throw new BadRequestException("Đơn hàng đã đóng, không thể hủy");
+        OrderStatus currentStatus = order.getStatus();
+        if (currentStatus == OrderStatus.CANCELLED || currentStatus == OrderStatus.COMPLETED
+                || currentStatus == OrderStatus.RETURNED) {
+            throw new BadRequestException("ÄÆ¡n hĂ ng Ä‘Ă£ Ä‘Ă³ng, khĂ´ng thá»ƒ há»§y");
         }
-        if (order.getStatus() == OrderStatus.SHIPPING) {
-            throw new BadRequestException("Đơn hàng đang giao, không thể hủy");
+        if (currentStatus == OrderStatus.SHIPPING) {
+            throw new BadRequestException("ÄÆ¡n hĂ ng Ä‘ang giao, khĂ´ng thá»ƒ há»§y");
         }
 
+        if (!canCustomerCancelOrder(currentStatus)) {
+            throw new BadRequestException("Đơn hàng đã được xác nhận hoặc đang xử lý, không thể hủy");
+        }
+        NormalizedCancelReason cancelReason = normalizeCustomerCancelReason(request);
         releaseAllocatedInventoryForOrder(order);
-        restoreVoucherForOrder(order);
+        voucherService.restoreVoucherForOrder(order);
         LocalDateTime cancelledAt = LocalDateTime.now();
         applyOrderStatus(order, OrderStatus.CANCELLED, cancelledAt);
         if (order.getSubOrders() != null) {
@@ -211,47 +467,54 @@ public class OrderService {
             }
         }
         if (PaymentMethod.PAYOS.equals(order.getPaymentMethod())
-                && PaymentStatus.UNPAID.equals(order.getPaymentStatus())) {
+                && isPendingPayosPayment(order)) {
             payOSService.cancelPaymentLink(order);
         }
-        if (cancelReason != null && !cancelReason.isBlank()) {
-            String previousNote = order.getNote() != null ? order.getNote() + " | " : "";
-            order.setNote(previousNote + "Cancel reason: " + cancelReason.trim());
-        }
+        applyCancellationReason(order, cancelReason.reasonCode(), cancelReason.reasonText());
         orderRepository.save(order);
         customerService.evaluateAndHandleCustomerReputation(order.getUser().getId());
+        notificationService.notifyOrderStatusChange(order, currentStatus, OrderStatus.CANCELLED);
     }
 
     @Transactional
     public void updateOrderStatus(Long orderId, OrderStatus newStatus) {
         Order order = orderRepository.findById(orderId)
-                .orElseThrow(() -> new NotFoundException("Không tìm thấy đơn hàng ID: " + orderId));
+                .orElseThrow(() -> new NotFoundException("KhĂ´ng tĂ¬m tháº¥y Ä‘Æ¡n hĂ ng ID: " + orderId));
 
         OrderStatus currentStatus = order.getStatus();
         if (currentStatus == OrderStatus.CANCELLED || currentStatus == OrderStatus.COMPLETED
                 || currentStatus == OrderStatus.RETURNED) {
-            throw new BadRequestException("Không thể thay đổi trạng thái của đơn hàng đã đóng!");
+            throw new BadRequestException("KhĂ´ng thá»ƒ thay Ä‘á»•i tráº¡ng thĂ¡i cá»§a Ä‘Æ¡n hĂ ng Ä‘Ă£ Ä‘Ă³ng!");
         }
 
         if (currentStatus == OrderStatus.SHIPPING && newStatus == OrderStatus.COMPLETED) {
-            throw new BadRequestException("Đơn hàng đang giao chỉ được hoàn tất khi khách hàng xác nhận đã nhận.");
+            throw new BadRequestException("ÄÆ¡n hĂ ng Ä‘ang giao chá»‰ Ä‘Æ°á»£c hoĂ n táº¥t khi khĂ¡ch hĂ ng xĂ¡c nháº­n Ä‘Ă£ nháº­n.");
+        }
+
+        if (currentStatus == OrderStatus.PENDING
+                && newStatus == OrderStatus.CONFIRMED
+                && orderHasMissingItems(order)) {
+            throw new BadRequestException(
+                    "Don hang dang thieu hang. Vui long xin lenh dieu chuyen truoc khi duyet sang buoc tiep theo.");
         }
 
         validateStatusTransition(currentStatus, newStatus);
 
         if (newStatus == OrderStatus.RECEIVED) {
-            markOrderAsReceived(order, false);
+            // Admin is allowed to confirm delivery completion immediately.
+            markOrderAsReceived(order, true);
             return;
         }
         if (newStatus == OrderStatus.COMPLETED) {
             completeReceivedOrder(order);
             customerService.evaluateAndHandleCustomerReputation(order.getUser().getId());
+            notificationService.notifyOrderStatusChange(order, currentStatus, OrderStatus.COMPLETED);
             return;
         }
         LocalDateTime statusChangedAt = LocalDateTime.now();
         if (newStatus == OrderStatus.CANCELLED) {
             releaseAllocatedInventoryForOrder(order);
-            restoreVoucherForOrder(order);
+            voucherService.restoreVoucherForOrder(order);
             if (order.getSubOrders() != null) {
                 List<SubOrder> cancelledSubOrders = order.getSubOrders().stream()
                         .filter(subOrder -> subOrder.getStatus() != OrderStatus.CANCELLED)
@@ -262,9 +525,17 @@ public class OrderService {
                 }
             }
             if (PaymentMethod.PAYOS.equals(order.getPaymentMethod())
-                    && PaymentStatus.UNPAID.equals(order.getPaymentStatus())) {
+                    && isPendingPayosPayment(order)) {
                 payOSService.cancelPaymentLink(order);
             }
+            ensureCancellationReason(order, OrderCancelReasonCode.ADMIN_CANCELLED, null);
+        }
+        syncActiveSubOrdersForStatusChange(order, newStatus, statusChangedAt);
+        if (newStatus == OrderStatus.SHIPPING
+                && (order.getSubOrders() == null || order.getSubOrders().isEmpty())) {
+            orderInventoryReservationService.shipReservedInventory(
+                    order.getCode(),
+                    "Xuat kho don hang " + order.getCode() + " khi chuyen sang giao hang");
         }
 
         applyOrderStatus(order, newStatus, statusChangedAt);
@@ -274,6 +545,7 @@ public class OrderService {
                 || newStatus == OrderStatus.RETURNED) {
             customerService.evaluateAndHandleCustomerReputation(order.getUser().getId());
         }
+        notificationService.notifyOrderStatusChange(order, currentStatus, newStatus);
     }
 
     private void validateStatusTransition(OrderStatus current, OrderStatus next) {
@@ -282,7 +554,7 @@ public class OrderService {
         if (current == OrderStatus.PENDING) {
             if (next != OrderStatus.CONFIRMED) {
                 throw new BadRequestException(
-                        "Đơn hàng chờ xác nhận chỉ có thể chuyển sang 'Đã duyệt' hoặc 'Đang xử lý'.");
+                        "ÄÆ¡n hĂ ng chá» xĂ¡c nháº­n chá»‰ cĂ³ thá»ƒ chuyá»ƒn sang 'ÄĂ£ xĂ¡c nháº­n'.");
             }
             return;
         }
@@ -290,45 +562,93 @@ public class OrderService {
             if (next != OrderStatus.CONFIRMED && next != OrderStatus.AWAITING_REPLENISHMENT
                     && next != OrderStatus.PROCESSING) {
                 throw new BadRequestException(
-                        "Đơn hàng chờ thanh toán chỉ có thể chuyển sang 'Đang xử lý' hoặc 'Chờ bổ sung' sau khi thanh toán xong.");
+                        "ÄÆ¡n hĂ ng chá» thanh toĂ¡n chá»‰ cĂ³ thá»ƒ chuyá»ƒn sang 'Äang xá»­ lĂ½' hoáº·c 'Chá» bá»• sung' sau khi thanh toĂ¡n xong.");
             }
             return;
         }
         if (current == OrderStatus.AWAITING_REPLENISHMENT) {
             if (next != OrderStatus.CONFIRMED && next != OrderStatus.PROCESSING) {
                 throw new BadRequestException(
-                        "Đơn hàng thiếu hàng chỉ có thể chuyển sang 'Đang xử lý' sau khi nhập đủ.");
+                        "ÄÆ¡n hĂ ng thiáº¿u hĂ ng chá»‰ cĂ³ thá»ƒ chuyá»ƒn sang 'Äang xá»­ lĂ½' sau khi nháº­p Ä‘á»§.");
             }
             return;
         }
         if (current == OrderStatus.CONFIRMED) {
             if (next != OrderStatus.PROCESSING) {
-                throw new BadRequestException("Đơn hàng đã duyệt chỉ có thể chuyển sang 'Đang xử lý'.");
+                throw new BadRequestException("ÄÆ¡n hĂ ng Ä‘Ă£ duyá»‡t chá»‰ cĂ³ thá»ƒ chuyá»ƒn sang 'Äang xá»­ lĂ½'.");
             }
             return;
         }
         if (current == OrderStatus.PROCESSING) {
             if (next != OrderStatus.READY_FOR_PICKUP) {
                 throw new BadRequestException(
-                        "Đơn hàng ở trạng thái 'Đang xử lý' chỉ có thể chuyển sang 'Sẵn sàng lấy' hoặc 'Đang giao'.");
+                        "ÄÆ¡n hĂ ng á»Ÿ tráº¡ng thĂ¡i 'Äang xá»­ lĂ½' chá»‰ cĂ³ thá»ƒ chuyá»ƒn sang 'Sáºµn sĂ ng bĂ n giao'.");
             }
             return;
         }
         if (current == OrderStatus.READY_FOR_PICKUP) {
             if (next != OrderStatus.SHIPPING) {
-                throw new BadRequestException("Đơn hàng chờ lấy hàng chỉ có thể chuyển sang 'Đang giao'.");
+                throw new BadRequestException("ÄÆ¡n hĂ ng chá» bĂ n giao chá»‰ cĂ³ thá»ƒ chuyá»ƒn sang 'Äang giao'.");
             }
             return;
         }
         if (current == OrderStatus.SHIPPING) {
             if (next != OrderStatus.RECEIVED && next != OrderStatus.RETURNED) {
                 throw new BadRequestException(
-                        "Đơn hàng đang giao chỉ có thể chuyển sang 'Hoàn thành' hoặc 'Đã trả hàng'.");
+                        "ÄÆ¡n hĂ ng Ä‘ang giao chá»‰ cĂ³ thá»ƒ chuyá»ƒn sang 'ÄĂ£ nháº­n hĂ ng' hoáº·c 'ÄĂ£ tráº£ hĂ ng'.");
             }
             return;
         }
         if (current == OrderStatus.RECEIVED && next != OrderStatus.COMPLETED) {
-            throw new BadRequestException("ÄÆ¡n hÃ ng Ä‘Ã£ nháº­n chá»‰ cÃ³ thá»ƒ chuyá»ƒn sang 'HoÃ n thÃ nh'.");
+            throw new BadRequestException("Ă„ÂĂ†Â¡n hĂƒÂ ng Ă„â€˜ĂƒÂ£ nhĂ¡ÂºÂ­n chĂ¡Â»â€° cĂƒÂ³ thĂ¡Â»Æ’ chuyĂ¡Â»Æ’n sang 'HoĂƒÂ n thĂƒÂ nh'.");
+        }
+    }
+
+    private void syncActiveSubOrdersForStatusChange(
+            Order order,
+            OrderStatus targetStatus,
+            LocalDateTime changedAt) {
+        if (order == null || order.getSubOrders() == null || order.getSubOrders().isEmpty()) {
+            return;
+        }
+
+        if (targetStatus != OrderStatus.CONFIRMED
+                && targetStatus != OrderStatus.PROCESSING
+                && targetStatus != OrderStatus.READY_FOR_PICKUP
+                && targetStatus != OrderStatus.SHIPPING) {
+            return;
+        }
+
+        List<SubOrder> subOrdersToUpdate = new ArrayList<>();
+
+        for (SubOrder subOrder : order.getSubOrders()) {
+            if (subOrder == null
+                    || subOrder.getStatus() == null
+                    || subOrder.getStatus() == OrderStatus.CANCELLED
+                    || subOrder.getStatus() == OrderStatus.COMPLETED
+                    || subOrder.getStatus() == OrderStatus.RETURNED
+                    || subOrder.getStatus() == targetStatus) {
+                continue;
+            }
+
+            if (statusWeight(subOrder.getStatus()) > statusWeight(targetStatus)) {
+                continue;
+            }
+
+            validateStatusTransition(subOrder.getStatus(), targetStatus);
+
+            if (targetStatus == OrderStatus.SHIPPING) {
+                orderInventoryReservationService.shipReservedInventory(
+                        buildSubOrderReferenceCode(subOrder),
+                        "Xuat kho cho phan don " + order.getCode() + " khi chuyen sang giao hang");
+            }
+
+            applySubOrderStatus(subOrder, targetStatus, changedAt);
+            subOrdersToUpdate.add(subOrder);
+        }
+
+        if (!subOrdersToUpdate.isEmpty()) {
+            subOrderRepository.saveAll(subOrdersToUpdate);
         }
     }
 
@@ -336,20 +656,43 @@ public class OrderService {
         return orderRepository.findByUserIdOrderByCreatedAtDesc(userId);
     }
 
-    // ══════════════════════════════════════════════════════════════════════
-    // QUẢN LÝ ĐƠN HÀNG CHO CHI NHÁNH / KHO
-    // ══════════════════════════════════════════════════════════════════════
+    // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+    // QUáº¢N LĂ ÄÆ N HĂ€NG CHO CHI NHĂNH / KHO
+    // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
     @Transactional(readOnly = true)
-    public List<BranchOrderResponse> getBranchOrders(Long branchId, OrderStatus status, String search) {
+    public List<BranchOrderResponse> getBranchOrders(
+            Long branchId,
+            OrderStatus status,
+            String search,
+            String startDate,
+            String endDate) {
         List<SubOrder> subOrders = (status != null)
                 ? subOrderRepository.findByBranchIdAndStatusOrderByCreatedAtDesc(branchId, status)
                 : subOrderRepository.findByBranchIdOrderByCreatedAtDesc(branchId);
 
-        List<SubOrder> filteredSubOrders = subOrders;
+        LocalDateTime startDateTime = parseOrderFilterDateTime(startDate, false);
+        LocalDateTime endDateTime = parseOrderFilterDateTime(endDate, true);
+
+        List<SubOrder> filteredSubOrders = subOrders.stream()
+                .filter(subOrder -> {
+                    LocalDateTime createdAt = resolveBranchOrderCreatedAt(subOrder);
+                    if (createdAt == null) {
+                        return false;
+                    }
+                    if (startDateTime != null && createdAt.isBefore(startDateTime)) {
+                        return false;
+                    }
+                    if (endDateTime != null && createdAt.isAfter(endDateTime)) {
+                        return false;
+                    }
+                    return true;
+                })
+                .collect(Collectors.toList());
+
         if (search != null && !search.isBlank()) {
             String lc = search.toLowerCase();
-            filteredSubOrders = subOrders.stream().filter(s -> {
+            filteredSubOrders = filteredSubOrders.stream().filter(s -> {
                 Order o = s.getOrder();
                 return (o.getCode() != null && o.getCode().toLowerCase().contains(lc))
                         || (o.getUser() != null && o.getUser().getFullName() != null
@@ -357,27 +700,20 @@ public class OrderService {
             }).collect(Collectors.toList());
         }
 
-        syncPayOSPaymentStatuses(
-                filteredSubOrders.stream()
-                        .map(SubOrder::getOrder)
-                        .filter(Objects::nonNull)
-                        .distinct()
-                        .collect(Collectors.toList()));
-
         return filteredSubOrders.stream().map(this::mapSubOrderToBranchOrderResponse).collect(Collectors.toList());
     }
 
     @Transactional(readOnly = true)
     public BranchOrderResponse getBranchOrderDetail(Long branchId, Long orderId) {
         SubOrder subOrder = subOrderRepository.findByOrderIdAndBranchId(orderId, branchId)
-                .orElseThrow(() -> new NotFoundException("Không tìm thấy đơn hàng cho chi nhánh này"));
-        syncPayOSPaymentStatus(subOrder.getOrder());
+                .orElseThrow(() -> new NotFoundException("KhĂ´ng tĂ¬m tháº¥y Ä‘Æ¡n hĂ ng cho chi nhĂ¡nh nĂ y"));
         return mapSubOrderToBranchOrderResponse(subOrder);
     }
 
     @Transactional(readOnly = true)
-    public List<MissingItemReportDto> getBackorderReport() {
-        return subOrderItemRepository.getBackorderReport().stream()
+    public List<MissingItemReportDto> getBackorderReport(Long branchId) {
+        Long finalBranchId = AuthUtils.resolveRequestedOrUserBranch(branchId, "ORDER_VIEW");
+        return subOrderItemRepository.getBackorderReport(finalBranchId).stream()
                 .map(row -> MissingItemReportDto.builder()
                         .productVariantId(row.getProductVariantId())
                         .sku(row.getSku())
@@ -393,16 +729,16 @@ public class OrderService {
     @Transactional
     public List<String> requestReplenishmentForAdmin(Long orderId) {
         Order order = orderRepository.findById(orderId)
-                .orElseThrow(() -> new NotFoundException("Không tìm thấy đơn hàng ID: " + orderId));
+                .orElseThrow(() -> new NotFoundException("KhĂ´ng tĂ¬m tháº¥y Ä‘Æ¡n hĂ ng ID: " + orderId));
 
         List<SubOrder> awaitingSubOrders = order.getSubOrders() == null
                 ? Collections.emptyList()
                 : order.getSubOrders().stream()
-                        .filter(subOrder -> subOrder.getStatus() == OrderStatus.AWAITING_REPLENISHMENT)
+                        .filter(this::canRequestReplenishment)
                         .toList();
 
         if (awaitingSubOrders.isEmpty()) {
-            throw new BadRequestException("Đơn hàng này không ở trạng thái chờ điều chuyển bổ sung.");
+            throw new BadRequestException("ÄÆ¡n hĂ ng nĂ y khĂ´ng á»Ÿ tráº¡ng thĂ¡i chá» Ä‘iá»u chuyá»ƒn bá»• sung.");
         }
 
         return awaitingSubOrders.stream()
@@ -415,10 +751,10 @@ public class OrderService {
     @Transactional
     public List<String> requestReplenishmentForBranch(Long branchId, Long orderId) {
         SubOrder subOrder = subOrderRepository.findByOrderIdAndBranchId(orderId, branchId)
-                .orElseThrow(() -> new NotFoundException("Không tìm thấy phần đơn cho chi nhánh này"));
+                .orElseThrow(() -> new NotFoundException("KhĂ´ng tĂ¬m tháº¥y pháº§n Ä‘Æ¡n cho chi nhĂ¡nh nĂ y"));
 
-        if (subOrder.getStatus() != OrderStatus.AWAITING_REPLENISHMENT) {
-            throw new BadRequestException("Phần đơn này không ở trạng thái chờ điều chuyển bổ sung.");
+        if (!canRequestReplenishment(subOrder)) {
+            throw new BadRequestException("Pháº§n Ä‘Æ¡n nĂ y khĂ´ng á»Ÿ tráº¡ng thĂ¡i chá» Ä‘iá»u chuyá»ƒn bá»• sung.");
         }
 
         return inventoryTransferService.createReplenishmentTransfersForSubOrder(subOrder).stream()
@@ -427,26 +763,121 @@ public class OrderService {
     }
 
     @Transactional
+    public ReplenishmentRequestResponse requestReplenishmentForAdminResponse(Long orderId) {
+        Order order = orderRepository.findById(orderId)
+                .orElseThrow(() -> new NotFoundException("Khong tim thay don hang ID: " + orderId));
+
+        List<SubOrder> awaitingSubOrders = order.getSubOrders() == null
+                ? Collections.emptyList()
+                : order.getSubOrders().stream()
+                        .filter(this::canRequestReplenishment)
+                        .toList();
+
+        if (awaitingSubOrders.isEmpty()) {
+            throw new BadRequestException("Don hang nay khong o trang thai cho dieu chuyen bo sung.");
+        }
+
+        List<String> transferCodes = new ArrayList<>();
+        List<String> purchaseRequestCodes = new ArrayList<>();
+        for (SubOrder subOrder : awaitingSubOrders) {
+            processReplenishmentRequest(subOrder, transferCodes, purchaseRequestCodes);
+        }
+
+        return ReplenishmentRequestResponse.builder()
+                .message("Da xu ly yeu cau bo sung cho don hang.")
+                .transferCodes(transferCodes)
+                .purchaseRequestCodes(purchaseRequestCodes)
+                .build();
+    }
+
+    @Transactional
+    public ReplenishmentRequestResponse requestReplenishmentForBranchResponse(Long branchId, Long orderId) {
+        SubOrder subOrder = subOrderRepository.findByOrderIdAndBranchId(orderId, branchId)
+                .orElseThrow(() -> new NotFoundException("Khong tim thay phan don cho chi nhanh nay."));
+
+        if (!canRequestReplenishment(subOrder)) {
+            throw new BadRequestException("Phan don nay khong o trang thai cho dieu chuyen bo sung.");
+        }
+
+        List<String> transferCodes = new ArrayList<>();
+        List<String> purchaseRequestCodes = new ArrayList<>();
+        processReplenishmentRequest(subOrder, transferCodes, purchaseRequestCodes);
+
+        return ReplenishmentRequestResponse.builder()
+                .message("Da xu ly yeu cau bo sung cho phan don.")
+                .transferCodes(transferCodes)
+                .purchaseRequestCodes(purchaseRequestCodes)
+                .build();
+    }
+
+    private void processReplenishmentRequest(
+            SubOrder subOrder,
+            List<String> transferCodes,
+            List<String> purchaseRequestCodes) {
+        List<InventoryTransfer> existingTransfers = inventoryTransferService
+                .findActiveReplenishmentTransfersForSubOrder(subOrder.getId());
+        if (!existingTransfers.isEmpty()) {
+            transferCodes.addAll(existingTransfers.stream()
+                    .map(InventoryTransfer::getTransferCode)
+                    .filter(Objects::nonNull)
+                    .toList());
+            return;
+        }
+
+        List<PurchaseRequest> existingRequests = purchaseRequestService
+                .findActiveAutoReplenishmentRequestsForSubOrder(subOrder.getId());
+        if (!existingRequests.isEmpty()) {
+            purchaseRequestCodes.addAll(existingRequests.stream()
+                    .map(PurchaseRequest::getCode)
+                    .filter(Objects::nonNull)
+                    .toList());
+            return;
+        }
+
+        InventoryTransferService.ReplenishmentDecision decision = inventoryTransferService
+                .planReplenishmentForSubOrder(subOrder);
+        if (decision.type() == InventoryTransferService.ReplenishmentDecisionType.PURCHASE_REQUEST) {
+            purchaseRequestCodes.addAll(purchaseRequestService
+                    .createAutomaticReplenishmentRequestsForSubOrder(subOrder)
+                    .stream()
+                    .map(PurchaseRequest::getCode)
+                    .filter(Objects::nonNull)
+                    .toList());
+            return;
+        }
+
+        transferCodes.addAll(inventoryTransferService.createReplenishmentTransfersForSubOrder(subOrder).stream()
+                .map(InventoryTransfer::getTransferCode)
+                .filter(Objects::nonNull)
+                .toList());
+    }
+
+    @Transactional
     public void updateSubOrderStatus(Long branchId, Long orderId, OrderStatus newStatus) {
         SubOrder subOrder = subOrderRepository.findByOrderIdAndBranchId(orderId, branchId)
-                .orElseThrow(() -> new NotFoundException("Không tìm thấy phần đơn cho chi nhánh này"));
+                .orElseThrow(() -> new NotFoundException("KhĂ´ng tĂ¬m tháº¥y pháº§n Ä‘Æ¡n cho chi nhĂ¡nh nĂ y"));
 
         OrderStatus currentStatus = subOrder.getStatus();
         if (currentStatus == OrderStatus.CANCELLED || currentStatus == OrderStatus.COMPLETED
                 || currentStatus == OrderStatus.RETURNED) {
-            throw new BadRequestException("Không thể thay đổi trạng thái của đơn đã đóng!");
+            throw new BadRequestException("KhĂ´ng thá»ƒ thay Ä‘á»•i tráº¡ng thĂ¡i cá»§a Ä‘Æ¡n Ä‘Ă£ Ä‘Ă³ng!");
         }
         if (currentStatus == OrderStatus.SHIPPING && newStatus == OrderStatus.COMPLETED) {
-            throw new BadRequestException("Phần đơn đang giao chỉ được hoàn tất khi khách hàng xác nhận đã nhận.");
+            throw new BadRequestException("Pháº§n Ä‘Æ¡n Ä‘ang giao chá»‰ Ä‘Æ°á»£c hoĂ n táº¥t khi khĂ¡ch hĂ ng xĂ¡c nháº­n Ä‘Ă£ nháº­n.");
         }
         validateStatusTransition(currentStatus, newStatus);
 
         if (newStatus == OrderStatus.CANCELLED) {
             releaseAllocatedInventoryForSubOrder(subOrder);
         }
+        if (newStatus == OrderStatus.SHIPPING) {
+            orderInventoryReservationService.shipReservedInventory(
+                    buildSubOrderReferenceCode(subOrder),
+                    "Xuat kho cho phan don " + subOrder.getOrder().getCode() + " khi chuyen sang giao hang");
+        }
         if (newStatus == OrderStatus.RECEIVED
                 && !canManuallyConfirmReceived(resolveStatusUpdatedAt(subOrder))) {
-            throw new BadRequestException("Chá»‰ Ä‘Æ°á»£c xÃ¡c nháº­n 'ÄÃ£ nháº­n hÃ ng' sau khi Ä‘Æ¡n Ä‘ang giao quÃ¡ 7 ngÃ y.");
+            throw new BadRequestException("ChĂ¡Â»â€° Ă„â€˜Ă†Â°Ă¡Â»Â£c xĂƒÂ¡c nhĂ¡ÂºÂ­n 'Ă„ÂĂƒÂ£ nhĂ¡ÂºÂ­n hĂƒÂ ng' sau khi Ă„â€˜Ă†Â¡n Ă„â€˜ang giao quĂƒÂ¡ 7 ngĂƒÂ y.");
         }
         if (newStatus == OrderStatus.RECEIVED && PaymentMethod.COD.equals(subOrder.getOrder().getPaymentMethod())) {
             subOrder.getOrder().setPaymentStatus(PaymentStatus.PAID);
@@ -456,12 +887,12 @@ public class OrderService {
         applySubOrderStatus(subOrder, newStatus, LocalDateTime.now());
         subOrderRepository.saveAndFlush(subOrder);
 
-        syncMasterOrderStatus(subOrder.getOrder().getId());
+        orderStatusSyncService.syncMasterOrderStatus(subOrder.getOrder().getId());
     }
 
     private void syncMasterOrderStatus(Long orderId) {
         Order order = orderRepository.findById(orderId)
-                .orElseThrow(() -> new NotFoundException("Không tìm thấy đơn hàng tổng"));
+                .orElseThrow(() -> new NotFoundException("KhĂ´ng tĂ¬m tháº¥y Ä‘Æ¡n hĂ ng tá»•ng"));
 
         List<SubOrder> allSubs = subOrderRepository.findByOrderId(orderId);
         if (allSubs.isEmpty())
@@ -493,14 +924,15 @@ public class OrderService {
                     .orElse(OrderStatus.PENDING);
         }
 
-        // Fix lỗi: Khi tất cả SubOrder bị hủy, Master Order chuyển thành Hủy -> Hoàn
-        // Voucher và Hủy link PayOS
+        // Fix lá»—i: Khi táº¥t cáº£ SubOrder bá»‹ há»§y, Master Order chuyá»ƒn thĂ nh Há»§y -> HoĂ n
+        // Voucher vĂ  Há»§y link PayOS
         if (newMasterStatus == OrderStatus.CANCELLED && order.getStatus() != OrderStatus.CANCELLED) {
-            restoreVoucherForOrder(order);
+            voucherService.restoreVoucherForOrder(order);
             if (PaymentMethod.PAYOS.equals(order.getPaymentMethod())
                     && PaymentStatus.UNPAID.equals(order.getPaymentStatus())) {
                 payOSService.cancelPaymentLink(order);
             }
+            ensureCancellationReason(order, OrderCancelReasonCode.SUB_ORDERS_CANCELLED, null);
         }
 
         applyOrderStatus(order, newMasterStatus, LocalDateTime.now());
@@ -512,28 +944,204 @@ public class OrderService {
         }
     }
 
+    private boolean canCustomerCancelOrder(OrderStatus status) {
+        return status == OrderStatus.PENDING || status == OrderStatus.AWAITING_PAYMENT;
+    }
+
+    private NormalizedCancelReason normalizeCustomerCancelReason(OrderCancelRequest request) {
+        OrderCancelReasonCode reasonCode = OrderCancelReasonCode.from(request != null ? request.getReasonCode() : null)
+                .orElseThrow(() -> new BadRequestException("Ly do huy don khong hop le."));
+
+        if (!CUSTOMER_CANCEL_REASON_CODES.contains(reasonCode)) {
+            throw new BadRequestException("Ly do huy don khong hop le.");
+        }
+
+        String reasonText = normalizeOptionalText(request != null ? request.getOtherReasonText() : null);
+        if (reasonCode == OrderCancelReasonCode.OTHER && reasonText == null) {
+            throw new BadRequestException("Vui long nhap ly do huy chi tiet.");
+        }
+
+        if (reasonCode != OrderCancelReasonCode.OTHER) {
+            reasonText = null;
+        }
+
+        return new NormalizedCancelReason(reasonCode, reasonText);
+    }
+
+    private void applyCancellationReason(Order order, OrderCancelReasonCode reasonCode, String reasonText) {
+        if (order == null) {
+            return;
+        }
+
+        order.setCancelReasonCode(reasonCode);
+        order.setCancelReasonText(normalizeOptionalText(reasonText));
+    }
+
+    private void ensureCancellationReason(Order order, OrderCancelReasonCode reasonCode, String reasonText) {
+        if (order == null) {
+            return;
+        }
+
+        if (order.getCancelReasonCode() == null) {
+            order.setCancelReasonCode(reasonCode);
+        }
+
+        String normalizedReasonText = normalizeOptionalText(reasonText);
+        if ((order.getCancelReasonText() == null || order.getCancelReasonText().isBlank())
+                && normalizedReasonText != null) {
+            order.setCancelReasonText(normalizedReasonText);
+        }
+    }
+
+    private String normalizeOptionalText(String value) {
+        if (value == null) {
+            return null;
+        }
+
+        String normalized = value.trim();
+        return normalized.isEmpty() ? null : normalized;
+    }
+
+    private record NormalizedCancelReason(OrderCancelReasonCode reasonCode, String reasonText) {
+    }
+
+    @Transactional
+    public void expireUnpaidPaymentOrders() {
+        LocalDateTime cutoff = LocalDateTime.now().minusMinutes(Math.max(1, paymentExpiryMinutes));
+        List<Order> overdueOrders = orderRepository.findByStatusAndCreatedAtBefore(OrderStatus.AWAITING_PAYMENT, cutoff)
+                .stream()
+                .filter(order -> PaymentMethod.PAYOS.equals(order.getPaymentMethod()))
+                .filter(this::isPendingPayosPayment)
+                .toList();
+
+        for (Order order : overdueOrders) {
+            if (payOSService.checkPaymentStatus(order)) {
+                payOSService.markOrderPaid(order);
+                continue;
+            }
+
+            releaseAllocatedInventoryForOrder(order);
+            voucherService.restoreVoucherForOrder(order);
+            payOSService.cancelPaymentLink(order);
+
+            LocalDateTime cancelledAt = LocalDateTime.now();
+            applyOrderStatus(order, OrderStatus.CANCELLED, cancelledAt);
+            if (order.getSubOrders() != null) {
+                List<SubOrder> cancelledSubOrders = order.getSubOrders().stream()
+                        .filter(subOrder -> subOrder.getStatus() != OrderStatus.CANCELLED)
+                        .peek(subOrder -> applySubOrderStatus(subOrder, OrderStatus.CANCELLED, cancelledAt))
+                        .toList();
+                if (!cancelledSubOrders.isEmpty()) {
+                    subOrderRepository.saveAll(cancelledSubOrders);
+                }
+            }
+
+            applyCancellationReason(order, OrderCancelReasonCode.PAYMENT_EXPIRED, null);
+            order.setPaymentStatus(PaymentStatus.EXPIRED);
+            order.setAutoApproveAt(null);
+            orderRepository.save(order);
+
+            if (order.getUser() != null) {
+                customerService.evaluateAndHandleCustomerReputation(order.getUser().getId());
+            }
+            notificationService.notifyOrderStatusChange(order, OrderStatus.AWAITING_PAYMENT, OrderStatus.CANCELLED);
+        }
+    }
+
+    @Transactional
+    public void autoApproveEligibleOrders() {
+        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime fallbackCutoff = now.minusMinutes(Math.max(1, autoApproveMinutes));
+
+        List<Order> eligibleOrders = new ArrayList<>(orderRepository.findOrdersReadyForAutoApproval(now));
+        List<Order> pendingFallbackOrders = orderRepository.findByStatusAndCreatedAtBefore(OrderStatus.PENDING, fallbackCutoff)
+                .stream()
+                .filter(order -> order.getAutoApproveAt() == null)
+                .toList();
+
+        Map<Long, Order> candidatesById = new LinkedHashMap<>();
+        for (Order order : eligibleOrders) {
+            if (order.getId() != null) {
+                candidatesById.put(order.getId(), order);
+            }
+        }
+        for (Order order : pendingFallbackOrders) {
+            if (order.getId() != null) {
+                candidatesById.putIfAbsent(order.getId(), order);
+            }
+        }
+
+        for (Order order : candidatesById.values()) {
+            if (!isEligibleForAutoApproval(order, now) && !shouldFallbackAutoApprove(order, now)) {
+                continue;
+            }
+
+            confirmOrderAutomatically(order, now);
+        }
+    }
+
     @Transactional
     public void autoCompleteDeliveredOrders() {
         LocalDateTime cutoff = LocalDateTime.now().minusDays(7);
 
         List<SubOrder> overdueSubOrders = subOrderRepository.findByStatusAndUpdatedAtBefore(OrderStatus.SHIPPING,
                 cutoff);
-        List<Order> overdueLegacyOrders = orderRepository.findByStatusAndCreatedAtBefore(OrderStatus.SHIPPING, cutoff)
+        List<Order> overdueLegacyOrders = orderRepository.findByStatusAndUpdatedAtBefore(OrderStatus.SHIPPING, cutoff)
                 .stream()
                 .filter(order -> order.getSubOrders() == null || order.getSubOrders().isEmpty())
                 .toList();
 
-        if (!overdueSubOrders.isEmpty() || !overdueLegacyOrders.isEmpty()) {
-            log.warn("CÃ³ {} pháº§n Ä‘Æ¡n vÃ  {} Ä‘Æ¡n legacy Ä‘ang SHIPPING quÃ¡ {} ngÃ y, cáº§n xÃ¡c nháº­n RECEIVED thá»§ cÃ´ng.",
+        if (overdueSubOrders.isEmpty() && overdueLegacyOrders.isEmpty()) {
+            return;
+        }
+
+        LocalDateTime receivedAt = LocalDateTime.now();
+
+        if (!overdueSubOrders.isEmpty()) {
+            overdueSubOrders.forEach(subOrder -> applySubOrderStatus(subOrder, OrderStatus.RECEIVED, receivedAt));
+            subOrderRepository.saveAll(overdueSubOrders);
+
+            overdueSubOrders.stream()
+                    .map(SubOrder::getOrder)
+                    .filter(Objects::nonNull)
+                    .map(Order::getId)
+                    .filter(Objects::nonNull)
+                    .distinct()
+                    .forEach(orderStatusSyncService::syncMasterOrderStatus);
+        }
+
+        for (Order order : overdueLegacyOrders) {
+            markOrderAsReceived(order, false);
+        }
+
+        log.info("Da tu dong xac nhan nhan hang cho {} phan don va {} don legacy SHIPPING qua {} ngay.",
+                overdueSubOrders.size(),
+                overdueLegacyOrders.size(),
+                SHIPPING_RECEIVED_CONFIRM_AFTER_DAYS);
+        /*
+            log.warn("CĂƒÂ³ {} phĂ¡ÂºÂ§n Ă„â€˜Ă†Â¡n vĂƒÂ  {} Ă„â€˜Ă†Â¡n legacy Ă„â€˜ang SHIPPING quĂƒÂ¡ {} ngĂƒÂ y, cĂ¡ÂºÂ§n xĂƒÂ¡c nhĂ¡ÂºÂ­n RECEIVED thĂ¡Â»Â§ cĂƒÂ´ng.",
                     overdueSubOrders.size(),
                     overdueLegacyOrders.size(),
                     SHIPPING_RECEIVED_CONFIRM_AFTER_DAYS);
+        }
+        */
+    }
+
+    @Transactional
+    public void reconcilePendingPayOSPayments() {
+        reconcilePendingPayosSessions();
+
+        Page<Order> pendingPayosOrders = orderRepository.findPendingPayosOrdersForReconcile(
+                PageRequest.of(0, PAYOS_RECONCILE_BATCH_SIZE));
+
+        for (Order order : pendingPayosOrders.getContent()) {
+            refreshPendingPayOSPayment(order);
         }
     }
 
     private void markOrderAsReceived(Order order, boolean force) {
         if (!force && !canManuallyConfirmReceived(resolveStatusUpdatedAt(order))) {
-            throw new BadRequestException("Chá»‰ Ä‘Æ°á»£c xÃ¡c nháº­n 'ÄÃ£ nháº­n hÃ ng' sau khi Ä‘Æ¡n Ä‘ang giao quÃ¡ 7 ngÃ y.");
+            throw new BadRequestException("ChĂ¡Â»â€° Ă„â€˜Ă†Â°Ă¡Â»Â£c xĂƒÂ¡c nhĂ¡ÂºÂ­n 'Ă„ÂĂƒÂ£ nhĂ¡ÂºÂ­n hĂƒÂ ng' sau khi Ă„â€˜Ă†Â¡n Ă„â€˜ang giao quĂƒÂ¡ 7 ngĂƒÂ y.");
         }
 
         LocalDateTime receivedAt = LocalDateTime.now();
@@ -612,7 +1220,7 @@ public class OrderService {
                     .max(LocalDateTime::compareTo)
                     .orElse(order.getCreatedAt());
         }
-        return order.getCreatedAt();
+        return order.getUpdatedAt() != null ? order.getUpdatedAt() : order.getCreatedAt();
     }
 
     private LocalDateTime resolveStatusUpdatedAt(SubOrder subOrder) {
@@ -621,6 +1229,26 @@ public class OrderService {
 
     private void applyOrderStatus(Order order, OrderStatus status, LocalDateTime changedAt) {
         order.setStatus(status);
+        if (status != OrderStatus.PENDING) {
+            order.setAutoApproveAt(null);
+        }
+        switch (status) {
+            case PROCESSING -> order.setFulfillmentStatus(FulfillmentStatus.PREPARING);
+            case READY_FOR_PICKUP -> order.setFulfillmentStatus(FulfillmentStatus.READY_TO_SHIP);
+            case SHIPPING -> order.setFulfillmentStatus(FulfillmentStatus.SHIPPING);
+            case RECEIVED, COMPLETED -> order.setFulfillmentStatus(FulfillmentStatus.DELIVERED);
+            case RETURNED -> order.setFulfillmentStatus(FulfillmentStatus.RETURNED);
+            default -> {
+                if (order.getFulfillmentStatus() == null
+                        || status == OrderStatus.PENDING
+                        || status == OrderStatus.AWAITING_PAYMENT
+                        || status == OrderStatus.AWAITING_REPLENISHMENT
+                        || status == OrderStatus.CONFIRMED
+                        || status == OrderStatus.CANCELLED) {
+                    order.setFulfillmentStatus(FulfillmentStatus.NOT_STARTED);
+                }
+            }
+        }
         if (status == OrderStatus.RECEIVED && order.getReceivedAt() == null) {
             order.setReceivedAt(changedAt);
         }
@@ -661,18 +1289,10 @@ public class OrderService {
         }
     }
 
-    private void syncPayOSPaymentStatuses(Collection<Order> orders) {
-        if (orders == null || orders.isEmpty()) {
-            return;
-        }
-
-        orders.forEach(this::syncPayOSPaymentStatus);
-    }
-
-    private void syncPayOSPaymentStatus(Order order) {
+    private void refreshPendingPayOSPayment(Order order) {
         if (order == null
                 || !PaymentMethod.PAYOS.equals(order.getPaymentMethod())
-                || !PaymentStatus.UNPAID.equals(order.getPaymentStatus())) {
+                || !isPendingPayosPayment(order)) {
             return;
         }
 
@@ -698,8 +1318,12 @@ public class OrderService {
                         order.getShippingAddress() != null ? order.getShippingAddress() : order.getDeliveryAddress())
                 .createdAt(order.getCreatedAt())
                 .paymentMethod(order.getPaymentMethod() != null ? order.getPaymentMethod().name() : "")
-                .paymentStatus(order.getPaymentStatus() != null ? order.getPaymentStatus().name() : "")
-                .orderStatus(order.getStatus() != null ? order.getStatus().name() : "")
+                .paymentStatus(resolvePaymentStatus(order))
+                .orderStatus(resolveWorkflowStatus(order))
+                .orderLegacyStatus(order.getStatus() != null ? order.getStatus().name() : "")
+                .fulfillmentStatus(resolveFulfillmentStatus(order))
+                .stockStatus(resolveStockStatus(order))
+                .autoApproveAt(order.getAutoApproveAt())
                 .subOrderId(subOrder.getId())
                 .subOrderStatus(subOrder.getStatus() != null ? subOrder.getStatus().name() : "")
                 .subtotal(subOrder.getSubtotal() != null ? subOrder.getSubtotal() : BigDecimal.ZERO)
@@ -716,9 +1340,64 @@ public class OrderService {
                 .build();
     }
 
-    // ══════════════════════════════════════════════════════════════════════
+    // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
     // MAPPING LOGIC
-    // ══════════════════════════════════════════════════════════════════════
+    // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+
+    private String resolveCancelReasonLabel(Order order) {
+        if (order == null || order.getCancelReasonCode() == null) {
+            return null;
+        }
+
+        return order.getCancelReasonCode().getDisplayName();
+    }
+
+    private String resolveCancelReasonText(Order order) {
+        if (order == null) {
+            return null;
+        }
+
+        String normalizedReasonText = normalizeOptionalText(order.getCancelReasonText());
+        if (normalizedReasonText != null) {
+            return normalizedReasonText;
+        }
+
+        return extractLegacyCancelReason(order.getNote());
+    }
+
+    private String resolveCancelReasonDisplay(Order order) {
+        String cancelReasonLabel = resolveCancelReasonLabel(order);
+        String cancelReasonText = resolveCancelReasonText(order);
+
+        if (cancelReasonLabel == null) {
+            return cancelReasonText;
+        }
+
+        if (cancelReasonText == null || cancelReasonText.equals(cancelReasonLabel)) {
+            return cancelReasonLabel;
+        }
+
+        return cancelReasonLabel + ": " + cancelReasonText;
+    }
+
+    private String extractLegacyCancelReason(String note) {
+        String normalizedNote = normalizeOptionalText(note);
+        if (normalizedNote == null) {
+            return null;
+        }
+
+        int cancelReasonIndex = normalizedNote.lastIndexOf(LEGACY_CANCEL_REASON_PREFIX);
+        if (cancelReasonIndex >= 0) {
+            return normalizeOptionalText(normalizedNote.substring(cancelReasonIndex + LEGACY_CANCEL_REASON_PREFIX.length()));
+        }
+
+        int paymentExpiredIndex = normalizedNote.lastIndexOf(LEGACY_PAYMENT_EXPIRED_PREFIX);
+        if (paymentExpiredIndex >= 0) {
+            return normalizeOptionalText(normalizedNote.substring(paymentExpiredIndex));
+        }
+
+        return null;
+    }
 
     private OrderResponse mapToOrderResponse(Order order, boolean isUserView) {
         List<OrderItemResponse> itemResponses = new ArrayList<>();
@@ -734,7 +1413,7 @@ public class OrderService {
             itemResponses = order.getSubOrders().stream()
                     .filter(sub -> sub.getItems() != null)
                     .flatMap(sub -> sub.getItems().stream())
-                    .map(this::mapSubItemToResponse)
+                    .map(item -> mapSubItemToResponse(item, !isUserView))
                     .collect(Collectors.toList());
         }
 
@@ -748,16 +1427,17 @@ public class OrderService {
             branchAddress = order.getBranch().getAddressDetail();
         } else if (order.getSubOrders() != null && order.getSubOrders().size() == 1) {
             Branch singleBranch = order.getSubOrders().get(0).getBranch();
-            branchName = singleBranch != null ? singleBranch.getName() : "Nhiều chi nhánh";
+            branchName = singleBranch != null ? singleBranch.getName() : "Nhiá»u chi nhĂ¡nh";
             branchPhone = singleBranch != null ? singleBranch.getPhone() : null;
             branchAddress = singleBranch != null ? singleBranch.getAddressDetail() : null;
         } else if (order.getSubOrders() != null && order.getSubOrders().size() > 1) {
-            branchName = "Nhiều chi nhánh";
+            branchName = "Nhiá»u chi nhĂ¡nh";
         } else {
-            branchName = "Không xác định";
+            branchName = "KhĂ´ng xĂ¡c Ä‘á»‹nh";
         }
 
-        String statusStr = order.getStatus() != null ? order.getStatus().name() : "";
+        String statusStr = isUserView ? resolveUserWorkflowStatus(order) : resolveWorkflowStatus(order);
+        String legacyStatusStr = order.getStatus() != null ? order.getStatus().name() : "";
 
         return OrderResponse.builder()
                 .id(order.getId())
@@ -770,16 +1450,27 @@ public class OrderService {
                 .totalAmount(order.getTotalAmount() != null ? order.getTotalAmount() : BigDecimal.ZERO)
                 .shippingFee(order.getTotalShippingFee() != null ? order.getTotalShippingFee() : BigDecimal.ZERO)
                 .totalShippingFee(order.getTotalShippingFee() != null ? order.getTotalShippingFee() : BigDecimal.ZERO)
+                .voucherCode(order.getVoucher() != null ? order.getVoucher().getCode() : null)
+                .discountAmount(order.getDiscountAmount() != null ? order.getDiscountAmount() : BigDecimal.ZERO)
                 .finalAmount(order.getFinalAmount() != null ? order.getFinalAmount() : BigDecimal.ZERO)
                 .paymentMethod(order.getPaymentMethod() != null ? order.getPaymentMethod().name() : "")
-                .paymentStatus(order.getPaymentStatus() != null ? order.getPaymentStatus().name() : "")
+                .paymentStatus(resolvePaymentStatus(order))
                 .status(statusStr)
+                .legacyStatus(legacyStatusStr)
+                .fulfillmentStatus(resolveFulfillmentStatus(order))
+                .stockStatus(isUserView ? null : resolveStockStatus(order))
+                .autoApproveAt(isUserView ? null : order.getAutoApproveAt())
+                .autoApprovalPaused(isUserView ? null : Boolean.TRUE.equals(order.getAutoApprovalPaused()))
                 .branchName(branchName)
                 .branchPhone(branchPhone)
                 .branchAddress(branchAddress)
                 .createdAt(order.getCreatedAt())
                 .shippingAddress(order.getShippingAddress())
                 .note(order.getNote())
+                .cancelReasonCode(order.getCancelReasonCode() != null ? order.getCancelReasonCode().name() : null)
+                .cancelReasonLabel(resolveCancelReasonLabel(order))
+                .cancelReasonText(resolveCancelReasonText(order))
+                .cancelReasonDisplay(resolveCancelReasonDisplay(order))
                 .checkoutUrl(order.getPayosCheckoutUrl())
                 .items(itemResponses)
                 .subOrders(subOrderSummaries)
@@ -787,7 +1478,9 @@ public class OrderService {
     }
 
     private SubOrderSummaryDto mapSubOrderToSummary(SubOrder subOrder, boolean isUserView) {
-        String statusStr = subOrder.getStatus() != null ? subOrder.getStatus().name() : null;
+        String statusStr = subOrder.getStatus() == null
+                ? null
+                : (isUserView ? resolveUserWorkflowStatus(subOrder.getStatus()) : subOrder.getStatus().name());
 
         return SubOrderSummaryDto.builder()
                 .subOrderId(subOrder.getId())
@@ -802,21 +1495,1260 @@ public class OrderService {
                 .build();
     }
 
+    private Specification<Order> buildAdminOrderSpecification(
+            String status,
+            String search,
+            PaymentStatus paymentStatus,
+            String startDate,
+            String endDate) {
+        return (root, query, criteriaBuilder) -> {
+            query.distinct(true);
+
+            List<Predicate> predicates = new ArrayList<>();
+
+            if (search != null && !search.isBlank()) {
+                String keyword = "%" + search.trim().toLowerCase(Locale.ROOT) + "%";
+                Join<Order, User> userJoin = root.join("user", JoinType.LEFT);
+                predicates.add(criteriaBuilder.or(
+                        criteriaBuilder.like(criteriaBuilder.lower(root.get("code")), keyword),
+                        criteriaBuilder.like(criteriaBuilder.lower(userJoin.get("fullName")), keyword),
+                        criteriaBuilder.like(criteriaBuilder.lower(userJoin.get("phoneNumber")), keyword),
+                        criteriaBuilder.like(criteriaBuilder.lower(root.get("receiverPhone")), keyword)));
+            }
+
+            if (paymentStatus != null) {
+                predicates.add(buildAdminPaymentPredicate(root, criteriaBuilder, paymentStatus));
+            }
+
+            LocalDateTime startDateTime = resolveAdminStartDate(startDate);
+            if (startDateTime != null) {
+                predicates.add(criteriaBuilder.greaterThanOrEqualTo(root.get("createdAt"), startDateTime));
+            }
+
+            LocalDateTime endDateTime = resolveAdminEndDate(endDate);
+            if (endDateTime != null) {
+                predicates.add(criteriaBuilder.lessThanOrEqualTo(root.get("createdAt"), endDateTime));
+            }
+
+            Predicate statusPredicate = buildAdminStatusPredicate(status, root, query, criteriaBuilder);
+            if (statusPredicate != null) {
+                predicates.add(statusPredicate);
+            }
+
+            return criteriaBuilder.and(predicates.toArray(Predicate[]::new));
+        };
+    }
+
+    private Predicate buildAdminPaymentPredicate(
+            Root<Order> root,
+            CriteriaBuilder criteriaBuilder,
+            PaymentStatus paymentStatus) {
+        if (paymentStatus == PaymentStatus.UNPAID) {
+            return root.get("paymentStatus").in(ADMIN_UNPAID_PAYMENT_STATUSES);
+        }
+        return criteriaBuilder.equal(root.get("paymentStatus"), paymentStatus);
+    }
+
+    private Predicate buildAdminStatusPredicate(
+            String status,
+            Root<Order> root,
+            CriteriaQuery<?> query,
+            CriteriaBuilder criteriaBuilder) {
+        if (status == null || status.isBlank() || "ALL".equalsIgnoreCase(status)) {
+            return null;
+        }
+
+        String normalized = status.trim().toUpperCase(Locale.ROOT);
+        Predicate activeTransferPredicate = buildActiveTransferPredicate(root, query, criteriaBuilder);
+
+        return switch (normalized) {
+            case "PENDING_PAYMENT", "AWAITING_PAYMENT" -> criteriaBuilder.equal(
+                    root.get("status"),
+                    OrderStatus.AWAITING_PAYMENT);
+            case "PENDING_AUTO_APPROVAL" -> criteriaBuilder.and(
+                    criteriaBuilder.equal(root.get("status"), OrderStatus.PENDING),
+                    criteriaBuilder.isNotNull(root.get("autoApproveAt")));
+            case "PENDING" -> criteriaBuilder.and(
+                    criteriaBuilder.equal(root.get("status"), OrderStatus.PENDING),
+                    criteriaBuilder.isNull(root.get("autoApproveAt")));
+            case "PENDING_SHORTAGE_REVIEW" -> criteriaBuilder.and(
+                    criteriaBuilder.equal(root.get("status"), OrderStatus.AWAITING_REPLENISHMENT),
+                    criteriaBuilder.not(activeTransferPredicate));
+            case "PENDING_TRANSFER" -> criteriaBuilder.and(
+                    criteriaBuilder.equal(root.get("status"), OrderStatus.AWAITING_REPLENISHMENT),
+                    activeTransferPredicate);
+            default -> {
+                try {
+                    yield criteriaBuilder.equal(root.get("status"), OrderStatus.valueOf(normalized));
+                } catch (IllegalArgumentException ex) {
+                    yield criteriaBuilder.disjunction();
+                }
+            }
+        };
+    }
+
+    private Predicate buildActiveTransferPredicate(
+            Root<Order> root,
+            CriteriaQuery<?> query,
+            CriteriaBuilder criteriaBuilder) {
+        Subquery<Long> subquery = query.subquery(Long.class);
+        Root<InventoryTransfer> transferRoot = subquery.from(InventoryTransfer.class);
+
+        subquery.select(criteriaBuilder.literal(1L));
+        subquery.where(
+                criteriaBuilder.like(
+                        transferRoot.get("referenceCode"),
+                        criteriaBuilder.concat(root.get("code"), "-SUB-%")),
+                transferRoot.get("status").in(ACTIVE_TRANSFER_STATUSES));
+
+        return criteriaBuilder.exists(subquery);
+    }
+
+    private LocalDateTime resolveAdminStartDate(String startDate) {
+        return parseOrderFilterDateTime(startDate, false);
+    }
+
+    private LocalDateTime resolveAdminEndDate(String endDate) {
+        return parseOrderFilterDateTime(endDate, true);
+    }
+
+    private boolean hasAdminOrderShortage(Order order) {
+        if (order == null) {
+            return false;
+        }
+
+        if (order.getStatus() == OrderStatus.AWAITING_REPLENISHMENT) {
+            return true;
+        }
+
+        return order.getStockStatus() != null
+                && order.getStockStatus() != StockStatus.FULLY_AVAILABLE;
+    }
+
+    private boolean isAdminOrderUnpaid(Order order) {
+        return order == null || !PaymentStatus.PAID.equals(order.getPaymentStatus());
+    }
+
+    private BigDecimal resolveAdminOrderValue(Order order) {
+        if (order == null) {
+            return BigDecimal.ZERO;
+        }
+
+        if (order.getFinalAmount() != null) {
+            return order.getFinalAmount();
+        }
+
+        if (order.getTotalAmount() != null) {
+            return order.getTotalAmount();
+        }
+
+        return BigDecimal.ZERO;
+    }
+
+    private LocalDateTime resolveBranchOrderCreatedAt(SubOrder subOrder) {
+        if (subOrder == null) {
+            return null;
+        }
+
+        if (subOrder.getOrder() != null && subOrder.getOrder().getCreatedAt() != null) {
+            return subOrder.getOrder().getCreatedAt();
+        }
+
+        return subOrder.getCreatedAt();
+    }
+
+    private LocalDateTime parseOrderFilterDateTime(String rawValue, boolean endOfRange) {
+        if (rawValue == null || rawValue.isBlank()) {
+            return null;
+        }
+
+        String normalized = rawValue.trim();
+        String normalizedDateTime = normalized.contains(" ") && !normalized.contains("T")
+                ? normalized.replace(" ", "T")
+                : normalized;
+
+        try {
+            LocalDate parsedDate = LocalDate.parse(normalized);
+            return endOfRange ? parsedDate.atTime(LocalTime.MAX) : parsedDate.atStartOfDay();
+        } catch (Exception ignored) {
+        }
+
+        try {
+            LocalDateTime parsedDateTime = LocalDateTime.parse(normalizedDateTime);
+            if (endOfRange) {
+                boolean minutePrecision = normalizedDateTime.matches("^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}$");
+                return minutePrecision
+                        ? parsedDateTime.withSecond(59).withNano(999_999_999)
+                        : parsedDateTime.withNano(999_999_999);
+            }
+            return parsedDateTime;
+        } catch (Exception ignored) {
+        }
+
+        try {
+            LocalDateTime parsedOffsetDateTime = OffsetDateTime.parse(normalizedDateTime).toLocalDateTime();
+            return endOfRange ? parsedOffsetDateTime.withNano(999_999_999) : parsedOffsetDateTime;
+        } catch (Exception ignored) {
+        }
+
+        if (normalized.length() >= 10) {
+            try {
+                LocalDate parsedDate = LocalDate.parse(normalized.substring(0, 10));
+                return endOfRange ? parsedDate.atTime(LocalTime.MAX) : parsedDate.atStartOfDay();
+            } catch (Exception ignored) {
+            }
+        }
+
+        throw new BadRequestException("Bo loc thoi gian khong hop le: " + rawValue);
+    }
+
+    private String resolveWorkflowStatus(Order order) {
+        if (order == null || order.getStatus() == null) {
+            return "";
+        }
+
+        return switch (order.getStatus()) {
+            case AWAITING_PAYMENT -> "PENDING_PAYMENT";
+            case AWAITING_REPLENISHMENT -> hasActiveTransferRequest(order)
+                    ? "PENDING_TRANSFER"
+                    : "PENDING_SHORTAGE_REVIEW";
+            case PENDING -> order.getAutoApproveAt() != null
+                    ? "PENDING_AUTO_APPROVAL"
+                    : "PENDING";
+            default -> order.getStatus().name();
+        };
+    }
+
+    private String resolveUserWorkflowStatus(Order order) {
+        if (order == null || order.getStatus() == null) {
+            return "";
+        }
+
+        if (order.getStatus() == OrderStatus.AWAITING_PAYMENT) {
+            return "PENDING_PAYMENT";
+        }
+
+        if (order.getStatus() == OrderStatus.PENDING) {
+            return "PENDING";
+        }
+
+        if (order.getStatus() == OrderStatus.AWAITING_REPLENISHMENT) {
+            return OrderStatus.PROCESSING.name();
+        }
+
+        return resolveUserWorkflowStatus(order.getStatus());
+    }
+
+    private String resolveUserWorkflowStatus(OrderStatus status) {
+        if (status == null) {
+            return "";
+        }
+
+        return switch (status) {
+            case AWAITING_PAYMENT -> "PENDING_PAYMENT";
+            case AWAITING_REPLENISHMENT, CONFIRMED, PROCESSING, READY_FOR_PICKUP -> OrderStatus.PROCESSING.name();
+            case PENDING -> OrderStatus.PENDING.name();
+            default -> status.name();
+        };
+    }
+
+    private String resolvePaymentStatus(Order order) {
+        if (order == null || order.getPaymentStatus() == null) {
+            return "";
+        }
+
+        if (PaymentMethod.PAYOS.equals(order.getPaymentMethod())
+                && order.getStatus() == OrderStatus.AWAITING_PAYMENT
+                && PaymentStatus.UNPAID.equals(order.getPaymentStatus())) {
+            return PaymentStatus.PENDING.name();
+        }
+
+        return order.getPaymentStatus().name();
+    }
+
+    private String resolveStockStatus(Order order) {
+        if (order == null) {
+            return "";
+        }
+
+        boolean hasMissingItems = order.getSubOrders() != null
+                && order.getSubOrders().stream()
+                        .filter(Objects::nonNull)
+                        .flatMap(subOrder -> subOrder.getItems() == null ? Stream.empty() : subOrder.getItems().stream())
+                        .anyMatch(item -> Objects.requireNonNullElse(item.getMissingQuantity(), 0) > 0);
+
+        if (!hasMissingItems) {
+            return StockStatus.FULLY_AVAILABLE.name();
+        }
+
+        if (order.getStockStatus() == StockStatus.OUT_OF_STOCK
+                || order.getStockStatus() == StockStatus.AVAILABLE_AFTER_TRANSFER) {
+            return order.getStockStatus().name();
+        }
+
+        return StockStatus.PARTIALLY_AVAILABLE.name();
+    }
+
+    private String resolveFulfillmentStatus(Order order) {
+        if (order == null) {
+            return "";
+        }
+
+        if (order.getFulfillmentStatus() != null) {
+            return order.getFulfillmentStatus().name();
+        }
+
+        if (order.getStatus() == null) {
+            return FulfillmentStatus.NOT_STARTED.name();
+        }
+
+        return switch (order.getStatus()) {
+            case PROCESSING -> FulfillmentStatus.PREPARING.name();
+            case READY_FOR_PICKUP -> FulfillmentStatus.READY_TO_SHIP.name();
+            case SHIPPING -> FulfillmentStatus.SHIPPING.name();
+            case RECEIVED, COMPLETED -> FulfillmentStatus.DELIVERED.name();
+            case RETURNED -> FulfillmentStatus.RETURNED.name();
+            default -> FulfillmentStatus.NOT_STARTED.name();
+        };
+    }
+
+    private boolean hasActiveTransferRequest(Order order) {
+        if (order == null || order.getSubOrders() == null || order.getSubOrders().isEmpty()) {
+            return false;
+        }
+
+        return order.getSubOrders().stream()
+                .filter(Objects::nonNull)
+                .anyMatch(subOrder -> inventoryTransferRepository.existsByReferenceCodeAndStatusIn(
+                        buildSubOrderReferenceCode(subOrder),
+                        ACTIVE_TRANSFER_STATUSES));
+    }
+
+    private boolean isPendingPayosPayment(Order order) {
+        if (order == null || !PaymentMethod.PAYOS.equals(order.getPaymentMethod())) {
+            return false;
+        }
+
+        return PaymentStatus.PENDING.equals(order.getPaymentStatus())
+                || PaymentStatus.UNPAID.equals(order.getPaymentStatus());
+    }
+
+    private Order getOwnedOrderForUser(Long userId, Long orderId) {
+        Order order = orderRepository.findById(orderId)
+                .orElseThrow(() -> new NotFoundException("Khong tim thay don hang ID: " + orderId));
+
+        if (order.getUser() == null || !order.getUser().getId().equals(userId)) {
+            throw new BadRequestException("Ban khong co quyen xem hoac thao tac tren don hang nay");
+        }
+
+        return order;
+    }
+
+    private String reopenPayosCheckout(Order order) {
+        LocalDateTime statusChangedAt = LocalDateTime.now();
+        order.setPaymentMethod(PaymentMethod.PAYOS);
+        order.setPaymentStatus(PaymentStatus.PENDING);
+        order.setAutoApproveAt(null);
+        order.setAutoApprovalPaused(Boolean.FALSE);
+        order.setFulfillmentStatus(FulfillmentStatus.NOT_STARTED);
+        applyOrderStatus(order, OrderStatus.AWAITING_PAYMENT, statusChangedAt);
+
+        if (order.getSubOrders() != null) {
+            List<SubOrder> awaitingPaymentSubOrders = order.getSubOrders().stream()
+                    .filter(Objects::nonNull)
+                    .filter(subOrder -> subOrder.getStatus() != OrderStatus.CANCELLED)
+                    .peek(subOrder -> applySubOrderStatus(subOrder, OrderStatus.AWAITING_PAYMENT, statusChangedAt))
+                    .toList();
+            if (!awaitingPaymentSubOrders.isEmpty()) {
+                subOrderRepository.saveAll(awaitingPaymentSubOrders);
+            }
+        }
+
+        try {
+            com.zone.agri.dto.response.payment.PayOSApiResponse.PayOSLinkData payosData = payOSService
+                    .createPaymentLink(order);
+            order.setPayosPaymentLinkId(payosData.getPaymentLinkId());
+            order.setPayosCheckoutUrl(payosData.getCheckoutUrl());
+            return payosData.getCheckoutUrl();
+        } catch (Exception e) {
+            throw new BadRequestException("Loi tao lai PayOS link: " + e.getMessage());
+        }
+    }
+
+    private void moveAwaitingPaymentOrderToPending(
+            Order order,
+            PaymentMethod paymentMethod,
+            PaymentStatus paymentStatus) {
+        boolean hasMissingItems = hasMissingItems(order);
+        LocalDateTime statusChangedAt = LocalDateTime.now();
+
+        order.setPaymentMethod(paymentMethod);
+        order.setPaymentStatus(paymentStatus);
+        order.setFulfillmentStatus(FulfillmentStatus.NOT_STARTED);
+        order.setAutoApprovalPaused(Boolean.FALSE);
+        applyOrderStatus(order, OrderStatus.PENDING, statusChangedAt);
+
+        if (hasMissingItems) {
+            order.setAutoApproveAt(null);
+            if (order.getStockStatus() == null) {
+                order.setStockStatus(StockStatus.PARTIALLY_AVAILABLE);
+            }
+        } else {
+            order.setAutoApproveAt(LocalDateTime.now().plusMinutes(Math.max(1, autoApproveMinutes)));
+            if (order.getStockStatus() == null) {
+                order.setStockStatus(StockStatus.FULLY_AVAILABLE);
+            }
+        }
+
+        if (order.getSubOrders() != null) {
+            List<SubOrder> activatedSubOrders = order.getSubOrders().stream()
+                    .filter(Objects::nonNull)
+                    .filter(subOrder -> subOrder.getStatus() == OrderStatus.AWAITING_PAYMENT)
+                    .peek(subOrder -> applySubOrderStatus(subOrder, OrderStatus.PENDING, statusChangedAt))
+                    .toList();
+            if (!activatedSubOrders.isEmpty()) {
+                subOrderRepository.saveAll(activatedSubOrders);
+            }
+        }
+    }
+
+    private boolean hasMissingItems(Order order) {
+        if (order == null || order.getSubOrders() == null) {
+            return false;
+        }
+
+        return order.getSubOrders().stream()
+                .filter(Objects::nonNull)
+                .flatMap(subOrder -> subOrder.getItems() == null ? Stream.empty() : subOrder.getItems().stream())
+                .anyMatch(item -> Objects.requireNonNullElse(item.getMissingQuantity(), 0) > 0);
+    }
+
+    private ConfirmOrderResponse buildConfirmOrderResponse(Order order, String checkoutUrl) {
+        List<SubOrderSummaryDto> subOrderSummaries = order.getSubOrders() == null
+                ? Collections.emptyList()
+                : order.getSubOrders().stream()
+                        .filter(Objects::nonNull)
+                        .map(subOrder -> SubOrderSummaryDto.builder()
+                                .subOrderId(subOrder.getId())
+                                .branchId(subOrder.getBranch() != null ? subOrder.getBranch().getId() : null)
+                                .branchName(subOrder.getBranch() != null ? subOrder.getBranch().getName() : null)
+                                .status(subOrder.getStatus() != null ? subOrder.getStatus().name() : null)
+                                .subtotal(subOrder.getSubtotal() != null ? subOrder.getSubtotal() : BigDecimal.ZERO)
+                                .shippingFee(subOrder.getShippingFee() != null ? subOrder.getShippingFee() : BigDecimal.ZERO)
+                                .estimatedDays(subOrder.getEstimatedDays())
+                                .carrier(subOrder.getCarrier())
+                                .build())
+                        .toList();
+
+        return buildConfirmOrderResponse(
+                order,
+                checkoutUrl,
+                subOrderSummaries,
+                order.getVoucher() != null ? order.getVoucher().getCode() : null);
+    }
+
+    private ConfirmOrderResponse buildConfirmOrderResponse(
+            Order order,
+            String checkoutUrl,
+            List<SubOrderSummaryDto> subOrderSummaries,
+            String voucherCode) {
+        return ConfirmOrderResponse.builder()
+                .orderId(order.getId())
+                .orderCode(order.getCode())
+                .status(resolveWorkflowStatus(order))
+                .legacyStatus(order.getStatus() != null ? order.getStatus().name() : "")
+                .paymentStatus(resolvePaymentStatus(order))
+                .fulfillmentStatus(resolveFulfillmentStatus(order))
+                .stockStatus(resolveStockStatus(order))
+                .autoApproveAt(order.getAutoApproveAt())
+                .voucherCode(voucherCode)
+                .subOrders(subOrderSummaries)
+                .totalAmount(order.getFinalAmount() != null ? order.getFinalAmount() : BigDecimal.ZERO)
+                .discountAmount(order.getDiscountAmount() != null ? order.getDiscountAmount() : BigDecimal.ZERO)
+                .totalShippingFee(order.getTotalShippingFee() != null ? order.getTotalShippingFee() : BigDecimal.ZERO)
+                .checkoutUrl(checkoutUrl)
+                .build();
+    }
+
+    private PrepareOrderResponse buildPrepareResponseFromDraft(PrepareOrderDraft draft) {
+        SubOrderDraftDto primarySubOrder = draft.getSubOrders() == null || draft.getSubOrders().isEmpty()
+                ? null
+                : draft.getSubOrders().get(0);
+        boolean canPlaceOrder = draft.getSubOrders() != null && !draft.getSubOrders().isEmpty();
+        boolean canFulfill = canPlaceOrder
+                && (draft.getOutOfStockItems() == null || draft.getOutOfStockItems().isEmpty());
+        return PrepareOrderResponse.builder()
+                .prepareToken(draft.getPrepareToken())
+                .expiresAt(draft.getExpiresAt())
+                .addressId(draft.getAddressId())
+                .deliveryAddress(draft.getDeliveryAddress())
+                .deliveryDistrictId(draft.getDeliveryDistrictId())
+                .deliveryWardCode(draft.getDeliveryWardCode())
+                .receiverName(draft.getReceiverName())
+                .receiverPhone(draft.getReceiverPhone())
+                .voucherCode(draft.getVoucherCode())
+                .canFulfill(canFulfill)
+                .canPlaceOrder(canPlaceOrder)
+                .requiresManualApproval(!"FULLY_AVAILABLE".equalsIgnoreCase(String.valueOf(draft.getStockStatus())))
+                .stockStatus(draft.getStockStatus())
+                .primaryBranch(primarySubOrder != null
+                        ? PreparePrimaryBranchDto.builder()
+                                .id(primarySubOrder.getBranchId())
+                                .name(primarySubOrder.getBranchName())
+                                .distanceKm(primarySubOrder.getDistanceKm())
+                                .build()
+                        : null)
+                .suggestedTransfers(draft.getSuggestedTransfers())
+                .subOrders(draft.getSubOrders() != null ? draft.getSubOrders() : Collections.emptyList())
+                .totalSubtotal(draft.getTotalSubtotal() != null ? draft.getTotalSubtotal() : BigDecimal.ZERO)
+                .discountAmount(draft.getDiscountAmount() != null ? draft.getDiscountAmount() : BigDecimal.ZERO)
+                .totalShippingFee(draft.getTotalShippingFee() != null ? draft.getTotalShippingFee() : BigDecimal.ZERO)
+                .totalAmount(draft.getTotalAmount() != null ? draft.getTotalAmount() : BigDecimal.ZERO)
+                .outOfStockItems(draft.getOutOfStockItems() != null ? draft.getOutOfStockItems() : Collections.emptyList())
+                .build();
+    }
+
+    private ConfirmOrderResponse buildPendingPayosSessionResponse(PayOSCheckoutSession session) {
+        PrepareOrderDraft draft = session.getDraftSnapshot();
+        List<SubOrderSummaryDto> subOrderSummaries = draft == null || draft.getSubOrders() == null
+                ? Collections.emptyList()
+                : draft.getSubOrders().stream()
+                        .filter(Objects::nonNull)
+                        .map(subOrder -> SubOrderSummaryDto.builder()
+                                .subOrderId(null)
+                                .branchId(subOrder.getBranchId())
+                                .branchName(subOrder.getBranchName())
+                                .status(OrderStatus.AWAITING_PAYMENT.name())
+                                .subtotal(subOrder.getSubtotal())
+                                .shippingFee(subOrder.getShippingFee())
+                                .estimatedDays(subOrder.getEstimatedDays())
+                                .carrier(subOrder.getCarrier())
+                                .build())
+                        .toList();
+
+        return ConfirmOrderResponse.builder()
+                .orderId(session.getOrderId())
+                .orderCode(session.getOrderCode())
+                .status("PENDING_PAYMENT")
+                .legacyStatus(OrderStatus.AWAITING_PAYMENT.name())
+                .paymentStatus(PaymentStatus.PENDING.name())
+                .fulfillmentStatus(FulfillmentStatus.NOT_STARTED.name())
+                .stockStatus(draft != null ? draft.getStockStatus() : null)
+                .autoApproveAt(null)
+                .voucherCode(draft != null ? draft.getVoucherCode() : null)
+                .subOrders(subOrderSummaries)
+                .totalAmount(session.getTotalAmount() != null ? session.getTotalAmount() : BigDecimal.ZERO)
+                .discountAmount(session.getDiscountAmount() != null ? session.getDiscountAmount() : BigDecimal.ZERO)
+                .totalShippingFee(session.getTotalShippingFee() != null ? session.getTotalShippingFee() : BigDecimal.ZERO)
+                .checkoutUrl(session.getCheckoutUrl())
+                .build();
+    }
+
+    private PayOSCheckoutSession markPayosSessionPaid(PayOSCheckoutSession rawSession) {
+        if (rawSession == null || rawSession.getSessionCode() == null || rawSession.getSessionCode().isBlank()) {
+            return rawSession;
+        }
+
+        PayOSCheckoutSession session = getPayosSession(rawSession.getSessionCode());
+        if (session == null) {
+            session = rawSession;
+        }
+
+        if (PAYOS_SESSION_STATUS_ORDER_CREATED.equals(session.getStatus())
+                || PAYOS_SESSION_STATUS_CANCELLED.equals(session.getStatus())
+                || PAYOS_SESSION_STATUS_EXPIRED.equals(session.getStatus())) {
+            return session;
+        }
+
+        if (!PAYOS_SESSION_STATUS_PAID.equals(session.getStatus())) {
+            session.setStatus(PAYOS_SESSION_STATUS_PAID);
+            savePayosSession(session);
+        }
+
+        return session;
+    }
+
+    private ConfirmOrderResponse createOrReusePayosCheckoutSession(
+            User user,
+            PrepareOrderDraft draft,
+            String normalizedIdempotencyKey,
+            String note) {
+        PayOSCheckoutSession activeSession = getActivePayosSession(draft.getPrepareToken());
+        if (activeSession != null && user.getId().equals(activeSession.getUserId())) {
+            if (PAYOS_SESSION_STATUS_ORDER_CREATED.equals(activeSession.getStatus()) && activeSession.getOrderId() != null) {
+                Order createdOrder = orderRepository.findById(activeSession.getOrderId()).orElse(null);
+                if (createdOrder != null) {
+                    return buildConfirmOrderResponse(createdOrder, null);
+                }
+            }
+            if (PAYOS_SESSION_STATUS_PAID.equals(activeSession.getStatus())) {
+                return finalizePayosSessionInternal(activeSession, true);
+            }
+            if (isPendingPayosSession(activeSession)) {
+                return buildPendingPayosSessionResponse(activeSession);
+            }
+        }
+
+        if (draft.getSubOrders() == null || draft.getSubOrders().isEmpty()) {
+            throw new ConflictException("Khong con du hang de tao phien thanh toan", true);
+        }
+
+        List<CartItemDto> cartSnapshot = normalizeCartItems(draft.getCartItems());
+        PreparedQuote liveQuote = buildPreparedQuote(
+                user.getId(),
+                cartSnapshot,
+                draft.getUserLat(),
+                draft.getUserLng(),
+                draft.getDeliveryAddress(),
+                draft.getDeliveryProvinceId(),
+                draft.getDeliveryDistrictId(),
+                draft.getDeliveryWardCode(),
+                draft.getVoucherCode());
+        if (liveQuote.subOrders().isEmpty()) {
+            throw new ConflictException("Khong con du hang de tao phien thanh toan", true);
+        }
+        ensurePreparedQuoteStillValid(draft, liveQuote);
+        draft = buildDraftWithPreparedQuote(draft, liveQuote);
+
+        BigDecimal totalAmount = draft.getTotalAmount() != null ? draft.getTotalAmount() : BigDecimal.ZERO;
+        if (totalAmount.compareTo(BigDecimal.ZERO) <= 0) {
+            throw new BadRequestException("Tong thanh toan khong hop le");
+        }
+
+        long payosOrderCode = buildPayosOrderCode();
+        String sessionCode = String.valueOf(payosOrderCode);
+        LocalDateTime createdAt = LocalDateTime.now();
+        LocalDateTime expiresAt = createdAt.plusMinutes(Math.max(1, paymentExpiryMinutes));
+
+        PayOSCheckoutSession session = PayOSCheckoutSession.builder()
+                .sessionCode(sessionCode)
+                .payosOrderCode(payosOrderCode)
+                .prepareToken(draft.getPrepareToken())
+                .userId(user.getId())
+                .idempotencyKey(normalizedIdempotencyKey)
+                .note(note)
+                .status(PAYOS_SESSION_STATUS_PENDING)
+                .totalAmount(totalAmount)
+                .discountAmount(draft.getDiscountAmount() != null ? draft.getDiscountAmount() : BigDecimal.ZERO)
+                .totalShippingFee(draft.getTotalShippingFee() != null ? draft.getTotalShippingFee() : BigDecimal.ZERO)
+                .createdAt(createdAt)
+                .expiresAt(expiresAt)
+                .draftSnapshot(draft)
+                .build();
+
+        try {
+            reserveInventoryForPayosSession(session);
+            com.zone.agri.dto.response.payment.PayOSApiResponse.PayOSLinkData payosData = payOSService.createPaymentLink(
+                    session,
+                    buildPayosSessionDescription(sessionCode),
+                    buildPayosSessionReturnUrl(session),
+                    buildPayosSessionCancelUrl(session));
+            session.setPaymentLinkId(payosData.getPaymentLinkId());
+            session.setCheckoutUrl(payosData.getCheckoutUrl());
+            savePayosSession(session);
+            saveActivePayosSession(draft.getPrepareToken(), session.getSessionCode());
+            return buildPendingPayosSessionResponse(session);
+        } catch (Exception e) {
+            try {
+                releaseInventoryForPayosSession(session, "Giai phong hold do tao phien PayOS that bai");
+            } catch (Exception releaseError) {
+                log.warn("Failed to release PayOS hold for session {} after start failure: {}",
+                        session.getSessionCode(),
+                        releaseError.getMessage());
+            }
+
+            if (session.getPayosOrderCode() != null) {
+                try {
+                    payOSService.cancelPaymentLink(session.getPayosOrderCode());
+                } catch (Exception cancelError) {
+                    log.warn("Failed to cancel PayOS link for session {} after start failure: {}",
+                            session.getSessionCode(),
+                            cancelError.getMessage());
+                }
+            }
+
+            throw new BadRequestException("Loi tao PayOS link: " + e.getMessage());
+        }
+    }
+
+    private ConfirmOrderResponse finalizePayosSessionInternal(PayOSCheckoutSession rawSession, boolean requireOwnedUser) {
+        PayOSCheckoutSession session = rawSession;
+        if (session == null) {
+            throw new NotFoundException("Khong tim thay phien thanh toan PayOS");
+        }
+
+            if (PAYOS_SESSION_STATUS_ORDER_CREATED.equals(session.getStatus()) && session.getOrderId() != null) {
+                Order existingOrder = orderRepository.findById(session.getOrderId())
+                        .orElseThrow(() -> new NotFoundException("Khong tim thay don hang da tao tu phien PayOS"));
+                return buildConfirmOrderResponse(existingOrder, null);
+            }
+
+            if (isExpiredPayosSession(session)) {
+                expirePayosSessionInternal(session, true);
+                throw new BadRequestException("Phien thanh toan PayOS da het han");
+            }
+
+            boolean paid = PAYOS_SESSION_STATUS_PAID.equals(session.getStatus());
+            if (!paid && session.getPayosOrderCode() != null && payOSService.checkPaymentStatus(session.getPayosOrderCode())) {
+                session = markPayosSessionPaid(session);
+                paid = true;
+            }
+        if (!paid) {
+            return buildPendingPayosSessionResponse(session);
+        }
+
+        if (!PAYOS_SESSION_STATUS_PAID.equals(session.getStatus())) {
+            session = markPayosSessionPaid(session);
+        }
+
+        String finalizeLockKey = PAYOS_SESSION_FINALIZE_LOCK_PREFIX + session.getSessionCode();
+        Boolean lockAcquired = redisTemplate.opsForValue().setIfAbsent(
+                finalizeLockKey,
+                String.valueOf(session.getUserId()),
+                PAYOS_SESSION_FINALIZE_LOCK_TTL_SECONDS,
+                TimeUnit.SECONDS);
+        if (Boolean.FALSE.equals(lockAcquired)) {
+            PayOSCheckoutSession lockedSession = getPayosSession(session.getSessionCode());
+            if (lockedSession != null
+                    && PAYOS_SESSION_STATUS_ORDER_CREATED.equals(lockedSession.getStatus())
+                    && lockedSession.getOrderId() != null) {
+                Order existingOrder = orderRepository.findById(lockedSession.getOrderId())
+                        .orElseThrow(() -> new NotFoundException("Khong tim thay don hang da tao tu phien PayOS"));
+                return buildConfirmOrderResponse(existingOrder, null);
+            }
+            throw new ConflictException("Dang hoan tat giao dich PayOS, vui long doi giay lat", true);
+        }
+
+        try {
+            session = getPayosSession(session.getSessionCode());
+            if (session == null) {
+                throw new NotFoundException("Khong tim thay phien thanh toan PayOS");
+            }
+            if (PAYOS_SESSION_STATUS_ORDER_CREATED.equals(session.getStatus()) && session.getOrderId() != null) {
+                Order existingOrder = orderRepository.findById(session.getOrderId())
+                        .orElseThrow(() -> new NotFoundException("Khong tim thay don hang da tao tu phien PayOS"));
+                return buildConfirmOrderResponse(existingOrder, null);
+            }
+
+            User user = userRepository.findById(session.getUserId())
+                    .orElseThrow(() -> new NotFoundException("User khong ton tai"));
+            PrepareOrderDraft draft = session.getDraftSnapshot();
+            if (draft == null) {
+                throw new BadRequestException("Khong tim thay du lieu dat hang tam cho phien PayOS");
+            }
+
+            releaseInventoryForPayosSession(session, "Chuyen hold PayOS sang don hang da thanh toan");
+            CreatedOrderData createdOrder = createCommittedOrderFromDraft(
+                    user,
+                    draft,
+                    PaymentMethod.PAYOS,
+                    PaymentStatus.PAID,
+                    OrderStatus.PENDING,
+                    OrderStatus.PENDING,
+                    session.getNote(),
+                    false);
+
+            cleanupPreparedCheckout(draft, user.getId());
+            session.setStatus(PAYOS_SESSION_STATUS_ORDER_CREATED);
+            session.setOrderId(createdOrder.order().getId());
+            session.setOrderCode(createdOrder.order().getCode());
+            savePayosSession(session);
+            clearActivePayosSession(draft.getPrepareToken(), session.getSessionCode());
+
+            return buildConfirmOrderResponse(
+                    createdOrder.order(),
+                    null,
+                    createdOrder.subOrderSummaries(),
+                    createdOrder.voucherCode());
+        } finally {
+            redisTemplate.delete(finalizeLockKey);
+        }
+    }
+
+    private CreatedOrderData createCommittedOrderFromDraft(
+            User user,
+            PrepareOrderDraft draft,
+            PaymentMethod paymentMethod,
+            PaymentStatus paymentStatus,
+            OrderStatus orderStatus,
+            OrderStatus subOrderStatus,
+            String note,
+            boolean strictVoucherValidation) {
+        if (draft.getSubOrders() == null || draft.getSubOrders().isEmpty()) {
+            throw new ConflictException("Khong con du hang de tao don", true);
+        }
+
+        VoucherResolution voucherResolution = resolveVoucherForCommittedOrder(user, draft, strictVoucherValidation);
+        StockStatus initialStockStatus = parseStockStatus(draft.getStockStatus());
+        Branch primaryBranch = draft.getBranchId() != null
+                ? branchRepository.findById(draft.getBranchId()).orElse(null)
+                : null;
+
+        BigDecimal totalSubtotal = draft.getTotalSubtotal() != null ? draft.getTotalSubtotal() : BigDecimal.ZERO;
+        BigDecimal totalShippingFee = draft.getTotalShippingFee() != null ? draft.getTotalShippingFee() : BigDecimal.ZERO;
+        BigDecimal discountAmount = voucherResolution.discountAmount() != null
+                ? voucherResolution.discountAmount()
+                : (draft.getDiscountAmount() != null ? draft.getDiscountAmount() : BigDecimal.ZERO);
+        BigDecimal finalAmount = draft.getTotalAmount() != null
+                ? draft.getTotalAmount()
+                : totalSubtotal.add(totalShippingFee).subtract(discountAmount);
+        if (finalAmount.compareTo(BigDecimal.ZERO) < 0) {
+            finalAmount = BigDecimal.ZERO;
+        }
+
+        Order order = Order.builder()
+                .code("ORD" + System.currentTimeMillis())
+                .user(user)
+                .status(orderStatus)
+                .paymentMethod(paymentMethod)
+                .paymentStatus(paymentStatus)
+                .createdAt(LocalDateTime.now())
+                .totalAmount(totalSubtotal)
+                .discountAmount(discountAmount)
+                .finalAmount(finalAmount)
+                .totalShippingFee(totalShippingFee)
+                .userLat(draft.getUserLat())
+                .userLng(draft.getUserLng())
+                .deliveryAddress(draft.getDeliveryAddress())
+                .shippingAddress(draft.getDeliveryAddress())
+                .receiverName(draft.getReceiverName())
+                .receiverPhone(draft.getReceiverPhone())
+                .deliveryAddressId(draft.getAddressId())
+                .voucher(voucherResolution.voucher())
+                .note(note)
+                .branch(primaryBranch)
+                .stockStatus(initialStockStatus)
+                .fulfillmentStatus(FulfillmentStatus.NOT_STARTED)
+                .autoApproveAt(resolveInitialAutoApproveAt(paymentMethod, initialStockStatus))
+                .autoApprovalPaused(Boolean.FALSE)
+                .build();
+        Order savedOrder = orderRepository.save(order);
+
+        List<SubOrderSummaryDto> subOrderSummaries = new ArrayList<>();
+        List<SubOrder> savedSubOrders = new ArrayList<>();
+        boolean anySubOrderMissing = false;
+
+        for (SubOrderDraftDto subDraft : draft.getSubOrders()) {
+            Branch branch = branchRepository.findById(subDraft.getBranchId())
+                    .orElseThrow(() -> new NotFoundException("Branch khong ton tai"));
+            SubOrder subOrder = SubOrder.builder()
+                    .order(savedOrder)
+                    .branch(branch)
+                    .status(subOrderStatus)
+                    .subtotal(subDraft.getSubtotal())
+                    .shippingFee(subDraft.getShippingFee())
+                    .estimatedDays(subDraft.getEstimatedDays())
+                    .carrier(subDraft.getCarrier())
+                    .build();
+            SubOrder savedSubOrder = subOrderRepository.save(subOrder);
+            savedSubOrders.add(savedSubOrder);
+
+            for (OrderItemDto item : subDraft.getItems()) {
+                ProductVariant variant = variantRepository.findById(item.getProductVariantId())
+                        .orElseThrow(() -> new NotFoundException("San pham khong ton tai"));
+
+                inventoryCheckGuardService.assertStockMutationAllowed(
+                        subDraft.getBranchId(),
+                        List.of(item.getProductVariantId()),
+                        "xac nhan don hang");
+
+                int requestedQuantity = Objects.requireNonNullElse(item.getQuantity(), 0);
+                int allocatedQuantity = Objects.requireNonNullElse(item.getAllocatedQuantity(), 0);
+
+                if (allocatedQuantity > 0) {
+                    allocatedQuantity = orderInventoryReservationService.reserveInventoryUpTo(
+                            subDraft.getBranchId(),
+                            item.getProductVariantId(),
+                            allocatedQuantity,
+                            buildSubOrderReferenceCode(savedSubOrder),
+                            "Giu hang cho phan don " + savedOrder.getCode());
+                }
+
+                int missingQuantity = Math.max(0, requestedQuantity - allocatedQuantity);
+                anySubOrderMissing = anySubOrderMissing || missingQuantity > 0;
+
+                subOrderItemRepository.save(SubOrderItem.builder()
+                        .subOrder(savedSubOrder)
+                        .productVariant(variant)
+                        .quantity(requestedQuantity)
+                        .allocatedQuantity(allocatedQuantity)
+                        .missingQuantity(missingQuantity)
+                        .unitPrice(item.getUnitPrice())
+                        .build());
+            }
+
+            subOrderSummaries.add(SubOrderSummaryDto.builder()
+                    .subOrderId(savedSubOrder.getId())
+                    .branchId(branch.getId())
+                    .branchName(branch.getName())
+                    .status(subOrderStatus.name())
+                    .subtotal(subDraft.getSubtotal())
+                    .shippingFee(subDraft.getShippingFee())
+                    .estimatedDays(subDraft.getEstimatedDays())
+                    .carrier(subDraft.getCarrier())
+                    .build());
+        }
+
+        savedOrder.setSubOrders(savedSubOrders);
+        savedOrder.setStockStatus(anySubOrderMissing ? StockStatus.PARTIALLY_AVAILABLE : StockStatus.FULLY_AVAILABLE);
+        if (anySubOrderMissing) {
+            savedOrder.setAutoApproveAt(null);
+        } else if (orderStatus == OrderStatus.PENDING
+                && (PaymentMethod.COD.equals(paymentMethod)
+                        || PaymentMethod.CASH.equals(paymentMethod)
+                        || PaymentStatus.PAID.equals(paymentStatus))) {
+            savedOrder.setAutoApproveAt(LocalDateTime.now().plusMinutes(Math.max(1, autoApproveMinutes)));
+        }
+        orderRepository.save(savedOrder);
+
+        return new CreatedOrderData(savedOrder, subOrderSummaries, voucherResolution.voucherCode());
+    }
+
+    private VoucherResolution resolveVoucherForCommittedOrder(
+            User user,
+            PrepareOrderDraft draft,
+            boolean strictVoucherValidation) {
+        String voucherCode = voucherService.normalizeVoucherCode(draft.getVoucherCode());
+        if (voucherCode == null) {
+            return new VoucherResolution(null, BigDecimal.ZERO, null);
+        }
+
+        BigDecimal subtotal = draft.getTotalSubtotal() != null ? draft.getTotalSubtotal() : BigDecimal.ZERO;
+        if (strictVoucherValidation) {
+            VoucherService.VoucherOrderEvaluation evaluation = voucherService.validateVoucherForOrder(
+                    user,
+                    voucherCode,
+                    subtotal,
+                    true,
+                    true);
+            return new VoucherResolution(evaluation.voucher(), evaluation.discountAmount(), voucherCode);
+        }
+
+        try {
+            VoucherService.VoucherOrderEvaluation evaluation = voucherService.validateVoucherForOrder(
+                    user,
+                    voucherCode,
+                    subtotal,
+                    true,
+                    false);
+            return new VoucherResolution(evaluation.voucher(), evaluation.discountAmount(), voucherCode);
+        } catch (RuntimeException ex) {
+            log.warn("Voucher {} khong the consume sau khi PayOS da thanh toan: {}", voucherCode, ex.getMessage());
+            return new VoucherResolution(
+                    null,
+                    draft.getDiscountAmount() != null ? draft.getDiscountAmount() : BigDecimal.ZERO,
+                    voucherCode);
+        }
+    }
+
+    private PrepareOrderDraft buildDraftWithPreparedQuote(PrepareOrderDraft draft, PreparedQuote liveQuote) {
+        return PrepareOrderDraft.builder()
+                .prepareToken(draft.getPrepareToken())
+                .userId(draft.getUserId())
+                .addressId(draft.getAddressId())
+                .voucherCode(draft.getVoucherCode())
+                .stockStatus(draft.getStockStatus())
+                .createdAt(draft.getCreatedAt())
+                .expiresAt(draft.getExpiresAt())
+                .branchId(draft.getBranchId())
+                .finalItems(draft.getFinalItems())
+                .suggestedTransfers(draft.getSuggestedTransfers())
+                .cartItems(draft.getCartItems())
+                .receiverName(draft.getReceiverName())
+                .receiverPhone(draft.getReceiverPhone())
+                .userLat(draft.getUserLat())
+                .userLng(draft.getUserLng())
+                .deliveryAddress(draft.getDeliveryAddress())
+                .deliveryDistrictId(draft.getDeliveryDistrictId())
+                .deliveryProvinceId(draft.getDeliveryProvinceId())
+                .deliveryWardCode(draft.getDeliveryWardCode())
+                .subOrders(liveQuote.subOrders())
+                .outOfStockItems(liveQuote.outOfStockItems())
+                .totalSubtotal(liveQuote.totalSubtotal())
+                .discountAmount(liveQuote.discountAmount())
+                .totalShippingFee(liveQuote.totalShippingFee())
+                .totalAmount(liveQuote.totalAmount())
+                .build();
+    }
+
+    private void cleanupPreparedCheckout(PrepareOrderDraft draft, Long userId) {
+        if (draft == null) {
+            return;
+        }
+
+        redisTemplate.delete(PREPARE_KEY_PREFIX + draft.getPrepareToken());
+        clearActivePayosSession(draft.getPrepareToken(), null);
+
+        normalizeCartItems(draft.getCartItems()).stream()
+                .map(CartItemDto::getProductVariantId)
+                .distinct()
+                .forEach(vId -> cartItemRepository.findByUserIdAndProductVariantId(userId, vId)
+                        .ifPresent(cartItemRepository::delete));
+    }
+
+    private String buildPayosHoldReferenceCode(String sessionCode) {
+        return PAYOS_HOLD_REFERENCE_PREFIX + sessionCode;
+    }
+
+    private void reserveInventoryForPayosSession(PayOSCheckoutSession session) {
+        if (session == null || session.getDraftSnapshot() == null || session.getSessionCode() == null) {
+            return;
+        }
+
+        PrepareOrderDraft draft = session.getDraftSnapshot();
+        String holdReferenceCode = buildPayosHoldReferenceCode(session.getSessionCode());
+        if (draft.getSubOrders() == null) {
+            return;
+        }
+
+        for (SubOrderDraftDto subDraft : draft.getSubOrders()) {
+            if (subDraft == null || subDraft.getBranchId() == null || subDraft.getItems() == null) {
+                continue;
+            }
+
+            for (OrderItemDto item : subDraft.getItems()) {
+                if (item == null || item.getProductVariantId() == null) {
+                    continue;
+                }
+
+                int allocatedQuantity = Objects.requireNonNullElse(item.getAllocatedQuantity(), 0);
+                if (allocatedQuantity <= 0) {
+                    continue;
+                }
+
+                inventoryCheckGuardService.assertStockMutationAllowed(
+                        subDraft.getBranchId(),
+                        List.of(item.getProductVariantId()),
+                        "giu hang tam cho phien PayOS");
+
+                orderInventoryReservationService.reserveInventory(
+                        subDraft.getBranchId(),
+                        item.getProductVariantId(),
+                        allocatedQuantity,
+                        holdReferenceCode,
+                        "Giu hang tam cho phien thanh toan PayOS " + session.getSessionCode());
+            }
+        }
+    }
+
+    private void releaseInventoryForPayosSession(PayOSCheckoutSession session, String reason) {
+        if (session == null || session.getSessionCode() == null || session.getSessionCode().isBlank()) {
+            return;
+        }
+        orderInventoryReservationService.releaseReservedInventory(
+                buildPayosHoldReferenceCode(session.getSessionCode()),
+                reason);
+    }
+
+    private void cancelActivePayosSessionForPrepareToken(Long userId, String prepareToken) {
+        PayOSCheckoutSession activeSession = getActivePayosSession(prepareToken);
+        if (activeSession == null || !userId.equals(activeSession.getUserId()) || !isPendingPayosSession(activeSession)) {
+            return;
+        }
+        cancelPayosSessionInternal(activeSession, true);
+    }
+
+    private void cancelPayosSessionInternal(PayOSCheckoutSession rawSession, boolean cancelRemoteLink) {
+        if (rawSession == null || rawSession.getSessionCode() == null || rawSession.getSessionCode().isBlank()) {
+            return;
+        }
+
+        PayOSCheckoutSession session = getPayosSession(rawSession.getSessionCode());
+        if (session == null) {
+            session = rawSession;
+        }
+
+        if (PAYOS_SESSION_STATUS_ORDER_CREATED.equals(session.getStatus())
+                || PAYOS_SESSION_STATUS_PAID.equals(session.getStatus())) {
+            return;
+        }
+
+        if (!PAYOS_SESSION_STATUS_CANCELLED.equals(session.getStatus())) {
+            session.setStatus(PAYOS_SESSION_STATUS_CANCELLED);
+            savePayosSession(session);
+        }
+
+        clearActivePayosSession(session.getPrepareToken(), session.getSessionCode());
+        releaseInventoryForPayosSession(session, "Giai phong hold do huy phien thanh toan PayOS");
+
+        if (cancelRemoteLink && session.getPayosOrderCode() != null) {
+            payOSService.cancelPaymentLink(session.getPayosOrderCode());
+        }
+    }
+
+    private void expirePayosSessionInternal(PayOSCheckoutSession rawSession, boolean cancelRemoteLink) {
+        if (rawSession == null || rawSession.getSessionCode() == null || rawSession.getSessionCode().isBlank()) {
+            return;
+        }
+
+        PayOSCheckoutSession session = getPayosSession(rawSession.getSessionCode());
+        if (session == null) {
+            session = rawSession;
+        }
+
+        if (PAYOS_SESSION_STATUS_ORDER_CREATED.equals(session.getStatus())
+                || PAYOS_SESSION_STATUS_PAID.equals(session.getStatus())) {
+            return;
+        }
+
+        if (!PAYOS_SESSION_STATUS_EXPIRED.equals(session.getStatus())) {
+            session.setStatus(PAYOS_SESSION_STATUS_EXPIRED);
+            savePayosSession(session);
+        }
+
+        clearActivePayosSession(session.getPrepareToken(), session.getSessionCode());
+        releaseInventoryForPayosSession(session, "Giai phong hold do phien thanh toan PayOS het han");
+
+        if (cancelRemoteLink && session.getPayosOrderCode() != null) {
+            payOSService.cancelPaymentLink(session.getPayosOrderCode());
+        }
+    }
+
+    private boolean isPendingPayosSession(PayOSCheckoutSession session) {
+        return session != null
+                && PAYOS_SESSION_STATUS_PENDING.equals(session.getStatus())
+                && !isExpiredPayosSession(session);
+    }
+
+    private boolean isExpiredPayosSession(PayOSCheckoutSession session) {
+        return session != null
+                && session.getExpiresAt() != null
+                && session.getExpiresAt().isBefore(LocalDateTime.now());
+    }
+
+    private long buildPayosOrderCode() {
+        long base = System.currentTimeMillis() * 1000L;
+        int suffix = new Random().nextInt(900) + 100;
+        return base + suffix;
+    }
+
+    private String buildPayosSessionDescription(String sessionCode) {
+        String suffix = sessionCode.length() > 8 ? sessionCode.substring(sessionCode.length() - 8) : sessionCode;
+        return "PAYOS " + suffix;
+    }
+
+    private String buildPayosSessionReturnUrl(PayOSCheckoutSession session) {
+        String baseUrl = payosReturnUrl != null && !payosReturnUrl.isBlank()
+                ? payosReturnUrl
+                : "https://agrishrimp.io.vn/order-success";
+        return appendQueryParams(baseUrl, Map.of(
+                "paymentSession", session.getSessionCode(),
+                "prepareToken", session.getPrepareToken(),
+                "status", "PAID",
+                "paymentMethod", "PAYOS"));
+    }
+
+    private String buildPayosSessionCancelUrl(PayOSCheckoutSession session) {
+        String baseUrl = payosCancelUrl;
+        if (baseUrl == null || baseUrl.isBlank()) {
+            baseUrl = payosReturnUrl;
+        }
+        if (baseUrl == null || baseUrl.isBlank()) {
+            baseUrl = "https://agrishrimp.io.vn/checkout";
+        }
+        String normalizedBaseUrl = baseUrl.replace("/order-cancel", "/checkout")
+                .replace("/order-success", "/checkout");
+        return appendQueryParams(normalizedBaseUrl, Map.of(
+                "prepareToken", session.getPrepareToken(),
+                "paymentSession", session.getSessionCode(),
+                "status", "CANCELLED",
+                "paymentMethod", "PAYOS"));
+    }
+
+    private String appendQueryParams(String baseUrl, Map<String, String> params) {
+        String separator = baseUrl.contains("?") ? "&" : "?";
+        String query = params.entrySet().stream()
+                .filter(entry -> entry.getValue() != null && !entry.getValue().isBlank())
+                .map(entry -> entry.getKey() + "=" + URLEncoder.encode(entry.getValue(), StandardCharsets.UTF_8))
+                .collect(Collectors.joining("&"));
+        return query.isBlank() ? baseUrl : baseUrl + separator + query;
+    }
+
+    private boolean isEligibleForAutoApproval(Order order, LocalDateTime now) {
+        if (!isEligibleForAutoApprovalBase(order)) {
+            return false;
+        }
+
+        if (order.getAutoApproveAt() == null || order.getAutoApproveAt().isAfter(now)) {
+            return false;
+        }
+
+        return true;
+    }
+
+    private boolean shouldFallbackAutoApprove(Order order, LocalDateTime now) {
+        if (!isEligibleForAutoApprovalBase(order)) {
+            return false;
+        }
+
+        if (order.getAutoApproveAt() != null) {
+            return false;
+        }
+
+        if (!PaymentMethod.COD.equals(order.getPaymentMethod()) && !PaymentMethod.CASH.equals(order.getPaymentMethod())) {
+            return false;
+        }
+
+        if (order.getCreatedAt() == null) {
+            return false;
+        }
+
+        LocalDateTime fallbackReadyAt = order.getCreatedAt().plusMinutes(Math.max(1, autoApproveMinutes));
+        return !fallbackReadyAt.isAfter(now);
+    }
+
+    private boolean isEligibleForAutoApprovalBase(Order order) {
+        if (order == null || order.getStatus() != OrderStatus.PENDING) {
+            return false;
+        }
+
+        if (Boolean.TRUE.equals(order.getAutoApprovalPaused())) {
+            return false;
+        }
+
+        String stockStatus = resolveStockStatus(order);
+        if (!StockStatus.FULLY_AVAILABLE.name().equals(stockStatus)) {
+            return false;
+        }
+
+        if (PaymentMethod.PAYOS.equals(order.getPaymentMethod()) || PaymentMethod.TRANSFER.equals(order.getPaymentMethod())) {
+            return PaymentStatus.PAID.equals(order.getPaymentStatus());
+        }
+
+        return PaymentStatus.UNPAID.equals(order.getPaymentStatus()) || PaymentStatus.PAID.equals(order.getPaymentStatus());
+    }
+
+    private void confirmOrderAutomatically(Order order, LocalDateTime changedAt) {
+        applyOrderStatus(order, OrderStatus.CONFIRMED, changedAt);
+        order.setFulfillmentStatus(FulfillmentStatus.PREPARING);
+        order.setAutoApproveAt(null);
+
+        if (order.getSubOrders() != null) {
+            List<SubOrder> confirmedSubOrders = order.getSubOrders().stream()
+                    .filter(subOrder -> subOrder.getStatus() == OrderStatus.PENDING)
+                    .peek(subOrder -> applySubOrderStatus(subOrder, OrderStatus.CONFIRMED, changedAt))
+                    .toList();
+            if (!confirmedSubOrders.isEmpty()) {
+                subOrderRepository.saveAll(confirmedSubOrders);
+            }
+        }
+
+        orderRepository.save(order);
+        notificationService.notifyOrderStatusChange(order, OrderStatus.PENDING, OrderStatus.CONFIRMED);
+    }
+
     private OrderItemResponse mapItemToResponse(OrderItem item) {
-        String pName = "Sản phẩm không xác định";
+        String pName = "Sáº£n pháº©m khĂ´ng xĂ¡c Ä‘á»‹nh";
         String pSku = "N/A";
         String pImg = null;
         Long productId = null;
 
         if (item.getProductVariant() != null) {
             pSku = item.getProductVariant().getSku();
+            pImg = resolveOrderItemImage(item.getProductVariant());
             if (item.getProductVariant().getProduct() != null) {
                 productId = item.getProductVariant().getProduct().getId();
                 pName = item.getProductVariant().getProduct().getName();
-                if (item.getProductVariant().getProduct().getProductImages() != null
-                        && !item.getProductVariant().getProduct().getProductImages().isEmpty()) {
-                    pImg = item.getProductVariant().getProduct().getProductImages().iterator().next().getImageUrl();
-                }
             }
         }
 
@@ -844,20 +2776,21 @@ public class OrderService {
     }
 
     private OrderItemResponse mapSubItemToResponse(SubOrderItem item) {
-        String pName = "Sản phẩm không xác định";
+        return mapSubItemToResponse(item, true);
+    }
+
+    private OrderItemResponse mapSubItemToResponse(SubOrderItem item, boolean exposeInternalDetails) {
+        String pName = "Sáº£n pháº©m khĂ´ng xĂ¡c Ä‘á»‹nh";
         String pSku = "N/A";
         String pImg = null;
         Long productId = null;
 
         if (item.getProductVariant() != null) {
             pSku = item.getProductVariant().getSku();
+            pImg = resolveOrderItemImage(item.getProductVariant());
             if (item.getProductVariant().getProduct() != null) {
                 productId = item.getProductVariant().getProduct().getId();
                 pName = item.getProductVariant().getProduct().getName();
-                if (item.getProductVariant().getProduct().getProductImages() != null
-                        && !item.getProductVariant().getProduct().getProductImages().isEmpty()) {
-                    pImg = item.getProductVariant().getProduct().getProductImages().iterator().next().getImageUrl();
-                }
             }
         }
 
@@ -877,8 +2810,13 @@ public class OrderService {
                 .image(pImg)
                 .quantity(item.getQuantity())
                 .allocatedQuantity(
-                        item.getAllocatedQuantity() != null ? item.getAllocatedQuantity() : item.getQuantity())
-                .missingQuantity(item.getMissingQuantity() != null ? item.getMissingQuantity() : 0)
+                        exposeInternalDetails && item.getAllocatedQuantity() != null
+                                ? item.getAllocatedQuantity()
+                                : item.getQuantity())
+                .missingQuantity(
+                        exposeInternalDetails && item.getMissingQuantity() != null
+                                ? item.getMissingQuantity()
+                                : 0)
                 .price(item.getUnitPrice() != null ? item.getUnitPrice() : BigDecimal.ZERO)
                 .totalPrice(
                         item.getUnitPrice() != null ? item.getUnitPrice().multiply(new BigDecimal(item.getQuantity()))
@@ -887,46 +2825,54 @@ public class OrderService {
                 .build();
     }
 
-    // ══════════════════════════════════════════════════════════════════════
-    // PREPARE & CONFIRM LOGIC (THUẬT TOÁN FIFO + LÔ HÀNG)
-    // ══════════════════════════════════════════════════════════════════════
+    // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+    // PREPARE & CONFIRM LOGIC (THUáº¬T TOĂN FIFO + LĂ” HĂ€NG)
+    // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
+    private String resolveOrderItemImage(ProductVariant productVariant) {
+        if (productVariant == null) {
+            return null;
+        }
+
+        if (productVariant.getImageUrl() != null && !productVariant.getImageUrl().isBlank()) {
+            return productVariant.getImageUrl();
+        }
+
+        Product product = productVariant.getProduct();
+        if (product == null || product.getProductImages() == null || product.getProductImages().isEmpty()) {
+            return null;
+        }
+
+        return product.getProductImages().stream()
+                .map(ProductImage::getImageUrl)
+                .filter(Objects::nonNull)
+                .map(String::trim)
+                .filter(imageUrl -> !imageUrl.isEmpty())
+                .findFirst()
+                .orElse(null);
+    }
+
+    @Transactional(readOnly = true)
     public PrepareOrderResponse prepareOrder(Long userId, PrepareOrderRequest request) {
         com.zone.agri.entity.UserAddress addr = userAddressRepository
                 .findByIdAndUserId(request.getUserAddressId(), userId)
                 .orElseThrow(() -> new NotFoundException(
-                        "Không tìm thấy địa chỉ trong sổ địa chỉ của bạn. ID: " + request.getUserAddressId()));
+                        "KhĂ´ng tĂ¬m tháº¥y Ä‘á»‹a chá»‰ trong sá»• Ä‘á»‹a chá»‰ cá»§a báº¡n. ID: " + request.getUserAddressId()));
 
         String receiverName = addr.getReceiverName();
         String receiverPhone = addr.getReceiverPhone();
         String deliveryAddress = addr.getAddressDetail();
         Integer deliveryDistrictId = addr.getDistrictId() != null ? parseIntSafe(addr.getDistrictId()) : null;
         Integer deliveryProvinceId = addr.getProvinceId() != null ? parseIntSafe(addr.getProvinceId()) : null;
-        String deliveryWardCode = addr.getWardId();
-
-        double userLat;
-        double userLng;
-        if (request.getUserLat() != null && request.getUserLng() != null) {
-            userLat = request.getUserLat();
-            userLng = request.getUserLng();
-        } else {
-            try {
-                CoordinateDto coord = geocodingService.geocode(deliveryAddress);
-                userLat = coord.getLat();
-                userLng = coord.getLng();
-            } catch (Exception e) {
-                log.warn("Geocode thất bại cho địa chỉ '{}', dùng tọa độ mặc định: {}", deliveryAddress,
-                        e.getMessage());
-                userLat = 10.0341;
-                userLng = 105.7904;
-            }
-        }
+        String deliveryWardCode = normalizeWardCode(addr.getWardId());
+        Double userLat = request.getUserLat();
+        Double userLng = request.getUserLng();
 
         List<CartItemDto> finalCart = request.getCart();
         if (finalCart == null || finalCart.isEmpty()) {
             List<com.zone.agri.entity.CartItem> dbItems = cartItemRepository.findByUserId(userId);
             if (dbItems.isEmpty())
-                throw new BadRequestException("Giỏ hàng của bạn đang trống");
+                throw new BadRequestException("Giá» hĂ ng cá»§a báº¡n Ä‘ang trá»‘ng");
 
             finalCart = dbItems.stream()
                     .map(item -> new CartItemDto(item.getProductVariant().getId(),
@@ -935,38 +2881,23 @@ public class OrderService {
         }
 
         finalCart = normalizeCartItems(finalCart);
-        String voucherCode = normalizeVoucherCode(request.getVoucherCode());
+        String voucherCode = voucherService.normalizeVoucherCode(request.getVoucherCode());
 
         List<Long> variantIds = finalCart.stream().map(CartItemDto::getProductVariantId).distinct().toList();
         List<ProductVariant> variants = variantRepository.findAllById(variantIds);
         if (variants.size() != variantIds.size())
-            throw new NotFoundException("Một hoặc nhiều sản phẩm không tồn tại");
+            throw new NotFoundException("Má»™t hoáº·c nhiá»u sáº£n pháº©m khĂ´ng tá»“n táº¡i");
 
         Map<Long, ProductVariant> variantMap = variants.stream()
                 .collect(Collectors.toMap(ProductVariant::getId, Function.identity()));
 
-        List<BranchWithRealDistance> nearestBranches = branchSearchService.findNearestBranches(userLat, userLng);
-        if (nearestBranches.isEmpty())
-            throw new NotFoundException("Không có chi nhánh hoạt động");
-
-        nearestBranches = filterCustomerFulfillmentBranches(nearestBranches);
-        if (nearestBranches.isEmpty())
-            throw new NotFoundException("KhÃ´ng cÃ³ chi nhÃ¡nh bÃ¡n hÃ ng phÃ¹ há»£p");
-
-        nearestBranches = filterCustomerFulfillmentBranches(nearestBranches);
-        if (nearestBranches.isEmpty()) {
-            throw new NotFoundException("KhÃ´ng cÃ³ chi nhÃ¡nh bÃ¡n hÃ ng phÃ¹ há»£p");
-        }
-
-        nearestBranches = filterCustomerFulfillmentBranches(nearestBranches);
-        if (nearestBranches.isEmpty()) {
-            throw new NotFoundException("Không có chi nhánh bán hàng phù hợp");
-        }
-
-        nearestBranches = filterCustomerFulfillmentBranches(nearestBranches);
-        if (nearestBranches.isEmpty()) {
-            throw new NotFoundException("KhÃ´ng cÃ³ chi nhÃ¡nh bÃ¡n hÃ ng phÃ¹ há»£p");
-        }
+        List<BranchWithRealDistance> nearestBranches = requireCustomerFulfillmentBranches(
+                branchSearchService.findBranchesForDelivery(
+                        deliveryProvinceId,
+                        deliveryDistrictId,
+                        deliveryWardCode,
+                        userLat,
+                        userLng));
 
         List<Long> branchIds = nearestBranches.stream().map(bwr -> bwr.branch().getId()).toList();
 
@@ -977,7 +2908,10 @@ public class OrderService {
 
         DeliveryInfo deliveryInfo = DeliveryInfo.builder()
                 .toDistrictId(deliveryDistrictId).toWardCode(deliveryWardCode)
-                .deliveryAddress(deliveryAddress).userLat(userLat).userLng(userLng).build();
+                .deliveryAddress(deliveryAddress)
+                .userLat(userLat != null ? userLat : 0d)
+                .userLng(userLng != null ? userLng : 0d)
+                .build();
 
         List<SubOrderDraftDto> enrichedSubOrders = shippingService.enrichWithShippingFees(allocation.subOrders(),
                 deliveryInfo, variantMap);
@@ -992,7 +2926,12 @@ public class OrderService {
         if (voucherCode != null) {
             User previewUser = userRepository.findById(userId)
                     .orElseThrow(() -> new NotFoundException("User khong ton tai"));
-            discountAmount = validateVoucher(previewUser, voucherCode, totalSubtotal, false, false).discountAmount();
+            discountAmount = voucherService.validateVoucherForOrder(
+                    previewUser,
+                    voucherCode,
+                    totalSubtotal,
+                    false,
+                    false).discountAmount();
         }
 
         BigDecimal totalAmount = totalSubtotal.add(totalShippingFee).subtract(discountAmount);
@@ -1000,14 +2939,29 @@ public class OrderService {
             totalAmount = BigDecimal.ZERO;
         }
 
+        SubOrderDraftDto primarySubOrder = enrichedSubOrders.isEmpty() ? null : enrichedSubOrders.get(0);
+        List<SuggestedTransferDto> suggestedTransfers = inferSuggestedTransfers(
+                primarySubOrder,
+                nearestBranches,
+                inventoryMatrix);
+        String stockStatus = determinePrepareStockStatus(
+                enrichedSubOrders,
+                allocation.outOfStockItems(),
+                suggestedTransfers);
+        boolean canPlaceOrder = !enrichedSubOrders.isEmpty();
+        boolean requiresManualApproval = !"FULLY_AVAILABLE".equals(stockStatus);
+        LocalDateTime createdAt = LocalDateTime.now();
+        LocalDateTime expiresAt = createdAt.plusMinutes(PREPARE_TTL_MINUTES);
+
         String token = UUID.randomUUID().toString();
         List<OrderItemDto> allFinalItems = enrichedSubOrders.stream().flatMap(s -> s.getItems().stream())
                 .collect(Collectors.toList());
-        Long mainBranchId = enrichedSubOrders.size() == 1 ? enrichedSubOrders.get(0).getBranchId() : null;
+        Long mainBranchId = primarySubOrder != null ? primarySubOrder.getBranchId() : null;
 
         PrepareOrderDraft draft = PrepareOrderDraft.builder()
-                .prepareToken(token).userId(userId).voucherCode(voucherCode).branchId(mainBranchId)
-                .finalItems(allFinalItems).cartItems(finalCart)
+                .prepareToken(token).userId(userId).addressId(request.getUserAddressId()).voucherCode(voucherCode)
+                .stockStatus(stockStatus).createdAt(createdAt).expiresAt(expiresAt)
+                .branchId(mainBranchId).finalItems(allFinalItems).suggestedTransfers(suggestedTransfers).cartItems(finalCart)
                 .receiverName(receiverName).receiverPhone(receiverPhone)
                 .userLat(userLat).userLng(userLng).deliveryAddress(deliveryAddress)
                 .deliveryDistrictId(deliveryDistrictId).deliveryProvinceId(deliveryProvinceId)
@@ -1020,16 +2974,31 @@ public class OrderService {
 
         return PrepareOrderResponse.builder()
                 .prepareToken(token)
-                .canFulfill(true) // Đánh lừa Frontend để luôn cho phép bấm nút Thanh toán
+                .expiresAt(expiresAt)
+                .addressId(draft.getAddressId())
+                .deliveryAddress(draft.getDeliveryAddress())
+                .deliveryDistrictId(draft.getDeliveryDistrictId())
+                .deliveryWardCode(draft.getDeliveryWardCode())
+                .receiverName(draft.getReceiverName())
+                .receiverPhone(draft.getReceiverPhone())
                 .voucherCode(voucherCode)
                 .canFulfill(allocation.outOfStockItems().isEmpty() && !enrichedSubOrders.isEmpty())
+                .canPlaceOrder(canPlaceOrder)
+                .requiresManualApproval(requiresManualApproval)
+                .stockStatus(stockStatus)
+                .primaryBranch(primarySubOrder != null
+                        ? PreparePrimaryBranchDto.builder()
+                                .id(primarySubOrder.getBranchId())
+                                .name(primarySubOrder.getBranchName())
+                                .distanceKm(primarySubOrder.getDistanceKm())
+                                .build()
+                        : null)
+                .suggestedTransfers(suggestedTransfers)
                 .subOrders(enrichedSubOrders)
                 .totalSubtotal(totalSubtotal)
                 .discountAmount(discountAmount)
                 .totalShippingFee(totalShippingFee)
                 .totalAmount(totalAmount)
-                .canFulfill(!enrichedSubOrders.isEmpty())
-                .outOfStockItems(allocation.outOfStockItems())
                 .outOfStockItems(allocation.outOfStockItems())
                 .build();
     }
@@ -1042,10 +3011,106 @@ public class OrderService {
         }
     }
 
+    private String normalizeWardCode(String wardCode) {
+        if (wardCode == null) {
+            return null;
+        }
+
+        String normalized = wardCode.trim();
+        return normalized.isEmpty() ? null : normalized;
+    }
+
+    private List<BranchWithRealDistance> requireCustomerFulfillmentBranches(List<BranchWithRealDistance> branches) {
+        if (branches == null || branches.isEmpty()) {
+            throw new BadRequestException("Hiá»‡n chÆ°a cĂ³ chi nhĂ¡nh hoáº¡t Ä‘á»™ng Ä‘á»ƒ phá»¥c vá»¥ Ä‘Æ¡n hĂ ng cá»§a báº¡n.");
+        }
+
+        List<BranchWithRealDistance> sellableBranches = filterCustomerFulfillmentBranches(branches);
+        if (sellableBranches.isEmpty()) {
+            throw new BadRequestException("Hiá»‡n chÆ°a cĂ³ chi nhĂ¡nh bĂ¡n hĂ ng phĂ¹ há»£p cho Ä‘á»‹a chá»‰ giao hĂ ng nĂ y.");
+        }
+
+        return sellableBranches;
+    }
+
     @Transactional
     public ConfirmOrderResponse confirmOrder(Long userId, ConfirmOrderRequest request) {
+        PaymentMethod requestedPaymentMethod = request.getPaymentMethod() != null
+                ? request.getPaymentMethod()
+                : PaymentMethod.COD;
+        if (!PaymentMethod.PAYOS.equals(requestedPaymentMethod)) {
+            cancelActivePayosSessionForPrepareToken(userId, request.getPrepareToken());
+            return confirmOrderLegacy(userId, request);
+        }
+
+        String normalizedIdempotencyKey = normalizeIdempotencyKey(request.getIdempotencyKey());
+        ConfirmOrderResponse idempotentResult = getConfirmResultByIdempotency(userId, normalizedIdempotencyKey);
+        if (idempotentResult != null) {
+            return idempotentResult;
+        }
+
+        String prepareToken = request.getPrepareToken();
+        PayOSCheckoutSession activeSession = getActivePayosSession(prepareToken);
+        if (activeSession != null
+                && userId.equals(activeSession.getUserId())
+                && isPendingPayosSession(activeSession)) {
+            ConfirmOrderResponse response = buildPendingPayosSessionResponse(activeSession);
+            saveConfirmResultByIdempotency(userId, normalizedIdempotencyKey, response);
+            return response;
+        }
+
+        String confirmLockKey = PREPARE_CONFIRM_LOCK_PREFIX + prepareToken;
+        Boolean lockAcquired = redisTemplate.opsForValue().setIfAbsent(
+                confirmLockKey,
+                String.valueOf(userId),
+                PREPARE_CONFIRM_LOCK_TTL_SECONDS,
+                TimeUnit.SECONDS);
+        if (Boolean.FALSE.equals(lockAcquired)) {
+            activeSession = getActivePayosSession(prepareToken);
+            if (activeSession != null
+                    && userId.equals(activeSession.getUserId())
+                    && isPendingPayosSession(activeSession)) {
+                ConfirmOrderResponse response = buildPendingPayosSessionResponse(activeSession);
+                saveConfirmResultByIdempotency(userId, normalizedIdempotencyKey, response);
+                return response;
+            }
+            throw new ConflictException("Đơn hàng đang được xử lý, vui lòng đợi trong giây lát", true);
+        }
+
+        try {
+            PrepareOrderDraft draft = getDraftFromRedis(prepareToken);
+            if (draft == null) {
+                throw new BadRequestException("Token hêt hạn");
+            }
+            if (!userId.equals(draft.getUserId())) {
+                throw new BadRequestException("Token không hợp lệ");
+            }
+
+            User user = userRepository.findById(userId)
+                    .orElseThrow(() -> new NotFoundException("User không tồn tại"));
+            ConfirmOrderResponse response = createOrReusePayosCheckoutSession(
+                    user,
+                    draft,
+                    normalizedIdempotencyKey,
+                    request.getNote());
+            saveConfirmResultByIdempotency(userId, normalizedIdempotencyKey, response);
+            return response;
+        } finally {
+            redisTemplate.delete(confirmLockKey);
+        }
+    }
+
+    @Transactional
+    private ConfirmOrderResponse confirmOrderLegacy(Long userId, ConfirmOrderRequest request) {
+        String normalizedIdempotencyKey = normalizeIdempotencyKey(request.getIdempotencyKey());
+        ConfirmOrderResponse idempotentResult = getConfirmResultByIdempotency(userId, normalizedIdempotencyKey);
+        if (idempotentResult != null) {
+            return idempotentResult;
+        }
+
         ConfirmOrderResponse cachedResult = getConfirmResultFromRedis(request.getPrepareToken());
         if (cachedResult != null) {
+            saveConfirmResultByIdempotency(userId, normalizedIdempotencyKey, cachedResult);
             return cachedResult;
         }
 
@@ -1060,17 +3125,17 @@ public class OrderService {
             if (lockedResult != null) {
                 return lockedResult;
             }
-            throw new ConflictException("Đơn hàng đang được xử lý, vui lòng đợi trong giây lát", true);
+            throw new ConflictException("ÄÆ¡n hĂ ng Ä‘ang Ä‘Æ°á»£c xá»­ lĂ½, vui lĂ²ng Ä‘á»£i trong giĂ¢y lĂ¡t", true);
         }
 
         try {
             PrepareOrderDraft draft = getDraftFromRedis(request.getPrepareToken());
             if (draft == null)
-                throw new BadRequestException("Token hết hạn");
+                throw new BadRequestException("Token háº¿t háº¡n");
             if (!userId.equals(draft.getUserId()))
-                throw new BadRequestException("Token không hợp lệ");
+                throw new BadRequestException("Token khĂ´ng há»£p lá»‡");
 
-            User user = userRepository.findById(userId).orElseThrow(() -> new NotFoundException("User không tồn tại"));
+            User user = userRepository.findById(userId).orElseThrow(() -> new NotFoundException("User khĂ´ng tá»“n táº¡i"));
             List<CartItemDto> cartSnapshot = normalizeCartItems(draft.getCartItems());
             PreparedQuote liveQuote = buildPreparedQuote(
                     userId,
@@ -1078,16 +3143,17 @@ public class OrderService {
                     draft.getUserLat(),
                     draft.getUserLng(),
                     draft.getDeliveryAddress(),
+                    draft.getDeliveryProvinceId(),
                     draft.getDeliveryDistrictId(),
                     draft.getDeliveryWardCode(),
                     draft.getVoucherCode());
-            if (false && (!liveQuote.outOfStockItems().isEmpty() || liveQuote.subOrders().isEmpty())) {
+            if (liveQuote.subOrders().isEmpty()) {
                 throw new ConflictException(
-                        "Một hoặc nhiều sản phẩm không còn đủ hàng tại chi nhánh bán hàng gần nhất, vui lòng tải lại giỏ hàng",
+                        "Má»™t hoáº·c nhiá»u sáº£n pháº©m khĂ´ng cĂ²n Ä‘á»§ hĂ ng táº¡i chi nhĂ¡nh bĂ¡n hĂ ng gáº§n nháº¥t, vui lĂ²ng táº£i láº¡i giá» hĂ ng",
                         true);
             }
-            ensurePreparedQuoteStillValid(draft, liveQuote);
-            VoucherValidation committedVoucher = validateVoucher(
+            // Allow checkout to continue even if stock moved after prepare.
+            VoucherService.VoucherOrderEvaluation committedVoucher = voucherService.validateVoucherForOrder(
                     user,
                     draft.getVoucherCode(),
                     liveQuote.totalSubtotal(),
@@ -1095,106 +3161,83 @@ public class OrderService {
                     true);
             PaymentMethod paymentMethod = request.getPaymentMethod() != null ? request.getPaymentMethod()
                     : PaymentMethod.COD;
-            boolean hasMissingItems = liveQuote.subOrders().stream()
-                    .flatMap(subOrder -> subOrder.getItems().stream())
-                    .anyMatch(item -> Objects.requireNonNullElse(item.getMissingQuantity(), 0) > 0);
-            OrderStatus initialStatus = hasMissingItems
-                    ? OrderStatus.AWAITING_REPLENISHMENT
-                    : (PaymentMethod.PAYOS.equals(paymentMethod) ? OrderStatus.AWAITING_PAYMENT
-                            : OrderStatus.PROCESSING);
+            StockStatus initialStockStatus = parseStockStatus(draft.getStockStatus());
+            PaymentStatus initialPaymentStatus = resolveInitialPaymentStatus(paymentMethod);
+            OrderStatus initialStatus = resolveInitialOrderStatus(paymentMethod, initialStockStatus);
+            LocalDateTime autoApproveAt = resolveInitialAutoApproveAt(paymentMethod, initialStockStatus);
+
+            Branch primaryBranch = draft.getBranchId() != null
+                    ? branchRepository.findById(draft.getBranchId()).orElse(null)
+                    : null;
 
             Order order = Order.builder().code("ORD" + System.currentTimeMillis()).user(user).status(initialStatus)
-                    .paymentMethod(paymentMethod).paymentStatus(PaymentStatus.UNPAID).createdAt(LocalDateTime.now())
+                    .paymentMethod(paymentMethod).paymentStatus(initialPaymentStatus).createdAt(LocalDateTime.now())
                     .totalAmount(liveQuote.totalSubtotal()).discountAmount(committedVoucher.discountAmount())
                     .finalAmount(liveQuote.totalAmount())
                     .totalShippingFee(liveQuote.totalShippingFee()).userLat(draft.getUserLat())
                     .userLng(draft.getUserLng())
                     .deliveryAddress(draft.getDeliveryAddress()).shippingAddress(draft.getDeliveryAddress())
                     .receiverName(draft.getReceiverName()).receiverPhone(draft.getReceiverPhone())
-                    .voucher(committedVoucher.voucher()).note(request.getNote()).build();
+                    .deliveryAddressId(draft.getAddressId())
+                    .voucher(committedVoucher.voucher()).note(request.getNote()).branch(primaryBranch)
+                    .stockStatus(initialStockStatus)
+                    .fulfillmentStatus(FulfillmentStatus.NOT_STARTED)
+                    .autoApproveAt(autoApproveAt)
+                    .autoApprovalPaused(Boolean.FALSE)
+                    .build();
             Order savedOrder = orderRepository.save(order);
 
             List<SubOrderSummaryDto> subOrderSummaries = new ArrayList<>();
-            boolean anySubOrderMissing = hasMissingItems;
-            List<Long> awaitingReplenishmentSubOrderIds = new ArrayList<>();
+            boolean anySubOrderMissing = false;
 
             for (SubOrderDraftDto subDraft : liveQuote.subOrders()) {
                 Branch branch = branchRepository.findById(subDraft.getBranchId())
-                        .orElseThrow(() -> new NotFoundException("Branch không tồn tại"));
-                boolean subOrderHasMissingItems = subDraft.getItems().stream()
-                        .anyMatch(item -> Objects.requireNonNullElse(item.getMissingQuantity(), 0) > 0);
-                OrderStatus subOrderStatus = subOrderHasMissingItems
-                        ? OrderStatus.AWAITING_REPLENISHMENT
-                        : (PaymentMethod.PAYOS.equals(paymentMethod) ? OrderStatus.AWAITING_PAYMENT
-                                : OrderStatus.PROCESSING);
+                        .orElseThrow(() -> new NotFoundException("Branch khĂ´ng tá»“n táº¡i"));
+                OrderStatus subOrderStatus = (PaymentMethod.PAYOS.equals(paymentMethod)
+                        || PaymentMethod.TRANSFER.equals(paymentMethod))
+                                ? OrderStatus.AWAITING_PAYMENT
+                                : OrderStatus.PENDING;
                 SubOrder subOrder = SubOrder.builder().order(savedOrder).branch(branch).status(subOrderStatus)
                         .subtotal(subDraft.getSubtotal()).shippingFee(subDraft.getShippingFee())
                         .estimatedDays(subDraft.getEstimatedDays()).carrier(subDraft.getCarrier()).build();
                 SubOrder savedSubOrder = subOrderRepository.save(subOrder);
-                boolean dynamicallyMissing = false;
 
                 for (OrderItemDto item : subDraft.getItems()) {
                     ProductVariant variant = variantRepository.findById(item.getProductVariantId())
-                            .orElseThrow(() -> new NotFoundException("Sản phẩm không tồn tại"));
+                            .orElseThrow(() -> new NotFoundException("Sáº£n pháº©m khĂ´ng tá»“n táº¡i"));
 
-                    int targetToDeduct = Objects.requireNonNullElse(item.getAllocatedQuantity(), item.getQuantity());
-                    int originallyMissing = Objects.requireNonNullElse(item.getMissingQuantity(), 0);
-                    int actuallyDeducted = 0;
+                    inventoryCheckGuardService.assertStockMutationAllowed(
+                            subDraft.getBranchId(),
+                            List.of(item.getProductVariantId()),
+                            "xac nhan don hang"
+                    );
 
-                    List<Inventory> batches = inventoryRepository.findForUpdateFIFO(subDraft.getBranchId(),
-                            item.getProductVariantId());
+                    int requestedQuantity = Objects.requireNonNullElse(item.getQuantity(), 0);
+                    int allocatedQuantity = Objects.requireNonNullElse(item.getAllocatedQuantity(), 0);
 
-                    for (Inventory batch : batches) {
-                        if (targetToDeduct <= 0)
-                            break;
-                        int available = Objects.requireNonNullElse(batch.getQuantity(), 0);
-                        if (available <= 0)
-                            continue;
-
-                        int deductAmount = Math.min(available, targetToDeduct);
-                        int newQty = available - deductAmount;
-                        batch.setQuantity(newQty);
-                        inventoryRepository.save(batch);
-
-                        transactionRepository.save(InventoryTransaction.builder()
-                                .type(TransactionType.SALE)
-                                .quantityChange(-deductAmount)
-                                .newBalance(newQty)
-                                .referenceCode(buildSubOrderReferenceCode(savedSubOrder))
-                                .reason("Bán hàng (Đơn: " + order.getCode() + ")")
-                                .createdAt(LocalDateTime.now())
-                                .inventory(batch)
-                                .build());
-
-                        targetToDeduct -= deductAmount;
-                        actuallyDeducted += deductAmount;
+                    if (allocatedQuantity > 0) {
+                        allocatedQuantity = orderInventoryReservationService.reserveInventoryUpTo(
+                                subDraft.getBranchId(),
+                                item.getProductVariantId(),
+                                allocatedQuantity,
+                                buildSubOrderReferenceCode(savedSubOrder),
+                                "Giu hang cho phan don " + savedOrder.getCode());
                     }
 
-                    int finalMissing = originallyMissing + targetToDeduct;
-                    int finalAllocated = actuallyDeducted;
-                    if (finalMissing > 0)
-                        dynamicallyMissing = true;
+                    int missingQuantity = Math.max(0, requestedQuantity - allocatedQuantity);
+                    anySubOrderMissing = anySubOrderMissing || missingQuantity > 0;
+
+
 
                     subOrderItemRepository.save(SubOrderItem.builder()
                             .subOrder(savedSubOrder)
                             .productVariant(variant)
-                            .quantity(item.getQuantity())
-                            .allocatedQuantity(finalAllocated)
-                            .missingQuantity(finalMissing)
+                            .quantity(requestedQuantity)
+                            .allocatedQuantity(allocatedQuantity)
+                            .missingQuantity(missingQuantity)
                             .unitPrice(item.getUnitPrice())
                             .build());
                 }
-
-                if (dynamicallyMissing && subOrderStatus == OrderStatus.PROCESSING) {
-                    subOrderStatus = OrderStatus.AWAITING_REPLENISHMENT;
-                    savedSubOrder.setStatus(subOrderStatus);
-                    subOrderRepository.save(savedSubOrder);
-                    anySubOrderMissing = true;
-                }
-                if (subOrderStatus == OrderStatus.AWAITING_REPLENISHMENT) {
-                    awaitingReplenishmentSubOrderIds.add(savedSubOrder.getId());
-                }
-
                 subOrderSummaries.add(SubOrderSummaryDto.builder()
                         .subOrderId(savedSubOrder.getId()).branchId(branch.getId()).branchName(branch.getName())
                         .status(subOrderStatus.name()).subtotal(subDraft.getSubtotal())
@@ -1202,17 +3245,11 @@ public class OrderService {
                         .estimatedDays(subDraft.getEstimatedDays()).carrier(subDraft.getCarrier()).build());
             }
 
-            if (anySubOrderMissing && initialStatus == OrderStatus.PROCESSING) {
-                initialStatus = OrderStatus.AWAITING_REPLENISHMENT;
-                savedOrder.setStatus(initialStatus);
-                orderRepository.save(savedOrder);
+            savedOrder.setStockStatus(anySubOrderMissing ? StockStatus.PARTIALLY_AVAILABLE : StockStatus.FULLY_AVAILABLE);
+            if (anySubOrderMissing) {
+                savedOrder.setAutoApproveAt(null);
             }
-
-            if (!awaitingReplenishmentSubOrderIds.isEmpty()) {
-                immediateReplenishmentService.scheduleAfterCommit(
-                        awaitingReplenishmentSubOrderIds,
-                        savedOrder.getCode());
-            }
+            orderRepository.save(savedOrder);
 
             String checkoutUrl = null;
             if (PaymentMethod.PAYOS.equals(paymentMethod)) {
@@ -1224,7 +3261,7 @@ public class OrderService {
                     orderRepository.save(savedOrder);
                     checkoutUrl = payosData.getCheckoutUrl();
                 } catch (Exception e) {
-                    throw new BadRequestException("Lỗi tạo PayOS link: " + e.getMessage());
+                    throw new BadRequestException("Lá»—i táº¡o PayOS link: " + e.getMessage());
                 }
             }
 
@@ -1235,21 +3272,28 @@ public class OrderService {
 
             ConfirmOrderResponse response = ConfirmOrderResponse.builder().orderId(savedOrder.getId())
                     .orderCode(savedOrder.getCode())
-                    .status(initialStatus.name()).voucherCode(draft.getVoucherCode()).subOrders(subOrderSummaries)
+                    .status(resolveWorkflowStatus(savedOrder))
+                    .legacyStatus(savedOrder.getStatus() != null ? savedOrder.getStatus().name() : "")
+                    .paymentStatus(resolvePaymentStatus(savedOrder))
+                    .fulfillmentStatus(resolveFulfillmentStatus(savedOrder))
+                    .stockStatus(resolveStockStatus(savedOrder))
+                    .autoApproveAt(savedOrder.getAutoApproveAt())
+                    .voucherCode(draft.getVoucherCode()).subOrders(subOrderSummaries)
                     .totalAmount(liveQuote.totalAmount())
                     .discountAmount(committedVoucher.discountAmount()).totalShippingFee(liveQuote.totalShippingFee())
                     .checkoutUrl(checkoutUrl).build();
 
             saveConfirmResultToRedis(request.getPrepareToken(), response);
+            saveConfirmResultByIdempotency(userId, normalizedIdempotencyKey, response);
             return response;
         } finally {
             redisTemplate.delete(confirmLockKey);
         }
     }
 
-    // ══════════════════════════════════════════════════════════════════════
+    // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
     // HELPERS & REDIS
-    // ══════════════════════════════════════════════════════════════════════
+    // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
     private List<CartItemDto> normalizeCartItems(List<CartItemDto> cartItems) {
         if (cartItems == null || cartItems.isEmpty()) {
@@ -1270,37 +3314,85 @@ public class OrderService {
                 .collect(Collectors.toList());
     }
 
+    private int availableToAllocate(Inventory inventory) {
+        if (inventory == null) {
+            return 0;
+        }
+
+        int quantity = Objects.requireNonNullElse(inventory.getQuantity(), 0);
+        int reserved = Objects.requireNonNullElse(inventory.getReservedQuantity(), 0);
+        return Math.max(0, quantity - reserved);
+    }
+
+    private boolean subOrderHasMissingItems(SubOrder subOrder) {
+        if (subOrder == null || subOrder.getItems() == null) {
+            return false;
+        }
+
+        return subOrder.getItems().stream()
+                .filter(Objects::nonNull)
+                .anyMatch(item -> Objects.requireNonNullElse(item.getMissingQuantity(), 0) > 0);
+    }
+
+    private boolean orderHasMissingItems(Order order) {
+        if (order == null || order.getSubOrders() == null) {
+            return false;
+        }
+
+        return order.getSubOrders().stream()
+                .filter(Objects::nonNull)
+                .anyMatch(this::subOrderHasMissingItems);
+    }
+
+    private boolean canRequestReplenishment(SubOrder subOrder) {
+        if (subOrder == null || subOrder.getStatus() == null) {
+            return false;
+        }
+
+        if (subOrder.getStatus() == OrderStatus.CANCELLED
+                || subOrder.getStatus() == OrderStatus.RETURNED
+                || subOrder.getStatus() == OrderStatus.COMPLETED) {
+            return false;
+        }
+
+        return (subOrder.getStatus() == OrderStatus.PENDING
+                || subOrder.getStatus() == OrderStatus.AWAITING_REPLENISHMENT)
+                && subOrderHasMissingItems(subOrder);
+    }
+
     private PreparedQuote buildPreparedQuote(
             Long userId,
             List<CartItemDto> cartItems,
             Double userLat,
             Double userLng,
             String deliveryAddress,
+            Integer deliveryProvinceId,
             Integer deliveryDistrictId,
             String deliveryWardCode,
             String voucherCode) {
         List<CartItemDto> normalizedCart = normalizeCartItems(cartItems);
         if (normalizedCart.isEmpty()) {
-            throw new BadRequestException("Giỏ hàng của bạn đang trống");
+            throw new BadRequestException("Giá» hĂ ng cá»§a báº¡n Ä‘ang trá»‘ng");
         }
 
         List<Long> variantIds = normalizedCart.stream().map(CartItemDto::getProductVariantId).distinct().toList();
         List<ProductVariant> variants = variantRepository.findAllById(variantIds);
         if (variants.size() != variantIds.size()) {
-            throw new NotFoundException("Một hoặc nhiều sản phẩm không tồn tại");
+            throw new NotFoundException("Má»™t hoáº·c nhiá»u sáº£n pháº©m khĂ´ng tá»“n táº¡i");
         }
 
         Map<Long, ProductVariant> variantMap = variants.stream()
                 .collect(Collectors.toMap(ProductVariant::getId, Function.identity()));
 
-        double finalUserLat = userLat != null ? userLat : 10.0341;
-        double finalUserLng = userLng != null ? userLng : 105.7904;
+        String normalizedWardCode = normalizeWardCode(deliveryWardCode);
 
-        List<BranchWithRealDistance> nearestBranches = branchSearchService.findNearestBranches(finalUserLat,
-                finalUserLng);
-        if (nearestBranches.isEmpty()) {
-            throw new NotFoundException("Không có chi nhánh hoạt động");
-        }
+        List<BranchWithRealDistance> nearestBranches = requireCustomerFulfillmentBranches(
+                branchSearchService.findBranchesForDelivery(
+                        deliveryProvinceId,
+                        deliveryDistrictId,
+                        normalizedWardCode,
+                        userLat,
+                        userLng));
 
         List<Long> branchIds = nearestBranches.stream().map(bwr -> bwr.branch().getId()).toList();
         Map<Long, Map<Long, List<Inventory>>> inventoryMatrix = allocationService.buildInventoryMatrix(branchIds,
@@ -1321,10 +3413,10 @@ public class OrderService {
 
         DeliveryInfo deliveryInfo = DeliveryInfo.builder()
                 .toDistrictId(deliveryDistrictId)
-                .toWardCode(deliveryWardCode)
+                .toWardCode(normalizedWardCode)
                 .deliveryAddress(deliveryAddress)
-                .userLat(finalUserLat)
-                .userLng(finalUserLng)
+                .userLat(userLat != null ? userLat : 0d)
+                .userLng(userLng != null ? userLng : 0d)
                 .build();
 
         List<SubOrderDraftDto> enrichedSubOrders = shippingService.enrichWithShippingFees(
@@ -1340,11 +3432,16 @@ public class OrderService {
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
 
         BigDecimal discountAmount = BigDecimal.ZERO;
-        String normalizedVoucherCode = normalizeVoucherCode(voucherCode);
+        String normalizedVoucherCode = voucherService.normalizeVoucherCode(voucherCode);
         if (normalizedVoucherCode != null) {
             User user = userRepository.findById(userId)
-                    .orElseThrow(() -> new NotFoundException("Người dùng không tồn tại"));
-            discountAmount = validateVoucher(user, normalizedVoucherCode, totalSubtotal, false, false).discountAmount();
+                    .orElseThrow(() -> new NotFoundException("NgÆ°á»i dĂ¹ng khĂ´ng tá»“n táº¡i"));
+            discountAmount = voucherService.validateVoucherForOrder(
+                    user,
+                    normalizedVoucherCode,
+                    totalSubtotal,
+                    false,
+                    false).discountAmount();
         }
 
         BigDecimal totalAmount = totalSubtotal.add(totalShippingFee).subtract(discountAmount);
@@ -1365,8 +3462,149 @@ public class OrderService {
     private void ensurePreparedQuoteStillValid(PrepareOrderDraft draft, PreparedQuote liveQuote) {
         if (!Objects.equals(buildSubOrderSignature(draft.getSubOrders()),
                 buildSubOrderSignature(liveQuote.subOrders()))) {
-            throw new ConflictException("Don hang vua thay doi, vui long tai lai gio hang truoc khi dat", true);
+            PrepareOrderRequest refreshRequest = new PrepareOrderRequest();
+            refreshRequest.setUserAddressId(draft.getAddressId());
+            refreshRequest.setVoucherCode(draft.getVoucherCode());
+            refreshRequest.setUserLat(draft.getUserLat());
+            refreshRequest.setUserLng(draft.getUserLng());
+            refreshRequest.setCart(draft.getCartItems());
+            PrepareOrderResponse refreshedQuote = prepareOrder(draft.getUserId(), refreshRequest);
+            throw new ConflictException(
+                    "ORDER_QUOTE_CHANGED",
+                    "Thong tin don hang da thay doi. Vui long kiem tra lai bao gia moi truoc khi dat.",
+                    Map.of(
+                            "newPrepareToken", refreshedQuote.getPrepareToken(),
+                            "newQuote", refreshedQuote));
         }
+    }
+
+    private String determinePrepareStockStatus(
+            List<SubOrderDraftDto> subOrders,
+            List<OutOfStockItemDto> outOfStockItems,
+            List<SuggestedTransferDto> suggestedTransfers) {
+        if (subOrders == null || subOrders.isEmpty()) {
+            return "OUT_OF_STOCK";
+        }
+
+        boolean hasMissingInPrimaryPlan = subOrders.stream()
+                .filter(Objects::nonNull)
+                .flatMap(subOrder -> subOrder.getItems() == null ? Stream.empty() : subOrder.getItems().stream())
+                .anyMatch(item -> Objects.requireNonNullElse(item.getMissingQuantity(), 0) > 0);
+        boolean hasNetworkShortage = outOfStockItems != null && !outOfStockItems.isEmpty();
+        boolean hasTransferSuggestion = suggestedTransfers != null && !suggestedTransfers.isEmpty();
+
+        if (!hasMissingInPrimaryPlan && !hasNetworkShortage) {
+            return "FULLY_AVAILABLE";
+        }
+        if (!hasNetworkShortage && hasTransferSuggestion) {
+            return "AVAILABLE_AFTER_TRANSFER";
+        }
+        return "PARTIALLY_AVAILABLE";
+    }
+
+    private StockStatus parseStockStatus(String stockStatus) {
+        if (stockStatus == null || stockStatus.isBlank()) {
+            return StockStatus.FULLY_AVAILABLE;
+        }
+
+        try {
+            return StockStatus.valueOf(stockStatus.trim().toUpperCase(Locale.ROOT));
+        } catch (IllegalArgumentException ex) {
+            return StockStatus.FULLY_AVAILABLE;
+        }
+    }
+
+    private PaymentStatus resolveInitialPaymentStatus(PaymentMethod paymentMethod) {
+        if (paymentMethod == null) {
+            return PaymentStatus.UNPAID;
+        }
+
+        return switch (paymentMethod) {
+            case PAYOS -> PaymentStatus.PENDING;
+            case TRANSFER -> PaymentStatus.PENDING_VERIFICATION;
+            default -> PaymentStatus.UNPAID;
+        };
+    }
+
+    private OrderStatus resolveInitialOrderStatus(PaymentMethod paymentMethod, StockStatus stockStatus) {
+        if (PaymentMethod.PAYOS.equals(paymentMethod) || PaymentMethod.TRANSFER.equals(paymentMethod)) {
+            return OrderStatus.AWAITING_PAYMENT;
+        }
+
+        return OrderStatus.PENDING;
+    }
+
+    private LocalDateTime resolveInitialAutoApproveAt(PaymentMethod paymentMethod, StockStatus stockStatus) {
+        if ((PaymentMethod.COD.equals(paymentMethod) || PaymentMethod.CASH.equals(paymentMethod))
+                && stockStatus == StockStatus.FULLY_AVAILABLE) {
+            return LocalDateTime.now().plusMinutes(Math.max(1, autoApproveMinutes));
+        }
+
+        return null;
+    }
+
+    private List<SuggestedTransferDto> inferSuggestedTransfers(
+            SubOrderDraftDto primarySubOrder,
+            List<BranchWithRealDistance> rankedBranches,
+            Map<Long, Map<Long, List<Inventory>>> inventoryMatrix) {
+        if (primarySubOrder == null || primarySubOrder.getBranchId() == null || primarySubOrder.getItems() == null) {
+            return Collections.emptyList();
+        }
+
+        Map<Long, Integer> missingByVariant = primarySubOrder.getItems().stream()
+                .filter(Objects::nonNull)
+                .filter(item -> item.getProductVariantId() != null)
+                .map(item -> Map.entry(
+                        item.getProductVariantId(),
+                        Math.max(0, Objects.requireNonNullElse(item.getMissingQuantity(), 0))))
+                .filter(entry -> entry.getValue() > 0)
+                .collect(Collectors.toMap(
+                        Map.Entry::getKey,
+                        Map.Entry::getValue,
+                        Integer::sum,
+                        LinkedHashMap::new));
+
+        if (missingByVariant.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        List<SuggestedTransferDto> suggestions = new ArrayList<>();
+        for (Map.Entry<Long, Integer> entry : missingByVariant.entrySet()) {
+            Long variantId = entry.getKey();
+            int remaining = entry.getValue();
+
+            for (BranchWithRealDistance branchCandidate : rankedBranches) {
+                if (branchCandidate == null || branchCandidate.branch() == null || remaining <= 0) {
+                    continue;
+                }
+
+                Long candidateBranchId = branchCandidate.branch().getId();
+                if (Objects.equals(candidateBranchId, primarySubOrder.getBranchId())) {
+                    continue;
+                }
+
+                int available = inventoryMatrix.getOrDefault(candidateBranchId, Collections.emptyMap())
+                        .getOrDefault(variantId, Collections.emptyList())
+                        .stream()
+                        .mapToInt(this::availableToAllocate)
+                        .sum();
+                if (available <= 0) {
+                    continue;
+                }
+
+                int quantity = Math.min(available, remaining);
+                suggestions.add(SuggestedTransferDto.builder()
+                        .fromBranchId(candidateBranchId)
+                        .fromBranchName(branchCandidate.branch().getName())
+                        .toBranchId(primarySubOrder.getBranchId())
+                        .productVariantId(variantId)
+                        .quantity(quantity)
+                        .build());
+                remaining -= quantity;
+            }
+        }
+
+        return suggestions;
     }
 
 
@@ -1375,8 +3613,16 @@ public class OrderService {
             return Collections.emptyList();
         }
 
-        return branches.stream()
+        List<BranchWithRealDistance> preferredBranches = branches.stream()
                 .filter(branchWithDistance -> isCustomerFulfillmentBranch(branchWithDistance.branch()))
+                .toList();
+
+        if (!preferredBranches.isEmpty()) {
+            return preferredBranches;
+        }
+
+        return branches.stream()
+                .filter(branchWithDistance -> branchWithDistance.branch() != null)
                 .toList();
     }
 
@@ -1403,8 +3649,7 @@ public class OrderService {
                                     .map(item -> String.join(":",
                                             String.valueOf(item.getProductVariantId()),
                                             String.valueOf(Objects.requireNonNullElse(item.getQuantity(), 0)),
-                                            String.valueOf(Objects.requireNonNullElse(item.getAllocatedQuantity(), 0)),
-                                            String.valueOf(Objects.requireNonNullElse(item.getMissingQuantity(), 0))))
+                                            String.valueOf(Objects.requireNonNullElse(item.getUnitPrice(), BigDecimal.ZERO))))
                                     .collect(Collectors.joining(","));
 
                     return String.join("|",
@@ -1417,10 +3662,7 @@ public class OrderService {
     }
 
     private String normalizeVoucherCode(String voucherCode) {
-        if (voucherCode == null || voucherCode.isBlank()) {
-            return null;
-        }
-        return voucherCode.trim().toUpperCase();
+        return voucherService.normalizeVoucherCode(voucherCode);
     }
 
     private VoucherValidation validateVoucher(
@@ -1436,7 +3678,7 @@ public class OrderService {
 
         Voucher voucher = (consume ? voucherRepository.findByCodeForUpdate(normalizedVoucherCode)
                 : voucherRepository.findByCode(normalizedVoucherCode))
-                .orElseThrow(() -> voucherValidationException(conflictOnUnavailable, "Mã voucher không tồn tại"));
+                .orElseThrow(() -> voucherValidationException(conflictOnUnavailable, "MĂ£ voucher khĂ´ng tá»“n táº¡i"));
 
         LocalDateTime now = LocalDateTime.now();
         if (voucher.getStatus() != VoucherStatus.ACTIVE
@@ -1444,17 +3686,17 @@ public class OrderService {
                 || voucher.getEndDate() == null
                 || now.isBefore(voucher.getStartDate())
                 || now.isAfter(voucher.getEndDate())) {
-            throw voucherValidationException(conflictOnUnavailable, "Voucher không hợp lệ hoặc đã hết hạn");
+            throw voucherValidationException(conflictOnUnavailable, "Voucher khĂ´ng há»£p lá»‡ hoáº·c Ä‘Ă£ háº¿t háº¡n");
         }
 
         BigDecimal minOrderValue = voucher.getMinOrderValue() != null ? voucher.getMinOrderValue() : BigDecimal.ZERO;
         if (orderSubtotal.compareTo(minOrderValue) < 0) {
             throw voucherValidationException(conflictOnUnavailable,
-                    "Đơn hàng chưa đạt giá trị tối thiểu để sử dụng voucher này");
+                    "ÄÆ¡n hĂ ng chÆ°a Ä‘áº¡t giĂ¡ trá»‹ tá»‘i thiá»ƒu Ä‘á»ƒ sá»­ dá»¥ng voucher nĂ y");
         }
 
         if (Objects.requireNonNullElse(voucher.getQuantity(), 0) <= 0) {
-            throw voucherValidationException(conflictOnUnavailable, "Voucher này đã hết lượt sử dụng trên hệ thống");
+            throw voucherValidationException(conflictOnUnavailable, "Voucher nĂ y Ä‘Ă£ háº¿t lÆ°á»£t sá»­ dá»¥ng trĂªn há»‡ thá»‘ng");
         }
 
         UserVoucher userVoucher = userVoucherRepository.findByUserAndVoucher(user, voucher)
@@ -1462,7 +3704,7 @@ public class OrderService {
         int maxUsagePerUser = voucher.getMaxUsagePerUser() != null ? voucher.getMaxUsagePerUser() : 1;
         if (Objects.requireNonNullElse(userVoucher.getUsageCount(), 0) >= maxUsagePerUser) {
             throw voucherValidationException(conflictOnUnavailable,
-                    "Bạn đã sử dụng tối đa số lượt cho phép của voucher này");
+                    "Báº¡n Ä‘Ă£ sá»­ dá»¥ng tá»‘i Ä‘a sá»‘ lÆ°á»£t cho phĂ©p cá»§a voucher nĂ y");
         }
 
         BigDecimal discountAmount;
@@ -1488,7 +3730,7 @@ public class OrderService {
             try {
                 userVoucherRepository.saveAndFlush(userVoucher);
             } catch (DataIntegrityViolationException ex) {
-                throw new ConflictException("Bạn đang thanh toán đồng thời với cùng voucher này. Vui lòng thử lại.");
+                throw new ConflictException("Báº¡n Ä‘ang thanh toĂ¡n Ä‘á»“ng thá»i vá»›i cĂ¹ng voucher nĂ y. Vui lĂ²ng thá»­ láº¡i.");
             }
         }
 
@@ -1500,25 +3742,11 @@ public class OrderService {
     }
 
     private void restoreVoucherForOrder(Order order) {
-        if (order.getVoucher() != null) {
-            Voucher voucher = voucherRepository.findByIdForUpdate(order.getVoucher().getId()).orElse(null);
-            if (voucher != null) {
-                voucher.setQuantity(Objects.requireNonNullElse(voucher.getQuantity(), 0) + 1);
-                voucherRepository.save(voucher);
-
-                userVoucherRepository.findByUserAndVoucher(order.getUser(), voucher).ifPresent(userVoucher -> {
-                    int currentUsage = Objects.requireNonNullElse(userVoucher.getUsageCount(), 0);
-                    if (currentUsage > 0) {
-                        userVoucher.setUsageCount(currentUsage - 1);
-                        userVoucherRepository.save(userVoucher);
-                    }
-                });
-            }
-        }
+        voucherService.restoreVoucherForOrder(order);
     }
 
     private String buildSubOrderReferenceCode(SubOrder subOrder) {
-        return subOrder.getOrder().getCode() + "-SUB-" + subOrder.getId();
+        return orderInventoryReservationService.buildSubOrderReferenceCode(subOrder);
     }
 
     private void releaseAllocatedInventoryForOrder(Order order) {
@@ -1529,17 +3757,23 @@ public class OrderService {
             return;
         }
 
+        orderInventoryReservationService.releaseReservedInventory(
+                order.getCode(),
+                "Giai phong hang giu do huy don hang");
         List<InventoryTransaction> legacyTransactions = transactionRepository
                 .findByReferenceCodeAndType(order.getCode(), TransactionType.SALE);
-        releaseInventoryTransactions(order.getCode(), legacyTransactions, "Hoàn kho do hủy đơn hàng");
+        releaseInventoryTransactions(order.getCode(), legacyTransactions, "HoĂ n kho do há»§y Ä‘Æ¡n hĂ ng");
     }
 
     private void releaseAllocatedInventoryForSubOrder(SubOrder subOrder) {
+        orderInventoryReservationService.releaseReservedInventory(
+                buildSubOrderReferenceCode(subOrder),
+                "Giai phong hang giu do huy phan don");
         List<InventoryTransaction> saleTransactions = transactionRepository.findByReferenceCodeAndType(
                 buildSubOrderReferenceCode(subOrder),
                 TransactionType.SALE);
         releaseInventoryTransactions(buildSubOrderReferenceCode(subOrder), saleTransactions,
-                "Hoàn kho do hủy phần đơn");
+                "HoĂ n kho do há»§y pháº§n Ä‘Æ¡n");
     }
 
     private void releaseInventoryTransactions(String referenceCode, List<InventoryTransaction> saleTransactions,
@@ -1551,6 +3785,11 @@ public class OrderService {
             }
 
             Inventory inventory = saleTransaction.getInventory();
+            inventoryCheckGuardService.assertStockMutationAllowed(
+                    inventory.getBranch() != null ? inventory.getBranch().getId() : null,
+                    inventory.getProductVariant() != null ? List.of(inventory.getProductVariant().getId()) : List.of(),
+                    "hoàn kho chứng từ"
+            );
             int currentQty = Objects.requireNonNullElse(inventory.getQuantity(), 0);
             int newQty = currentQty + quantityToRelease;
             inventory.setQuantity(newQty);
@@ -1566,8 +3805,8 @@ public class OrderService {
                     .inventory(inventory)
                     .build());
 
-            // Khi hủy đơn hoàn kho, tự động cấp lại cho các đơn đang thiếu hàng
-            // tại cùng chi nhánh nếu có thể.
+            // Khi há»§y Ä‘Æ¡n hoĂ n kho, tá»± Ä‘á»™ng cáº¥p láº¡i cho cĂ¡c Ä‘Æ¡n Ä‘ang thiáº¿u hĂ ng
+            // táº¡i cĂ¹ng chi nhĂ¡nh náº¿u cĂ³ thá»ƒ.
             if (inventory.getBranch() != null && inventory.getProductVariant() != null) {
                 backorderService.fulfillBackordersOnStockReceive(
                         inventory.getBranch().getId(),
@@ -1577,12 +3816,25 @@ public class OrderService {
         }
     }
 
+    private String normalizeIdempotencyKey(String idempotencyKey) {
+        if (idempotencyKey == null) {
+            return null;
+        }
+
+        String normalized = idempotencyKey.trim();
+        return normalized.isEmpty() ? null : normalized;
+    }
+
+    private String buildIdempotencyRedisKey(Long userId, String idempotencyKey) {
+        return PREPARE_CONFIRM_IDEMPOTENCY_PREFIX + userId + ":" + idempotencyKey;
+    }
+
     private void saveDraftToRedis(String token, PrepareOrderDraft draft) {
         try {
             redisTemplate.opsForValue().set(PREPARE_KEY_PREFIX + token, objectMapper.writeValueAsString(draft),
                     PREPARE_TTL_MINUTES, TimeUnit.MINUTES);
         } catch (JsonProcessingException e) {
-            throw new RuntimeException("Lỗi lưu Redis");
+            throw new RuntimeException("Lá»—i lÆ°u Redis");
         }
     }
 
@@ -1597,6 +3849,143 @@ public class OrderService {
         }
     }
 
+    private void savePayosSession(PayOSCheckoutSession session) {
+        if (session == null || session.getSessionCode() == null) {
+            return;
+        }
+
+        try {
+            redisTemplate.opsForValue().set(
+                    PAYOS_SESSION_KEY_PREFIX + session.getSessionCode(),
+                    objectMapper.writeValueAsString(session),
+                    getPayosSessionTtlMinutes(),
+                    TimeUnit.MINUTES);
+        } catch (JsonProcessingException e) {
+            throw new RuntimeException("Khong the luu phien PayOS vao Redis");
+        }
+    }
+
+    private PayOSCheckoutSession getPayosSession(String sessionCode) {
+        if (sessionCode == null || sessionCode.isBlank()) {
+            return null;
+        }
+
+        String json = redisTemplate.opsForValue().get(PAYOS_SESSION_KEY_PREFIX + sessionCode);
+        if (json == null) {
+            return null;
+        }
+
+        try {
+            return objectMapper.readValue(json, PayOSCheckoutSession.class);
+        } catch (JsonProcessingException e) {
+            return null;
+        }
+    }
+
+    private void saveActivePayosSession(String prepareToken, String sessionCode) {
+        if (prepareToken == null || prepareToken.isBlank() || sessionCode == null || sessionCode.isBlank()) {
+            return;
+        }
+        redisTemplate.opsForValue().set(
+                PAYOS_SESSION_ACTIVE_PREFIX + prepareToken,
+                sessionCode,
+                getPayosSessionTtlMinutes(),
+                TimeUnit.MINUTES);
+    }
+
+    private PayOSCheckoutSession getActivePayosSession(String prepareToken) {
+        if (prepareToken == null || prepareToken.isBlank()) {
+            return null;
+        }
+
+        String sessionCode = redisTemplate.opsForValue().get(PAYOS_SESSION_ACTIVE_PREFIX + prepareToken);
+        if (sessionCode == null || sessionCode.isBlank()) {
+            return null;
+        }
+
+        PayOSCheckoutSession session = getPayosSession(sessionCode);
+        if (session == null) {
+            redisTemplate.delete(PAYOS_SESSION_ACTIVE_PREFIX + prepareToken);
+            return null;
+        }
+
+        if (isExpiredPayosSession(session) && PAYOS_SESSION_STATUS_PENDING.equals(session.getStatus())) {
+            expirePayosSessionInternal(session, true);
+            session = getPayosSession(sessionCode);
+            if (session == null) {
+                redisTemplate.delete(PAYOS_SESSION_ACTIVE_PREFIX + prepareToken);
+                return null;
+            }
+        }
+
+        if (PAYOS_SESSION_STATUS_CANCELLED.equals(session.getStatus())
+                || PAYOS_SESSION_STATUS_EXPIRED.equals(session.getStatus())
+                || PAYOS_SESSION_STATUS_ORDER_CREATED.equals(session.getStatus())) {
+            redisTemplate.delete(PAYOS_SESSION_ACTIVE_PREFIX + prepareToken);
+        }
+
+        return session;
+    }
+
+    private void clearActivePayosSession(String prepareToken, String sessionCode) {
+        if (prepareToken == null || prepareToken.isBlank()) {
+            return;
+        }
+
+        String key = PAYOS_SESSION_ACTIVE_PREFIX + prepareToken;
+        if (sessionCode == null || sessionCode.isBlank()) {
+            redisTemplate.delete(key);
+            return;
+        }
+
+        String currentSessionCode = redisTemplate.opsForValue().get(key);
+        if (sessionCode.equals(currentSessionCode)) {
+            redisTemplate.delete(key);
+        }
+    }
+
+    private long getPayosSessionTtlMinutes() {
+        return Math.max(PREPARE_TTL_MINUTES, paymentExpiryMinutes + 15);
+    }
+
+    private void reconcilePendingPayosSessions() {
+        Set<String> sessionKeys = redisTemplate.keys(PAYOS_SESSION_KEY_PREFIX + "[0-9]*");
+        if (sessionKeys == null || sessionKeys.isEmpty()) {
+            return;
+        }
+
+        for (String key : sessionKeys) {
+            String sessionCode = key.substring(PAYOS_SESSION_KEY_PREFIX.length());
+            PayOSCheckoutSession session = getPayosSession(sessionCode);
+            if (session == null) {
+                continue;
+            }
+
+            if (PAYOS_SESSION_STATUS_ORDER_CREATED.equals(session.getStatus())
+                    || PAYOS_SESSION_STATUS_CANCELLED.equals(session.getStatus())
+                    || PAYOS_SESSION_STATUS_EXPIRED.equals(session.getStatus())) {
+                continue;
+            }
+
+            if (isExpiredPayosSession(session)) {
+                expirePayosSessionInternal(session, true);
+                continue;
+            }
+
+            if (PAYOS_SESSION_STATUS_PAID.equals(session.getStatus())) {
+                finalizePayosSessionInternal(session, false);
+                continue;
+            }
+
+            if (PAYOS_SESSION_STATUS_PENDING.equals(session.getStatus())
+                    && session.getPayosOrderCode() != null
+                    && payOSService.checkPaymentStatus(session.getPayosOrderCode())) {
+                session = markPayosSessionPaid(session);
+                finalizePayosSessionInternal(session, false);
+            }
+        }
+    }
+
     private void saveConfirmResultToRedis(String token, ConfirmOrderResponse response) {
         try {
             redisTemplate.opsForValue().set(
@@ -1605,7 +3994,7 @@ public class OrderService {
                     PREPARE_TTL_MINUTES,
                     TimeUnit.MINUTES);
         } catch (JsonProcessingException e) {
-            log.warn("Không thể lưu kết quả xác nhận vào Redis cho token {}: {}", token, e.getMessage());
+            log.warn("KhĂ´ng thá»ƒ lÆ°u káº¿t quáº£ xĂ¡c nháº­n vĂ o Redis cho token {}: {}", token, e.getMessage());
         }
     }
 
@@ -1621,29 +4010,65 @@ public class OrderService {
         }
     }
 
-    // ══════════════════════════════════════════════════════════════════════
-    // CHECKOUT API TRỰC TIẾP (CÓ ÁP DỤNG VOUCHER & PAYOS)
-    // ══════════════════════════════════════════════════════════════════════
+    private void saveConfirmResultByIdempotency(Long userId, String idempotencyKey, ConfirmOrderResponse response) {
+        if (userId == null || idempotencyKey == null || response == null) {
+            return;
+        }
+
+        try {
+            redisTemplate.opsForValue().set(
+                    buildIdempotencyRedisKey(userId, idempotencyKey),
+                    objectMapper.writeValueAsString(response),
+                    PREPARE_TTL_MINUTES,
+                    TimeUnit.MINUTES);
+        } catch (JsonProcessingException e) {
+            log.warn("Khong the luu ket qua idempotency cho user {}: {}", userId, e.getMessage());
+        }
+    }
+
+    private ConfirmOrderResponse getConfirmResultByIdempotency(Long userId, String idempotencyKey) {
+        if (userId == null || idempotencyKey == null) {
+            return null;
+        }
+
+        String json = redisTemplate.opsForValue().get(buildIdempotencyRedisKey(userId, idempotencyKey));
+        if (json == null) {
+            return null;
+        }
+
+        try {
+            return objectMapper.readValue(json, ConfirmOrderResponse.class);
+        } catch (JsonProcessingException e) {
+            return null;
+        }
+    }
+
+    // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+    // CHECKOUT API TRá»°C TIáº¾P (CĂ“ ĂP Dá»¤NG VOUCHER & PAYOS)
+    // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
     @Transactional
     public Order placeOrder(Long userId, CheckoutRequest req) {
-        User user = userRepository.findById(userId).orElseThrow(() -> new NotFoundException("User không tìm thấy"));
+        User user = userRepository.findById(userId).orElseThrow(() -> new NotFoundException("User khĂ´ng tĂ¬m tháº¥y"));
 
-        // Lấy chi nhánh từ request (gửi từ FE) hoặc tìm tự động
+        // Láº¥y chi nhĂ¡nh tá»« request (gá»­i tá»« FE) hoáº·c tĂ¬m tá»± Ä‘á»™ng
         Branch selectedBranch;
         if (req.getBranchId() != null) {
             selectedBranch = branchRepository.findById(req.getBranchId())
-                    .orElseThrow(() -> new NotFoundException("Chi nhánh không tồn tại"));
+                    .orElseThrow(() -> new NotFoundException("Chi nhĂ¡nh khĂ´ng tá»“n táº¡i"));
         } else {
             selectedBranch = findBranchWithEnoughStock(req.getItems());
             if (selectedBranch == null)
-                throw new BadRequestException("Không chi nhánh nào đủ hàng");
+                throw new BadRequestException("KhĂ´ng chi nhĂ¡nh nĂ o Ä‘á»§ hĂ ng");
         }
 
         PaymentMethod paymentMethod = req.getPaymentMethod() != null ? req.getPaymentMethod() : PaymentMethod.COD;
+        if (PaymentMethod.PAYOS.equals(paymentMethod)) {
+            throw new BadRequestException("Thanh toan PayOS phai di qua luong /orders/prepare va /orders/confirm moi");
+        }
         OrderStatus legacyInitialStatus = PaymentMethod.PAYOS.equals(paymentMethod)
                 ? OrderStatus.AWAITING_PAYMENT
-                : OrderStatus.PROCESSING;
+                : OrderStatus.PENDING;
 
         Order order = Order.builder()
                 .code("ORD" + System.currentTimeMillis())
@@ -1655,7 +4080,11 @@ public class OrderService {
                 .note(req.getNote())
                 .status(legacyInitialStatus)
                 .paymentMethod(paymentMethod)
-                .paymentStatus(PaymentStatus.UNPAID)
+                .paymentStatus(resolveInitialPaymentStatus(paymentMethod))
+                .stockStatus(StockStatus.FULLY_AVAILABLE)
+                .fulfillmentStatus(FulfillmentStatus.NOT_STARTED)
+                .autoApproveAt(resolveInitialAutoApproveAt(paymentMethod, StockStatus.FULLY_AVAILABLE))
+                .autoApprovalPaused(Boolean.FALSE)
                 .createdAt(LocalDateTime.now())
                 .totalAmount(BigDecimal.ZERO)
                 .discountAmount(BigDecimal.ZERO)
@@ -1668,7 +4097,13 @@ public class OrderService {
 
         for (CheckoutItemRequest itemReq : req.getItems()) {
             ProductVariant variant = variantRepository.findById(itemReq.getVariantId())
-                    .orElseThrow(() -> new NotFoundException("Sản phẩm không tồn tại"));
+                    .orElseThrow(() -> new NotFoundException("Sáº£n pháº©m khĂ´ng tá»“n táº¡i"));
+
+            inventoryCheckGuardService.assertStockMutationAllowed(
+                    selectedBranch.getId(),
+                    List.of(variant.getId()),
+                    "xac nhan xuat kho"
+            );
 
             // LOGIC TRỪ KHO THEO LÔ (FIFO)
             int remainingToDeduct = itemReq.getQuantity();
@@ -1691,7 +4126,7 @@ public class OrderService {
                         .quantityChange(-deduct)
                         .newBalance(newQty)
                         .referenceCode(savedOrder.getCode())
-                        .reason("Bán hàng trực tiếp (Đơn: " + savedOrder.getCode() + ")")
+                        .reason("BĂ¡n hĂ ng trá»±c tiáº¿p (ÄÆ¡n: " + savedOrder.getCode() + ")")
                         .createdAt(LocalDateTime.now())
                         .inventory(batch)
                         .build());
@@ -1712,21 +4147,26 @@ public class OrderService {
             }
 
             if (remainingToDeduct > 0) {
-                throw new ConflictException("Hết hàng trong lúc thanh toán cho sản phẩm: " + variant.getSku());
+                throw new ConflictException("Háº¿t hĂ ng trong lĂºc thanh toĂ¡n cho sáº£n pháº©m: " + variant.getSku());
             }
         }
 
-        // 👉 VOUCHER LOGIC
+        // đŸ‘‰ VOUCHER LOGIC
         BigDecimal discountAmount = BigDecimal.ZERO;
         if (req.getVoucherCode() != null && !req.getVoucherCode().trim().isEmpty()) {
-            VoucherValidation validation = validateVoucher(user, req.getVoucherCode(), subTotal, true, false);
+            VoucherService.VoucherOrderEvaluation validation = voucherService.validateVoucherForOrder(
+                    user,
+                    req.getVoucherCode(),
+                    subTotal,
+                    true,
+                    false);
             discountAmount = validation.discountAmount();
         }
 
-        // 👉 PHÍ VẬN CHUYỂN
+        // đŸ‘‰ PHĂ Váº¬N CHUYá»‚N
         BigDecimal shippingFee = new BigDecimal("15000");
 
-        // 👉 CHỐT TỔNG TIỀN VÀ CẬP NHẬT ĐƠN HÀNG
+        // đŸ‘‰ CHá»T Tá»”NG TIá»€N VĂ€ Cáº¬P NHáº¬T ÄÆ N HĂ€NG
         BigDecimal finalAmount = subTotal.add(shippingFee).subtract(discountAmount);
         if (finalAmount.compareTo(BigDecimal.ZERO) < 0) {
             finalAmount = BigDecimal.ZERO;
@@ -1737,7 +4177,7 @@ public class OrderService {
         savedOrder.setDiscountAmount(discountAmount);
         savedOrder.setFinalAmount(finalAmount);
 
-        // 👉 PAYOS LOGIC
+        // đŸ‘‰ PAYOS LOGIC
         if (PaymentMethod.PAYOS.equals(paymentMethod)) {
             try {
                 com.zone.agri.dto.response.payment.PayOSApiResponse.PayOSLinkData payosData = payOSService
@@ -1745,13 +4185,13 @@ public class OrderService {
                 savedOrder.setPayosPaymentLinkId(payosData.getPaymentLinkId());
                 savedOrder.setPayosCheckoutUrl(payosData.getCheckoutUrl());
             } catch (Exception e) {
-                throw new BadRequestException("Lỗi tạo PayOS link: " + e.getMessage());
+                throw new BadRequestException("Lá»—i táº¡o PayOS link: " + e.getMessage());
             }
         }
 
         orderRepository.save(savedOrder);
 
-        // Xóa sản phẩm khỏi giỏ hàng
+        // XĂ³a sáº£n pháº©m khá»i giá» hĂ ng
         req.getItems().stream().map(CheckoutItemRequest::getVariantId).distinct()
                 .forEach(vId -> cartItemRepository.findByUserIdAndProductVariantId(userId, vId)
                         .ifPresent(cartItemRepository::delete));

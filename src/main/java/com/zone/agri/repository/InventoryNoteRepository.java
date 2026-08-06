@@ -4,7 +4,9 @@ import com.zone.agri.entity.InventoryNote;
 import com.zone.agri.entity.enums.InventoryCheckWorkflowStatus;
 import com.zone.agri.entity.enums.InventoryNoteStatus;
 import com.zone.agri.entity.enums.InventoryNoteType;
+import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
@@ -145,6 +147,20 @@ public interface InventoryNoteRepository extends JpaRepository<InventoryNote, Lo
     """)
     Optional<InventoryNote> findByIdWithDetails(@Param("id") Long id);
 
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("""
+        SELECT DISTINCT in
+        FROM InventoryNote in
+        LEFT JOIN FETCH in.details d
+        LEFT JOIN FETCH d.productVariant
+        LEFT JOIN FETCH in.branch
+        LEFT JOIN FETCH in.supplier
+        LEFT JOIN FETCH in.partnerBranch
+        LEFT JOIN FETCH in.createdBy
+        WHERE in.id = :id
+    """)
+    Optional<InventoryNote> findByIdWithDetailsForUpdate(@Param("id") Long id);
+
     @Query("""
         SELECT COUNT(inote) > 0
         FROM InventoryNote inote
@@ -160,10 +176,13 @@ public interface InventoryNoteRepository extends JpaRepository<InventoryNote, Lo
     );
 
     @Query("""
-        SELECT inote
+        SELECT DISTINCT inote
         FROM InventoryNote inote
+        LEFT JOIN FETCH inote.branch
         LEFT JOIN FETCH inote.createdBy
         LEFT JOIN FETCH inote.checkApprovedBy
+        LEFT JOIN FETCH inote.details detail
+        LEFT JOIN FETCH detail.productVariant
         WHERE inote.type = com.zone.agri.entity.enums.InventoryNoteType.CHECK
           AND inote.branch.id = :branchId
           AND inote.checkWorkflowStatus IN :workflowStatuses
@@ -221,5 +240,30 @@ public interface InventoryNoteRepository extends JpaRepository<InventoryNote, Lo
             @Param("variantId") Long variantId,
             @Param("statuses") Collection<InventoryNoteStatus> statuses,
             @Param("excludeNoteId") Long excludeNoteId
+    );
+
+    @Query("""
+        SELECT DISTINCT note
+        FROM InventoryNote note
+        LEFT JOIN FETCH note.details detail
+        LEFT JOIN FETCH detail.productVariant
+        LEFT JOIN FETCH note.createdBy
+        WHERE note.purchaseRequest.id = :purchaseRequestId
+        ORDER BY note.createdAt ASC
+    """)
+    List<InventoryNote> findGoodsReceiptsByPurchaseRequestId(
+            @Param("purchaseRequestId") Long purchaseRequestId
+    );
+
+    boolean existsBySupplierId(Long supplierId);
+
+    @Query("SELECT COUNT(n) FROM InventoryNote n " +
+           "WHERE n.supplier.id = :supplierId " +
+           "AND n.type = com.zone.agri.entity.enums.InventoryNoteType.IMPORT " +
+           "AND n.status = com.zone.agri.entity.enums.InventoryNoteStatus.COMPLETED " +
+           "AND n.createdAt >= :sinceDate")
+    long countCompletedImportsSince(
+            @Param("supplierId") Long supplierId,
+            @Param("sinceDate") java.time.LocalDateTime sinceDate
     );
 }

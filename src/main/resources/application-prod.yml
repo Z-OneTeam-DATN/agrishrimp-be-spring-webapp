@@ -1,6 +1,11 @@
 server:
   port: ${SERVER_PORT:8004}
 
+management:
+  health:
+    mail:
+      enabled: ${MANAGEMENT_HEALTH_MAIL_ENABLED:false}
+
 spring:
   application:
     name: agri-shrimp
@@ -36,6 +41,8 @@ spring:
       host: ${SPRING_DATA_REDIS_HOST:redis}
       port: ${SPRING_DATA_REDIS_PORT:6379}
       password: ${SPRING_DATA_REDIS_PASSWORD:}
+      repositories:
+        enabled: ${SPRING_DATA_REDIS_REPOSITORIES_ENABLED:false}
 
   mail:
     host: ${SPRING_MAIL_HOST:smtp.gmail.com}
@@ -52,8 +59,10 @@ spring:
           timeout: 3000
           writetimeout: 5000
 
-sendgrid:
-  api-key: ${SENDGRID_API_KEY:}
+resend:
+  api-key: ${RESEND_API_KEY:}
+  from-email: ${RESEND_FROM_EMAIL:onboarding@resend.dev}
+  from-name: ${RESEND_FROM_NAME:AgriShrimp}
 
 security:
   jwt:
@@ -126,30 +135,10 @@ image-search:
 ai:
   base-url: ${AI_BASE_URL:}
   predict-path: ${AI_PREDICT_PATH:/ai/predict-image}
-  prescription-path: ${AI_PRESCRIPTION_PATH:/ai/generate-prescription}
-
-zalo:
-  app-secret: ${ZALO_APP_SECRET}
-
-cloud:
-  aws:
-    accessKey: ${AWS_ACCESS_KEY_ID:}
-    secretKey: ${AWS_SECRET_ACCESS_KEY:}
-    region: ${AWS_REGION:ap-southeast-1}
-  s3:
-    bucket-name: ${AWS_S3_BUCKET_NAME:agri-shrimp-storage}
-    upload-dir: ${AWS_S3_UPLOAD_DIR:webapp}
-    region: ${AWS_REGION:ap-southeast-1}
 
 logging:
   level:
     root: INFO
     com.zone.agri: INFO
+    com.zone.agri.logging: ${LOGGING_LEVEL_COM_ZONE_AGRI_LOGGING:WARN}
 
-# 16. CẤU HÌNH OCR (GOOGLE VISION)
-ocr:
-  tesseract:
-    language: ${OCR_TESSERACT_LANGUAGE:vie}
-    data-path: ${OCR_TESSERACT_DATA_PATH:/usr/share/tesseract-ocr/5/tessdata}
-  max-file-size-bytes: ${OCR_MAX_FILE_SIZE_BYTES:5242880}
-  max-image-width: ${OCR_MAX_IMAGE_WIDTH:1800}

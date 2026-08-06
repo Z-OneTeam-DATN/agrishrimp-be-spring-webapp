@@ -30,6 +30,10 @@ public class BranchOrderResponse {
     private String paymentStatus;
     /** Trạng thái tổng của đơn hàng (tổng hợp từ tất cả SubOrder) */
     private String orderStatus;
+    private String orderLegacyStatus;
+    private String fulfillmentStatus;
+    private String stockStatus;
+    private LocalDateTime autoApproveAt;
 
     // ── Thông tin phần đơn của chi nhánh (SubOrder) ─────────────
     private Long subOrderId;

@@ -76,6 +76,15 @@ public class Supplier {
     @Column(length = 20)
     SupplierStatus status;
 
+    @Column(name = "issue_date")
+    java.time.LocalDate issueDate;
+
+    @Column(name = "tax_authority", length = 255)
+    String taxAuthority;
+
+    @Column(name = "main_business_sector", columnDefinition = "TEXT")
+    String mainBusinessSector;
+
     @CreationTimestamp
     @Column(name = "created_at", updatable = false)
     LocalDateTime createdAt;

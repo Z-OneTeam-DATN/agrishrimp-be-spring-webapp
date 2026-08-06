@@ -1,5 +1,5 @@
 # --- Stage 1: Build Stage ---
-FROM maven:3.9.9-eclipse-temurin-21 AS build
+FROM maven:3.9.14-eclipse-temurin-25 AS build
 WORKDIR /app
 
 # Cache dependencies
@@ -11,14 +11,13 @@ COPY src ./src
 RUN mvn clean package -DskipTests
 
 # --- Stage 2: Run Stage ---
-FROM eclipse-temurin:21-jre-jammy
+FROM eclipse-temurin:25-jre-jammy
 WORKDIR /app
 
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-vie \
+# curl is required for the container HEALTHCHECK (docker-compose.yml probes /actuator/health);
+# the base jre-jammy image ships neither curl nor wget.
+RUN apt-get update && apt-get install -y --no-install-recommends curl \
     && rm -rf /var/lib/apt/lists/*
-
-ENV TESSDATA_PREFIX=/usr/share/tesseract-ocr/5/tessdata
 
 # Copy the built JAR
 COPY --from=build /app/target/*.jar app.jar

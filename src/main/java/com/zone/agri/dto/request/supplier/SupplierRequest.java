@@ -19,7 +19,7 @@ public class SupplierRequest {
     @NotBlank(message = "Tên người liên hệ không được để trống")
     private String contactName;
 
-    @Pattern(regexp = "^$|^(0|84)[3|5|7|8|9][0-9]{8}$", message = "Số điện thoại không hợp lệ")
+    @Pattern(regexp = "^$|^(0|84)[3|5|7|8|9][0-9]{8}$|^0[\\d\\s\\-]{8,19}$", message = "Số điện thoại không hợp lệ")
     private String phone;
 
     @Pattern(regexp = "^$|^[A-Za-z0-9+_.-]+@[A-Za-z0-9.-]+$", message = "Email không hợp lệ")
@@ -33,6 +33,10 @@ public class SupplierRequest {
 
     @NotNull(message = "Trạng thái không được để trống")
     private SupplierStatus status;
+
+    private java.time.LocalDate issueDate;
+    private String taxAuthority;
+    private String mainBusinessSector;
 
     @AssertTrue(message = "Cần nhập ít nhất Số điện thoại hoặc Email")
     public boolean isAtLeastOneContactProvided() {

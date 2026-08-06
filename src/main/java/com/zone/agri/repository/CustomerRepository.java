@@ -1,5 +1,7 @@
 package com.zone.agri.repository;
 
+import java.util.Collection;
+import java.util.List;
 import java.util.Optional;
 
 import org.springframework.data.domain.Page;
@@ -19,6 +21,9 @@ public interface CustomerRepository extends JpaRepository<Customer, Long> {
         boolean existsByPhone(String phone);
 
         Optional<Customer> findByUserId(Long userId);
+
+        @Query("SELECT c FROM Customer c LEFT JOIN FETCH c.staffAssigned WHERE c.user.id IN :userIds")
+        List<Customer> findByUserIdIn(@Param("userIds") Collection<Long> userIds);
 
         // Tìm kiếm khách hàng theo tên hoặc SĐT, lọc theo trạng thái
         @Query("SELECT c FROM Customer c JOIN c.user u LEFT JOIN c.assignedBranch b WHERE " +

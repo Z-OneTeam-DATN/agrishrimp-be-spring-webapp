@@ -48,11 +48,12 @@ public class CustomUserDetailsService implements UserDetailsService {
                 .updatedAt(user.getUpdatedAt())
                 .branchId(user.getBranch() != null ? user.getBranch().getId() : null)
                 .role(user.getRole() != null ? new RoleDto(user.getRole()) : null)
+                .tokenVersion(user.getTokenVersion() != null ? user.getTokenVersion() : 0)
                 .build();
 
         // 4. Xử lý trạng thái tài khoản
         boolean enabled = (user.getStatus() == UserStatus.ACTIVE);
-        boolean accountNonLocked = (user.getStatus() != UserStatus.BANNED);
+        boolean accountNonLocked = true;
 
         return new CustomUserDetail(username, user.getPasswordHash(), enabled, accountNonLocked, userDetailDto, authorities);
     }

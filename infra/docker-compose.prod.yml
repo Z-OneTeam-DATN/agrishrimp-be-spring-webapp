@@ -1,6 +1,6 @@
 # =============================================================
 # docker-compose.prod.yml — VPS Production Stack
-# Vị trí trên VPS: <repo>/infra/docker-compose.prod.yml
+# Vị trí trên VPS: <repo>/docker-compose.prod.yml
 #
 # Services trong scope:
 #   ✅ webapp        (agrishrimp-web,    port 3004)
@@ -10,7 +10,7 @@
 #   ✅ redis         (Redis 7)
 #
 # Excluded (NOT deployed):
-#   ❌ minizalo      — pending Zalo platform approval
+#   ❌ legacy mini app service — removed from current web-first deployment
 #   ✅ ai-diagnosis  (agrishrimp-ai-diagnosis, internal port 8000)
 # =============================================================
 
@@ -75,6 +75,15 @@ services:
       FLASK_PORT: 5001
       SIMILARITY_THRESHOLD: ${SIMILARITY_THRESHOLD:-0.60}
       TOP_K_RESULTS: ${TOP_K_RESULTS:-5}
+      MAX_UPLOAD_MB: ${VISUAL_SEARCH_MAX_UPLOAD_MB:-5}
+      MAX_DOWNLOAD_MB: ${VISUAL_SEARCH_MAX_DOWNLOAD_MB:-10}
+      MAX_IMAGE_SIDE: ${VISUAL_SEARCH_MAX_IMAGE_SIDE:-1600}
+      MAX_IMAGE_PIXELS: ${VISUAL_SEARCH_MAX_IMAGE_PIXELS:-40000000}
+      TORCH_NUM_THREADS: ${VISUAL_SEARCH_TORCH_NUM_THREADS:-2}
+      DB_POOL_SIZE: ${VISUAL_SEARCH_DB_POOL_SIZE:-5}
+      GUNICORN_WORKERS: ${VISUAL_SEARCH_GUNICORN_WORKERS:-1}
+      GUNICORN_THREADS: ${VISUAL_SEARCH_GUNICORN_THREADS:-4}
+      GUNICORN_TIMEOUT: ${VISUAL_SEARCH_GUNICORN_TIMEOUT:-120}
     volumes:
       # Cache CLIP model (~340MB) — tránh download lại khi restart
       - clip_model_cache:/root/.cache/clip
@@ -92,17 +101,21 @@ services:
       start_period: 90s    # CLIP model cần ~60-90s để load lần đầu
 
   # ─────────────────────────────────────────────────────
-  # BACKEND — Spring Boot 3 / Java 21
+  # BACKEND — Spring Boot 3 / Java 25
   # Port 8004 — expose ra host, Nginx proxy từ api.agrishrimp.io.vn
   # ─────────────────────────────────────────────────────
   api:
     image: ghcr.io/z-oneteam-datn/agrishrimp-be-spring-webapp:latest
     container_name: agrishrimp-api
     restart: unless-stopped
+    # Khong co limit nay, MaxRAMPercentage=75.0 (Dockerfile) tinh tren RAM CA VPS thay vi ngan
+    # sach rieng cho service nay — la nguyen nhan JVM heap ceiling bi thoi phong qua muc can thiet.
+    mem_limit: 768m
+    mem_reservation: 384m
     ports:
       - "127.0.0.1:8004:8004"    # bind localhost only — Nginx sẽ proxy
     env_file:
-      - ../.env                  # file secrets đặt ở root repo, KHÔNG commit git
+      - ./.env                   # file secrets đặt cạnh docker-compose.prod.yml, KHÔNG commit git
     environment:
       SPRING_PROFILES_ACTIVE: prod
       SERVER_PORT: 8004
@@ -134,8 +147,10 @@ services:
     networks:
       - agrishrimp-net
     healthcheck:
+      # curl, khong phai wget — image jre-jammy chi cai curl (xem Dockerfile), khong co wget,
+      # nen ban wget cu khong bao gio chay duoc va container luon bao unhealthy du app that su OK.
       test: ["CMD-SHELL",
-             "wget -qO- http://localhost:8004/actuator/health | grep -q '\"status\":\"UP\"'"]
+             "curl -sf http://localhost:8004/actuator/health | grep -q '\"status\":\"UP\"'"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -197,7 +212,7 @@ services:
 # ─────────────────────────────────────────────────────
 # EXCLUDED SERVICES — do NOT uncomment until ready
 # ─────────────────────────────────────────────────────
-# minizalo:        ❌ excluded — pending Zalo platform approval
+# legacy-miniapp:  ❌ excluded — no longer used in web-first deployment
 
 networks:
   agrishrimp-net:

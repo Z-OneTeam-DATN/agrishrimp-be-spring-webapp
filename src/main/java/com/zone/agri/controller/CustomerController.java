@@ -1,11 +1,8 @@
 package com.zone.agri.controller;
 
-import com.zone.agri.dto.request.customer.CustomerInternalNoteRequest;
 import com.zone.agri.dto.request.customer.CustomerRequest;
 import com.zone.agri.dto.response.customer.CustomerDetailResponse;
-import com.zone.agri.dto.response.customer.CustomerInternalNoteResponse;
 import com.zone.agri.dto.response.customer.CustomerResponse;
-import com.zone.agri.dto.response.customer.CustomerStatusLogResponse;
 import com.zone.agri.entity.Customer;
 import com.zone.agri.security.annotation.RequirePermission;
 import com.zone.agri.service.CustomerService;
@@ -82,41 +79,6 @@ public class CustomerController {
         return ResponseEntity.ok(customerService.getCustomerDetailById(id));
     }
 
-    @Operation(summary = "Danh sách ghi chú nội bộ", description = "Lấy toàn bộ ghi chú nội bộ của khách hàng")
-    @SecurityRequirement(name = "bearerAuth")
-    @RequirePermission("CUSTOMER_VIEW")
-    @GetMapping("/{id}/internal-notes")
-    public ResponseEntity<List<CustomerInternalNoteResponse>> getInternalNotes(@PathVariable Long id) {
-        return ResponseEntity.ok(customerService.getInternalNotes(id));
-    }
-
-    @Operation(summary = "Thêm ghi chú nội bộ", description = "Tạo ghi chú nội bộ mới cho khách hàng")
-    @SecurityRequirement(name = "bearerAuth")
-    @RequirePermission("CUSTOMER_UPDATE")
-    @PostMapping("/{id}/internal-notes")
-    public ResponseEntity<CustomerInternalNoteResponse> addInternalNote(
-            @PathVariable Long id,
-            @Valid @RequestBody CustomerInternalNoteRequest request) {
-        return ResponseEntity.ok(customerService.addInternalNote(id, request));
-    }
-
-    @Operation(summary = "Xóa ghi chú nội bộ", description = "Xóa một ghi chú nội bộ theo ID")
-    @SecurityRequirement(name = "bearerAuth")
-    @RequirePermission("CUSTOMER_UPDATE")
-    @DeleteMapping("/internal-notes/{noteId}")
-    public ResponseEntity<String> deleteInternalNote(@PathVariable Long noteId) {
-        customerService.deleteInternalNote(noteId);
-        return ResponseEntity.ok("Đã xóa ghi chú nội bộ");
-    }
-
-    @Operation(summary = "Lịch sử thay đổi trạng thái", description = "Xem lịch sử khóa/mở khóa tài khoản khách hàng")
-    @SecurityRequirement(name = "bearerAuth")
-    @RequirePermission("CUSTOMER_VIEW")
-    @GetMapping("/{id}/status-logs")
-    public ResponseEntity<List<CustomerStatusLogResponse>> getStatusLogs(@PathVariable Long id) {
-        return ResponseEntity.ok(customerService.getStatusLogs(id));
-    }
-
     @Operation(summary = "Tạo hồ sơ khách hàng mới", description = "Thêm mới khách hàng vào hệ thống. Hệ thống có thể tự động tạo tài khoản User liên kết nếu được cấu hình.")
     @SecurityRequirement(name = "bearerAuth")
     @RequirePermission("CUSTOMER_CREATE")
@@ -146,6 +108,15 @@ public class CustomerController {
     public ResponseEntity<String> toggleStatus(@PathVariable Long id) {
         customerService.toggleUserStatus(id);
         return ResponseEntity.ok("Cập nhật trạng thái tài khoản thành công!");
+    }
+
+    @Operation(summary = "Gửi lại thông tin tài khoản qua email", description = "Gửi lại mật khẩu mới cho khách hàng qua email của họ")
+    @SecurityRequirement(name = "bearerAuth")
+    @RequirePermission("CUSTOMER_UPDATE")
+    @PostMapping("/{id}/resend-credentials")
+    public ResponseEntity<String> resendCredentials(@PathVariable Long id) {
+        String result = customerService.resendCustomerCredentials(id);
+        return ResponseEntity.ok(result);
     }
 
     // 🟢 Get all branches for FE dropdown

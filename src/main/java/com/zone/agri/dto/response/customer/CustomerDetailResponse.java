@@ -40,6 +40,4 @@ public class CustomerDetailResponse {
     private BigDecimal averageOrderValue;
 
     private List<CustomerAddressResponse> addresses;
-    private List<CustomerInternalNoteResponse> internalNotes;
-    private List<CustomerStatusLogResponse> statusLogs;
 }

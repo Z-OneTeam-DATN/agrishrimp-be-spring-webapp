@@ -1,0 +1,25 @@
+logging:
+  level:
+    org.springframework.web.filter.CommonsRequestLoggingFilter: INFO
+
+spring:
+  main:
+    lazy-initialization: true
+
+  data:
+    redis:
+      repositories:
+        enabled: false
+
+  jpa:
+    hibernate:
+      ddl-auto: none
+    show-sql: false
+    open-in-view: false
+
+app:
+  startup:
+    schema-patches:
+      enabled: true
+    seed-data:
+      enabled: false

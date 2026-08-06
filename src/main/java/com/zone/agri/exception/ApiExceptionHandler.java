@@ -1,9 +1,12 @@
 package com.zone.agri.exception;
 
+import jakarta.validation.ConstraintViolationException;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -22,6 +25,9 @@ public class ApiExceptionHandler {
 
   private static final String ERROR_LOG_FORMAT = "Error: URI: {}, ErrorCode: {}, Message: {}";
 
+  @Value("${spring.servlet.multipart.max-file-size}")
+  private String maxUploadFileSize;
+
   @ExceptionHandler(NotFoundException.class)
   public ResponseEntity<ErrorDetail> handleNotFoundException(NotFoundException ex,
       WebRequest request) {
@@ -32,8 +38,8 @@ public class ApiExceptionHandler {
     return new ResponseEntity<>(errorVm, HttpStatus.NOT_FOUND);
   }
 
-  @ExceptionHandler(BadRequestException.class)
-  public ResponseEntity<ErrorDetail> handleBadRequestException(BadRequestException ex,
+  @ExceptionHandler({ BadRequestException.class, IllegalArgumentException.class })
+  public ResponseEntity<ErrorDetail> handleBadRequestException(Exception ex,
       WebRequest request) {
     String message = ex.getMessage();
     ErrorDetail errorVm = new ErrorDetail(HttpStatus.BAD_REQUEST.toString(), "Bad Request",
@@ -42,11 +48,21 @@ public class ApiExceptionHandler {
   }
 
   @ExceptionHandler(ConflictException.class)
-  public ResponseEntity<ErrorDetail> handleConflictException(ConflictException ex,
+  public ResponseEntity<Map<String, Object>> handleConflictException(ConflictException ex,
       WebRequest request) {
     String message = ex.getMessage();
-    ErrorDetail errorVm = new ErrorDetail(HttpStatus.CONFLICT.toString(), "Conflict", message);
-    return ResponseEntity.status(HttpStatus.CONFLICT).body(errorVm);
+    Map<String, Object> payload = new LinkedHashMap<>();
+    payload.put("statusCode", HttpStatus.CONFLICT.toString());
+    payload.put("title", "Conflict");
+    payload.put("detail", message);
+    payload.put("message", message);
+    if (ex.getCode() != null && !ex.getCode().isBlank()) {
+      payload.put("code", ex.getCode());
+    }
+    if (ex.getPayload() != null && !ex.getPayload().isEmpty()) {
+      payload.putAll(ex.getPayload());
+    }
+    return ResponseEntity.status(HttpStatus.CONFLICT).body(payload);
   }
 
   @ExceptionHandler(RateLimitException.class)
@@ -73,10 +89,30 @@ public class ApiExceptionHandler {
   protected ResponseEntity<ErrorDetail> handleMethodArgumentNotValid(
       MethodArgumentNotValidException ex) {
     List<String> errors = ex.getBindingResult().getFieldErrors().stream()
-        .map(error -> error.getField() + " " + error.getDefaultMessage()).toList();
+        .map(error -> error.getDefaultMessage() != null
+            ? error.getDefaultMessage()
+            : error.getField() + " không hợp lệ")
+        .distinct()
+        .toList();
 
-    ErrorDetail errorVm = new ErrorDetail("400", "Bad Request", "Request information is not valid",
+    String detail = errors.isEmpty()
+        ? "Dữ liệu gửi lên không hợp lệ"
+        : String.join(". ", errors);
+
+    ErrorDetail errorVm = new ErrorDetail("400", "Bad Request", detail,
         errors);
+    return ResponseEntity.badRequest().body(errorVm);
+  }
+
+  @ExceptionHandler(ConstraintViolationException.class)
+  public ResponseEntity<ErrorDetail> handleConstraintViolationException(
+      ConstraintViolationException ex, WebRequest request) {
+    String detail = ex.getConstraintViolations().stream()
+        .map(violation -> violation.getPropertyPath() + ": " + violation.getMessage())
+        .collect(java.util.stream.Collectors.joining(", "));
+    ErrorDetail errorVm = new ErrorDetail(HttpStatus.BAD_REQUEST.toString(), "Bad Request",
+        "Dữ liệu không hợp lệ: " + detail);
+    log.warn(ERROR_LOG_FORMAT, this.getServletPath(request), 400, detail);
     return ResponseEntity.badRequest().body(errorVm);
   }
 
@@ -112,8 +148,17 @@ public class ApiExceptionHandler {
       DataIntegrityViolationException ex, WebRequest request) {
     String detail = "Dữ liệu vi phạm ràng buộc cơ sở dữ liệu.";
     Throwable cause = ex.getRootCause();
-    if (cause != null && cause.getMessage() != null && cause.getMessage().contains("Duplicate entry")) {
-      detail = "Giá trị bị trùng lặp: " + cause.getMessage();
+    if (cause != null && cause.getMessage() != null) {
+      String rootMessage = cause.getMessage();
+      if (rootMessage.contains("Duplicate entry")) {
+        detail = "Dữ liệu bị trùng lặp. Vui lòng kiểm tra lại thông tin đã nhập.";
+      } else if (rootMessage.contains("Data too long for column 'slug'")) {
+        detail = "Mã vai trò vượt quá giới hạn 50 ký tự. Vui lòng rút gọn tên vai trò.";
+      } else if (rootMessage.contains("Data too long for column 'display_name'")) {
+        detail = "Tên vai trò tối đa 100 ký tự.";
+      } else if (rootMessage.contains("Data too long for column 'description'")) {
+        detail = "Mô tả vai trò tối đa 255 ký tự.";
+      }
     }
     ErrorDetail errorVm = new ErrorDetail(HttpStatus.CONFLICT.toString(), "Xung đột dữ liệu", detail);
     log.warn(ERROR_LOG_FORMAT, this.getServletPath(request), 409, detail);
@@ -124,12 +169,12 @@ public class ApiExceptionHandler {
   public ResponseEntity<ErrorDetail> handleMaxSizeException(MaxUploadSizeExceededException exc,
       WebRequest request) {
     String message = exc.getMessage();
-    ErrorDetail errorVm = new ErrorDetail(HttpStatus.NOT_FOUND.toString(),
-        "Maximum upload size exceeded",
-        "File is too large! Please upload a file smaller than 100MB.");
-    log.warn(ERROR_LOG_FORMAT, this.getServletPath(request), 404, message);
+    ErrorDetail errorVm = new ErrorDetail(HttpStatus.PAYLOAD_TOO_LARGE.toString(),
+        "Payload Too Large",
+        "File tải lên vượt quá dung lượng cho phép (tối đa " + maxUploadFileSize + "). Vui lòng chọn file nhỏ hơn.");
+    log.warn(ERROR_LOG_FORMAT, this.getServletPath(request), 413, message);
     log.debug(exc.toString());
-    return new ResponseEntity<>(errorVm, HttpStatus.NOT_FOUND);
+    return new ResponseEntity<>(errorVm, HttpStatus.PAYLOAD_TOO_LARGE);
   }
 
   @ExceptionHandler(org.springframework.web.server.ResponseStatusException.class)

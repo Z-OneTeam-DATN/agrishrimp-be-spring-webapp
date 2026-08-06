@@ -6,7 +6,10 @@ import com.zone.agri.dto.response.ChatMessageResponse;
 import com.zone.agri.dto.response.ConversationResponse;
 import com.zone.agri.entity.User;
 import com.zone.agri.exception.SignInRequiredException;
+import com.zone.agri.entity.StickerPack;
+import com.zone.agri.repository.StickerPackRepository;
 import com.zone.agri.repository.UserRepository;
+import com.zone.agri.security.annotation.RequirePermission;
 import com.zone.agri.service.ChatService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
@@ -34,6 +37,7 @@ public class ChatController {
 
     private final ChatService chatService;
     private final UserRepository userRepository;
+    private final StickerPackRepository stickerPackRepository;
 
     private User getCurrentUser() {
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
@@ -53,10 +57,18 @@ public class ChatController {
 
     @Operation(summary = "Lấy danh sách tất cả conversations (dành cho shop/admin)")
     @GetMapping("/conversations")
+    @RequirePermission({"CHAT_VIEW", "CUSTOMER_ADVISOR_USE"})
     public ResponseEntity<Page<ConversationResponse>> getAllConversations(
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
         return ResponseEntity.ok(chatService.getAllConversations(page, size));
+    }
+
+    @Operation(summary = "Lấy thông tin một conversation theo ID (dành cho shop/admin)")
+    @GetMapping("/conversations/{id}")
+    @RequirePermission({"CHAT_VIEW", "CUSTOMER_ADVISOR_USE"})
+    public ResponseEntity<ConversationResponse> getConversationById(@PathVariable Long id) {
+        return ResponseEntity.ok(chatService.getConversationById(id));
     }
 
     @Operation(summary = "Lấy lịch sử tin nhắn của conversation")
@@ -79,6 +91,7 @@ public class ChatController {
 
     @Operation(summary = "Người bán ghim sản phẩm vào conversation")
     @PostMapping("/conversations/{id}/pin-product")
+    @RequirePermission("CHAT_MANAGE")
     public ResponseEntity<ChatMessageResponse> pinProduct(
             @PathVariable Long id,
             @RequestBody PinProductRequest request) {
@@ -88,10 +101,27 @@ public class ChatController {
 
     @Operation(summary = "Phân công nhân viên phụ trách conversation")
     @PutMapping("/conversations/{id}/assign")
+    @RequirePermission("CHAT_MANAGE")
     public ResponseEntity<ConversationResponse> assignStaff(
             @PathVariable Long id,
             @RequestParam(required = false) Long staffId) {
         return ResponseEntity.ok(chatService.assignStaff(id, staffId));
+    }
+
+    @Operation(summary = "Cập nhật trạng thái conversation")
+    @PutMapping("/conversations/{id}/status")
+    @RequirePermission("CHAT_MANAGE")
+    public ResponseEntity<ConversationResponse> updateStatus(
+            @PathVariable Long id,
+            @RequestParam com.zone.agri.entity.enums.ConversationStatus status) {
+        return ResponseEntity.ok(chatService.updateStatus(id, status));
+    }
+
+    @Operation(summary = "Đánh dấu conversation là chưa đọc")
+    @PutMapping("/conversations/{id}/unread")
+    @RequirePermission("CHAT_MANAGE")
+    public ResponseEntity<ConversationResponse> markAsUnread(@PathVariable Long id) {
+        return ResponseEntity.ok(chatService.markAsUnread(id));
     }
 
     @Operation(summary = "Gửi ảnh vào conversation")
@@ -109,6 +139,12 @@ public class ChatController {
         User user = getCurrentUser();
         chatService.markAsRead(id, user.getId());
         return ResponseEntity.ok().build();
+    }
+
+    @Operation(summary = "Lấy danh sách tất cả sticker packs cùng stickers")
+    @GetMapping("/stickers")
+    public ResponseEntity<List<StickerPack>> getStickers() {
+        return ResponseEntity.ok(stickerPackRepository.findAll());
     }
 
     // ===== WebSocket handlers =====
@@ -138,5 +174,21 @@ public class ChatController {
         if (convIdObj == null) return;
         Long convId = ((Number) convIdObj).longValue();
         chatService.broadcastTyping(user.getId(), convId);
+    }
+
+    @MessageMapping("/chat.viewing")
+    public void handleViewing(@Payload Map<String, Object> payload, Principal principal) {
+        if (principal == null) return;
+        User user = userRepository.findByEmail(principal.getName()).orElse(null);
+        if (user == null) return;
+
+        Object convIdObj = payload.get("conversationId");
+        Object statusObj = payload.get("status");
+        if (convIdObj == null || statusObj == null) return;
+
+        Long convId = ((Number) convIdObj).longValue();
+        String status = String.valueOf(statusObj);
+
+        chatService.updateViewingStatus(user.getId(), user.getFullName(), convId, status);
     }
 }

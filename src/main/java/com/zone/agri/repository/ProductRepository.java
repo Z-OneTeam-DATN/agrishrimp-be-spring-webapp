@@ -50,10 +50,6 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
   void deleteVariantAttributesByProduct(@Param("product") Product product);
 
   @Modifying
-  @Query("DELETE FROM UnitConversion uc WHERE uc.variant.product = :product")
-  void deleteUnitConversionsByProduct(@Param("product") Product product);
-
-  @Modifying
   @Query("DELETE FROM ProductVariant pv WHERE pv.product = :product")
   void deleteVariantsByProduct(@Param("product") Product product);
 
@@ -66,8 +62,7 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
   @Query("SELECT b FROM Brand b WHERE LOWER(b.name) = LOWER(:name)")
   Optional<Brand> findBrandByName(@Param("name") String name);
 
-  // --- MINI APP: lấy sản phẩm ACTIVE kèm ảnh + category để gợi ý cho AI
-  // prescription ---
+  // --- AI DOCTOR: lấy sản phẩm ACTIVE kèm ảnh + category để gợi ý theo phác đồ ---
   // Phase BE-3: bổ sung LEFT JOIN FETCH p.category để rankCandidateProducts truy
   // cập category.getName()
   // an toàn sau khi transaction đóng (proxy đã initialized).
@@ -76,7 +71,7 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
       "LEFT JOIN FETCH p.category " +
       "WHERE p.status = :status " +
       "ORDER BY p.name ASC")
-  List<Product> findActiveProductsForMiniApp(@Param("status") ProductStatus status);
+  List<Product> findActiveProductsForAiDoctor(@Param("status") ProductStatus status);
 
   // Lấy danh sách sản phẩm đang kinh doanh và còn hàng tại chi nhánh ACTIVE
   @Query("SELECT p FROM Product p " +
@@ -139,6 +134,15 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
   // Tìm theo Slug cho trang chi tiết
   Optional<Product> findBySlug(String slug);
 
+  @Query("""
+      SELECT DISTINCT p FROM Product p
+      LEFT JOIN FETCH p.brand
+      LEFT JOIN FETCH p.category
+      LEFT JOIN FETCH p.productImages
+      WHERE p.slug = :slug
+      """)
+  Optional<Product> findBySlugWithPublicDetails(@Param("slug") String slug);
+
   // =========================================================================
   // PUBLIC WEBSITE API — không lộ dữ liệu nội bộ
   // =========================================================================
@@ -160,7 +164,7 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
       WHERE p.status = com.zone.agri.entity.enums.ProductStatus.ACTIVE
         AND c.status = com.zone.agri.entity.enums.CategoryStatus.ACTIVE
         AND (:keyword IS NULL OR LOWER(p.name) LIKE LOWER(CONCAT('%', :keyword, '%')))
-        AND (:categoryId IS NULL OR c.id = :categoryId)
+        AND (:categoryId IS NULL OR c.id = :categoryId OR c.parent.id = :categoryId)
         AND (:brandId IS NULL OR b.id = :brandId)
         AND EXISTS (
           SELECT 1 FROM ProductVariant v
@@ -183,7 +187,7 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
       WHERE p.status = com.zone.agri.entity.enums.ProductStatus.ACTIVE
         AND c.status = com.zone.agri.entity.enums.CategoryStatus.ACTIVE
         AND (:keyword IS NULL OR LOWER(p.name) LIKE LOWER(CONCAT('%', :keyword, '%')))
-        AND (:categoryId IS NULL OR c.id = :categoryId)
+        AND (:categoryId IS NULL OR c.id = :categoryId OR c.parent.id = :categoryId)
         AND (:brandId IS NULL OR b.id = :brandId)
         AND EXISTS (
           SELECT 1 FROM ProductVariant v
@@ -203,6 +207,115 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
       @Param("keyword") String keyword,
       @Param("categoryId") Long categoryId,
       @Param("brandId") Long brandId, // Thêm tham số brandId
+      Pageable pageable);
+
+  @Query(value = """
+      SELECT p.id FROM Product p
+      JOIN p.category c
+      LEFT JOIN p.brand b
+      WHERE p.status = com.zone.agri.entity.enums.ProductStatus.ACTIVE
+        AND c.status = com.zone.agri.entity.enums.CategoryStatus.ACTIVE
+        AND (
+          :keyword IS NULL
+          OR LOWER(p.name) LIKE LOWER(CONCAT('%', :keyword, '%'))
+          OR LOWER(c.name) LIKE LOWER(CONCAT('%', :keyword, '%'))
+          OR LOWER(COALESCE(b.name, '')) LIKE LOWER(CONCAT('%', :keyword, '%'))
+          OR (:hasKeywordCategoryFilter = true AND c.id IN :keywordCategoryIds)
+          OR (:hasKeywordBrandFilter = true AND b.id IN :keywordBrandIds)
+          OR EXISTS (
+            SELECT 1 FROM ProductVariant kv
+            WHERE kv.product.id = p.id
+              AND (
+                LOWER(kv.sku) LIKE LOWER(CONCAT('%', :keyword, '%'))
+                OR LOWER(COALESCE(kv.barcode, '')) LIKE LOWER(CONCAT('%', :keyword, '%'))
+              )
+          )
+        )
+        AND (:hasCategoryFilter = false OR c.id IN :categoryIds)
+        AND (:brandId IS NULL OR b.id = :brandId)
+        AND EXISTS (
+          SELECT 1 FROM ProductVariant v
+          JOIN Inventory i ON i.productVariant.id = v.id
+          WHERE v.product.id = p.id
+            AND v.status = com.zone.agri.entity.enums.VariantStatus.ACTIVE
+            AND (:hasPackagingFilter = false OR EXISTS (
+              SELECT 1 FROM SKUAttributeValue savp
+              WHERE savp.sku.id = v.id
+                AND savp.attribute.status = com.zone.agri.entity.enums.AttributeStatus.ACTIVE
+                AND (
+                  (:hasPackagingValueIdFilter = true AND savp.attributeValue.id IN :packagingValueIds)
+                  OR LOWER(savp.attributeValue.value) IN :packagingValues
+                )
+            ))
+            AND NOT EXISTS (
+              SELECT 1 FROM SKUAttributeValue sav
+              WHERE sav.sku.id = v.id
+                AND sav.attribute.status = com.zone.agri.entity.enums.AttributeStatus.INACTIVE
+            )
+            AND i.branch.status = com.zone.agri.entity.enums.BranchStatus.ACTIVE
+            AND i.quantity > 0
+        )
+      ORDER BY p.createdAt DESC
+      """, countQuery = """
+      SELECT COUNT(p) FROM Product p
+      JOIN p.category c
+      LEFT JOIN p.brand b
+      WHERE p.status = com.zone.agri.entity.enums.ProductStatus.ACTIVE
+        AND c.status = com.zone.agri.entity.enums.CategoryStatus.ACTIVE
+        AND (
+          :keyword IS NULL
+          OR LOWER(p.name) LIKE LOWER(CONCAT('%', :keyword, '%'))
+          OR LOWER(c.name) LIKE LOWER(CONCAT('%', :keyword, '%'))
+          OR LOWER(COALESCE(b.name, '')) LIKE LOWER(CONCAT('%', :keyword, '%'))
+          OR (:hasKeywordCategoryFilter = true AND c.id IN :keywordCategoryIds)
+          OR (:hasKeywordBrandFilter = true AND b.id IN :keywordBrandIds)
+          OR EXISTS (
+            SELECT 1 FROM ProductVariant kv
+            WHERE kv.product.id = p.id
+              AND (
+                LOWER(kv.sku) LIKE LOWER(CONCAT('%', :keyword, '%'))
+                OR LOWER(COALESCE(kv.barcode, '')) LIKE LOWER(CONCAT('%', :keyword, '%'))
+              )
+          )
+        )
+        AND (:hasCategoryFilter = false OR c.id IN :categoryIds)
+        AND (:brandId IS NULL OR b.id = :brandId)
+        AND EXISTS (
+          SELECT 1 FROM ProductVariant v
+          JOIN Inventory i ON i.productVariant.id = v.id
+          WHERE v.product.id = p.id
+            AND v.status = com.zone.agri.entity.enums.VariantStatus.ACTIVE
+            AND (:hasPackagingFilter = false OR EXISTS (
+              SELECT 1 FROM SKUAttributeValue savp
+              WHERE savp.sku.id = v.id
+                AND savp.attribute.status = com.zone.agri.entity.enums.AttributeStatus.ACTIVE
+                AND (
+                  (:hasPackagingValueIdFilter = true AND savp.attributeValue.id IN :packagingValueIds)
+                  OR LOWER(savp.attributeValue.value) IN :packagingValues
+                )
+            ))
+            AND NOT EXISTS (
+              SELECT 1 FROM SKUAttributeValue sav
+              WHERE sav.sku.id = v.id
+                AND sav.attribute.status = com.zone.agri.entity.enums.AttributeStatus.INACTIVE
+            )
+            AND i.branch.status = com.zone.agri.entity.enums.BranchStatus.ACTIVE
+            AND i.quantity > 0
+        )
+      """)
+  Page<Long> findPublicProductIdsFiltered(
+      @Param("keyword") String keyword,
+      @Param("hasKeywordCategoryFilter") boolean hasKeywordCategoryFilter,
+      @Param("keywordCategoryIds") List<Long> keywordCategoryIds,
+      @Param("hasKeywordBrandFilter") boolean hasKeywordBrandFilter,
+      @Param("keywordBrandIds") List<Long> keywordBrandIds,
+      @Param("hasCategoryFilter") boolean hasCategoryFilter,
+      @Param("categoryIds") List<Long> categoryIds,
+      @Param("brandId") Long brandId,
+      @Param("hasPackagingFilter") boolean hasPackagingFilter,
+      @Param("hasPackagingValueIdFilter") boolean hasPackagingValueIdFilter,
+      @Param("packagingValueIds") List<Long> packagingValueIds,
+      @Param("packagingValues") List<String> packagingValues,
       Pageable pageable);
 
   /**
@@ -235,8 +348,15 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
   // Kiểm tra xem danh mục có sản phẩm không (phục vụ logic xóa)
   boolean existsByCategoryId(Long categoryId);
 
+  // Kiểm tra xem thương hiệu có sản phẩm không (phục vụ logic xóa)
+  boolean existsByBrandId(Long brandId);
+
   @Query("SELECT COUNT(p) FROM Product p WHERE p.status = 'ACTIVE'")
   long countActiveProducts();
+
+  boolean existsByNameIgnoreCase(String name);
+
+  boolean existsByNameIgnoreCaseAndIdNot(String name, Long id);
 
   // 3. Tỷ trọng doanh thu theo danh mục (Admin - Toàn hệ thống)
   interface CategorySalesProjection {

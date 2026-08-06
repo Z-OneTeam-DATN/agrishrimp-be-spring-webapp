@@ -8,15 +8,17 @@ import java.util.List;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import com.zone.agri.entity.Order;
 import com.zone.agri.entity.enums.OrderStatus;
+import com.zone.agri.entity.enums.PaymentStatus;
 
 @Repository
-public interface OrderRepository extends JpaRepository<Order, Long> {
+public interface OrderRepository extends JpaRepository<Order, Long>, JpaSpecificationExecutor<Order> {
 
        interface LegacyFinancialOrderProjection {
               Long getId();
@@ -73,21 +75,66 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
        boolean existsCompletedOrderWithProduct(@Param("orderId") Long orderId, @Param("userId") Long userId,
                      @Param("productId") Long productId);
 
+       // "Completed" duoc dinh nghia giong het ProductRecommendationBatchService.fetchCompletedBasketRows
+       // (UNION order_items + sub_order_items, ca 2 deu yeu cau status COMPLETED) — de nhat quan voi chinh
+       // du lieu product_recommendations dang doc, tranh lech dinh nghia "da mua" giua 2 noi.
+       @Query(value = """
+                     SELECT DISTINCT basket.product_id
+                     FROM (
+                         SELECT pv.product_id AS product_id
+                         FROM orders o
+                         JOIN order_items oi ON oi.order_id = o.id
+                         JOIN product_variants pv ON pv.id = oi.product_variant_id
+                         WHERE o.status = 'COMPLETED' AND o.user_id = :userId
+                         UNION
+                         SELECT pv.product_id AS product_id
+                         FROM sub_orders so
+                         JOIN orders o ON o.id = so.order_id
+                         JOIN sub_order_items soi ON soi.sub_order_id = so.id
+                         JOIN product_variants pv ON pv.id = soi.product_variant_id
+                         WHERE o.status = 'COMPLETED' AND so.status = 'COMPLETED' AND o.user_id = :userId
+                     ) basket
+                     WHERE basket.product_id IS NOT NULL
+                     """, nativeQuery = true)
+       List<Long> findDistinctPurchasedProductIdsByUserId(@Param("userId") Long userId);
+
        List<Order> findByUserIdOrderByCreatedAtDesc(Long userId);
 
        List<Order> findByStatusAndCreatedAtBefore(OrderStatus status, LocalDateTime createdAt);
+
+       List<Order> findByStatusAndUpdatedAtBefore(OrderStatus status, LocalDateTime updatedAt);
+
+       @Query("""
+              SELECT o
+              FROM Order o
+              WHERE o.status = com.zone.agri.entity.enums.OrderStatus.PENDING
+                AND o.autoApproveAt IS NOT NULL
+                AND o.autoApproveAt <= :now
+                AND (o.autoApprovalPaused IS NULL OR o.autoApprovalPaused = false)
+              ORDER BY o.autoApproveAt ASC
+              """)
+       List<Order> findOrdersReadyForAutoApproval(@Param("now") LocalDateTime now);
 
        List<Order> findByUserIdAndStatusOrderByCreatedAtDesc(Long userId, OrderStatus status);
 
        List<Order> findByStatusOrderByCreatedAtDesc(OrderStatus status);
 
-       @Query("SELECT o FROM Order o WHERE " +
-                     "(:status IS NULL OR o.status = :status) AND " +
-                     "(:search IS NULL OR LOWER(o.code) LIKE LOWER(CONCAT('%', LOWER(:search), '%')) OR LOWER(o.user.fullName) LIKE LOWER(CONCAT('%', LOWER(:search), '%'))) "
-                     +
-                     "ORDER BY o.createdAt DESC")
-       Page<Order> findAdminOrdersWithFilter(@Param("status") OrderStatus status, @Param("search") String search,
-                     Pageable pageable);
+       @Query("""
+                     SELECT o
+                     FROM Order o
+                     WHERE o.paymentMethod = com.zone.agri.entity.enums.PaymentMethod.PAYOS
+                       AND o.paymentStatus IN (
+                            com.zone.agri.entity.enums.PaymentStatus.UNPAID,
+                            com.zone.agri.entity.enums.PaymentStatus.PENDING
+                       )
+                       AND o.status NOT IN (
+                            com.zone.agri.entity.enums.OrderStatus.CANCELLED,
+                            com.zone.agri.entity.enums.OrderStatus.RETURNED,
+                            com.zone.agri.entity.enums.OrderStatus.COMPLETED
+                       )
+                     ORDER BY o.createdAt ASC
+                     """)
+       Page<Order> findPendingPayosOrdersForReconcile(Pageable pageable);
 
        @Query("SELECT o FROM Order o WHERE o.status = :status " +
                      "AND (:branchId IS NULL OR o.branch.id = :branchId) " +
@@ -100,7 +147,8 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
                      "AND (:branchId IS NULL OR o.branch.id = :branchId)")
        long countByStatus(@Param("status") OrderStatus status, @Param("branchId") Long branchId);
 
-       @Query("SELECT o FROM Order o WHERE (:branchId IS NULL OR o.branch.id = :branchId) ORDER BY o.createdAt DESC")
+       @Query("SELECT o FROM Order o LEFT JOIN FETCH o.user " +
+                     "WHERE (:branchId IS NULL OR o.branch.id = :branchId) ORDER BY o.createdAt DESC")
        List<Order> findRecentOrders(@Param("branchId") Long branchId, Pageable pageable);
 
        List<Order> findAllByOrderByCreatedAtDesc();
@@ -108,6 +156,13 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
        @Query("SELECT COUNT(o) FROM Order o WHERE o.status <> com.zone.agri.entity.enums.OrderStatus.CANCELLED " +
                      "AND (:branchId IS NULL OR o.branch.id = :branchId)")
        long countAllOrdersExceptCancelled(@Param("branchId") Long branchId);
+
+       // Đếm luỹ kế tính đến 1 thời điểm — dùng để so sánh "Tổng đơn hàng" hôm nay với hôm qua.
+       @Query("SELECT COUNT(o) FROM Order o WHERE o.status <> com.zone.agri.entity.enums.OrderStatus.CANCELLED " +
+                     "AND o.createdAt <= :endDate " +
+                     "AND (:branchId IS NULL OR o.branch.id = :branchId)")
+       long countAllOrdersExceptCancelledBefore(@Param("endDate") LocalDateTime endDate,
+                     @Param("branchId") Long branchId);
 
        @Query("SELECT COUNT(o) FROM Order o WHERE o.status IN (com.zone.agri.entity.enums.OrderStatus.COMPLETED, com.zone.agri.entity.enums.OrderStatus.RECEIVED, com.zone.agri.entity.enums.OrderStatus.SHIPPING) "
                      +
@@ -136,6 +191,47 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
        default BigDecimal sumTotalRevenue(LocalDateTime startDate, LocalDateTime endDate, Long branchId) {
               return sumRecognizedFinalAmount(startDate, endDate, branchId);
        }
+
+       // Đơn hàng cũ (trước khi có luồng tách đơn theo chi nhánh) không có SubOrder nào —
+       // finalAmount của Order đã là số cuối cùng đúng (đã trừ giảm giá, đã gồm ship) nên dùng trực tiếp.
+       @Query("SELECT SUM(o.finalAmount) FROM Order o WHERE o.status IN (com.zone.agri.entity.enums.OrderStatus.COMPLETED, com.zone.agri.entity.enums.OrderStatus.RECEIVED, com.zone.agri.entity.enums.OrderStatus.SHIPPING) "
+                     +
+                     "AND o.subOrders IS EMPTY " +
+                     "AND o.createdAt BETWEEN :startDate AND :endDate " +
+                     "AND (:branchId IS NULL OR o.branch.id = :branchId)")
+       BigDecimal sumLegacyRevenue(@Param("startDate") LocalDateTime startDate,
+                     @Param("endDate") LocalDateTime endDate,
+                     @Param("branchId") Long branchId);
+
+       interface LegacyRevenueRow {
+              LocalDateTime getCreatedAt();
+
+              BigDecimal getFinalAmount();
+       }
+
+       // Trả về từng dòng thay vì 1 số tổng — cho phép tính "tổng đến hôm nay" và "tổng đến hôm qua"
+       // từ CÙNG 1 lần fetch (lọc theo createdAt trong Java), thay vì phải quét lại toàn bộ lịch sử
+       // 2 lần trên DB. Quan trọng vì DB chạy qua SSH tunnel từ xa, mỗi round-trip đều tốn độ trễ.
+       @Query("SELECT o.createdAt AS createdAt, COALESCE(o.finalAmount, 0) AS finalAmount " +
+                     "FROM Order o WHERE o.status IN (com.zone.agri.entity.enums.OrderStatus.COMPLETED, com.zone.agri.entity.enums.OrderStatus.RECEIVED, com.zone.agri.entity.enums.OrderStatus.SHIPPING) "
+                     +
+                     "AND o.subOrders IS EMPTY " +
+                     "AND o.createdAt BETWEEN :startDate AND :endDate " +
+                     "AND (:branchId IS NULL OR o.branch.id = :branchId)")
+       List<LegacyRevenueRow> findLegacyRevenueRows(@Param("startDate") LocalDateTime startDate,
+                     @Param("endDate") LocalDateTime endDate,
+                     @Param("branchId") Long branchId);
+
+       @Query("SELECT CAST(o.createdAt AS date) as date, SUM(o.finalAmount) as revenue, COUNT(o) as orderCount " +
+                     "FROM Order o WHERE o.status IN (com.zone.agri.entity.enums.OrderStatus.COMPLETED, com.zone.agri.entity.enums.OrderStatus.RECEIVED, com.zone.agri.entity.enums.OrderStatus.SHIPPING) "
+                     +
+                     "AND o.subOrders IS EMPTY " +
+                     "AND o.createdAt BETWEEN :startDate AND :endDate " +
+                     "AND (:branchId IS NULL OR o.branch.id = :branchId) " +
+                     "GROUP BY CAST(o.createdAt AS date)")
+       List<Object[]> getLegacyDailyStats(@Param("startDate") LocalDateTime startDate,
+                     @Param("endDate") LocalDateTime endDate,
+                     @Param("branchId") Long branchId);
 
        @Query("SELECT SUM(ABS(it.quantityChange) * i.importPrice) " +
                      "FROM Order o " +
@@ -223,12 +319,90 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
                      WHERE o.subOrders IS EMPTY
                        AND (:branchId IS NULL OR o.branch.id = :branchId)
                        AND (
-                            (o.receivedAt IS NOT NULL AND o.receivedAt <= :endDate)
-                            OR (o.completedAt IS NOT NULL AND o.completedAt <= :endDate)
-                            OR (o.returnedAt IS NOT NULL AND o.returnedAt <= :endDate)
+                            (
+                                CASE
+                                    WHEN o.receivedAt IS NULL THEN o.completedAt
+                                    WHEN o.completedAt IS NULL THEN o.receivedAt
+                                    WHEN o.receivedAt <= o.completedAt THEN o.receivedAt
+                                    ELSE o.completedAt
+                                END
+                            ) BETWEEN :startDate AND :endDate
+                            OR (o.returnedAt IS NOT NULL AND o.returnedAt BETWEEN :startDate AND :endDate)
                        )
                      """)
        List<LegacyFinancialOrderProjection> findLegacyFinancialOrders(
-                     @Param("endDate") LocalDateTime endDate,
-                     @Param("branchId") Long branchId);
+                      @Param("startDate") LocalDateTime startDate,
+                      @Param("endDate") LocalDateTime endDate,
+                      @Param("branchId") Long branchId);
+
+       // Chỉ tính đơn COD chưa đối soát — đúng như nhãn UI "Dòng tiền thu dự kiến (COD chưa đối
+       // soát)". Trước đây cộng mọi đơn UNPAID bất kể phương thức thanh toán, kể cả chuyển khoản
+       // chưa trả (không phải "sắp thu được tiền"), khiến ước tính dòng tiền vào bị thổi phồng.
+       @Query("SELECT COALESCE(SUM(o.finalAmount), 0) FROM Order o " +
+              "WHERE o.paymentStatus = com.zone.agri.entity.enums.PaymentStatus.UNPAID " +
+              "AND o.paymentMethod = com.zone.agri.entity.enums.PaymentMethod.COD " +
+              "AND o.status NOT IN (com.zone.agri.entity.enums.OrderStatus.CANCELLED, com.zone.agri.entity.enums.OrderStatus.RETURNED) " +
+              "AND (:branchId IS NULL OR o.branch.id = :branchId)")
+       BigDecimal sumUnpaidOrdersAmount(@Param("branchId") Long branchId);
+
+    @Query("""
+        SELECT COALESCE(SUM(o.finalAmount), 0)
+        FROM Order o
+        WHERE o.paymentStatus = com.zone.agri.entity.enums.PaymentStatus.PAID
+          AND o.status NOT IN (com.zone.agri.entity.enums.OrderStatus.CANCELLED, com.zone.agri.entity.enums.OrderStatus.RETURNED)
+          AND (:branchId IS NULL OR o.branch.id = :branchId)
+          AND o.subOrders IS EMPTY
+          AND (
+            CASE WHEN o.paymentMethod = com.zone.agri.entity.enums.PaymentMethod.COD
+                 THEN COALESCE(o.receivedAt, o.completedAt, o.createdAt)
+                 ELSE o.createdAt
+            END < :startDate
+          )
+    """)
+    BigDecimal sumPaidLegacyOrdersAmountBefore(
+            @Param("startDate") LocalDateTime startDate,
+            @Param("branchId") Long branchId);
+
+    // JOIN FETCH user/branch — mapOrderToCashbookEntry() đọc order.getUser()/getBranch() cho
+    // mỗi dòng; thiếu fetch join gây N+1 lazy-load (1 query phụ mỗi đơn) khi sinh sổ quỹ.
+    @Query("""
+        SELECT o
+        FROM Order o
+        LEFT JOIN FETCH o.user
+        LEFT JOIN FETCH o.branch
+        WHERE o.paymentStatus = com.zone.agri.entity.enums.PaymentStatus.PAID
+          AND o.status NOT IN (com.zone.agri.entity.enums.OrderStatus.CANCELLED, com.zone.agri.entity.enums.OrderStatus.RETURNED)
+          AND (:branchId IS NULL OR o.branch.id = :branchId)
+          AND o.subOrders IS EMPTY
+          AND (
+            CASE WHEN o.paymentMethod = com.zone.agri.entity.enums.PaymentMethod.COD
+                 THEN COALESCE(o.receivedAt, o.completedAt, o.createdAt)
+                 ELSE o.createdAt
+            END BETWEEN :startDate AND :endDate
+          )
+    """)
+    List<Order> findPaidLegacyOrdersInRange(
+            @Param("startDate") LocalDateTime startDate,
+            @Param("endDate") LocalDateTime endDate,
+            @Param("branchId") Long branchId);
+
+    @Query("""
+        SELECT o
+        FROM Order o
+        LEFT JOIN FETCH o.user
+        LEFT JOIN FETCH o.branch
+        WHERE o.paymentStatus = com.zone.agri.entity.enums.PaymentStatus.PAID
+          AND o.status NOT IN (com.zone.agri.entity.enums.OrderStatus.CANCELLED, com.zone.agri.entity.enums.OrderStatus.RETURNED)
+          AND (:branchId IS NULL OR o.branch.id = :branchId)
+          AND o.subOrders IS EMPTY
+          AND (
+            CASE WHEN o.paymentMethod = com.zone.agri.entity.enums.PaymentMethod.COD
+                 THEN COALESCE(o.receivedAt, o.completedAt, o.createdAt)
+                 ELSE o.createdAt
+            END <= :endDate
+          )
+    """)
+    List<Order> findPaidLegacyOrdersBefore(
+            @Param("endDate") LocalDateTime endDate,
+            @Param("branchId") Long branchId);
 }

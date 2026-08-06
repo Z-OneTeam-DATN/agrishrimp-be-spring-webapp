@@ -186,12 +186,12 @@ public class PublicProductService {
                 .slug(product.getSlug())
                 .shortDesc(product.getShortDesc())
                 .description(product.getDescription())
-                .origin(product.getOrigin())
                 .baseSku(product.getBaseSku())
                 .soldCount(soldCountMap.getOrDefault(product.getId(), 0L))
                 .ratingAverage(product.getRatingAverage())
                 .reviewCount(product.getReviewCount())
                 .category(categoryInfo)
+                .supplierName(product.getBrand() != null ? product.getBrand().getName() : null)
                 .brandName(product.getBrand() != null ? product.getBrand().getName() : null)
                 .imageUrls(imageUrls)
                 .variants(variants)
@@ -247,7 +247,6 @@ public class PublicProductService {
                 .unit("Cái") // Giá trị mặc định do entity không còn lưu unit
                 .imageUrl(variant.getImageUrl())
                 .attributeValues(attrs)
-                .unitConversions(Collections.emptyList()) // Ẩn quy đổi
                 .build();
     }
 

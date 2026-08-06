@@ -19,7 +19,6 @@ public class PublicProductResponse {
     private String slug;
     private String shortDesc;
     private String description;
-    private String origin;
     private String baseSku;
     private Long soldCount;
     private Float ratingAverage;
@@ -28,6 +27,7 @@ public class PublicProductResponse {
     /** Danh mục — chỉ trả id + name, không trả status hay dữ liệu nội bộ */
     private CategoryInfo category;
 
+    private String supplierName;
     private String brandName;
 
     /** Danh sách URL ảnh sản phẩm chính */

@@ -54,8 +54,15 @@ public class ProductVariantService {
                     .mapToInt(i -> Objects.requireNonNullElse(i.getQuantity(), 0))
                     .sum();
 
-            // Định mức (Threshold): 10 theo yêu cầu
-            int currentThreshold = threshold;
+            // Định mức (Threshold): dùng đúng Inventory.minStock đã cấu hình cho biến thể/chi
+            // nhánh này (lấy giá trị lớn nhất nếu có nhiều lô cùng chi nhánh); chỉ rơi về mặc định
+            // 10 khi chưa ai cấu hình minStock cho bản ghi kho nào — trước đây luôn cứng 10 dù DB
+            // đã có sẵn cột minStock, khiến cấu hình định mức riêng từng SKU bị bỏ qua hoàn toàn.
+            int currentThreshold = inventories.stream()
+                    .map(Inventory::getMinStock)
+                    .filter(Objects::nonNull)
+                    .max(Integer::compareTo)
+                    .orElse(threshold);
 
             // Ngày nhập hàng gần nhất
             LocalDateTime lastImport = inventories.stream()

@@ -14,6 +14,7 @@ import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
+import jakarta.persistence.Version;
 import lombok.AccessLevel;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -32,8 +33,8 @@ import org.springframework.data.jpa.domain.support.AuditingEntityListener;
 import java.time.LocalDateTime;
 
 @Entity
-@Table(name = "supplier_product_catalogs", uniqueConstraints = @UniqueConstraint(name = "uq_supplier_product_catalog", columnNames = {
-        "supplier_id", "product_id" }))
+@Table(name = "supplier_product_catalogs", uniqueConstraints = @UniqueConstraint(name = "uq_supplier_product_catalog_variant", columnNames = {
+        "supplier_id", "product_variant_id" }))
 @EntityListeners(AuditingEntityListener.class)
 @Getter
 @Setter
@@ -54,10 +55,10 @@ public class SupplierProductCatalog {
     Supplier supplier;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "product_id", nullable = false)
+    @JoinColumn(name = "product_variant_id", nullable = false)
     @ToString.Exclude
     @EqualsAndHashCode.Exclude
-    Product product;
+    ProductVariant productVariant;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "status", length = 20, nullable = false)
@@ -65,6 +66,13 @@ public class SupplierProductCatalog {
 
     @Column(name = "note", columnDefinition = "TEXT")
     String note;
+
+    @Column(name = "status_changed_at")
+    LocalDateTime statusChangedAt;
+
+    @Version
+    @Column(name = "version", nullable = false, columnDefinition = "int default 0")
+    Integer version;
 
     @CreationTimestamp
     @Column(name = "created_at", updatable = false)

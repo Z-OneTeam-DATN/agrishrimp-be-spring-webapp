@@ -14,12 +14,15 @@ public class DailyBusinessResultsResponse {
     private BigDecimal todayRevenue;
     private BigDecimal yesterdayRevenue;
     private double revenueChangePercent;
+    private boolean revenueIsNew;
 
     private BigDecimal todayProfit;
     private BigDecimal yesterdayProfit;
     private double profitChangePercent;
+    private boolean profitIsNew;
 
     private long todayOrders;
     private long yesterdayOrders;
     private double orderChangePercent;
+    private boolean orderIsNew;
 }

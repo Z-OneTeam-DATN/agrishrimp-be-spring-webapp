@@ -37,6 +37,12 @@ public class VoucherController {
         return ResponseEntity.ok(ApiResponse.success(data, "Lấy danh sách voucher công khai thành công"));
     }
 
+    @Operation(summary = "Lay voucher cong khai theo ma", description = "Lay thong tin chi tiet cua voucher cong khai theo ma.")
+    @GetMapping("/public/code/{code}")
+    public ResponseEntity<ApiResponse<VoucherResponse>> getPublicVoucherByCode(@PathVariable String code) {
+        VoucherResponse data = voucherService.getVoucherByCode(code);
+        return ResponseEntity.ok(ApiResponse.success(data, "Lay thong tin voucher thanh cong"));
+    }
 
     // ==========================================
     // API QUẢN TRỊ (YÊU CẦU QUYỀN ADMIN)

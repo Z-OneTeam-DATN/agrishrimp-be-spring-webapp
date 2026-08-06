@@ -2,6 +2,7 @@ package com.zone.agri.entity;
 
 import com.fasterxml.jackson.annotation.JsonBackReference;
 import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.zone.agri.converter.UserStatusConverter;
 import com.zone.agri.entity.enums.AuthProvider;
 import com.zone.agri.entity.enums.Gender;
 import com.zone.agri.entity.enums.UserStatus;
@@ -58,12 +59,20 @@ public class User extends BaseEntity {
     @Column(columnDefinition = "TINYINT")
     private Gender gender;
 
-    @Enumerated(EnumType.STRING)
-    @Column(columnDefinition = "ENUM('ACTIVE', 'INACTIVE', 'BANNED', 'UNVERIFIED')")
+    @Convert(converter = UserStatusConverter.class)
+    @Column(length = 20)
     private UserStatus status;
 
     @Column(name = "deleted_at")
     private LocalDateTime deletedAt;
+
+    // Tang moi lan doi mat khau (doi mat khau khi da dang nhap, hoac dat lai mat khau qua email)
+    // de vo hieu hoa moi access/refresh token da phat hanh truoc do — buoc dang nhap lai tren
+    // TAT CA thiet bi. JwtUtils nhung gia tri nay vao claim cua token; JWTFilter va endpoint
+    // /auth/refresh doi chieu voi gia tri hien tai trong DB, lech la coi nhu token het hieu luc.
+    @Builder.Default
+    @Column(name = "token_version", nullable = false, columnDefinition = "int default 0")
+    private Integer tokenVersion = 0;
 
     // --- KHÓA NGOẠI ---
 
@@ -84,9 +93,6 @@ public class User extends BaseEntity {
     @EqualsAndHashCode.Exclude
     @JsonIgnore
     private Role role;
-
-    @Column(name = "zalo_id", unique = true)
-    private String zaloId;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "auth_provider")

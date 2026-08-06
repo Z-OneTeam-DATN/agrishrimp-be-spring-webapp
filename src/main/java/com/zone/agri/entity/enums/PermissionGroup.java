@@ -8,6 +8,8 @@ public enum PermissionGroup {
     PRODUCT_CATALOG,
     INVENTORY,
     INVENTORY_TRANSACTION,
+    // Legacy value still present in some permission rows.
+    AI_KNOWLEDGE,
     PARTNER,
     SHIPPING,
     SETTING,

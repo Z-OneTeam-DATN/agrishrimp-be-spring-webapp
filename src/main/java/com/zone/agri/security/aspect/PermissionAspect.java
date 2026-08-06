@@ -1,5 +1,6 @@
 package com.zone.agri.security.aspect;
 
+import com.zone.agri.common.RoleUtils;
 import com.zone.agri.exception.Forbidden;
 import com.zone.agri.exception.SignInRequiredException;
 import com.zone.agri.security.annotation.RequirePermission;
@@ -56,7 +57,7 @@ public class PermissionAspect {
                 .collect(Collectors.toSet());
 
         // ADMIN bypass: ROLE_ADMIN được qua mọi permission check
-        if (userAuthorities.contains("ROLE_ADMIN")) return;
+        if (RoleUtils.hasAdminLikeAuthority(userAuthorities)) return;
 
         // 4. Kiểm tra OR logic — có ít nhất một permission là đủ
         boolean hasPermission = Arrays.stream(requiredCodes)

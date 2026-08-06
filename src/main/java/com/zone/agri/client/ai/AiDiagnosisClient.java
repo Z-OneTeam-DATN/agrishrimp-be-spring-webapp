@@ -1,6 +1,6 @@
 package com.zone.agri.client.ai;
 
-import com.zone.agri.dto.miniapp.ai.AiPredictResponse;
+import com.zone.agri.dto.ai.AiPredictResponse;
 import com.zone.agri.exception.BadRequestException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -95,7 +95,7 @@ public class AiDiagnosisClient {
             log.warn("[AI-Diagnosis] predict trả về response null hoặc thiếu status: {}", result);
             throw new BadRequestException("AI service trả về kết quả không hợp lệ. Vui lòng thử lại.");
         }
-        // Trả nguyên response — MiniAppDiagnosisService sẽ phân nhánh theo status
+        // Trả nguyên response — AiDoctorDiagnosisService sẽ phân nhánh theo status
         // (BLURRY, NON_SHRIMP trả success=false nhưng status hợp lệ)
         return result;
     }

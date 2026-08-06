@@ -17,4 +17,19 @@ public class OrderCompletionScheduler {
         log.info("Running scheduled delivery completion job");
         orderService.autoCompleteDeliveredOrders();
     }
+
+    @Scheduled(fixedDelayString = "${order.payment-expiry-check-delay-ms:60000}")
+    public void expireUnpaidPaymentOrders() {
+        orderService.expireUnpaidPaymentOrders();
+    }
+
+    @Scheduled(fixedDelayString = "${order.auto-approve-check-delay-ms:30000}")
+    public void autoApproveEligibleOrders() {
+        orderService.autoApproveEligibleOrders();
+    }
+
+    @Scheduled(fixedDelayString = "${order.payos-reconcile-delay-ms:45000}")
+    public void reconcilePendingPayOSPayments() {
+        orderService.reconcilePendingPayOSPayments();
+    }
 }

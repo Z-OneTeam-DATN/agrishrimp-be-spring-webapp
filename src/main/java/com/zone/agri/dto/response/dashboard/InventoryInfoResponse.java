@@ -15,4 +15,7 @@ public class InventoryInfoResponse {
     private Long lowStockCount;
     private Long outOfStockCount;
     private BigDecimal totalInventoryValue;
+
+    private double valueChangePercent;
+    private boolean valueIsNew;
 }

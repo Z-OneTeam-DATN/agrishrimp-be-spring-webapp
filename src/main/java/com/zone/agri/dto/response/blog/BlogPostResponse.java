@@ -18,6 +18,7 @@ public class BlogPostResponse {
     private String content;
     private String thumbnailUrl;
     private String status;
+    private String reviewNote;
     private Long viewCount;
     private LocalDateTime publishedAt;
     private LocalDateTime createdAt;
@@ -46,6 +47,7 @@ public class BlogPostResponse {
         private Long id;
         private String name;
         private String slug;
+        private Long usageCount;
     }
 
     @Data @Builder @NoArgsConstructor @AllArgsConstructor

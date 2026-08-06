@@ -113,6 +113,9 @@ public class UserService {
 
         // 3. Mã hóa và lưu mật khẩu mới
         user.setPasswordHash(passwordEncoder.encode(request.getNewPassword()));
+        // 4. Tang tokenVersion de vo hieu hoa moi access/refresh token da phat hanh truoc do —
+        // buoc dang nhap lai tren tat ca thiet bi (bao gom ca phien hien tai sau request nay).
+        user.setTokenVersion((user.getTokenVersion() == null ? 0 : user.getTokenVersion()) + 1);
         userRepository.save(user);
 
         log.info("User {} đã đổi mật khẩu thành công", contact);
@@ -122,14 +125,17 @@ public class UserService {
     // QUẢN LÝ NHÂN VIÊN (DÀNH CHO ADMIN)
     // ==============================================================
 
-    public Page<UserResponse> getUsers(String keyword, Long roleId, Long branchId, String status, Pageable pageable) {
+    public Page<UserResponse> getUsers(String keyword, Long roleId, Long branchId, String permissionCode, String status, Pageable pageable) {
         UserStatus userStatus = null;
         if (status != null && !status.equalsIgnoreCase("all")) {
             try {
                 userStatus = UserStatus.valueOf(status.toUpperCase());
             } catch (IllegalArgumentException ignored) {}
         }
-        return userRepository.findAllWithFilter(keyword, roleId, branchId, userStatus, pageable)
+        String normalizedPermissionCode = permissionCode != null && !permissionCode.isBlank()
+                ? permissionCode.trim().toUpperCase()
+                : null;
+        return userRepository.findAllWithFilter(keyword, roleId, branchId, normalizedPermissionCode, userStatus, pageable)
                 .map(this::mapUserToResponse);
     }
 

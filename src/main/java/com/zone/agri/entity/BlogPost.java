@@ -56,6 +56,10 @@ public class BlogPost {
     @Column(name = "updated_at")
     LocalDateTime updatedAt;
 
+    /** Ly do tu choi / yeu cau chinh sua tu admin — hien cho tac gia xem tren form sua. Null khi chua tung bi tu choi. */
+    @Column(name = "review_note", columnDefinition = "TEXT")
+    String reviewNote;
+
     // --- Quan hệ ---
 
     @ManyToOne(fetch = FetchType.LAZY)
@@ -87,6 +91,13 @@ public class BlogPost {
     @EqualsAndHashCode.Exclude
     @Builder.Default
     List<BlogPostProduct> relatedProducts = new ArrayList<>();
+
+    @OneToMany(mappedBy = "post", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
+    @OrderBy("createdAt ASC, id ASC")
+    @ToString.Exclude
+    @EqualsAndHashCode.Exclude
+    @Builder.Default
+    List<BlogComment> comments = new ArrayList<>();
 
     @PrePersist
     void onCreate() {

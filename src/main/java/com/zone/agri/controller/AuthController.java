@@ -1,10 +1,10 @@
 package com.zone.agri.controller;
 
-import com.zone.agri.dto.request.auth.ZaloAuthRequest;
 import com.zone.agri.dto.response.auth.AuthResponse;
-import com.zone.agri.dto.response.auth.ZaloAuthResponse;
+import com.zone.agri.dto.request.auth.ForgotPasswordRequest;
 import com.zone.agri.dto.request.auth.GoogleLoginRequest;
 import com.zone.agri.dto.request.auth.LoginRequest;
+import com.zone.agri.dto.request.auth.ResetPasswordRequest;
 import com.zone.agri.dto.request.auth.SignupRequest;
 import com.zone.agri.dto.request.auth.TokenRefreshRequest;
 import com.zone.agri.dto.response.common.MessageResponse;
@@ -124,6 +124,38 @@ public class AuthController {
     }
 
     // ---------------------------------------------------------
+    // POST /api/auth/forgot-password — Gửi email chứa link đặt lại mật khẩu
+    // ---------------------------------------------------------
+    @Operation(summary = "Quên mật khẩu", description = "Gửi email chứa liên kết đặt lại mật khẩu (hiệu lực 15 phút) nếu email tồn tại trong hệ thống.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Yêu cầu đã được ghi nhận"),
+            @ApiResponse(responseCode = "400", description = "Captcha thất bại hoặc email không hợp lệ"),
+    })
+    @PostMapping("/forgot-password")
+    public ResponseEntity<MessageResponse> forgotPassword(
+            @Valid @RequestBody ForgotPasswordRequest request,
+            HttpServletRequest httpServletRequest
+    ) {
+        authService.forgotPassword(request, httpServletRequest);
+        return ResponseEntity.ok(new MessageResponse(
+                "Nếu email tồn tại trong hệ thống, chúng tôi đã gửi hướng dẫn đặt lại mật khẩu."));
+    }
+
+    // ---------------------------------------------------------
+    // POST /api/auth/reset-password — Đặt lại mật khẩu bằng token từ email
+    // ---------------------------------------------------------
+    @Operation(summary = "Đặt lại mật khẩu", description = "Đặt mật khẩu mới bằng token nhận được từ email quên mật khẩu.")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Đặt lại mật khẩu thành công"),
+            @ApiResponse(responseCode = "400", description = "Token không hợp lệ, đã hết hạn, hoặc mật khẩu xác nhận không khớp"),
+    })
+    @PostMapping("/reset-password")
+    public ResponseEntity<MessageResponse> resetPassword(@Valid @RequestBody ResetPasswordRequest request) {
+        authService.resetPassword(request);
+        return ResponseEntity.ok(new MessageResponse("Đặt lại mật khẩu thành công. Vui lòng đăng nhập lại."));
+    }
+
+    // ---------------------------------------------------------
     // POST /api/auth/google-login — Đăng nhập bằng Google
     // ---------------------------------------------------------
     @Operation(summary = "Đăng nhập Google", description = "Xác thực qua Google Access Token. Tự động tạo tài khoản nếu chưa tồn tại.")
@@ -140,22 +172,6 @@ public class AuthController {
         AuthResponse authResponse = authService.loginWithGoogle(request);
         cookieUtils.setAuthCookies(response, authResponse.getAccessToken(), authResponse.getRefreshToken());
         return ResponseEntity.ok(authResponse);
-    }
-
-    // ---------------------------------------------------------
-    // POST /api/auth/zalo/auth — Đăng nhập Zalo Mini App
-    // ---------------------------------------------------------
-    @Operation(summary = "Đăng nhập Zalo Mini App",
-               description = "Xác thực người dùng từ Zalo Mini App bằng userId + zaloAccessToken + phoneToken. Tự động tạo tài khoản nếu chưa tồn tại.")
-    @ApiResponses({
-            @ApiResponse(responseCode = "200", description = "Đăng nhập thành công", content = @Content(schema = @Schema(implementation = ZaloAuthResponse.class))),
-            @ApiResponse(responseCode = "400", description = "Token không hợp lệ, userId không khớp, hoặc không lấy được SĐT"),
-            @ApiResponse(responseCode = "401", description = "Tài khoản bị vô hiệu hoá hoặc chưa xác thực"),
-    })
-    @PostMapping("/zalo/auth")
-    public ResponseEntity<ZaloAuthResponse> zaloAuth(@Valid @RequestBody ZaloAuthRequest request) {
-        ZaloAuthResponse response = authService.loginWithZaloUserInfo(request);
-        return ResponseEntity.ok(response);
     }
 
     // ---------------------------------------------------------
@@ -228,6 +244,18 @@ public class AuthController {
 
         String username = jwtUtils.extractUsername(refreshToken);
         CustomUserDetail userDetails = (CustomUserDetail) userDetailsService.loadUserByUsername(username);
+
+        // Refresh token phat hanh truoc lan doi mat khau gan nhat (tokenVersion lech) -> tu choi,
+        // buoc nguoi dung dang nhap lai thay vi am tham cap access token moi bang phien cu.
+        if (!java.util.Objects.equals(jwtUtils.extractTokenVersion(refreshToken), userDetails.getUserDetail().getTokenVersion())) {
+            throw new CustomAuthenticationException("Phiên đăng nhập đã hết hiệu lực do mật khẩu vừa được thay đổi. Vui lòng đăng nhập lại.");
+        }
+
+        // Tai khoan vua bi admin khoa/chan (status != ACTIVE) -> tu choi cap access token moi.
+        if (!userDetails.isEnabled()) {
+            throw new CustomAuthenticationException("Tài khoản này đã bị khóa. Vui lòng liên hệ quản trị viên.");
+        }
+
         String newAccessToken = jwtUtils.generateAccessToken(userDetails);
 
         return ResponseEntity.ok(AuthResponse.builder()

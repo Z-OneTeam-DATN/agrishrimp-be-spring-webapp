@@ -1,0 +1,58 @@
+package com.zone.agri.dto.response.ai;
+
+import com.fasterxml.jackson.annotation.JsonInclude;
+import lombok.Builder;
+import lombok.Data;
+
+import java.time.LocalDateTime;
+import java.util.List;
+
+/**
+ * Response cho luồng AI Doctor:
+ * - POST /api/ai-doctor/diagnosis (createdAt = null, excluded by NON_NULL)
+ * - GET  /api/ai-doctor/diagnosis/{id} (createdAt = thời điểm lưu history)
+ */
+@Data
+@Builder
+@JsonInclude(JsonInclude.Include.NON_NULL)
+public class AiDoctorDiagnosisResponse {
+
+    private String diagnosisId;
+
+    /** HEALTHY | DISEASE — FE dùng để render UI phù hợp */
+    private String status;
+
+    /** URL ảnh chẩn đoán — Phase BE-5: upload lên Cloudinary */
+    private String imageUrl;
+
+    private DiseaseResponse disease;
+    private List<TopPredictionResponse> topPredictions;
+    private List<String> causes;
+    private String signsSummary;
+    private List<TreatmentStageResponse> treatmentStages;
+
+    /**
+     * true khi độ tin cậy quá thấp để kết luận ngay — FE cần chủ động gọi
+     * POST /diagnosis/{id}/clarify để bắt đầu hội thoại hỏi làm rõ bệnh với AI.
+     * Null/absent (NON_NULL) ở các response bình thường.
+     */
+    private Boolean needsClarification;
+
+    /** Purchase link — Phase BE-5: bổ sung */
+    private String purchaseUrl;
+
+    /**
+     * Narrative HTML: mô tả ảnh của Gemini + câu trích dẫn độ tin cậy/tên bệnh từ YOLO
+     * do code ghép sẵn ở BE. Chỉ set ở response của POST /diagnosis — EPHEMERAL, không
+     * lưu vào AiDoctorDiagnosisHistory nên luôn absent khi đọc lại qua GET /diagnosis/{id}
+     * hoặc GET /history. An toàn cho dangerouslySetInnerHTML, cùng hợp đồng với AiChatResponse.reply.
+     */
+    private String aiDescription;
+
+    /**
+     * Thời điểm lưu history.
+     * Null với POST response (excluded by NON_NULL).
+     * Set với GET /diagnosis/{id} response.
+     */
+    private LocalDateTime createdAt;
+}

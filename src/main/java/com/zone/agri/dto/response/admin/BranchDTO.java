@@ -16,6 +16,7 @@ public class BranchDTO {
     private String branchCode;
 
     private String branchType;
+    private String type;
 
     @NotBlank(message = "Tên chi nhánh không được để trống")
     private String name;
@@ -27,21 +28,28 @@ public class BranchDTO {
     @Email(message = "Email không hợp lệ")
     private String email;
 
-    @NotBlank(message = "Địa chỉ chi tiết không được để trống")
     private String addressDetail;
+    private String detailAddress;
+    private String fullAddress;
+    private String mapDisplayName;
 
     private Integer provinceId;
+    private Integer provinceCode;
     private Integer districtId;
+    private Integer districtCode;
     private Integer wardId;
     /** GHN WardCode (string, ví dụ: "550113") — dùng cho shipping fee API */
     private String wardCode;
     private String provinceName;
-    private String districtName;
     private String wardName;
     /** Tọa độ — tự động geocode từ addressDetail khi create/update */
     private Double lat;
     private Double lng;
+    private Double latitude;
+    private Double longitude;
+    private Long managerId;
     private List<Long> managerIds;
     private List<String> managerNames;
+    private List<String> managerAvatarUrls;
     private BranchStatus status;
 }

@@ -20,28 +20,23 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.zone.agri.common.AuthUtils;
 import com.zone.agri.common.RoleUtils;
-import com.zone.agri.dto.request.customer.CustomerInternalNoteRequest;
 import com.zone.agri.dto.request.customer.CustomerRequest;
 import com.zone.agri.dto.response.customer.CustomerAddressResponse;
 import com.zone.agri.dto.response.customer.CustomerDetailResponse;
-import com.zone.agri.dto.response.customer.CustomerInternalNoteResponse;
 import com.zone.agri.dto.response.customer.CustomerResponse;
-import com.zone.agri.dto.response.customer.CustomerStatusLogResponse;
 import com.zone.agri.entity.Customer;
-import com.zone.agri.entity.CustomerInternalNote;
-import com.zone.agri.entity.CustomerStatusLog;
 import com.zone.agri.entity.Role;
 import com.zone.agri.entity.User;
 import com.zone.agri.entity.UserAddress;
+import com.zone.agri.entity.enums.NotificationType;
 import com.zone.agri.entity.enums.AuthProvider;
 import com.zone.agri.entity.enums.CustomerStatus;
 import com.zone.agri.entity.enums.UserStatus;
+import com.zone.agri.exception.BadRequestException;
 import com.zone.agri.exception.ConflictException;
 import com.zone.agri.exception.NotFoundException;
 import com.zone.agri.repository.BranchRepository;
-import com.zone.agri.repository.CustomerInternalNoteRepository;
 import com.zone.agri.repository.CustomerRepository;
-import com.zone.agri.repository.CustomerStatusLogRepository;
 import com.zone.agri.repository.OrderRepository;
 import com.zone.agri.repository.RoleRepository;
 import com.zone.agri.repository.UserAddressRepository;
@@ -55,7 +50,7 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class CustomerService {
 
-    private static final Set<String> MANAGED_CUSTOMER_ROLE_SLUGS = Set.of("CUSTOMER", "USER");
+    private static final Set<String> MANAGED_CUSTOMER_ROLE_SLUGS = Set.of("USER");
     private static final long MIN_SETTLED_ORDERS_FOR_RISK_ASSESSMENT = 3L;
     private static final double LOW_RISK_REPUTATION_THRESHOLD = 80.0;
     private static final double HIGH_RISK_REPUTATION_THRESHOLD = 50.0;
@@ -67,9 +62,8 @@ public class CustomerService {
     private final EmailService emailService;
     private final UserAddressRepository userAddressRepository;
     private final OrderRepository orderRepository;
-    private final CustomerInternalNoteRepository customerInternalNoteRepository;
-    private final CustomerStatusLogRepository customerStatusLogRepository;
     private final BranchRepository branchRepository;
+    private final NotificationService notificationService;
 
     private record CustomerRiskAssessment(long settledOrders, double reputationScore, String riskLevel,
             boolean onlinePaymentOnly) {
@@ -87,10 +81,12 @@ public class CustomerService {
             throw new ConflictException("SDT " + req.getPhone() + " da duoc su dung!", true);
         }
 
-        String randomPassword = UUID.randomUUID().toString().replace("-", "").substring(0, 8);
+        String randomPassword = (req.getPhone() != null && !req.getPhone().isBlank())
+                ? req.getPhone().replaceAll("\\s+", "")
+                : "123456";
 
-        Role customerRole = roleRepository.findBySlug("CUSTOMER")
-                .orElseThrow(() -> new NotFoundException("Role CUSTOMER chua duoc cau hinh"));
+        Role customerRole = roleRepository.findBySlug("USER")
+                .orElseThrow(() -> new NotFoundException("Role USER chua duoc cau hinh"));
 
         User newUser = User.builder()
                 .fullName(req.getName())
@@ -345,10 +341,40 @@ public class CustomerService {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new NotFoundException("Khong tim thay tai khoan nguoi dung"));
 
-        UserStatus fromStatus = user.getStatus();
         user.setStatus(user.getStatus() == UserStatus.ACTIVE ? UserStatus.INACTIVE : UserStatus.ACTIVE);
         userRepository.save(user);
-        saveStatusLog(user, fromStatus, user.getStatus(), "ADMIN_TOGGLE_STATUS");
+    }
+
+    @Transactional
+    public String resendCustomerCredentials(Long userId) {
+        User customerUser = userRepository.findById(userId)
+                .orElseThrow(() -> new NotFoundException("Khong tim thay khach hang"));
+
+        if (customerUser.getEmail() == null || customerUser.getEmail().isBlank()) {
+            throw new BadRequestException("Khach hang nay chua co email de nhan thong tin tai khoan");
+        }
+
+        String defaultPassword = (customerUser.getPhoneNumber() != null && !customerUser.getPhoneNumber().isBlank())
+                ? customerUser.getPhoneNumber().replaceAll("\\s+", "")
+                : "123456";
+
+        boolean isAlreadyDefault = passwordEncoder.matches(defaultPassword, customerUser.getPasswordHash());
+
+        if (!isAlreadyDefault) {
+            customerUser.setPasswordHash(passwordEncoder.encode(defaultPassword));
+            userRepository.save(customerUser);
+            log.info("Khach hang {} da doi mat khau. Set lai ve mat khau mac dinh de gui email.", customerUser.getEmail());
+        } else {
+            log.info("Khach hang {} chua doi mat khau (van dung mat khau mac dinh). Chi gui lai email.", customerUser.getEmail());
+        }
+
+        try {
+            emailService.sendAccountInfo(customerUser.getEmail(), customerUser.getFullName(), defaultPassword);
+            return "Đặt lại mật khẩu và gửi email thành công!";
+        } catch (Exception e) {
+            log.error("Loi khi gui email thong tin tai khoan cho khach hang {}: {}", customerUser.getEmail(), e.getMessage());
+            return "Đặt lại mật khẩu thành công! Tuy nhiên không gửi được email do lỗi máy chủ gửi thư. Mật khẩu mặc định là: " + defaultPassword;
+        }
     }
 
     public CustomerResponse getCustomerById(Long identifier) {
@@ -399,101 +425,7 @@ public class CustomerService {
                 .lastOrderDate(lastOrderDate)
                 .averageOrderValue(averageOrderValue)
                 .addresses(addresses)
-                .internalNotes(getInternalNotes(resolvedUserId))
-                .statusLogs(getStatusLogs(resolvedUserId))
                 .build();
-    }
-
-    public List<CustomerInternalNoteResponse> getInternalNotes(Long identifier) {
-        Long resolvedUserId = getAccessibleCustomerUser(identifier).getId();
-        List<CustomerInternalNote> notes = customerInternalNoteRepository
-                .findByCustomerUserIdOrderByCreatedAtDesc(resolvedUserId);
-        return mapNotes(notes);
-    }
-
-    @Transactional
-    public CustomerInternalNoteResponse addInternalNote(Long identifier, CustomerInternalNoteRequest request) {
-        User customerUser = getAccessibleCustomerUser(identifier);
-
-        CustomerInternalNote note = CustomerInternalNote.builder()
-                .customerUser(customerUser)
-                .content(request.getContent().trim())
-                .build();
-
-        CustomerInternalNote saved = customerInternalNoteRepository.save(note);
-        return mapNotes(Collections.singletonList(saved)).get(0);
-    }
-
-    @Transactional
-    public void deleteInternalNote(Long noteId) {
-        if (!customerInternalNoteRepository.existsById(noteId)) {
-            throw new NotFoundException("Khong tim thay ghi chu noi bo");
-        }
-        customerInternalNoteRepository.deleteById(noteId);
-    }
-
-    public List<CustomerStatusLogResponse> getStatusLogs(Long identifier) {
-        Long resolvedUserId = getAccessibleCustomerUser(identifier).getId();
-        List<CustomerStatusLog> logs = customerStatusLogRepository
-                .findByCustomerUserIdOrderByCreatedAtDesc(resolvedUserId);
-        if (logs.isEmpty()) {
-            return Collections.emptyList();
-        }
-
-        Map<Long, String> userNameById = userRepository.findAllById(
-                logs.stream()
-                        .map(CustomerStatusLog::getCreatedByUserId)
-                        .filter(id -> id != null && id > 0)
-                        .distinct()
-                        .toList())
-                .stream()
-                .collect(Collectors.toMap(User::getId, User::getFullName));
-
-        return logs.stream()
-                .map(statusLog -> CustomerStatusLogResponse.builder()
-                        .id(statusLog.getId())
-                        .fromStatus(statusLog.getFromStatus())
-                        .toStatus(statusLog.getToStatus())
-                        .reason(statusLog.getReason())
-                        .changedByName(userNameById.getOrDefault(statusLog.getCreatedByUserId(), "He thong"))
-                        .createdAt(statusLog.getCreatedAt())
-                        .build())
-                .toList();
-    }
-
-    private List<CustomerInternalNoteResponse> mapNotes(List<CustomerInternalNote> notes) {
-        if (notes.isEmpty()) {
-            return Collections.emptyList();
-        }
-
-        Map<Long, String> authorNameById = userRepository.findAllById(
-                notes.stream()
-                        .map(CustomerInternalNote::getCreatedByUserId)
-                        .filter(id -> id != null && id > 0)
-                        .distinct()
-                        .toList())
-                .stream()
-                .collect(Collectors.toMap(User::getId, User::getFullName));
-
-        return notes.stream()
-                .map(note -> CustomerInternalNoteResponse.builder()
-                        .id(note.getId())
-                        .content(note.getContent())
-                        .authorName(authorNameById.getOrDefault(note.getCreatedByUserId(), "He thong"))
-                        .createdAt(note.getCreatedAt())
-                        .updatedAt(note.getUpdatedAt())
-                        .build())
-                .toList();
-    }
-
-    private void saveStatusLog(User customerUser, UserStatus fromStatus, UserStatus toStatus, String reason) {
-        CustomerStatusLog statusLog = CustomerStatusLog.builder()
-                .customerUser(customerUser)
-                .fromStatus(fromStatus)
-                .toStatus(toStatus)
-                .reason(reason)
-                .build();
-        customerStatusLogRepository.save(statusLog);
     }
 
     @Transactional
@@ -517,6 +449,10 @@ public class CustomerService {
             } catch (Exception e) {
                 log.error("Loi gui mail canh bao: {}", e.getMessage());
             }
+            notificationService.sendNotification(userId, "Cảnh báo tỉ lệ nhận hàng thấp",
+                    "Tỉ lệ nhận hàng của bạn hiện ở mức " + String.format("%.1f", riskAssessment.reputationScore())
+                            + "%. Vui lòng chú ý nhận hàng đúng hẹn để tránh bị tạm khoá tài khoản.",
+                    NotificationType.SYSTEM, null);
         }
     }
 
@@ -530,7 +466,6 @@ public class CustomerService {
         c.setWardId(req.getWardId());
         c.setAddressDetail(req.getAddressDetail());
         c.setStatus(req.getStatus());
-        c.setNote(req.getNote());
 
         if (req.getBranchId() != null) {
             c.setAssignedBranch(branchRepository.findById(req.getBranchId()).orElse(null));
@@ -538,13 +473,10 @@ public class CustomerService {
         if (req.getStaffAssignedId() != null) {
             c.setStaffAssigned(userRepository.findById(req.getStaffAssignedId()).orElse(null));
         }
-        if (req.getInternalNotes() != null) {
-            c.setInternalNotes(req.getInternalNotes());
-        }
     }
 
     public List<Map<String, Object>> getStaffByBranch(Long branchId) {
-        return userRepository.findByBranchIdAndRole(branchId, "STAFF");
+        return userRepository.findByBranchIdAndRole(branchId, "MANAGER");
     }
 
     public List<?> getAllBranches() {

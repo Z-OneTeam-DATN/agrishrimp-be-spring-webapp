@@ -25,6 +25,7 @@ public class InventoryReceiptResponse {
     private String purchaseRequestCode;
     private String supplierName;
     private String supplierCode;
+    private Long branchId;
     private String branchName;
     private BigDecimal totalAmount;
     private BigDecimal paymentAmount;
@@ -44,6 +45,8 @@ public class InventoryReceiptResponse {
     @NoArgsConstructor
     @AllArgsConstructor
     public static class ItemResponse {
+        private Long productVariantId;
+        private Long variantId;
         private String productCode;
         private String productName;
         private String unit;

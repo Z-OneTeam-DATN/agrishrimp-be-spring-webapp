@@ -1,6 +1,6 @@
 # 🦐 AgriShrimp Backend API
 
-![Java 21](https://img.shields.io/badge/Java-21-007396?logo=openjdk&logoColor=white)
+![Java 25](https://img.shields.io/badge/Java-25-007396?logo=openjdk&logoColor=white)
 ![Spring Boot 3.5](https://img.shields.io/badge/Spring_Boot-3.5-6DB33F?logo=springboot&logoColor=white)
 ![MySQL](https://img.shields.io/badge/MySQL-8-4479A1?logo=mysql&logoColor=white)
 ![Redis](https://img.shields.io/badge/Redis-Cache-DC382D?logo=redis&logoColor=white)
@@ -14,7 +14,7 @@ AgriShrimp Backend is a Spring Boot API for a shrimp farming operations and agri
 | --- | --- |
 | Role | Central backend API for storefront, admin, and mini app |
 | Domain | Agri-commerce / shrimp farming operations |
-| Core stack | Java 21, Spring Boot 3.5, Spring Security, Spring Data JPA, MySQL, Redis |
+| Core stack | Java 25, Spring Boot 3.5, Spring Security, Spring Data JPA, MySQL, Redis |
 | External integrations | Cloudinary, PayOS, GHN, Google Login, Zalo Mini App, TrackAsia, OpenRouteService |
 | API docs | `/swagger-ui/index.html` |
 | Health check | `/actuator/health` |
@@ -67,13 +67,13 @@ Swagger is grouped for easier review:
 - `Public APIs`: `/api/auth/**`, `/api/public/**`, `/api/external/**`
 - `Core System`: `/api/users/**`, `/api/roles/**`, `/api/branches/**`, `/api/files/**`
 - `Business Operations`: `/api/products/**`, `/api/categories/**`, `/api/suppliers/**`, `/api/customers/**`, `/api/attributes/**`
-- `Mini App`: `/api/miniapp/**`
+- `AI Doctor`: `/api/ai-doctor/**`
 
 Full endpoint documentation is available at `http://localhost:8004/swagger-ui/index.html` after the application starts.
 
 ## 🛠️ Tech Stack
 
-- Language: Java 21
+- Language: Java 25
 - Framework: Spring Boot 3.5.5
 - Security: Spring Security, JWT
 - Persistence: Spring Data JPA, Hibernate, MySQL
@@ -87,7 +87,7 @@ Full endpoint documentation is available at `http://localhost:8004/swagger-ui/in
 
 ### Requirements
 
-- JDK 21
+- JDK 25
 - Docker + Docker Compose
 - Maven Wrapper already included in the repository
 
@@ -122,6 +122,45 @@ After startup:
 - Swagger UI: `http://localhost:8004/swagger-ui/index.html`
 - Health check: `http://localhost:8004/actuator/health`
 
+### Option 1A: Run the backend locally and test against the real server database
+
+This project already auto-loads `.env` via Spring config import, so after a one-time setup you can start the backend with a normal Spring Boot command.
+
+Recommended flow:
+
+1. Open an SSH tunnel from your machine to the server database:
+
+```bash
+ssh -L 3307:127.0.0.1:3306 your-user@your-server
+```
+
+2. Copy `.env.example` to `.env` and fill in the real secrets (tunnel-based DB/Redis values are already the defaults).
+3. Keep the tunnel open.
+4. Start local Redis if needed:
+
+```bash
+docker compose up -d redis
+```
+
+5. Run the backend normally:
+
+```bash
+./mvnw spring-boot:run -Dspring-boot.run.profiles=dev,live-local
+```
+
+Windows PowerShell:
+
+```powershell
+.\mvnw.cmd spring-boot:run "-Dspring-boot.run.profiles=dev,live-local"
+```
+
+Because `.env` is loaded automatically, no manual `source .env` or extra wrapper script is required for this workflow. The `live-local` profile keeps local runs safer against the real database by disabling startup schema patches and seed data.
+
+Important:
+
+- Your machine must be allowed to reach the remote MySQL host. Firewall, security groups, bind-address, and MySQL user host rules can still block the connection.
+- The local web app should point to `http://localhost:8004/api` if you want the browser to use your local backend instead of the deployed API.
+
 ### Option 2: Run in a more production-like container setup
 
 - Use `.env.example` as the template for your `.env` file.
@@ -140,6 +179,7 @@ Important environment variables include:
 - `SPRING_DATA_REDIS_HOST`, `SPRING_DATA_REDIS_PORT`
 - `SECURITY_JWT_SECRET_KEY`
 - `APP_CORS_ALLOWED_ORIGINS`, `APP_WEB_BASE_URL`, `APP_SERVER_URL`
+- `RESEND_API_KEY`, `RESEND_FROM_EMAIL`, `RESEND_FROM_NAME`
 - `CLOUDINARY_*`
 - `PAYOS_*`
 - `GHN_*`
@@ -148,6 +188,7 @@ Important environment variables include:
 Notes:
 
 - Do not commit real secrets to Git.
+- `EmailService` currently sends mail through Resend, so make sure the `RESEND_*` variables exist in `.env`.
 - External integrations require their matching environment variables to be fully functional.
 
 ## ✅ Testing & Operations

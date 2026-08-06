@@ -21,7 +21,7 @@ public interface UserRepository extends JpaRepository<User, Long> {
 
         Optional<User> findByPhoneNumber(String phoneNumber);
 
-        Optional<User> findByZaloId(String zaloId);
+        Optional<User> findFirstByRole_SlugOrderByIdAsc(String slug);
 
         Optional<User> findByCitizenId(String citizenId);
 
@@ -31,41 +31,67 @@ public interface UserRepository extends JpaRepository<User, Long> {
 
         boolean existsByCitizenId(String citizenId);
 
-        @Query("SELECT u FROM User u WHERE " +
+        @Query("SELECT DISTINCT u FROM User u LEFT JOIN u.role r LEFT JOIN r.permissions p WHERE " +
                         "(:keyword IS NULL OR LOWER(u.fullName) LIKE LOWER(CONCAT('%', :keyword, '%')) OR u.email LIKE LOWER(CONCAT('%', :keyword, '%')) OR u.phoneNumber LIKE CONCAT('%', :keyword, '%') OR u.citizenId LIKE CONCAT('%', :keyword, '%')) AND "
                         +
                         "(:roleId IS NULL OR u.role.id = :roleId) AND " +
                         "(:branchId IS NULL OR u.branch.id = :branchId) AND " +
+                        "(:permissionCode IS NULL OR p.code = :permissionCode) AND " +
                         "(:status IS NULL OR u.status = :status)")
         Page<User> findAllWithFilter(
                         @Param("keyword") String keyword,
                         @Param("roleId") Long roleId,
                         @Param("branchId") Long branchId,
+                        @Param("permissionCode") String permissionCode,
                         @Param("status") com.zone.agri.entity.enums.UserStatus status,
                         Pageable pageable);
 
-        @Query("SELECT u FROM User u WHERE " +
-                        "u.role.slug NOT IN ('CUSTOMER', 'USER') AND " +
+        @Query("SELECT DISTINCT u FROM User u LEFT JOIN u.role r LEFT JOIN r.permissions p WHERE " +
+                        "u.role.slug <> 'USER' AND " +
                         "(:keyword IS NULL OR LOWER(u.fullName) LIKE LOWER(CONCAT('%', :keyword, '%')) OR u.email LIKE LOWER(CONCAT('%', :keyword, '%')) OR u.phoneNumber LIKE CONCAT('%', :keyword, '%') OR u.citizenId LIKE CONCAT('%', :keyword, '%')) AND "
                         +
                         "(:roleId IS NULL OR u.role.id = :roleId) AND " +
                         "(:branchId IS NULL OR u.branch.id = :branchId) AND " +
+                        "(:permissionCode IS NULL OR p.code = :permissionCode) AND " +
                         "(:status IS NULL OR u.status = :status)")
         Page<User> findAllEmployeesWithFilter(
                         @Param("keyword") String keyword,
                         @Param("roleId") Long roleId,
                         @Param("branchId") Long branchId,
+                        @Param("permissionCode") String permissionCode,
                         @Param("status") com.zone.agri.entity.enums.UserStatus status,
                         Pageable pageable);
 
-        @Query("SELECT u FROM User u WHERE u.role.slug IN ('CUSTOMER', 'USER') " +
+        @Query("SELECT u FROM User u WHERE u.role.slug = 'USER' " +
                         "AND (:branchId IS NULL OR u.branch.id = :branchId) " +
                         "ORDER BY u.createdAt DESC")
         List<User> findRecentCustomers(@Param("branchId") Long branchId, Pageable pageable);
 
-        @Query("SELECT COUNT(u) FROM User u WHERE u.role.slug IN ('CUSTOMER', 'USER') " +
+        @Query("SELECT COUNT(u) FROM User u WHERE u.role.slug = 'USER' " +
                         "AND (:branchId IS NULL OR u.branch.id = :branchId)")
         long countCustomers(@Param("branchId") Long branchId);
+
+        // Đếm luỹ kế tính đến 1 thời điểm — dùng để so sánh "Khách hàng" hôm nay với hôm qua.
+        @Query("SELECT COUNT(u) FROM User u WHERE u.role.slug = 'USER' " +
+                        "AND (:branchId IS NULL OR u.branch.id = :branchId) " +
+                        "AND u.createdAt <= :endDate")
+        long countCustomersBefore(@Param("branchId") Long branchId,
+                        @Param("endDate") java.time.LocalDateTime endDate);
+
+        @Query("SELECT COUNT(u) FROM User u WHERE u.role.slug = 'USER' " +
+                        "AND (:branchId IS NULL OR u.branch.id = :branchId) " +
+                        "AND u.status = :status")
+        long countCustomersByStatus(
+                        @Param("branchId") Long branchId,
+                        @Param("status") com.zone.agri.entity.enums.UserStatus status);
+
+        @Query("SELECT COUNT(u) FROM User u WHERE u.role.slug = 'USER' " +
+                        "AND (:branchId IS NULL OR u.branch.id = :branchId) " +
+                        "AND u.createdAt >= :startAt AND u.createdAt < :endAt")
+        long countCustomersCreatedBetween(
+                        @Param("branchId") Long branchId,
+                        @Param("startAt") java.time.LocalDateTime startAt,
+                        @Param("endAt") java.time.LocalDateTime endAt);
 
         boolean existsByEmailAndIdNot(String email, Long id);
 
@@ -74,7 +100,7 @@ public interface UserRepository extends JpaRepository<User, Long> {
         boolean existsByCitizenIdAndIdNot(String citizenId, Long id);
 
         @EntityGraph(attributePaths = { "customer" })
-        @Query("SELECT u FROM User u WHERE u.role.slug IN ('CUSTOMER', 'USER') " +
+        @Query("SELECT u FROM User u WHERE u.role.slug = 'USER' " +
                         "AND (:status = 'all' OR CAST(u.status AS string) = :status) " +
                         "AND (:keyword IS NULL OR :keyword = '' OR LOWER(u.fullName) LIKE LOWER(CONCAT('%', :keyword, '%')) "
                         +
@@ -92,7 +118,7 @@ public interface UserRepository extends JpaRepository<User, Long> {
 
         @EntityGraph(attributePaths = { "customer" })
         @Query("SELECT u FROM User u LEFT JOIN u.customer c LEFT JOIN c.assignedBranch b WHERE " +
-                        "u.role.slug IN ('CUSTOMER', 'USER') AND " +
+                        "u.role.slug = 'USER' AND " +
                         "(:status IS NULL OR u.status = :status) AND " +
                         "(:branchId IS NULL OR b.id = :branchId) AND " +
                         "(:keyword IS NULL OR :keyword = '' OR LOWER(u.fullName) LIKE LOWER(CONCAT('%', :keyword, '%')) "
@@ -110,6 +136,14 @@ public interface UserRepository extends JpaRepository<User, Long> {
 
         // 🟢 Get staff by branch
         @Query("SELECT NEW MAP(u.id AS id, u.fullName AS fullName, u.email AS email, u.phoneNumber AS phoneNumber) " +
-                        "FROM User u WHERE u.branch.id = :branchId AND u.role.slug = 'STAFF' ORDER BY u.fullName")
+                        "FROM User u WHERE u.branch.id = :branchId AND u.role.slug = :slug ORDER BY u.fullName")
         List<Map<String, Object>> findByBranchIdAndRole(@Param("branchId") Long branchId, @Param("slug") String slug);
+
+        // 🟢 Notification recipient resolution: users holding a given permission, scoped to a branch
+        // (or system-wide when branchId is null — same convention as WarehouseContext.isSuperAdmin()).
+        @Query("SELECT DISTINCT u FROM User u JOIN u.role r JOIN r.permissions p WHERE " +
+                        "p.code = :permissionCode AND u.status = com.zone.agri.entity.enums.UserStatus.ACTIVE AND " +
+                        "((:branchId IS NULL AND u.branch IS NULL) OR (:branchId IS NOT NULL AND u.branch.id = :branchId))")
+        List<User> findUsersByPermissionCodeAndBranch(@Param("permissionCode") String permissionCode,
+                        @Param("branchId") Long branchId);
 }

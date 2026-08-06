@@ -23,16 +23,12 @@ public class Brand {
     @Column(name = "name", length = 100)
     String name;
 
-    @Column(name = "logo_url", length = 255)
+    @Column(name = "logo_url", columnDefinition = "TEXT")
     String logoUrl;
 
     @Enumerated(EnumType.STRING)
     @Column(columnDefinition = "ENUM('ACTIVE', 'INACTIVE')")
     BrandStatus status;
 
-    @JsonIgnore  // phá vòng lặp: Product → brand → products → product → brand → ...
-    @OneToMany(mappedBy = "brand", fetch = FetchType.LAZY)
-    @ToString.Exclude
-    @EqualsAndHashCode.Exclude
-    List<Product> products;
+
 }

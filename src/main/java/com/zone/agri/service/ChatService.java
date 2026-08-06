@@ -8,11 +8,11 @@ import com.zone.agri.entity.*;
 import com.zone.agri.entity.enums.ConversationStatus;
 import com.zone.agri.entity.enums.MessageType;
 import com.zone.agri.entity.enums.NotificationType;
-import com.zone.agri.client.ai.AiChatClient;
 import com.zone.agri.common.CloudinaryService;
-import com.zone.agri.dto.miniapp.ai.AiChatRequest;
-import com.zone.agri.dto.miniapp.ai.AiChatResponse;
+import com.zone.agri.dto.ai.AiChatResponse;
+import com.zone.agri.dto.request.ai.AiDoctorChatRequest;
 import com.zone.agri.repository.*;
+import com.zone.agri.service.ai.AiKnowledgeService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.multipart.MultipartFile;
@@ -41,7 +41,7 @@ public class ChatService {
     private final SimpMessagingTemplate messagingTemplate;
     private final NotificationService notificationService;
     private final CloudinaryService cloudinaryService;
-    private final AiChatClient aiChatClient;
+    private final AiKnowledgeService aiKnowledgeService;
 
     @Transactional
     public ConversationResponse getOrCreateConversation(Long customerId) {
@@ -64,6 +64,13 @@ public class ChatService {
     public Page<ConversationResponse> getAllConversations(int page, int size) {
         return conversationRepository.findAllOrderByLastMessageDesc(PageRequest.of(page, size))
                 .map(this::toConversationResponse);
+    }
+
+    @Transactional(readOnly = true)
+    public ConversationResponse getConversationById(Long conversationId) {
+        Conversation conv = conversationRepository.findById(conversationId)
+                .orElseThrow(() -> new RuntimeException("Conversation not found: " + conversationId));
+        return toConversationResponse(conv);
     }
 
     @Transactional(readOnly = true)
@@ -93,6 +100,8 @@ public class ChatService {
 
         conv.setLastMessage(request.getContent());
         conv.setLastMessageAt(LocalDateTime.now());
+        conv.setLastSenderId(senderId);
+        conv.setStatus(ConversationStatus.OPEN);
         Long customerId = conv.getCustomer().getId();
         boolean senderIsCustomer = senderId.equals(customerId);
         if (senderIsCustomer) {
@@ -118,13 +127,7 @@ public class ChatService {
         // Notify the other party
         if (senderIsCustomer) {
             messagingTemplate.convertAndSend("/topic/shop-messages", response);
-            // AI auto-reply outside business hours (08:00 – 18:00)
-            int hour = LocalTime.now().getHour();
-            if (hour < 8 || hour >= 18) {
-                Long savedConvId = conv.getId();
-                String customerMsg = request.getContent();
-                CompletableFuture.runAsync(() -> sendBotAutoReply(savedConvId, customerMsg));
-            }
+            // AI auto-reply disabled for customer support chat
         } else {
             notificationService.sendNotification(
                     customerId,
@@ -163,7 +166,9 @@ public class ChatService {
 
         conv.setLastMessage("[Sản phẩm ghim] " + product.getName());
         conv.setLastMessageAt(LocalDateTime.now());
+        conv.setLastSenderId(staffId);
         conv.setUnreadByCustomer(conv.getUnreadByCustomer() + 1);
+        conv.setStatus(ConversationStatus.OPEN);
         conversationRepository.save(conv);
 
         ChatMessageResponse response = toMessageResponse(msg);
@@ -207,6 +212,8 @@ public class ChatService {
 
         conv.setLastMessage("[Hình ảnh]");
         conv.setLastMessageAt(LocalDateTime.now());
+        conv.setLastSenderId(senderId);
+        conv.setStatus(ConversationStatus.OPEN);
         Long customerId = conv.getCustomer().getId();
         boolean senderIsCustomer = senderId.equals(customerId);
         if (senderIsCustomer) {
@@ -239,7 +246,19 @@ public class ChatService {
             if (readerId.equals(conv.getCustomer().getId())) {
                 conv.setUnreadByCustomer(0);
             } else {
+                // Admin/Staff read: set unreadByShop to 0, then notify customer
                 conv.setUnreadByShop(0);
+                conversationRepository.save(conv);
+
+                // Send READ_RECEIPT event to customer so their tick turns to double-check
+                String customerPrincipal = conv.getCustomer().getEmail() != null
+                        ? conv.getCustomer().getEmail()
+                        : conv.getCustomer().getPhoneNumber();
+                java.util.Map<String, Object> readEvent = new java.util.HashMap<>();
+                readEvent.put("type", "READ_RECEIPT");
+                readEvent.put("conversationId", conversationId);
+                messagingTemplate.convertAndSendToUser(customerPrincipal, "/queue/messages", readEvent);
+                return;
             }
             conversationRepository.save(conv);
         });
@@ -250,11 +269,14 @@ public class ChatService {
             User botUser = userRepository.findByEmail("bot@agrishrimp.vn").orElse(null);
             if (botUser == null) return;
 
-            AiChatResponse aiResp = aiChatClient.chat(
-                    AiChatRequest.builder()
+            AiChatResponse aiResp = aiKnowledgeService.answerChat(
+                    AiDoctorChatRequest.builder()
                             .message(customerMessage)
-                            .conversationId("chat_" + convId)
-                            .build());
+                            .sessionId("chat_" + convId)
+                            .build(),
+                    null,
+                    "CUSTOMER_CHAT_AUTO_REPLY",
+                    false);
 
             String reply = aiResp != null && aiResp.isSuccess() ? aiResp.getReply() : null;
             if (reply == null || reply.isBlank()) return;
@@ -313,6 +335,22 @@ public class ChatService {
         return toConversationResponse(conversationRepository.save(conv));
     }
 
+    @Transactional
+    public ConversationResponse updateStatus(Long conversationId, com.zone.agri.entity.enums.ConversationStatus status) {
+        Conversation conv = conversationRepository.findById(conversationId)
+                .orElseThrow(() -> new RuntimeException("Conversation not found"));
+        conv.setStatus(status);
+        return toConversationResponse(conversationRepository.save(conv));
+    }
+
+    @Transactional
+    public ConversationResponse markAsUnread(Long conversationId) {
+        Conversation conv = conversationRepository.findById(conversationId)
+                .orElseThrow(() -> new RuntimeException("Conversation not found"));
+        conv.setUnreadByShop(1);
+        return toConversationResponse(conversationRepository.save(conv));
+    }
+
     private ConversationResponse toConversationResponse(Conversation c) {
         User customer = c.getCustomer();
         User assigned = c.getAssignedStaff();
@@ -324,6 +362,7 @@ public class ChatService {
                 .status(c.getStatus())
                 .lastMessage(c.getLastMessage())
                 .lastMessageAt(c.getLastMessageAt())
+                .lastSenderId(c.getLastSenderId())
                 .unreadByShop(c.getUnreadByShop())
                 .unreadByCustomer(c.getUnreadByCustomer())
                 .assignedStaffId(assigned != null ? assigned.getId() : null)
@@ -346,9 +385,12 @@ public class ChatService {
 
         if (m.getPinnedProduct() != null) {
             Product p = m.getPinnedProduct();
-            String imageUrl = p.getProductImages() != null && !p.getProductImages().isEmpty()
-                    ? p.getProductImages().iterator().next().getImageUrl()
-                    : null;
+            String imageUrl = null;
+            if (p.getProductImages() != null && !p.getProductImages().isEmpty()) {
+                imageUrl = p.getProductImages().iterator().next().getImageUrl();
+            } else if (p.getVariants() != null && !p.getVariants().isEmpty()) {
+                imageUrl = p.getVariants().iterator().next().getImageUrl();
+            }
             builder.pinnedProduct(ChatMessageResponse.PinnedProductInfo.builder()
                     .id(p.getId())
                     .name(p.getName())
@@ -358,5 +400,53 @@ public class ChatService {
         }
 
         return builder.build();
+    }
+
+    // Map of conversationId -> Map of userId -> username
+    private static final java.util.concurrent.ConcurrentHashMap<Long, java.util.concurrent.ConcurrentHashMap<Long, String>> activeViewers =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    public void updateViewingStatus(Long userId, String username, Long conversationId, String status) {
+        if ("JOIN".equals(status)) {
+            activeViewers.computeIfAbsent(conversationId, k -> new java.util.concurrent.ConcurrentHashMap<>())
+                    .put(userId, username);
+        } else if ("LEAVE".equals(status)) {
+            java.util.concurrent.ConcurrentHashMap<Long, String> viewers = activeViewers.get(conversationId);
+            if (viewers != null) {
+                viewers.remove(userId);
+                if (viewers.isEmpty()) {
+                    activeViewers.remove(conversationId);
+                }
+            }
+        }
+        broadcastViewers(conversationId);
+    }
+
+    public void broadcastViewers(Long conversationId) {
+        java.util.concurrent.ConcurrentHashMap<Long, String> viewersMap = activeViewers.get(conversationId);
+        List<Map<String, Object>> viewersList = new java.util.ArrayList<>();
+        if (viewersMap != null) {
+            for (Map.Entry<Long, String> entry : viewersMap.entrySet()) {
+                viewersList.add(Map.of("userId", entry.getKey(), "username", entry.getValue()));
+            }
+        }
+        
+        Map<String, Object> event = Map.of(
+                "conversationId", conversationId,
+                "viewers", viewersList
+        );
+        messagingTemplate.convertAndSend("/topic/shop-viewers", event);
+    }
+
+    public void removeUserFromAllConversations(String email) {
+        userRepository.findByEmail(email).ifPresent(user -> {
+            Long userId = user.getId();
+            for (Map.Entry<Long, java.util.concurrent.ConcurrentHashMap<Long, String>> entry : activeViewers.entrySet()) {
+                if (entry.getValue().containsKey(userId)) {
+                    entry.getValue().remove(userId);
+                    broadcastViewers(entry.getKey());
+                }
+            }
+        });
     }
 }

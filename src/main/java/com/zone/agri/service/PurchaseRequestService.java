@@ -1,11 +1,13 @@
 package com.zone.agri.service;
 
+import com.zone.agri.common.AuthUtils;
+import com.zone.agri.common.RoleUtils;
 import com.zone.agri.common.WarehouseContext;
 import com.zone.agri.dto.request.purchase.PurchaseRequestCreateRequest;
 import com.zone.agri.dto.response.purchase.PurchaseRequestResponse;
 import com.zone.agri.entity.*;
-import com.zone.agri.entity.enums.InventoryNoteStatus;
 import com.zone.agri.entity.enums.PurchaseRequestStatus;
+import com.zone.agri.entity.enums.SupplierProductCatalogStatus;
 import com.zone.agri.exception.BadRequestException;
 import com.zone.agri.exception.NotFoundException;
 import com.zone.agri.repository.*;
@@ -35,6 +37,9 @@ public class PurchaseRequestService {
     private final UserRepository userRepository;
     private final WarehouseContext warehouseContext;
     private final EmailService emailService;
+    private final SubOrderRepository subOrderRepository;
+    private final InventoryTransferService inventoryTransferService;
+    private final NotificationService notificationService;
 
     // ─────────────────────────────────────────────────────────────────────────
     // HELPER
@@ -54,27 +59,216 @@ public class PurchaseRequestService {
                 .anyMatch(a -> a.getAuthority().equals(authority));
     }
 
-    private boolean hasRole(String role) {
-        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-        return auth != null && auth.getAuthorities().stream()
-                .anyMatch(a -> a.getAuthority().equals("ROLE_" + role));
+    private boolean canApprovePurchaseRequests() {
+        return hasAuthority("PURCHASE_REQUEST_APPROVE");
+    }
+
+    private boolean canApprovePurchaseRequestsAcrossBranches() {
+        return canApprovePurchaseRequests()
+                && RoleUtils.hasAdminLikeAuthority(AuthUtils.getAuthorities());
+    }
+
+    private void assertPurchaseRequestReadOrApproveAccess(PurchaseRequest pr) {
+        if (!canApprovePurchaseRequestsAcrossBranches()) {
+            warehouseContext.assertAccess(pr.getBranch().getId());
+        }
+    }
+
+    private Long resolvePurchaseRequestListBranchId(Long requestedBranchId) {
+        if (canApprovePurchaseRequestsAcrossBranches()) {
+            return requestedBranchId;
+        }
+
+        Long scopedBranchId = warehouseContext.resolveWarehouseId();
+        if (requestedBranchId != null) {
+            warehouseContext.assertAccess(requestedBranchId);
+        }
+        return scopedBranchId;
     }
 
     private Branch resolveRequestBranch(PurchaseRequestCreateRequest request) {
         if (request.getBranchId() != null) {
             return branchRepository.findById(request.getBranchId())
-                    .orElseThrow(() -> new NotFoundException("Khong tim thay chi nhanh ID: " + request.getBranchId()));
+                    .orElseThrow(() -> new NotFoundException("Không tìm thấy chi nhánh ID: " + request.getBranchId()));
         }
 
         String branchName = request.getBranchName() != null ? request.getBranchName().trim() : "";
         return branchRepository.findByName(branchName)
-                .orElseThrow(() -> new NotFoundException("Chi nhanh khong ton tai: " + branchName));
+                .orElseThrow(() -> new NotFoundException("Chi nhánh không tồn tại: " + branchName));
     }
 
     private String generateCode() {
         String prefix = "YCM-";
         String ts = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyMMddHHmmss"));
         return prefix + ts;
+    }
+
+    private String normalizeText(String value) {
+        if (value == null) {
+            return "";
+        }
+        return java.text.Normalizer.normalize(value, java.text.Normalizer.Form.NFD)
+                .replaceAll("\\p{M}+", "")
+                .replace('\u0111', 'd')
+                .replace('\u0110', 'D')
+                .toLowerCase(Locale.ROOT)
+                .trim();
+    }
+
+    private boolean isMainWarehouseBranch(Branch branch) {
+        return branch != null
+                && ((branch.getBranchType() != null
+                        && normalizeText(branch.getBranchType()).contains("warehouse"))
+                        || normalizeText(branch.getName()).contains("kho tong"));
+    }
+
+    private Branch resolveMainWarehouseBranch() {
+        return branchRepository.findAll().stream()
+                .filter(this::isMainWarehouseBranch)
+                .findFirst()
+                .orElseThrow(() -> new BadRequestException("Khong tim thay kho tong de tao yeu cau mua tu dong."));
+    }
+
+    private String buildReplenishmentReferenceCode(SubOrder subOrder) {
+        return subOrder.getOrder().getCode() + "-SUB-" + subOrder.getId();
+    }
+
+    private String buildAutomaticReplenishmentNote(SubOrder subOrder) {
+        String orderCode = subOrder.getOrder() != null ? subOrder.getOrder().getCode() : "N/A";
+        String branchName = subOrder.getBranch() != null ? subOrder.getBranch().getName() : "chi nhanh phuc vu";
+        return "Tu dong tao yeu cau mua bo sung cho " + orderCode + " de cap cho " + branchName;
+    }
+
+    private boolean enforceMainWarehousePurchaseRequests() {
+        return true;
+    }
+
+    @Transactional(readOnly = true)
+    public List<PurchaseRequest> findActiveAutoReplenishmentRequestsForSubOrder(Long subOrderId) {
+        return purchaseRequestRepository.findAutoReplenishmentRequestsByLinkedSubOrderIdExcludingStatuses(
+                subOrderId,
+                List.of(PurchaseRequestStatus.CANCELLED, PurchaseRequestStatus.CLOSED));
+    }
+
+    @Transactional
+    public List<PurchaseRequest> createAutomaticReplenishmentRequestsForSubOrder(SubOrder subOrder) {
+        SubOrder replenishmentSubOrder = subOrderRepository.findByIdWithItems(subOrder.getId())
+                .orElseThrow(() -> new NotFoundException("Khong tim thay phan don can tao yeu cau mua."));
+
+        List<PurchaseRequest> existingRequests = findActiveAutoReplenishmentRequestsForSubOrder(replenishmentSubOrder.getId());
+        if (!existingRequests.isEmpty()) {
+            return existingRequests;
+        }
+
+        Map<ProductVariant, Integer> missingQuantities = new LinkedHashMap<>();
+        for (SubOrderItem item : replenishmentSubOrder.getItems() != null
+                ? replenishmentSubOrder.getItems()
+                : Collections.<SubOrderItem>emptyList()) {
+            int missingQty = Objects.requireNonNullElse(item.getMissingQuantity(), 0);
+            if (missingQty <= 0 || item.getProductVariant() == null || item.getProductVariant().getId() == null) {
+                continue;
+            }
+            missingQuantities.merge(item.getProductVariant(), missingQty, Integer::sum);
+        }
+
+        if (missingQuantities.isEmpty()) {
+            throw new BadRequestException("Phan don nay khong con mat hang thieu de tao yeu cau mua.");
+        }
+
+        Branch mainWarehouse = resolveMainWarehouseBranch();
+        String referenceCode = buildReplenishmentReferenceCode(replenishmentSubOrder);
+        List<Long> variantIds = missingQuantities.keySet().stream()
+                .map(ProductVariant::getId)
+                .toList();
+
+        List<SupplierProductCatalog> catalogs = supplierProductCatalogRepository.findByProductVariantIdInAndStatus(
+                variantIds,
+                SupplierProductCatalogStatus.AVAILABLE);
+        Map<Long, SupplierProductCatalog> firstCatalogByVariantId = new LinkedHashMap<>();
+        for (SupplierProductCatalog catalog : catalogs) {
+            if (catalog.getProductVariant() == null || catalog.getProductVariant().getId() == null) {
+                continue;
+            }
+            firstCatalogByVariantId.putIfAbsent(catalog.getProductVariant().getId(), catalog);
+        }
+
+        List<String> missingSupplierSkus = missingQuantities.keySet().stream()
+                .filter(variant -> !firstCatalogByVariantId.containsKey(variant.getId()))
+                .map(ProductVariant::getSku)
+                .sorted()
+                .toList();
+        if (!missingSupplierSkus.isEmpty()) {
+            throw new BadRequestException(
+                    "Chua cau hinh nha cung cap dang hoat dong cho cac SKU: " + String.join(", ", missingSupplierSkus));
+        }
+
+        Map<Long, Supplier> supplierById = new LinkedHashMap<>();
+        Map<Long, List<PurchaseRequestItem>> itemsBySupplierId = new LinkedHashMap<>();
+        for (Map.Entry<ProductVariant, Integer> missingEntry : missingQuantities.entrySet()) {
+            ProductVariant variant = missingEntry.getKey();
+            SupplierProductCatalog catalog = firstCatalogByVariantId.get(variant.getId());
+            Supplier supplier = catalog.getSupplier();
+            if (supplier == null || supplier.getId() == null) {
+                throw new BadRequestException("Khong tim thay nha cung cap hop le cho SKU: " + variant.getSku());
+            }
+
+            supplierById.putIfAbsent(supplier.getId(), supplier);
+            itemsBySupplierId.computeIfAbsent(supplier.getId(), ignored -> new ArrayList<>())
+                    .add(PurchaseRequestItem.builder()
+                            .productVariant(variant)
+                            .requestedQty(missingEntry.getValue())
+                            .deliveredQty(0)
+                            .acceptedQty(0)
+                            .defectiveQty(0)
+                            .remainingQty(missingEntry.getValue())
+                            .unitPrice(BigDecimal.ZERO)
+                            .note("Tu dong bo sung cho phan don " + referenceCode)
+                            .build());
+        }
+
+        User creator = getCurrentUser();
+        List<PurchaseRequest> createdRequests = new ArrayList<>();
+        for (Map.Entry<Long, List<PurchaseRequestItem>> supplierEntry : itemsBySupplierId.entrySet()) {
+            Supplier supplier = supplierById.get(supplierEntry.getKey());
+            String code = generateCode();
+            while (purchaseRequestRepository.existsByCode(code)) {
+                code = generateCode();
+            }
+
+            PurchaseRequest purchaseRequest = PurchaseRequest.builder()
+                    .code(code)
+                    .status(PurchaseRequestStatus.APPROVED)
+                    .supplier(supplier)
+                    .branch(mainWarehouse)
+                    .note(buildAutomaticReplenishmentNote(replenishmentSubOrder))
+                    .createdBy(creator)
+                    .approvedBy(creator)
+                    .approvedAt(LocalDateTime.now())
+                    .autoReplenishment(true)
+                    .linkedSubOrderId(replenishmentSubOrder.getId())
+                    .linkedDestinationBranchId(replenishmentSubOrder.getBranch().getId())
+                    .linkedReferenceCode(referenceCode)
+                    .totalAmount(BigDecimal.ZERO)
+                    .items(new ArrayList<>())
+                    .build();
+
+            for (PurchaseRequestItem item : supplierEntry.getValue()) {
+                item.setPurchaseRequest(purchaseRequest);
+                purchaseRequest.getItems().add(item);
+            }
+
+            purchaseRequest = purchaseRequestRepository.save(purchaseRequest);
+            if (supplier.getEmail() != null && !supplier.getEmail().isBlank()) {
+                emailService.sendPurchaseRequestToSupplier(purchaseRequest);
+                purchaseRequest.setStatus(PurchaseRequestStatus.SENT_TO_SUPPLIER);
+                purchaseRequest.setSentToSupplierAt(LocalDateTime.now());
+                purchaseRequest = purchaseRequestRepository.save(purchaseRequest);
+            }
+
+            createdRequests.add(purchaseRequest);
+        }
+
+        return createdRequests;
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -85,6 +279,10 @@ public class PurchaseRequestService {
     public PurchaseRequestResponse createRequest(PurchaseRequestCreateRequest request) {
         Supplier supplier = supplierRepository.findByCode(request.getSupplierCode())
                 .orElseThrow(() -> new NotFoundException("Nhà cung cấp không tồn tại: " + request.getSupplierCode()));
+
+        if (supplier.getStatus() == com.zone.agri.entity.enums.SupplierStatus.INACTIVE) {
+            throw new BadRequestException("Nhà cung cấp đang tạm ngừng giao dịch. Không thể tạo phiếu yêu cầu mua.");
+        }
 
         Branch branch = resolveRequestBranch(request);
         validatePurchaseRequestBranch(branch);
@@ -125,6 +323,8 @@ public class PurchaseRequestService {
         pr = purchaseRequestRepository.save(pr);
 
         // Tạo các dòng hàng
+        validateUniqueRequestItems(request.getItems());
+
         BigDecimal totalAmount = BigDecimal.ZERO;
         for (PurchaseRequestCreateRequest.ItemRequest itemReq : request.getItems()) {
             ProductVariant variant = productVariantRepository.findBySku(itemReq.getProductCode())
@@ -155,6 +355,10 @@ public class PurchaseRequestService {
             pr.setApprovedAt(LocalDateTime.now());
         }
         pr = purchaseRequestRepository.save(pr);
+
+        if (pr.getStatus() == PurchaseRequestStatus.PENDING_APPROVAL) {
+            notificationService.notifyPurchaseRequestNeedsApproval(pr);
+        }
 
         return mapToResponse(pr);
     }
@@ -190,6 +394,10 @@ public class PurchaseRequestService {
 
         Supplier supplier = supplierRepository.findByCode(request.getSupplierCode())
                 .orElseThrow(() -> new NotFoundException("Nhà cung cấp không tồn tại"));
+
+        if (supplier.getStatus() == com.zone.agri.entity.enums.SupplierStatus.INACTIVE) {
+            throw new BadRequestException("Nhà cung cấp đang tạm ngừng giao dịch. Không thể tạo phiếu yêu cầu mua.");
+        }
         Branch branch = resolveRequestBranch(request);
         validatePurchaseRequestBranch(branch);
         warehouseContext.assertAccess(branch.getId());
@@ -205,6 +413,8 @@ public class PurchaseRequestService {
         // Xóa items cũ và tạo lại
         pr.getItems().clear();
         purchaseRequestRepository.flush();
+
+        validateUniqueRequestItems(request.getItems());
 
         for (PurchaseRequestCreateRequest.ItemRequest itemReq : request.getItems()) {
             ProductVariant variant = productVariantRepository.findBySku(itemReq.getProductCode())
@@ -244,8 +454,8 @@ public class PurchaseRequestService {
     // ─────────────────────────────────────────────────────────────────────────
 
     @Transactional(readOnly = true)
-    public List<PurchaseRequestResponse> getAllRequests() {
-        Long branchId = warehouseContext.resolveWarehouseId();
+    public List<PurchaseRequestResponse> getAllRequests(Long requestedBranchId) {
+        Long branchId = resolvePurchaseRequestListBranchId(requestedBranchId);
         List<PurchaseRequest> list = (branchId == null)
                 ? purchaseRequestRepository.findAllWithRelations()
                 : purchaseRequestRepository.findAllByBranchWithRelations(branchId);
@@ -257,7 +467,7 @@ public class PurchaseRequestService {
     public PurchaseRequestResponse getById(Long id) {
         PurchaseRequest pr = purchaseRequestRepository.findByIdWithDetails(id)
                 .orElseThrow(() -> new NotFoundException("Không tìm thấy phiếu yêu cầu mua ID: " + id));
-        warehouseContext.assertAccess(pr.getBranch().getId());
+        assertPurchaseRequestReadOrApproveAccess(pr);
         return mapToResponse(pr);
     }
 
@@ -268,7 +478,7 @@ public class PurchaseRequestService {
                 .orElseThrow(() -> new NotFoundException("Không tìm thấy phiếu yêu cầu mua ID: " + id));
         warehouseContext.assertAccess(pr.getBranch().getId());
 
-        if (pr.getStatus() != PurchaseRequestStatus.SENT_TO_SUPPLIER &&
+        if (pr.getStatus() != PurchaseRequestStatus.DELIVERING &&
                 pr.getStatus() != PurchaseRequestStatus.PARTIALLY_RECEIVED) {
             throw new BadRequestException("Phiáº¿u yĂªu cáº§u mua pháº£i Ä‘Æ°á»£c gá»­i nhĂ  cung cáº¥p trÆ°á»›c khi táº¡o phiáº¿u nháº­p.");
         }
@@ -305,7 +515,7 @@ public class PurchaseRequestService {
     @Transactional
     public PurchaseRequestResponse approve(Long id) {
         PurchaseRequest pr = findOrThrow(id);
-        warehouseContext.assertAccess(pr.getBranch().getId());
+        assertPurchaseRequestReadOrApproveAccess(pr);
         if (pr.getStatus() != PurchaseRequestStatus.PENDING_APPROVAL) {
             throw new BadRequestException("Chỉ có thể duyệt phiếu đang ở trạng thái Chờ duyệt.");
         }
@@ -318,7 +528,7 @@ public class PurchaseRequestService {
     @Transactional
     public PurchaseRequestResponse reject(Long id) {
         PurchaseRequest pr = findOrThrow(id);
-        warehouseContext.assertAccess(pr.getBranch().getId());
+        assertPurchaseRequestReadOrApproveAccess(pr);
         if (pr.getStatus() != PurchaseRequestStatus.PENDING_APPROVAL) {
             throw new BadRequestException("Chỉ có thể từ chối phiếu đang ở trạng thái Chờ duyệt.");
         }
@@ -343,13 +553,52 @@ public class PurchaseRequestService {
     }
 
     @Transactional
+    public PurchaseRequestResponse resendToSupplier(Long id) {
+        PurchaseRequest pr = findOrThrow(id);
+        warehouseContext.assertAccess(pr.getBranch().getId());
+        if (pr.getStatus() != PurchaseRequestStatus.SENT_TO_SUPPLIER) {
+            throw new BadRequestException("Chi co the gui lai email khi phieu da gui nha cung cap.");
+        }
+        if (pr.getSupplier() == null || pr.getSupplier().getEmail() == null || pr.getSupplier().getEmail().isBlank()) {
+            throw new BadRequestException("Nha cung cap chua co email de gui lai phieu yeu cau.");
+        }
+        emailService.sendPurchaseRequestToSupplier(pr);
+        return mapToResponseShallow(pr);
+    }
+
+    @Transactional
+    public PurchaseRequestResponse confirmSupplier(Long id) {
+        PurchaseRequest pr = findOrThrow(id);
+        warehouseContext.assertAccess(pr.getBranch().getId());
+        if (pr.getStatus() != PurchaseRequestStatus.SENT_TO_SUPPLIER) {
+            throw new BadRequestException("Chi co the ghi nhan xac nhan khi phieu da gui nha cung cap.");
+        }
+        pr.setStatus(PurchaseRequestStatus.SUPPLIER_CONFIRMED);
+        return mapToResponseShallow(purchaseRequestRepository.save(pr));
+    }
+
+    @Transactional
+    public PurchaseRequestResponse markDelivering(Long id) {
+        PurchaseRequest pr = findOrThrow(id);
+        warehouseContext.assertAccess(pr.getBranch().getId());
+        if (pr.getStatus() != PurchaseRequestStatus.SUPPLIER_CONFIRMED) {
+            throw new BadRequestException("Chi co the chuyen sang cho giao hang sau khi NCC da xac nhan.");
+        }
+        pr.setStatus(PurchaseRequestStatus.DELIVERING);
+        return mapToResponseShallow(purchaseRequestRepository.save(pr));
+    }
+
+    @Transactional
     public PurchaseRequestResponse cancel(Long id) {
         PurchaseRequest pr = findOrThrow(id);
         warehouseContext.assertAccess(pr.getBranch().getId());
         Set<PurchaseRequestStatus> cancellableStatuses = Set.of(
                 PurchaseRequestStatus.DRAFT,
                 PurchaseRequestStatus.PENDING_APPROVAL,
-                PurchaseRequestStatus.APPROVED
+                PurchaseRequestStatus.APPROVED,
+                PurchaseRequestStatus.SENT_TO_SUPPLIER,
+                PurchaseRequestStatus.SUPPLIER_CONFIRMED,
+                PurchaseRequestStatus.DELIVERING
         );
         if (!cancellableStatuses.contains(pr.getStatus())) {
             throw new BadRequestException("Không thể hủy phiếu ở trạng thái hiện tại. Phiếu đã gửi NCC hoặc đang nhận hàng.");
@@ -365,10 +614,10 @@ public class PurchaseRequestService {
     @Transactional
     public PurchaseRequestResponse close(Long id) {
         PurchaseRequest pr = findOrThrow(id);
-        warehouseContext.assertAccess(pr.getBranch().getId());
+        assertPurchaseRequestReadOrApproveAccess(pr);
         Set<PurchaseRequestStatus> closableStatuses = Set.of(
-                PurchaseRequestStatus.SENT_TO_SUPPLIER,
-                PurchaseRequestStatus.PARTIALLY_RECEIVED
+                PurchaseRequestStatus.PARTIALLY_RECEIVED,
+                PurchaseRequestStatus.COMPLETED
         );
         if (!closableStatuses.contains(pr.getStatus())) {
             throw new BadRequestException("Chỉ có thể đóng phiếu đang gửi NCC hoặc đang nhận một phần.");
@@ -439,13 +688,15 @@ public class PurchaseRequestService {
             pr.setCompletedAt(LocalDateTime.now());
         } else {
             // Còn thiếu → PARTIALLY_RECEIVED (chuyển từ trạng thái chờ hàng sang đã nhận một phần)
-            if (pr.getStatus() == PurchaseRequestStatus.SENT_TO_SUPPLIER ||
-                    pr.getStatus() == PurchaseRequestStatus.APPROVED) {
+            if (pr.getStatus() == PurchaseRequestStatus.DELIVERING) {
                 pr.setStatus(PurchaseRequestStatus.PARTIALLY_RECEIVED);
             }
         }
 
-        purchaseRequestRepository.save(pr);
+        pr = purchaseRequestRepository.save(pr);
+        if (Boolean.TRUE.equals(pr.getAutoReplenishment()) && pr.getLinkedSubOrderId() != null) {
+            inventoryTransferService.createMainWarehouseReplenishmentTransferIfPossible(pr.getLinkedSubOrderId());
+        }
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -458,6 +709,14 @@ public class PurchaseRequestService {
     }
 
     private void validatePurchaseRequestBranch(Branch branch) {
+        if (enforceMainWarehousePurchaseRequests()) {
+            Branch mainWarehouse = resolveMainWarehouseBranch();
+            if (branch == null || branch.getId() == null || !Objects.equals(branch.getId(), mainWarehouse.getId())) {
+                throw new BadRequestException("Phieu yeu cau mua NCC chi duoc tao cho kho tong.");
+            }
+            return;
+        }
+
         String branchType = branch.getBranchType();
         if (branchType == null || !"WAREHOUSE".equalsIgnoreCase(branchType)) {
             throw new BadRequestException("Phiếu yêu cầu mua NCC chỉ được tạo cho kho tổng / chi nhánh loại WAREHOUSE.");
@@ -465,18 +724,30 @@ public class PurchaseRequestService {
     }
 
     // Mapping đầy đủ (dùng cho getById - có details và goodsReceipts)
+    private void validateUniqueRequestItems(List<PurchaseRequestCreateRequest.ItemRequest> items) {
+        Set<String> seenSkus = new HashSet<>();
+        for (PurchaseRequestCreateRequest.ItemRequest item : items) {
+            String sku = item.getProductCode() != null ? item.getProductCode().trim() : "";
+            String normalizedSku = sku.toUpperCase(Locale.ROOT);
+            if (!seenSkus.add(normalizedSku)) {
+                throw new BadRequestException("SKU " + sku + " bị trùng trong phiếu yêu cầu mua.");
+            }
+        }
+    }
+
     private void validateSupplierCatalogContainsVariant(Supplier supplier, ProductVariant variant) {
-        if (supplier == null || variant == null || variant.getProduct() == null) {
-            throw new BadRequestException("Invalid supplier or product data.");
+        if (supplier == null || variant == null) {
+            throw new BadRequestException("Dữ liệu nhà cung cấp hoặc sản phẩm không hợp lệ. Vui lòng tải lại trang và thử lại.");
         }
 
-        boolean isAvailableForSupplier = supplierProductCatalogRepository.existsAvailableBySupplierIdAndProductId(
+        boolean isAvailableForSupplier = supplierProductCatalogRepository.existsAvailableBySupplierIdAndProductVariantId(
                 supplier.getId(),
-                variant.getProduct().getId());
+                variant.getId());
 
         if (!isAvailableForSupplier) {
             throw new BadRequestException(
-                    "SKU " + variant.getSku() + " is not available in supplier catalog " + supplier.getCode());
+                    "SKU " + variant.getSku() + " không nằm trong catalog đang bán của nhà cung cấp "
+                            + supplier.getCode() + ". Vui lòng chọn sản phẩm trong danh sách catalog của nhà cung cấp.");
         }
     }
 
@@ -490,8 +761,9 @@ public class PurchaseRequestService {
 
         // Lấy danh sách phiếu nhập liên kết
         List<PurchaseRequestResponse.GoodsReceiptSummary> receiptSummaries = new ArrayList<>();
-        if (pr.getGoodsReceipts() != null) {
-            receiptSummaries = pr.getGoodsReceipts().stream()
+        List<InventoryNote> goodsReceipts = inventoryNoteRepository.findGoodsReceiptsByPurchaseRequestId(pr.getId());
+        if (goodsReceipts != null) {
+            receiptSummaries = goodsReceipts.stream()
                     .map(note -> {
                         int totalDelivered = 0;
                         int totalAccepted = 0;
@@ -550,6 +822,9 @@ public class PurchaseRequestService {
 
     // Mapping nhanh cho danh sách (không load items + receipts chi tiết)
     private PurchaseRequestResponse mapToResponseShallow(PurchaseRequest pr) {
+        long totalReceiptCount = purchaseRequestRepository.countGoodsReceiptsByPrId(pr.getId());
+        long completedReceiptCount = purchaseRequestRepository.countCompletedGoodsReceiptsByPrId(pr.getId());
+
         return PurchaseRequestResponse.builder()
                 .id(pr.getId())
                 .code(pr.getCode())
@@ -566,6 +841,8 @@ public class PurchaseRequestService {
                 .createdByName(pr.getCreatedBy() != null ? pr.getCreatedBy().getFullName() : "")
                 .totalAmount(Objects.requireNonNullElse(pr.getTotalAmount(), BigDecimal.ZERO))
                 .note(pr.getNote())
+                .totalReceiptCount(totalReceiptCount)
+                .completedReceiptCount(completedReceiptCount)
                 .build();
     }
 

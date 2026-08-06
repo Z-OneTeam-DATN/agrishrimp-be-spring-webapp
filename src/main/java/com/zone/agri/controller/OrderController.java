@@ -1,10 +1,12 @@
 package com.zone.agri.controller;
 
+import com.zone.agri.common.RoleUtils;
 import com.zone.agri.dto.request.order.*;
 import com.zone.agri.dto.response.order.*;
 import com.zone.agri.entity.Order;
 import com.zone.agri.entity.User;
 import com.zone.agri.entity.enums.OrderStatus;
+import com.zone.agri.entity.enums.PaymentStatus;
 import com.zone.agri.exception.BadRequestException;
 import com.zone.agri.exception.SignInRequiredException;
 import com.zone.agri.repository.UserRepository;
@@ -56,7 +58,7 @@ public class OrderController {
     private void verifyAdminAccess() {
         User user = getCurrentUser();
         String roleSlug = user.getRole() != null ? user.getRole().getSlug() : "";
-        if (!"ADMIN".equals(roleSlug) && !"SUPER_ADMIN".equals(roleSlug)) {
+        if (!RoleUtils.isAdminLikeRole(roleSlug)) {
             throw new com.zone.agri.exception.Forbidden("Tài khoản chi nhánh không được phép xem/thao tác toàn bộ đơn hàng hệ thống. Vui lòng sử dụng chức năng dành cho chi nhánh!");
         }
     }
@@ -85,17 +87,9 @@ public class OrderController {
     @Operation(summary = "Hủy đơn hàng của tôi")
     @PostMapping("/orders/{id}/cancel")
     public ResponseEntity<?> cancelMyOrder(@PathVariable Long id,
-            @RequestBody(required = false) Map<String, Object> body) {
+            @Valid @RequestBody(required = false) OrderCancelRequest request) {
         Long userId = getCurrentUserId();
-        String reasonCode = body != null && body.get("reasonCode") != null ? body.get("reasonCode").toString() : null;
-        String otherReasonText = body != null && body.get("otherReasonText") != null
-                ? body.get("otherReasonText").toString()
-                : null;
-        String cancelReason = reasonCode;
-        if (otherReasonText != null && !otherReasonText.isBlank()) {
-            cancelReason = (cancelReason != null ? cancelReason + ": " : "") + otherReasonText;
-        }
-        orderService.cancelMyOrder(userId, id, cancelReason);
+        orderService.cancelMyOrder(userId, id, request);
         return ResponseEntity.ok(Map.of("message", "Hủy đơn hàng thành công"));
     }
 
@@ -120,6 +114,13 @@ public class OrderController {
         return ResponseEntity.ok(response);
     }
 
+    @Operation(summary = "Lay lai bao gia tam", description = "Khoi phuc prepare draft theo prepareToken de quay lai checkout sau khi huy PayOS.")
+    @GetMapping("/orders/prepare/{prepareToken}")
+    public ResponseEntity<PrepareOrderResponse> getPreparedOrder(@PathVariable String prepareToken) {
+        Long userId = getCurrentUserId();
+        return ResponseEntity.ok(orderService.getPreparedOrder(userId, prepareToken));
+    }
+
     @Operation(summary = "Xác nhận đơn hàng", description = "Bước 2 — Lưu đơn vào DB, trừ tồn kho (có lock tránh race condition), "
             + "tạo SubOrder theo từng chi nhánh.")
     @PostMapping("/orders/confirm")
@@ -136,14 +137,45 @@ public class OrderController {
     @RequirePermission("ORDER_VIEW")
     @GetMapping("/admin/all")
     public ResponseEntity<Page<OrderResponse>> getAllOrders(
-            @RequestParam(required = false) OrderStatus status,
+            @RequestParam(required = false) String status,
             @RequestParam(required = false) String search,
+            @RequestParam(required = false) PaymentStatus paymentStatus,
+            @RequestParam(required = false) String startDate,
+            @RequestParam(required = false) String endDate,
             @PageableDefault(size = 10, sort = "createdAt", direction = Sort.Direction.DESC) Pageable pageable) {
         verifyAdminAccess();
-        return ResponseEntity.ok(orderService.getAdminOrders(status, search, pageable));
+        return ResponseEntity.ok(orderService.getAdminOrders(
+                status,
+                search,
+                paymentStatus,
+                startDate,
+                endDate,
+                pageable));
     }
 
     @Operation(summary = "Lấy chi tiết đơn hàng (Admin)", description = "Admin xem chi tiết toàn bộ thông tin đơn hàng")
+    private void adminOrderDetailOpenApiAnchor() {
+    }
+
+    @Operation(summary = "Tổng quan danh sách đơn hàng (Admin)", description = "Lấy số liệu tổng hợp theo đúng bộ lọc đang áp dụng ở màn quản lý đơn hàng.")
+    @RequirePermission("ORDER_VIEW")
+    @GetMapping("/admin/all/summary")
+    public ResponseEntity<AdminOrderSummaryResponse> getAllOrdersSummary(
+            @RequestParam(required = false) String status,
+            @RequestParam(required = false) String search,
+            @RequestParam(required = false) PaymentStatus paymentStatus,
+            @RequestParam(required = false) String startDate,
+            @RequestParam(required = false) String endDate) {
+        verifyAdminAccess();
+        return ResponseEntity.ok(orderService.getAdminOrderSummary(
+                status,
+                search,
+                paymentStatus,
+                startDate,
+                endDate));
+    }
+
+    @Operation(summary = "Láº¥y chi tiáº¿t Ä‘Æ¡n hĂ ng (Admin)", description = "Admin xem chi tiáº¿t toĂ n bá»™ thĂ´ng tin Ä‘Æ¡n hĂ ng")
     @RequirePermission("ORDER_VIEW")
     @GetMapping("/admin/{id}")
     public ResponseEntity<OrderResponse> getAdminOrderDetail(@PathVariable Long id) {
@@ -154,9 +186,10 @@ public class OrderController {
     @Operation(summary = "Báo cáo nợ đơn", description = "Tổng hợp các sản phẩm đang thiếu hàng trong các phần đơn chờ điều chuyển bổ sung.")
     @RequirePermission("ORDER_VIEW")
     @GetMapping("/admin/backorders")
-    public ResponseEntity<List<MissingItemReportDto>> getBackorderReport() {
+    public ResponseEntity<List<MissingItemReportDto>> getBackorderReport(
+            @RequestParam(required = false) Long branchId) {
         verifyAdminAccess();
-        return ResponseEntity.ok(orderService.getBackorderReport());
+        return ResponseEntity.ok(orderService.getBackorderReport(branchId));
     }
 
     @Operation(summary = "Cập nhật trạng thái đơn hàng (Admin)", description = "Admin duyệt đơn, đóng gói, giao hàng theo quy trình.")
@@ -199,12 +232,19 @@ public class OrderController {
     @GetMapping("/branch/orders")
     public ResponseEntity<List<BranchOrderResponse>> getBranchOrders(
             @RequestParam(required = false) OrderStatus status,
-            @RequestParam(required = false) String search) {
+            @RequestParam(required = false) String search,
+            @RequestParam(required = false) String startDate,
+            @RequestParam(required = false) String endDate) {
         User user = getCurrentUser();
         if (user.getBranch() == null) {
             throw new BadRequestException("Tài khoản chưa được gán vào chi nhánh nào");
         }
-        return ResponseEntity.ok(orderService.getBranchOrders(user.getBranch().getId(), status, search));
+        return ResponseEntity.ok(orderService.getBranchOrders(
+                user.getBranch().getId(),
+                status,
+                search,
+                startDate,
+                endDate));
     }
 
     @Operation(summary = "Chi tiết đơn hàng của chi nhánh", description = "Xem chi tiết phần đơn (SubOrder) thuộc chi nhánh của người dùng đang đăng nhập, "
@@ -219,9 +259,10 @@ public class OrderController {
         return ResponseEntity.ok(orderService.getBranchOrderDetail(user.getBranch().getId(), orderId));
     }
 
-    @Operation(summary = "Cập nhật trạng thái phần đơn của chi nhánh", description = "Chi nhánh tự quản lý trạng thái phần đơn của mình theo quy trình: "
-            + "PENDING → CONFIRMED → PROCESSING → READY_FOR_PICKUP → SHIPPING → RECEIVED → COMPLETED. "
-            + "Trạng thái tổng của đơn hàng sẽ được tự động đồng bộ theo chi nhánh chậm nhất.")
+    @Operation(summary = "Cập nhật trạng thái phần đơn của chi nhánh", description = "Chi nhánh tự quản lý phần đơn theo luồng: "
+            + "PENDING → CONFIRMED → PROCESSING → READY_FOR_PICKUP, sau đó bàn giao qua handover để sang SHIPPING. "
+            + "Nếu thiếu hàng thì phần đơn nằm ở AWAITING_REPLENISHMENT cho đến khi được bổ sung đủ. "
+            + "Trạng thái tổng của đơn hàng sẽ được đồng bộ tự động theo tiến độ các sub-order.")
     @RequirePermission("ORDER_UPDATE")
     @PutMapping("/branch/orders/{orderId}/status")
     public ResponseEntity<?> updateBranchSubOrderStatus(
@@ -240,10 +281,10 @@ public class OrderController {
     @PostMapping("/admin/{id}/request-replenishment")
     public ResponseEntity<?> requestReplenishmentForAdmin(@PathVariable Long id) {
         verifyAdminAccess();
-        List<String> transferCodes = orderService.requestReplenishmentForAdmin(id);
-        return ResponseEntity.ok(Map.of(
+        Object response = orderService.requestReplenishmentForAdminResponse(id);
+        return ResponseEntity.ok(response); /*
                 "message", "Đã tạo lệnh điều chuyển bổ sung",
-                "transferCodes", transferCodes));
+        */
     }
 
     @Operation(summary = "Tạo lệnh điều chuyển bổ sung cho phần đơn của chi nhánh")
@@ -254,9 +295,9 @@ public class OrderController {
         if (user.getBranch() == null) {
             throw new BadRequestException("Tài khoản chưa được gán vào chi nhánh nào");
         }
-        List<String> transferCodes = orderService.requestReplenishmentForBranch(user.getBranch().getId(), orderId);
-        return ResponseEntity.ok(Map.of(
+        Object response = orderService.requestReplenishmentForBranchResponse(user.getBranch().getId(), orderId);
+        return ResponseEntity.ok(response); /*
                 "message", "Đã tạo lệnh điều chuyển bổ sung",
-                "transferCodes", transferCodes));
+                "transferCodes", transferCodes)); */
     }
 }

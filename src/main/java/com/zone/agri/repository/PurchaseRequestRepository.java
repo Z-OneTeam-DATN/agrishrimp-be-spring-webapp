@@ -54,6 +54,14 @@ public interface PurchaseRequestRepository extends JpaRepository<PurchaseRequest
     @Query("SELECT COUNT(n) FROM InventoryNote n WHERE n.purchaseRequest.id = :prId")
     long countGoodsReceiptsByPrId(@Param("prId") Long prId);
 
+    @Query("""
+        SELECT COUNT(n)
+        FROM InventoryNote n
+        WHERE n.purchaseRequest.id = :prId
+          AND n.status = com.zone.agri.entity.enums.InventoryNoteStatus.COMPLETED
+    """)
+    long countCompletedGoodsReceiptsByPrId(@Param("prId") Long prId);
+
     // Tìm theo mã code
     Optional<PurchaseRequest> findByCode(String code);
 
@@ -67,4 +75,20 @@ public interface PurchaseRequestRepository extends JpaRepository<PurchaseRequest
         ORDER BY pr.createdAt DESC
     """)
     List<PurchaseRequest> findByStatusIn(@Param("statuses") List<PurchaseRequestStatus> statuses);
+
+    boolean existsBySupplierId(Long supplierId);
+
+    @Query("""
+        SELECT DISTINCT pr
+        FROM PurchaseRequest pr
+        LEFT JOIN FETCH pr.supplier
+        LEFT JOIN FETCH pr.branch
+        WHERE pr.autoReplenishment = true
+          AND pr.linkedSubOrderId = :subOrderId
+          AND pr.status NOT IN :excludedStatuses
+        ORDER BY pr.createdAt DESC
+    """)
+    List<PurchaseRequest> findAutoReplenishmentRequestsByLinkedSubOrderIdExcludingStatuses(
+            @Param("subOrderId") Long subOrderId,
+            @Param("excludedStatuses") List<PurchaseRequestStatus> excludedStatuses);
 }

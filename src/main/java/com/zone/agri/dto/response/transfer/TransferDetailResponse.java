@@ -3,11 +3,11 @@ package com.zone.agri.dto.response.transfer;
 import com.zone.agri.entity.enums.InventoryTransferStatus;
 import com.zone.agri.entity.enums.TransferBusinessType;
 import com.zone.agri.entity.enums.TransferSettlementStatus;
-import lombok.Builder;
-import lombok.Data;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
+import lombok.Builder;
+import lombok.Data;
 
 @Data
 @Builder
@@ -22,18 +22,38 @@ public class TransferDetailResponse {
     private String dispatchOrder;
     private String referenceCode;
     private LocalDateTime createdAt;
+    private Long sourceBranchId;
+    private Long destinationBranchId;
     private String fromBranchName;
     private String toBranchName;
+    private Long createdByBranchId;
+    private String createdByBranchName;
+    private Boolean sourceConfirmationRequired;
+    private String createdByName;
+    private String sourceConfirmedByName;
+    private LocalDateTime sourceConfirmedAt;
+    private String approvedByName;
+    private LocalDateTime approvedAt;
+    private String shippedByName;
+    private LocalDateTime shippedAt;
+    private String inspectionStartedByName;
+    private LocalDateTime inspectionStartedAt;
+    private String receivedByName;
+    private LocalDateTime receivedAt;
+    private String settledByName;
+    private LocalDateTime settledAt;
     private Integer totalQuantity;
-    private BigDecimal totalValue; // Tổng giá trị theo giá vốn FIFO (quản trị kho)
-    private List<ItemDetail> items; // Danh sách hàng hóa chi tiết
+    private BigDecimal totalValue;
+    private List<ItemDetail> items;
 
-    // --- THÔNG TIN BÁN NỘI BỘ ---
-    private TransferBusinessType transferBusinessType; // STOCK_TRANSFER hoặc INTERNAL_SALE
-    private BigDecimal transferAmount;                 // Tổng thành tiền nội bộ (chỉ có khi INTERNAL_SALE)
-    private TransferSettlementStatus settlementStatus; // Trạng thái thanh toán nội bộ
-    private BigDecimal sourceReceivableAmount;         // Phải thu nội bộ của kho xuất
-    private BigDecimal destPayableAmount;              // Phải trả nội bộ của kho nhận
+    private TransferBusinessType transferBusinessType;
+    private BigDecimal transferAmount;
+    private TransferSettlementStatus settlementStatus;
+    private BigDecimal sourceReceivableAmount;
+    private BigDecimal destPayableAmount;
+    private BigDecimal paidAmount;
+    private BigDecimal outstandingAmount;
+    private BigDecimal requiredMarginPercent;
 
     @Data
     @Builder
@@ -42,12 +62,12 @@ public class TransferDetailResponse {
         private String productName;
         private String sku;
         private String unit;
-        private Integer quantityRequested; // Expected
-        private Integer quantityReal;      // Actual
-        private Integer quantityAccepted;  // Accepted
-        private Integer quantityRejected;  // Rejected
+        private Integer quantityRequested;
+        private Integer quantityReal;
+        private Integer quantityAccepted;
+        private Integer quantityRejected;
         private String note;
-        private BigDecimal unitTransferPrice;  // Đơn giá nội bộ (chỉ có khi INTERNAL_SALE)
-        private BigDecimal totalTransferPrice; // Thành tiền nội bộ = unitTransferPrice × quantityRequested
+        private BigDecimal unitTransferPrice;
+        private BigDecimal totalTransferPrice;
     }
 }

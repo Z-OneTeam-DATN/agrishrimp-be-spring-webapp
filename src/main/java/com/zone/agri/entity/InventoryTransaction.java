@@ -21,7 +21,10 @@ public class InventoryTransaction {
     Long id;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "type")
+    @Column(
+            name = "type",
+            columnDefinition = "ENUM('IMPORT','ORDER_RESERVE','ORDER_RELEASE','SALE','CANCEL_RELEASE','TRANSFER_OUT','TRANSFER_IN','ADJUSTMENT','RETURN','DAMAGED')"
+    )
     TransactionType type;
 
     @Column(name = "quantity_change")

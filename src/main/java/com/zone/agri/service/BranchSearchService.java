@@ -74,6 +74,54 @@ public class BranchSearchService {
         return enrichWithRealDistance(userLat, userLng, sorted);
     }
 
+    /**
+     * Ưu tiên chi nhánh theo ward/district/province của địa chỉ giao hàng.
+     * Nếu có tọa độ thật từ client thì tiếp tục sort theo khoảng cách trong cùng nhóm ưu tiên.
+     * Không geocode lại từ chuỗi địa chỉ để tránh phụ thuộc dịch vụ ngoài.
+     */
+    public List<BranchWithRealDistance> findBranchesForDelivery(
+            Integer provinceId,
+            Integer districtId,
+            String wardCode,
+            Double userLat,
+            Double userLng) {
+        List<Branch> allActive = branchRepository.findByStatus(BranchStatus.ACTIVE);
+
+        if (allActive.isEmpty()) {
+            log.error("Hệ thống không có chi nhánh nào đang hoạt động!");
+            return List.of();
+        }
+
+        String normalizedWardCode = normalizeWardCode(wardCode);
+
+        if (userLat != null && userLng != null) {
+            List<BranchWithDistance> rankedByDistance = allActive.stream()
+                    .map(branch -> {
+                        double dist = (branch.getLat() != null && branch.getLng() != null)
+                                ? HaversineUtils.distanceKm(userLat, userLng, branch.getLat(), branch.getLng())
+                                : Double.MAX_VALUE;
+                        return new BranchWithDistance(branch, dist);
+                    })
+                    .sorted(Comparator
+                            .comparingInt((BranchWithDistance candidate) -> administrativeMatchScore(
+                                    candidate.branch(), provinceId, districtId, normalizedWardCode))
+                            .thenComparingDouble(BranchWithDistance::distanceKm)
+                            .thenComparing(candidate -> candidate.branch().getId(), Comparator.nullsLast(Long::compareTo)))
+                    .toList();
+
+            return enrichWithRealDistance(userLat, userLng, rankedByDistance);
+        }
+
+        List<Branch> rankedWithoutCoordinates = allActive.stream()
+                .sorted(Comparator
+                        .comparingInt((Branch branch) -> administrativeMatchScore(
+                                branch, provinceId, districtId, normalizedWardCode))
+                        .thenComparing(Branch::getId, Comparator.nullsLast(Long::compareTo)))
+                .toList();
+
+        return buildAdministrativeRanking(rankedWithoutCoordinates, provinceId, districtId, normalizedWardCode);
+    }
+
     // ──────────────────────────────────────────────────────────────
     // Haversine sort — toàn bộ, không giới hạn
     // ──────────────────────────────────────────────────────────────
@@ -155,5 +203,52 @@ public class BranchSearchService {
 
     private BranchWithRealDistance createRealDistance(BranchWithDistance bwd, double durationSec) {
         return new BranchWithRealDistance(bwd.branch(), bwd.distanceKm(), durationSec, durationSec / 60.0);
+    }
+
+    private List<BranchWithRealDistance> buildAdministrativeRanking(
+            List<Branch> branches,
+            Integer provinceId,
+            Integer districtId,
+            String wardCode) {
+        List<BranchWithRealDistance> ranked = new ArrayList<>();
+
+        for (int index = 0; index < branches.size(); index++) {
+            Branch branch = branches.get(index);
+            int score = administrativeMatchScore(branch, provinceId, districtId, wardCode);
+            double distanceKm = switch (score) {
+                case 0 -> 1.0;
+                case 1 -> 4.0;
+                case 2 -> 12.0;
+                default -> 30.0;
+            } + (index * 0.1);
+            double durationSec = estimateDuration(distanceKm);
+            ranked.add(new BranchWithRealDistance(branch, distanceKm, durationSec, durationSec / 60.0));
+        }
+
+        return ranked;
+    }
+
+    private int administrativeMatchScore(Branch branch, Integer provinceId, Integer districtId, String wardCode) {
+        if (branch == null) {
+            return Integer.MAX_VALUE;
+        }
+
+        String branchWardCode = normalizeWardCode(branch.getWardCode());
+        if (wardCode != null && wardCode.equals(branchWardCode)) {
+            return 0;
+        }
+        if (provinceId != null && provinceId.equals(branch.getProvinceId())) {
+            return 1;
+        }
+        return 2;
+    }
+
+    private String normalizeWardCode(String wardCode) {
+        if (wardCode == null) {
+            return null;
+        }
+
+        String normalized = wardCode.trim();
+        return normalized.isEmpty() ? null : normalized;
     }
 }

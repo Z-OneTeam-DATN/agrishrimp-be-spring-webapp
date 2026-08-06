@@ -3,12 +3,18 @@ package com.zone.agri.service;
 import com.zone.agri.dto.request.order.HandoverCreateRequest;
 import com.zone.agri.dto.response.order.HandoverDetailResponse;
 import com.zone.agri.dto.response.order.HandoverResponse;
-import com.zone.agri.entity.*;
+import com.zone.agri.entity.Branch;
+import com.zone.agri.entity.Handover;
+import com.zone.agri.entity.SubOrder;
+import com.zone.agri.entity.User;
 import com.zone.agri.entity.enums.OrderStatus;
 import com.zone.agri.entity.enums.PaymentMethod;
 import com.zone.agri.exception.BadRequestException;
 import com.zone.agri.exception.NotFoundException;
-import com.zone.agri.repository.*;
+import com.zone.agri.repository.BranchRepository;
+import com.zone.agri.repository.HandoverRepository;
+import com.zone.agri.repository.SubOrderRepository;
+import com.zone.agri.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -26,9 +32,10 @@ public class HandoverService {
 
     private final HandoverRepository handoverRepository;
     private final SubOrderRepository subOrderRepository;
-    private final OrderRepository orderRepository;
     private final UserRepository userRepository;
     private final BranchRepository branchRepository;
+    private final OrderStatusSyncService orderStatusSyncService;
+    private final OrderInventoryReservationService orderInventoryReservationService;
 
     @Transactional
     public Handover createHandover(Long userId, Long branchId, HandoverCreateRequest request) {
@@ -84,26 +91,17 @@ public class HandoverService {
         Handover savedHandover = handoverRepository.save(handover);
 
         for (SubOrder subOrder : subOrders) {
+            orderInventoryReservationService.shipReservedInventory(
+                    orderInventoryReservationService.buildSubOrderReferenceCode(subOrder),
+                    "Xuat kho khi ban giao van chuyen cho phan don " + subOrder.getOrder().getCode());
             subOrder.setHandover(savedHandover);
             subOrder.setStatus(OrderStatus.SHIPPING);
             subOrderRepository.save(subOrder);
 
-            syncMasterOrderStatus(subOrder.getOrder());
+            orderStatusSyncService.syncMasterOrderStatus(subOrder.getOrder().getId());
         }
 
         return savedHandover;
-    }
-
-    private void syncMasterOrderStatus(Order order) {
-        List<SubOrder> allSubs = subOrderRepository.findByOrderId(order.getId());
-        boolean allShippingOrHigher = allSubs.stream().allMatch(s ->
-                s.getStatus() == OrderStatus.SHIPPING || s.getStatus() == OrderStatus.COMPLETED
-        );
-
-        if (allShippingOrHigher && order.getStatus() != OrderStatus.SHIPPING && order.getStatus() != OrderStatus.COMPLETED) {
-            order.setStatus(OrderStatus.SHIPPING);
-            orderRepository.save(order);
-        }
     }
 
     public List<HandoverResponse> getHandoverList(Long branchId) {

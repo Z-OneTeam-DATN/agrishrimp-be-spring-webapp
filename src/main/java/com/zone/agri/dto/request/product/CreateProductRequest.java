@@ -15,13 +15,8 @@ public class CreateProductRequest {
     @NotNull(message = "Danh mục không được để trống")
     private Long categoryId;
 
-    @NotBlank(message = "Thương hiệu không được để trống")
-    @Size(max = 100, message = "Thương hiệu không được vượt quá 100 ký tự")
-    private String brand;
+    private Long brandId;
 
-    @NotBlank(message = "Xuất xứ không được để trống")
-    @Size(max = 100, message = "Xuất xứ không được vượt quá 100 ký tự")
-    private String origin;
 
     @Size(max = 50, message = "Mã SKU gốc không được vượt quá 50 ký tự")
     private String baseSku;

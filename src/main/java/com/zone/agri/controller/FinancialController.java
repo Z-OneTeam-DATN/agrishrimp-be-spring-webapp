@@ -11,12 +11,14 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.zone.agri.dto.response.financial.CashbookReportResponse;
+import com.zone.agri.dto.response.financial.ProfitLossInsightResponse;
 import com.zone.agri.dto.response.financial.ProfitLossResponse;
 import com.zone.agri.dto.response.inventory.ReceiptPaymentResponse;
 import com.zone.agri.dto.response.supplier.SupplierDebtResponse;
 import com.zone.agri.security.annotation.RequirePermission;
 import com.zone.agri.service.FinancialService;
 import com.zone.agri.service.InventoryReceiptPaymentService;
+import com.zone.agri.service.ProfitLossInsightService;
 
 import lombok.RequiredArgsConstructor;
 
@@ -28,6 +30,15 @@ public class FinancialController {
 
     private final FinancialService financialService;
     private final InventoryReceiptPaymentService inventoryReceiptPaymentService;
+    private final ProfitLossInsightService profitLossInsightService;
+
+    @GetMapping("/profit-loss/insight-analysis")
+    public ResponseEntity<ProfitLossInsightResponse> getProfitLossInsight(
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate,
+            @RequestParam(required = false) Long branchId) {
+        return ResponseEntity.ok(profitLossInsightService.getProfitLossInsights(startDate, endDate, branchId));
+    }
 
     @GetMapping("/profit-loss")
     public ResponseEntity<ProfitLossResponse> getProfitLoss(

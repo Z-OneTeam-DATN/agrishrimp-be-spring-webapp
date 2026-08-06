@@ -8,6 +8,7 @@ import com.zone.agri.dto.response.supplier.SupplierResponse;
 import com.zone.agri.dto.response.supplier.SupplierWarningResponse;
 import com.zone.agri.entity.InventoryNote;
 import com.zone.agri.entity.Product;
+import com.zone.agri.entity.ProductVariant;
 import com.zone.agri.entity.Supplier;
 import com.zone.agri.entity.SupplierProductCatalog;
 import com.zone.agri.entity.User;
@@ -16,10 +17,15 @@ import com.zone.agri.entity.enums.SupplierProductCatalogStatus;
 import com.zone.agri.entity.enums.SupplierStatus;
 import com.zone.agri.repository.InventoryNoteRepository;
 import com.zone.agri.repository.ProductRepository;
+import com.zone.agri.repository.ProductVariantRepository;
 import com.zone.agri.repository.SupplierProductCatalogRepository;
 import com.zone.agri.repository.SupplierRepository;
 import com.zone.agri.repository.UserRepository;
+import com.zone.agri.repository.InventoryReceiptPaymentRepository;
+import com.zone.agri.repository.PurchaseRequestRepository;
+import com.zone.agri.exception.ConflictException;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
@@ -40,14 +46,18 @@ import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class SupplierService {
     private static final long CHECKING_TOO_LONG_DAYS = 14L;
 
     private final SupplierRepository supplierRepository;
     private final InventoryNoteRepository inventoryNoteRepository;
     private final ProductRepository productRepository;
+    private final ProductVariantRepository productVariantRepository;
     private final SupplierProductCatalogRepository supplierProductCatalogRepository;
     private final UserRepository userRepository;
+    private final InventoryReceiptPaymentRepository inventoryReceiptPaymentRepository;
+    private final PurchaseRequestRepository purchaseRequestRepository;
 
     @Transactional
     public SupplierResponse createSupplier(SupplierRequest request) {
@@ -80,15 +90,16 @@ public class SupplierService {
 
         mapRequestToEntity(request, supplier);
         Supplier updated = supplierRepository.save(supplier);
-        return buildSupplierResponse(updated, supplierProductCatalogRepository.findAllBySupplierId(id));
+        CatalogLoadResult catalogLoadResult = loadCatalogItemsSafely(id);
+        return buildSupplierResponse(updated, catalogLoadResult.items(), catalogLoadResult.loaded());
     }
 
     @Transactional(readOnly = true)
     public SupplierResponse getSupplierById(Long id) {
         Supplier supplier = supplierRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Không tìm thấy NCC"));
-        List<SupplierProductCatalog> catalogItems = supplierProductCatalogRepository.findAllBySupplierId(id);
-        return buildSupplierResponse(supplier, catalogItems);
+        CatalogLoadResult catalogLoadResult = loadCatalogItemsSafely(id);
+        return buildSupplierResponse(supplier, catalogLoadResult.items(), catalogLoadResult.loaded());
     }
 
     @Transactional(readOnly = true)
@@ -109,8 +120,30 @@ public class SupplierService {
     @Transactional
     public void deleteSupplier(Long id) {
         if (!supplierRepository.existsById(id)) {
-            throw new RuntimeException("Không tìm thấy nhà cung cấp để xóa");
+            throw new IllegalArgumentException("Không tìm thấy nhà cung cấp để xóa");
         }
+
+        // Check 1: Catalog sản phẩm (SupplierProductCatalog)
+        if (supplierProductCatalogRepository.existsBySupplierId(id)) {
+            throw new IllegalArgumentException("Không thể xóa nhà cung cấp vì đã có sản phẩm trong catalog");
+        }
+
+
+        // Check 3: Phiếu nhập kho (InventoryNote)
+        if (inventoryNoteRepository.existsBySupplierId(id)) {
+            throw new IllegalArgumentException("Không thể xóa nhà cung cấp vì đã có phiếu nhập kho phát sinh");
+        }
+
+        // Check 4: Thanh toán phiếu nhập (InventoryReceiptPayment)
+        if (inventoryReceiptPaymentRepository.existsBySupplierId(id)) {
+            throw new IllegalArgumentException("Không thể xóa nhà cung cấp vì đã có giao dịch thanh toán");
+        }
+
+        // Check 5: Yêu cầu mua hàng (PurchaseRequest)
+        if (purchaseRequestRepository.existsBySupplierId(id)) {
+            throw new IllegalArgumentException("Không thể xóa nhà cung cấp vì đã có yêu cầu mua hàng");
+        }
+
         supplierRepository.deleteById(id);
     }
 
@@ -139,7 +172,7 @@ public class SupplierService {
     @Transactional(readOnly = true)
     public List<SupplierProductCatalogResponse> getProductCatalog(Long supplierId) {
         List<SupplierProductCatalog> catalogItems = supplierProductCatalogRepository.findAllBySupplierId(supplierId);
-        Map<Long, String> userNames = resolveUserNames(catalogItems.stream()
+        Map<Long, String> userNames = resolveUserNamesSafely(catalogItems.stream()
                 .flatMap(item -> java.util.stream.Stream.of(item.getCreatedByUserId(), item.getUpdatedByUserId()))
                 .filter(Objects::nonNull)
                 .toList());
@@ -155,8 +188,8 @@ public class SupplierService {
                 .orElseThrow(() -> new RuntimeException("Không tìm thấy NCC"));
 
         List<SupplierProductCatalogRequest> safeRequests = requests != null ? requests : List.of();
-        Set<Long> duplicateProductIds = safeRequests.stream()
-                .map(SupplierProductCatalogRequest::getProductId)
+        Set<Long> duplicateVariantIds = safeRequests.stream()
+                .map(SupplierProductCatalogRequest::getProductVariantId)
                 .filter(Objects::nonNull)
                 .collect(Collectors.groupingBy(id -> id, Collectors.counting()))
                 .entrySet().stream()
@@ -164,52 +197,83 @@ public class SupplierService {
                 .map(Map.Entry::getKey)
                 .collect(Collectors.toSet());
 
-        if (!duplicateProductIds.isEmpty()) {
-            throw new IllegalArgumentException("Catalog chứa sản phẩm trùng lặp: " + duplicateProductIds);
+        if (!duplicateVariantIds.isEmpty()) {
+            throw new IllegalArgumentException("Catalog chứa biến thể trùng lặp: " + duplicateVariantIds);
         }
 
-        List<Long> productIds = safeRequests.stream()
-                .map(SupplierProductCatalogRequest::getProductId)
+        List<Long> variantIdsInRequest = safeRequests.stream()
+                .map(SupplierProductCatalogRequest::getProductVariantId)
                 .filter(Objects::nonNull)
                 .distinct()
                 .toList();
 
-        Map<Long, Product> productMap = productRepository.findAllById(productIds).stream()
-                .collect(Collectors.toMap(Product::getId, product -> product));
+        Map<Long, ProductVariant> variantMap = productVariantRepository.findAllById(variantIdsInRequest).stream()
+                .collect(Collectors.toMap(ProductVariant::getId, v -> v));
 
-        if (productMap.size() != productIds.size()) {
-            List<Long> missing = productIds.stream()
-                    .filter(id -> !productMap.containsKey(id))
+        if (variantMap.size() != variantIdsInRequest.size()) {
+            List<Long> missing = variantIdsInRequest.stream()
+                    .filter(id -> !variantMap.containsKey(id))
                     .toList();
-            throw new RuntimeException("Không tìm thấy sản phẩm: " + missing);
+            throw new RuntimeException("Không tìm thấy biến thể sản phẩm: " + missing);
         }
 
-        Map<Long, SupplierProductCatalog> existingMap = new HashMap<>();
-        supplierProductCatalogRepository.findAllBySupplierId(supplierId)
-                .forEach(catalog -> existingMap.put(catalog.getProduct().getId(), catalog));
+        List<SupplierProductCatalog> dbCatalogs = supplierProductCatalogRepository.findAllBySupplierId(supplierId);
+        Map<Long, SupplierProductCatalog> dbMap = dbCatalogs.stream()
+                .collect(Collectors.toMap(c -> c.getProductVariant().getId(), c -> c));
+
+        Set<Long> requestVariantIds = safeRequests.stream()
+                .map(SupplierProductCatalogRequest::getProductVariantId)
+                .collect(Collectors.toSet());
+
+        List<Long> staleVariants = dbMap.keySet().stream()
+                .filter(id -> !requestVariantIds.contains(id))
+                .toList();
+
+        if (!staleVariants.isEmpty()) {
+            throw new ConflictException("Dữ liệu catalog sản phẩm đã thay đổi bởi người dùng khác. Vui lòng tải lại trang.", true);
+        }
 
         for (SupplierProductCatalogRequest request : safeRequests) {
-            Product product = productMap.get(request.getProductId());
-            if (product == null) {
+            Long pvId = request.getProductVariantId();
+            ProductVariant variant = variantMap.get(pvId);
+            if (variant == null) {
                 continue;
             }
 
-            SupplierProductCatalog catalog = existingMap.get(request.getProductId());
-            if (catalog == null) {
-                catalog = new SupplierProductCatalog();
-                catalog.setSupplier(supplier);
-                catalog.setProduct(product);
+            SupplierProductCatalog catalog = dbMap.get(pvId);
+            boolean isDeletion = Boolean.TRUE.equals(request.getIsDeleted()) || request.getStatus() == null;
+
+            if (isDeletion) {
+                if (catalog != null) {
+                    if (request.getVersion() == null || !Objects.equals(catalog.getVersion(), request.getVersion())) {
+                        throw new ConflictException("Sản phẩm " + variant.getSku() + " đã được cập nhật bởi người dùng khác. Vui lòng tải lại trang.", true);
+                    }
+                    supplierProductCatalogRepository.delete(catalog);
+                }
+            } else {
+                if (catalog == null) {
+                    if (request.getVersion() != null) {
+                        throw new ConflictException("Sản phẩm " + variant.getSku() + " đã bị người dùng khác xóa khỏi catalog. Vui lòng tải lại trang.", true);
+                    }
+                    catalog = new SupplierProductCatalog();
+                    catalog.setSupplier(supplier);
+                    catalog.setProductVariant(variant);
+                    catalog.setStatus(request.getStatus());
+                    catalog.setNote(normalizeOptionalText(request.getNote()));
+                    catalog.setStatusChangedAt(LocalDateTime.now());
+                    catalog.setVersion(0);
+                } else {
+                    if (request.getVersion() == null || !Objects.equals(catalog.getVersion(), request.getVersion())) {
+                        throw new ConflictException("Sản phẩm " + variant.getSku() + " đã được cập nhật bởi người dùng khác. Vui lòng tải lại trang.", true);
+                    }
+                    if (catalog.getStatus() != request.getStatus()) {
+                        catalog.setStatusChangedAt(LocalDateTime.now());
+                        catalog.setStatus(request.getStatus());
+                    }
+                    catalog.setNote(normalizeOptionalText(request.getNote()));
+                }
+                supplierProductCatalogRepository.save(catalog);
             }
-
-            catalog.setStatus(request.getStatus() != null ? request.getStatus() : SupplierProductCatalogStatus.CHECKING);
-            catalog.setNote(normalizeOptionalText(request.getNote()));
-            supplierProductCatalogRepository.save(catalog);
-        }
-
-        if (!productIds.isEmpty()) {
-            supplierProductCatalogRepository.deleteBySupplierIdAndProductIdNotIn(supplierId, productIds);
-        } else {
-            supplierProductCatalogRepository.deleteBySupplierId(supplierId);
         }
 
         return getProductCatalog(supplierId);
@@ -224,18 +288,25 @@ public class SupplierService {
         supplier.setProvinceId(normalizeRequiredText(request.getProvinceId()));
         supplier.setAddressDetail(normalizeRequiredText(request.getAddressDetail()));
         supplier.setStatus(request.getStatus());
+        supplier.setIssueDate(request.getIssueDate());
+        supplier.setTaxAuthority(normalizeOptionalText(request.getTaxAuthority()));
+        supplier.setMainBusinessSector(normalizeOptionalText(request.getMainBusinessSector()));
     }
 
     private SupplierResponse buildSupplierResponse(Supplier supplier, List<SupplierProductCatalog> catalogItems) {
+        return buildSupplierResponse(supplier, catalogItems, true);
+    }
+
+    private SupplierResponse buildSupplierResponse(Supplier supplier, List<SupplierProductCatalog> catalogItems, boolean catalogLoaded) {
         SupplierResponse response = SupplierResponse.fromEntity(supplier);
-        Map<Long, String> userNames = resolveUserNames(java.util.stream.Stream.of(
+        Map<Long, String> userNames = resolveUserNamesSafely(java.util.stream.Stream.of(
                         supplier.getCreatedByUserId(),
                         supplier.getUpdatedByUserId())
                 .filter(Objects::nonNull)
                 .toList());
 
-        response.setCreatedByName(userNames.get(supplier.getCreatedByUserId()));
-        response.setUpdatedByName(userNames.get(supplier.getUpdatedByUserId()));
+        response.setCreatedByName(getMapValueOrNull(userNames, supplier.getCreatedByUserId()));
+        response.setUpdatedByName(getMapValueOrNull(userNames, supplier.getUpdatedByUserId()));
         response.setCatalogProductCount(catalogItems.size());
         response.setAvailableProductCount((int) catalogItems.stream()
                 .filter(item -> item.getStatus() == SupplierProductCatalogStatus.AVAILABLE)
@@ -246,58 +317,85 @@ public class SupplierService {
         response.setCheckingProductCount((int) catalogItems.stream()
                 .filter(item -> item.getStatus() == SupplierProductCatalogStatus.CHECKING)
                 .count());
-        response.setWarnings(buildWarnings(supplier, catalogItems));
+        response.setWarnings(buildWarningsSafely(supplier, catalogItems, catalogLoaded));
         return response;
     }
 
     private SupplierProductCatalogResponse toCatalogResponse(SupplierProductCatalog catalog, Map<Long, String> userNames) {
         SupplierProductCatalogResponse response = SupplierProductCatalogResponse.fromEntity(catalog);
-        response.setCreatedByName(userNames.get(catalog.getCreatedByUserId()));
-        response.setUpdatedByName(userNames.get(catalog.getUpdatedByUserId()));
+        response.setCreatedByName(getMapValueOrNull(userNames, catalog.getCreatedByUserId()));
+        response.setUpdatedByName(getMapValueOrNull(userNames, catalog.getUpdatedByUserId()));
 
-        Long checkingAgeDays = calculateCheckingAgeDays(catalog.getStatus(), catalog.getUpdatedAt());
+        Long checkingAgeDays = calculateCheckingAgeDays(catalog.getStatus(), catalog.getStatusChangedAt());
         response.setCheckingAgeDays(checkingAgeDays);
         response.setCheckingTooLong(checkingAgeDays != null && checkingAgeDays >= CHECKING_TOO_LONG_DAYS);
         return response;
     }
 
-    private List<SupplierWarningResponse> buildWarnings(Supplier supplier, List<SupplierProductCatalog> catalogItems) {
+    private List<SupplierWarningResponse> buildWarnings(Supplier supplier, List<SupplierProductCatalog> catalogItems, boolean catalogLoaded) {
         List<SupplierWarningResponse> warnings = new ArrayList<>();
 
-        if (supplier.getStatus() == SupplierStatus.ACTIVE && catalogItems.isEmpty()) {
+        if (!catalogLoaded) {
             warnings.add(SupplierWarningResponse.builder()
-                    .code("ACTIVE_WITHOUT_CATALOG")
+                    .code("CATALOG_DATA_UNAVAILABLE")
                     .severity("WARNING")
-                    .message("Nhà cung cấp đang hoạt động nhưng chưa có catalog sản phẩm.")
+                    .message("Khong the doc catalog cua nha cung cap o thoi diem hien tai. Ho so supplier van duoc mo voi du lieu co ban.")
                     .build());
         }
 
-        long checkingTooLongCount = catalogItems.stream()
-                .map(item -> calculateCheckingAgeDays(item.getStatus(), item.getUpdatedAt()))
+        if (catalogLoaded) {
+            long checkingTooLongCount = catalogItems.stream()
+                .map(item -> calculateCheckingAgeDays(item.getStatus(), item.getStatusChangedAt()))
                 .filter(Objects::nonNull)
                 .filter(days -> days >= CHECKING_TOO_LONG_DAYS)
                 .count();
-        if (checkingTooLongCount > 0) {
-            warnings.add(SupplierWarningResponse.builder()
+            if (checkingTooLongCount > 0) {
+                warnings.add(SupplierWarningResponse.builder()
                     .code("CHECKING_TOO_LONG")
                     .severity("WARNING")
                     .message(checkingTooLongCount + " sản phẩm đang ở trạng thái CHECKING quá " + CHECKING_TOO_LONG_DAYS + " ngày.")
-                    .build());
+                        .build());
+            }
         }
 
-        findDuplicatePhone(supplier).ifPresent(duplicate -> warnings.add(SupplierWarningResponse.builder()
+        findDuplicatePhoneSafely(supplier).ifPresent(duplicate -> warnings.add(SupplierWarningResponse.builder()
                 .code("DUPLICATE_PHONE")
                 .severity("WARNING")
                 .message("Số điện thoại đang trùng với NCC " + duplicate.getCode() + " - " + duplicate.getName() + ".")
                 .build()));
 
-        findDuplicateEmail(supplier).ifPresent(duplicate -> warnings.add(SupplierWarningResponse.builder()
+        findDuplicateEmailSafely(supplier).ifPresent(duplicate -> warnings.add(SupplierWarningResponse.builder()
                 .code("DUPLICATE_EMAIL")
                 .severity("WARNING")
                 .message("Email đang trùng với NCC " + duplicate.getCode() + " - " + duplicate.getName() + ".")
                 .build()));
 
         return warnings;
+    }
+
+    private List<SupplierWarningResponse> buildWarningsSafely(Supplier supplier, List<SupplierProductCatalog> catalogItems, boolean catalogLoaded) {
+        try {
+            return buildWarnings(supplier, catalogItems, catalogLoaded);
+        } catch (Exception exception) {
+            log.warn("Unable to build supplier warnings for supplierId={}. Returning detail without warning insights.", supplier.getId(), exception);
+            return List.of(SupplierWarningResponse.builder()
+                    .code("SUPPLIER_WARNING_DATA_UNAVAILABLE")
+                    .severity("WARNING")
+                    .message("Khong the tai day du canh bao du lieu cua nha cung cap luc nay. Ban van co the xem va cap nhat ho so.")
+                    .build());
+        }
+    }
+
+    private CatalogLoadResult loadCatalogItemsSafely(Long supplierId) {
+        try {
+            return new CatalogLoadResult(supplierProductCatalogRepository.findAllBySupplierId(supplierId), true);
+        } catch (Exception exception) {
+            log.warn("Unable to load supplier catalog for supplierId={}. Returning supplier detail without catalog summary.", supplierId, exception);
+            return new CatalogLoadResult(List.of(), false);
+        }
+    }
+
+    private record CatalogLoadResult(List<SupplierProductCatalog> items, boolean loaded) {
     }
 
     private Optional<Supplier> findDuplicatePhone(Supplier supplier) {
@@ -318,6 +416,24 @@ public class SupplierService {
                 : supplierRepository.findFirstByEmailIgnoreCaseAndIdNot(supplier.getEmail(), supplier.getId());
     }
 
+    private Optional<Supplier> findDuplicatePhoneSafely(Supplier supplier) {
+        try {
+            return findDuplicatePhone(supplier);
+        } catch (Exception exception) {
+            log.warn("Unable to resolve duplicate phone warning for supplierId={}.", supplier.getId(), exception);
+            return Optional.empty();
+        }
+    }
+
+    private Optional<Supplier> findDuplicateEmailSafely(Supplier supplier) {
+        try {
+            return findDuplicateEmail(supplier);
+        } catch (Exception exception) {
+            log.warn("Unable to resolve duplicate email warning for supplierId={}.", supplier.getId(), exception);
+            return Optional.empty();
+        }
+    }
+
     private Map<Long, String> resolveUserNames(Collection<Long> userIds) {
         List<Long> ids = userIds.stream()
                 .filter(Objects::nonNull)
@@ -335,6 +451,15 @@ public class SupplierService {
                         LinkedHashMap::new));
     }
 
+    private Map<Long, String> resolveUserNamesSafely(Collection<Long> userIds) {
+        try {
+            return resolveUserNames(userIds);
+        } catch (Exception exception) {
+            log.warn("Unable to resolve supplier audit usernames for userIds={}.", userIds, exception);
+            return Map.of();
+        }
+    }
+
     private String resolveDisplayName(User user) {
         if (user == null) {
             return null;
@@ -346,6 +471,13 @@ public class SupplierService {
             return user.getEmail();
         }
         return "User #" + user.getId();
+    }
+
+    private String getMapValueOrNull(Map<Long, String> values, Long key) {
+        if (key == null || values == null || values.isEmpty()) {
+            return null;
+        }
+        return values.get(key);
     }
 
     private Long calculateCheckingAgeDays(SupplierProductCatalogStatus status, LocalDateTime updatedAt) {

@@ -80,6 +80,8 @@ import com.zone.agri.repository.ProductVariantRepository;
 import com.zone.agri.repository.ProductVectorRepository;
 import com.zone.agri.repository.SKUAttributeValueRepository;
 import com.zone.agri.repository.UserRepository;
+import com.zone.agri.repository.SupplierRepository;
+import com.zone.agri.entity.Supplier;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -90,11 +92,15 @@ import lombok.extern.slf4j.Slf4j;
 @SuppressWarnings({ "boxing", "unboxing" })
 public class ProductService {
 
+    private static final int PRICE_FILTER_SCAN_LIMIT = 10_000;
+    private static final String DEFAULT_PUBLIC_SORT = "featured";
+
     private final UserRepository userRepository;
     private final ProductRepository productRepository;
     private final ProductVariantRepository variantRepository;
     private final ProductImageRepository imageRepository;
     private final BrandRepository brandRepository;
+    private final SupplierRepository supplierRepository;
     private final CategoryRepository categoryRepository;
     private final AttributeValueRepository attributeValueRepository;
     private final SKUAttributeValueRepository skuAttributeValueRepository;
@@ -110,10 +116,23 @@ public class ProductService {
     private final ImageSearchService imageSearchService;
     private final ProductVectorRepository productVectorRepository;
 
+    private enum PublicProductSort {
+        FEATURED,
+        PRICE_ASC,
+        PRICE_DESC,
+        NAME_ASC,
+        NAME_DESC,
+        OLDEST,
+        NEWEST,
+        BEST_SELLING,
+        INVENTORY_DESC
+    }
+
     // =========================================================================
     // READ METHODS
     // =========================================================================
 
+    @Transactional(readOnly = true)
     public List<ProductResponse> getAll(String keyword, Long categoryId, String statusStr) {
         ProductStatus status = null;
         if (statusStr != null && !statusStr.isBlank()) {
@@ -124,17 +143,21 @@ public class ProductService {
             }
         }
 
-        return productRepository.findAllWithFilter(keyword, categoryId, status).stream()
-                .map(this::convertToResponse)
-                .collect(Collectors.toList());
+        List<Product> products = productRepository.findAllWithFilter(keyword, categoryId, status);
+        Map<Long, Long> soldCountMap = buildSoldCountMap(products.stream().map(Product::getId).toList());
+
+        return convertToResponseList(products, soldCountMap);
     }
 
+    @Transactional(readOnly = true)
     public List<ProductResponse> getAll() {
-        return productRepository.findAllWithDetails().stream()
-                .map(this::convertToResponse)
-                .collect(Collectors.toList());
+        List<Product> products = productRepository.findAllWithDetails();
+        Map<Long, Long> soldCountMap = buildSoldCountMap(products.stream().map(Product::getId).toList());
+
+        return convertToResponseList(products, soldCountMap);
     }
 
+    @Transactional(readOnly = true)
     public ProductResponse getById(Long id) {
         Product product = productRepository.findById(id)
                 .orElseThrow(() -> new NotFoundException("Không tìm thấy sản phẩm với ID: " + id));
@@ -154,14 +177,22 @@ public class ProductService {
         Category category = categoryRepository.findById(request.getCategoryId())
                 .orElseThrow(() -> new NotFoundException("Danh mục không tồn tại với ID: " + request.getCategoryId()));
 
+        if (request.getName() != null && productRepository.existsByNameIgnoreCase(request.getName().trim())) {
+            throw new ConflictException("Tên sản phẩm đã tồn tại trong hệ thống. Vui lòng chọn tên khác!", true);
+        }
+
         validateSkusInRequest(request.getVariants());
         ProductStatus targetStatus = parseProductStatus(request.getStatus());
 
-        if (targetStatus == ProductStatus.ACTIVE
-                && (request.getBrand() == null || request.getBrand().isBlank()
-                        || request.getOrigin() == null || request.getOrigin().isBlank())) {
+        if (targetStatus == ProductStatus.ACTIVE && request.getBrandId() == null) {
             throw new BadRequestException(
-                    "Sản phẩm ở trạng thái ACTIVE bắt buộc phải có thương hiệu và xuất xứ để đảm bảo giao đúng hàng.");
+                    "Sản phẩm ở trạng thái ACTIVE bắt buộc phải có thương hiệu.");
+        }
+
+        Brand brand = null;
+        if (request.getBrandId() != null) {
+            brand = brandRepository.findById(request.getBrandId())
+                    .orElseThrow(() -> new NotFoundException("Thương hiệu không tồn tại với ID: " + request.getBrandId()));
         }
 
         Product product = Product.builder()
@@ -169,15 +200,11 @@ public class ProductService {
                 .slug(toSlug(request.getName()) + "-" + System.currentTimeMillis())
                 .description(request.getDescription())
                 .status(targetStatus)
-                .origin(request.getOrigin() != null ? request.getOrigin().trim() : null)
                 .baseSku(request.getBaseSku())
                 .category(category)
+                .brand(brand)
                 .createdAt(LocalDateTime.now())
                 .build();
-
-        if (request.getBrand() != null && !request.getBrand().isBlank()) {
-            product.setBrand(getOrCreateBrand(request.getBrand().trim()));
-        }
 
         Product savedProduct = productRepository.save(product);
         List<ProductImage> savedImages = uploadAndSaveProductImages(savedProduct, productImages);
@@ -207,16 +234,28 @@ public class ProductService {
         Product product = productRepository.findById(id)
                 .orElseThrow(() -> new NotFoundException("Sản phẩm không tồn tại với ID: " + id));
 
+        if (request.getName() != null && productRepository.existsByNameIgnoreCaseAndIdNot(request.getName().trim(), id)) {
+            throw new ConflictException("Tên sản phẩm đã tồn tại trong hệ thống. Vui lòng chọn tên khác!", true);
+        }
+
+        ProductStatus targetStatus = parseProductStatus(request.getStatus());
+        if (targetStatus == ProductStatus.ACTIVE && request.getBrandId() == null) {
+            throw new BadRequestException("Sản phẩm ở trạng thái ACTIVE bắt buộc phải có thương hiệu.");
+        }
+
+        Brand brand = null;
+        if (request.getBrandId() != null) {
+            brand = brandRepository.findById(request.getBrandId())
+                    .orElseThrow(() -> new NotFoundException("Thương hiệu không tồn tại với ID: " + request.getBrandId()));
+        }
+
         product.setName(request.getName());
-        product.setOrigin(request.getOrigin());
         product.setDescription(request.getDescription());
-        product.setStatus(parseProductStatus(request.getStatus()));
+        product.setStatus(targetStatus);
+        product.setBrand(brand);
 
         if (request.getCategoryId() != null) {
             categoryRepository.findById(request.getCategoryId()).ifPresent(product::setCategory);
-        }
-        if (request.getBrand() != null && !request.getBrand().trim().isEmpty()) {
-            product.setBrand(getOrCreateBrand(request.getBrand()));
         }
 
         // 1. XỬ LÝ ẢNH CHÍNH
@@ -472,11 +511,25 @@ public class ProductService {
      */
     public List<ProductResponse> searchByImage(MultipartFile image) {
         List<ImageSearchResult> results = imageSearchService.searchByImage(image);
+        List<Long> productIds = results.stream()
+                .map(ImageSearchResult::getProductId)
+                .toList();
+        Map<Long, Product> productMap = productRepository.findAllById(productIds)
+                .stream()
+                .collect(Collectors.toMap(Product::getId, product -> product));
+
         return results.stream()
                 .sorted(Comparator.comparingDouble(r -> -r.getScore()))
-                .map(r -> productRepository.findById(r.getProductId()).orElse(null))
+                .map(r -> {
+                    Product product = productMap.get(r.getProductId());
+                    if (product == null) {
+                        return null;
+                    }
+                    ProductResponse response = convertToResponse(product);
+                    response.setSimilarity(r.getScore());
+                    return response;
+                })
                 .filter(Objects::nonNull)
-                .map(this::convertToResponse)
                 .collect(Collectors.toList());
     }
 
@@ -611,6 +664,27 @@ public class ProductService {
         return convertToResponse(product, buildSoldCountMap(List.of(product.getId())));
     }
 
+    private List<ProductResponse> convertToResponseList(List<Product> products, Map<Long, Long> soldCountMap) {
+        if (products == null || products.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        return products.stream()
+                .map(product -> convertToResponse(product, soldCountMap))
+                .collect(Collectors.toList());
+    }
+
+    private List<ProductVariant> getActiveDisplayVariants(Product product) {
+        if (product == null || product.getVariants() == null) {
+            return Collections.emptyList();
+        }
+
+        return product.getVariants().stream()
+                .filter(variant -> variant.getStatus() == VariantStatus.ACTIVE)
+                .filter(this::hasOnlyActiveAttributes)
+                .collect(Collectors.toList());
+    }
+
     private ProductResponse convertToResponse(Product product, Map<Long, Long> soldCountMap) {
         User currentUser = getCurrentUser();
 
@@ -622,12 +696,27 @@ public class ProductService {
                 ? product.getProductImages().stream().map(ProductImage::getImageUrl).collect(Collectors.toList())
                 : Collections.emptyList();
 
-        // TRUYỀN HỆ SỐ profitMultiplier VÀO HÀM MAP BIẾN THẾ
-        List<ProductVariantResponse> variantResponses = product.getVariants() != null ? product.getVariants().stream()
+        // TRUYỀN HỆ SỐ profitMultiplier VÀO HÀM MAP BIẾN THẾ (Tải kho gộp để tránh N+1 Query)
+        List<ProductVariant> activeVariants = product.getVariants() != null ? product.getVariants().stream()
                 .filter(variant -> variant.getStatus() == VariantStatus.ACTIVE)
                 .filter(this::hasOnlyActiveAttributes)
-                .map(variant -> mapVariantToResponse(variant, currentUser, profitMultiplier, roundingRule))
                 .collect(Collectors.toList()) : Collections.emptyList();
+
+        Map<Long, List<Inventory>> inventoryMap = new HashMap<>();
+        if (!activeVariants.isEmpty()) {
+            List<Long> activeVariantIds = activeVariants.stream().map(ProductVariant::getId).toList();
+            List<Inventory> allInventories = inventoryRepository.findByProductVariantIdInWithBranch(activeVariantIds);
+            inventoryMap = allInventories.stream()
+                    .collect(Collectors.groupingBy(inv -> inv.getProductVariant().getId()));
+        }
+
+        final Map<Long, List<Inventory>> finalInventoryMap = inventoryMap;
+        List<ProductVariantResponse> variantResponses = activeVariants.stream()
+                .map(variant -> {
+                    List<Inventory> variantInventories = finalInventoryMap.getOrDefault(variant.getId(), List.of());
+                    return mapVariantToResponse(variant, currentUser, profitMultiplier, roundingRule, variantInventories);
+                })
+                .collect(Collectors.toList());
 
         int totalInventory = variantResponses.stream()
                 .map(ProductVariantResponse::getQuantity)
@@ -644,14 +733,6 @@ public class ProductService {
             categoryDTO.setStatus(product.getCategory().getStatus());
         }
 
-        BrandResponse brandResponse = null;
-        if (product.getBrand() != null) {
-            brandResponse = BrandResponse.builder()
-                    .id(product.getBrand().getId())
-                    .name(product.getBrand().getName())
-                    .build();
-        }
-
         return ProductResponse.builder()
                 .id(product.getId())
                 .name(product.getName())
@@ -659,15 +740,14 @@ public class ProductService {
                 .shortDesc(product.getShortDesc())
                 .description(product.getDescription())
                 .status(product.getStatus() != null ? product.getStatus().name() : null)
-                .origin(product.getOrigin())
+                .brandId(product.getBrand() != null ? product.getBrand().getId() : null)
+                .brandName(product.getBrand() != null ? product.getBrand().getName() : null)
                 .baseSku(product.getBaseSku())
                 .categoryName(product.getCategory() != null ? product.getCategory().getName() : null)
-                .brandName(product.getBrand() != null ? product.getBrand().getName() : null)
                 .soldCount(soldCountMap.getOrDefault(product.getId(), 0L))
                 .ratingAverage(product.getRatingAverage())
                 .reviewCount(product.getReviewCount())
                 .category(categoryDTO)
-                .brand(brandResponse)
                 .inventory(totalInventory)
                 .imageUrls(imageUrls)
                 .variants(variantResponses)
@@ -690,29 +770,26 @@ public class ProductService {
 
     public ProductVariantResponse mapVariantToResponse(ProductVariant variant, User currentUser, BigDecimal multiplier,
             String roundingRule) {
-        // Tránh lỗi NullPointerException khi role null
+        List<Inventory> allInventories = inventoryRepository.findByProductVariantIdWithBranch(variant.getId());
+        return mapVariantToResponse(variant, currentUser, multiplier, roundingRule, allInventories);
+    }
+
+    public ProductVariantResponse mapVariantToResponse(ProductVariant variant, User currentUser, BigDecimal multiplier,
+            String roundingRule, List<Inventory> allInventories) {
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-        boolean hasExportPermission = auth != null && auth.getAuthorities().stream()
-                .anyMatch(a -> a.getAuthority().equals("EXPORT_CREATE") || a.getAuthority().equals("TRANSFER_CREATE"));
-
-        Role currentRole = currentUser != null ? currentUser.getRole() : null;
-        String roleSlug = (currentRole != null && currentRole.getSlug() != null)
-                ? currentRole.getSlug().toUpperCase()
-                : "";
-        boolean isAdmin = "ADMIN".equals(roleSlug)
-                || (currentRole != null && currentRole.getId() != null && currentRole.getId() == 1L)
-                || (currentRole != null && currentRole.getDisplayName() != null
-                        && "QUẢN TRỊ VIÊN".equalsIgnoreCase(currentRole.getDisplayName()));
-        boolean isManager = "MANAGER".equals(roleSlug) || "BRANCH_MANAGER".equals(roleSlug);
-
-        boolean canSeeImportPrice = isAdmin || isManager || hasExportPermission;
+        Set<String> authorities = auth == null
+                ? Set.of()
+                : auth.getAuthorities().stream()
+                        .map(a -> a.getAuthority())
+                        .collect(Collectors.toSet());
+        boolean canSeeImportPrice = authorities.contains("REPORT_FINANCE_VIEW")
+                || authorities.contains("IMPORT_VIEW")
+                || authorities.contains("EXPORT_CREATE")
+                || authorities.contains("TRANSFER_CREATE")
+                || authorities.contains("PURCHASE_REQUEST_VIEW");
 
         Branch currentBranch = currentUser != null ? currentUser.getBranch() : null;
-
-        List<Inventory> allInventories = inventoryRepository.findByProductVariantIdWithBranch(variant.getId());
-
-        // Chỉ Admin mới được thấy tồn kho/lô hàng của tất cả chi nhánh.
-        boolean canSeeAllBranches = isAdmin;
+        boolean canSeeAllBranches = currentBranch == null;
 
         List<Inventory> validBatches = allInventories.stream()
                 .filter(inv -> inv.getQuantity() != null && inv.getQuantity() > 0)
@@ -736,9 +813,13 @@ public class ProductService {
 
         Map<Long, BigDecimal> transferImportPriceCache = new HashMap<>();
 
+        Long categoryId = (variant.getProduct() != null && variant.getProduct().getCategory() != null)
+                ? variant.getProduct().getCategory().getId()
+                : null;
+
         List<ProductVariantResponse.BatchInfoDto> batchDtos = validBatches.stream().map(inv -> {
             BigDecimal importPrice = resolveDisplayImportPrice(inv, variant.getId(), transferImportPriceCache);
-            BigDecimal sellingPrice = settingService.calculateSellingPrice(importPrice, multiplier, roundingRule);
+            BigDecimal sellingPrice = settingService.calculateSellingPrice(importPrice, categoryId, inv.getExpiryDate());
 
             return ProductVariantResponse.BatchInfoDto.builder()
                     .inventoryId(inv.getId())
@@ -748,6 +829,7 @@ public class ProductService {
                     .importPrice(canSeeImportPrice ? importPrice : null) // Admin/Manager/Exporter được thấy giá nhập
                     .sellingPrice(sellingPrice)
                     .expiryDate(inv.getExpiryDate() != null ? inv.getExpiryDate().toLocalDate().toString() : null)
+                    .marginCapped(settingService.isMarginCapped(categoryId, inv.getExpiryDate()))
                     .build();
         }).collect(Collectors.toList());
 
@@ -760,7 +842,7 @@ public class ProductService {
 
         BigDecimal sellingPriceByAverageImport = averageImportPrice == null
                 ? null
-                : settingService.calculateSellingPrice(averageImportPrice, multiplier, roundingRule);
+                : settingService.calculateSellingPrice(averageImportPrice, categoryId, null);
 
         List<AttributeValueResponse> attributeValues = variant.getAttributeValues() != null
                 ? variant.getAttributeValues().stream().map(sav -> AttributeValueResponse.builder()
@@ -839,13 +921,7 @@ public class ProductService {
                         && sav.getAttribute().getStatus() == AttributeStatus.ACTIVE);
     }
 
-    private Brand getOrCreateBrand(String name) {
-        return brandRepository.findByName(name.trim())
-                .orElseGet(() -> brandRepository.save(Brand.builder()
-                        .name(name.trim())
-                        .status(BrandStatus.ACTIVE)
-                        .build()));
-    }
+
 
     private void validateSkusInRequest(List<VariantRequest> variants) {
         if (variants == null)
@@ -959,8 +1035,7 @@ public class ProductService {
         Map<Long, Long> soldCountMap = buildSoldCountMap(
                 products.stream().map(Product::getId).toList());
 
-        return products.stream()
-                .map(product -> convertToResponse(product, soldCountMap))
+        return convertToResponseList(products, soldCountMap).stream()
                 .filter(p -> p.getInventory() != null && p.getInventory() > 0)
                 .collect(Collectors.toList());
     }
@@ -971,15 +1046,15 @@ public class ProductService {
         Map<Long, Long> soldCountMap = buildSoldCountMap(
                 products.stream().map(Product::getId).toList());
 
-        return products.stream()
-                .map(product -> convertToResponse(product, soldCountMap))
+        return convertToResponseList(products, soldCountMap).stream()
                 .filter(p -> p.getInventory() != null && p.getInventory() > 0)
                 .limit(limit)
                 .collect(Collectors.toList());
     }
 
+    @Transactional(readOnly = true)
     public ProductResponse getProductDetailForUser(String slug) {
-        Product product = productRepository.findBySlug(slug)
+        Product product = productRepository.findBySlugWithPublicDetails(slug)
                 .orElseThrow(() -> new NotFoundException("Sản phẩm không tồn tại hoặc đã bị xóa."));
 
         if (product.getStatus() != ProductStatus.ACTIVE) {
@@ -1012,8 +1087,7 @@ public class ProductService {
         List<Product> products = productRepository.findPublicByIds(productIds);
         Map<Long, Long> soldCountMap = buildSoldCountMap(productIds);
 
-        return products.stream()
-                .map(product -> convertToResponse(product, soldCountMap))
+        return convertToResponseList(products, soldCountMap).stream()
                 .filter(p -> p.getInventory() != null && p.getInventory() > 0)
                 .collect(Collectors.toList());
     }
@@ -1037,23 +1111,432 @@ public class ProductService {
         List<Product> products = productRepository.findPublicByIds(productIds);
         Map<Long, Long> soldCountMap = buildSoldCountMap(productIds);
 
-        return products.stream()
-                .map(product -> convertToResponse(product, soldCountMap))
+        return convertToResponseList(products, soldCountMap).stream()
                 .filter(p -> p.getInventory() != null && p.getInventory() > 0)
                 .collect(Collectors.toList());
     }
 
     @Transactional(readOnly = true)
-    public Page<ProductResponse> getPublicProducts(String keyword, Long categoryId, Long brandId, Pageable pageable) {
-        Page<Long> productIdsPage = productRepository.findPublicProductIds(keyword, categoryId, brandId, pageable);
+    public Page<ProductResponse> getPublicProducts(
+            String keyword,
+            Long categoryId,
+            Long brandId,
+            BigDecimal minPrice,
+            BigDecimal maxPrice,
+            String packaging,
+            String packagingValueIds,
+            String sort,
+            Pageable pageable) {
+        validatePriceRange(minPrice, maxPrice);
+
+        List<Long> packagingValueIdList = normalizePackagingValueIds(packagingValueIds);
+        List<String> packagingValues = resolvePackagingValues(
+                normalizePackagingValues(packaging),
+                packagingValueIdList);
+        PublicProductSort sortOption = parsePublicProductSort(sort);
+        boolean hasPackagingValueIdFilter = !packagingValueIdList.isEmpty();
+        boolean hasPackagingFilter = hasPackagingValueIdFilter || !packagingValues.isEmpty();
+        List<Long> categoryIds = resolveCategoryFilterIds(categoryId);
+        boolean hasCategoryFilter = !categoryIds.isEmpty();
+        String normalizedKeyword = blankToNull(keyword);
+        List<Long> keywordCategoryIds = resolveKeywordCategoryFilterIds(normalizedKeyword);
+        List<Long> keywordBrandIds = resolveKeywordBrandFilterIds(normalizedKeyword);
+        boolean hasKeywordCategoryFilter = !keywordCategoryIds.isEmpty();
+        boolean hasKeywordBrandFilter = !keywordBrandIds.isEmpty();
+        Pageable lookupPageable = PageRequest.of(0, PRICE_FILTER_SCAN_LIMIT);
+
+        Page<Long> productIdsPage = productRepository.findPublicProductIdsFiltered(
+                normalizedKeyword,
+                hasKeywordCategoryFilter,
+                hasKeywordCategoryFilter ? keywordCategoryIds : List.of(-1L),
+                hasKeywordBrandFilter,
+                hasKeywordBrandFilter ? keywordBrandIds : List.of(-1L),
+                hasCategoryFilter,
+                hasCategoryFilter ? categoryIds : List.of(-1L),
+                brandId,
+                hasPackagingFilter,
+                hasPackagingValueIdFilter,
+                hasPackagingValueIdFilter ? packagingValueIdList : List.of(-1L),
+                hasPackagingFilter ? packagingValues : List.of("__no_packaging_filter__"),
+                lookupPageable);
+
         List<Long> productIds = productIdsPage.getContent();
         if (productIds.isEmpty())
             return Page.empty(pageable);
+
         Map<Long, Long> soldCountMap = buildSoldCountMap(productIds);
-        List<ProductResponse> productResponses = productRepository.findPublicByIds(productIds).stream()
-                .map(product -> convertToResponse(product, soldCountMap))
-                .filter(p -> p.getInventory() != null && p.getInventory() > 0)
+
+        Map<Long, Product> productsById = productRepository.findPublicByIds(productIds).stream()
+                .collect(Collectors.toMap(Product::getId, product -> product));
+
+        List<Product> orderedProducts = productIds.stream()
+                .map(productsById::get)
+                .filter(Objects::nonNull)
                 .collect(Collectors.toList());
-        return new PageImpl<>(productResponses, pageable, productIdsPage.getTotalElements());
+
+        List<ProductResponse> productResponses = convertToResponseList(orderedProducts, soldCountMap).stream()
+                .map(p -> applyPublicListVariantFilters(p, minPrice, maxPrice, packagingValueIdList, packagingValues))
+                .filter(p -> p.getVariants() != null && !p.getVariants().isEmpty())
+                .collect(Collectors.toList());
+
+        productResponses.sort(buildPublicProductComparator(sortOption, productsById));
+
+        int fromIndex = (int) Math.min(pageable.getOffset(), productResponses.size());
+        int toIndex = Math.min(fromIndex + pageable.getPageSize(), productResponses.size());
+        List<ProductResponse> pageContent = productResponses.subList(fromIndex, toIndex);
+
+        return new PageImpl<>(pageContent, pageable, productResponses.size());
+    }
+
+    private PublicProductSort parsePublicProductSort(String sort) {
+        if (sort == null || sort.isBlank()) {
+            return PublicProductSort.FEATURED;
+        }
+
+        return switch (sort.trim().toLowerCase(Locale.ROOT)) {
+            case "price-asc" -> PublicProductSort.PRICE_ASC;
+            case "price-desc" -> PublicProductSort.PRICE_DESC;
+            case "name-asc" -> PublicProductSort.NAME_ASC;
+            case "name-desc" -> PublicProductSort.NAME_DESC;
+            case "oldest" -> PublicProductSort.OLDEST;
+            case "newest" -> PublicProductSort.NEWEST;
+            case "best-selling" -> PublicProductSort.BEST_SELLING;
+            case "inventory-desc" -> PublicProductSort.INVENTORY_DESC;
+            default -> PublicProductSort.FEATURED;
+        };
+    }
+
+    private Comparator<ProductResponse> buildPublicProductComparator(
+            PublicProductSort sortOption,
+            Map<Long, Product> productsById) {
+        Comparator<ProductResponse> newestTieBreaker = Comparator
+                .comparing(
+                        (ProductResponse response) -> resolveProductCreatedAt(productsById.get(response.getId())),
+                        Comparator.nullsLast(Comparator.reverseOrder()))
+                .thenComparing(ProductResponse::getId, Comparator.nullsLast(Comparator.reverseOrder()));
+
+        return switch (sortOption) {
+            case PRICE_ASC -> Comparator
+                    .comparing(this::resolveLowestVariantPrice, Comparator.nullsLast(Comparator.naturalOrder()))
+                    .thenComparing(newestTieBreaker);
+            case PRICE_DESC -> Comparator
+                    .comparing(this::resolveLowestVariantPrice, Comparator.nullsLast(Comparator.reverseOrder()))
+                    .thenComparing(newestTieBreaker);
+            case NAME_ASC -> Comparator
+                    .comparing(
+                            (ProductResponse response) -> blankToEmpty(response.getName()),
+                            String.CASE_INSENSITIVE_ORDER)
+                    .thenComparing(newestTieBreaker);
+            case NAME_DESC -> Comparator
+                    .comparing(
+                            (ProductResponse response) -> blankToEmpty(response.getName()),
+                            String.CASE_INSENSITIVE_ORDER.reversed())
+                    .thenComparing(newestTieBreaker);
+            case OLDEST -> Comparator
+                    .comparing(
+                            (ProductResponse response) -> resolveProductCreatedAt(productsById.get(response.getId())),
+                            Comparator.nullsLast(Comparator.naturalOrder()))
+                    .thenComparing(ProductResponse::getId, Comparator.nullsLast(Comparator.naturalOrder()));
+            case NEWEST -> newestTieBreaker;
+            case BEST_SELLING -> Comparator
+                    .comparing(this::safeLong, Comparator.reverseOrder())
+                    .thenComparing(newestTieBreaker);
+            case INVENTORY_DESC -> Comparator
+                    .comparing(this::safeInventory, Comparator.reverseOrder())
+                    .thenComparing(newestTieBreaker);
+            case FEATURED -> Comparator
+                    .comparing(this::safeLong, Comparator.reverseOrder())
+                    .thenComparing(this::safeRating, Comparator.reverseOrder())
+                    .thenComparing(this::safeReviewCount, Comparator.reverseOrder())
+                    .thenComparing(this::safeInventory, Comparator.reverseOrder())
+                    .thenComparing(newestTieBreaker);
+        };
+    }
+
+    private BigDecimal resolveLowestVariantPrice(ProductResponse response) {
+        if (response == null || response.getVariants() == null || response.getVariants().isEmpty()) {
+            return null;
+        }
+
+        return response.getVariants().stream()
+                .map(ProductVariantResponse::getPrice)
+                .filter(Objects::nonNull)
+                .min(Comparator.naturalOrder())
+                .orElse(null);
+    }
+
+    private LocalDateTime resolveProductCreatedAt(Product product) {
+        return product != null ? product.getCreatedAt() : null;
+    }
+
+    private Long safeLong(ProductResponse response) {
+        return response != null && response.getSoldCount() != null ? response.getSoldCount() : 0L;
+    }
+
+    private Integer safeInventory(ProductResponse response) {
+        return response != null && response.getInventory() != null ? response.getInventory() : 0;
+    }
+
+    private Float safeRating(ProductResponse response) {
+        return response != null && response.getRatingAverage() != null ? response.getRatingAverage() : 0F;
+    }
+
+    private Integer safeReviewCount(ProductResponse response) {
+        return response != null && response.getReviewCount() != null ? response.getReviewCount() : 0;
+    }
+
+    private String blankToEmpty(String value) {
+        return value == null ? "" : value;
+    }
+
+    private List<Long> resolveKeywordCategoryFilterIds(String keyword) {
+        String normalizedKeyword = normalizeSearchText(keyword);
+        if (normalizedKeyword.isBlank()) {
+            return Collections.emptyList();
+        }
+
+        List<Category> activeCategories = categoryRepository.findAll().stream()
+                .filter(category -> category.getStatus() == CategoryStatus.ACTIVE)
+                .collect(Collectors.toList());
+
+        Map<Long, List<Category>> childrenByParentId = activeCategories.stream()
+                .filter(category -> category.getParent() != null && category.getParent().getId() != null)
+                .collect(Collectors.groupingBy(category -> category.getParent().getId()));
+
+        LinkedHashSet<Long> ids = new LinkedHashSet<>();
+        activeCategories.stream()
+                .filter(category -> matchesNormalizedKeyword(category.getName(), normalizedKeyword))
+                .forEach(category -> collectCategoryAndChildren(category.getId(), childrenByParentId, ids));
+
+        return new ArrayList<>(ids);
+    }
+
+    private List<Long> resolveKeywordBrandFilterIds(String keyword) {
+        String normalizedKeyword = normalizeSearchText(keyword);
+        if (normalizedKeyword.isBlank()) {
+            return Collections.emptyList();
+        }
+
+        return brandRepository.findAll().stream()
+                .filter(brand -> brand.getStatus() == BrandStatus.ACTIVE)
+                .filter(brand -> matchesNormalizedKeyword(brand.getName(), normalizedKeyword))
+                .map(Brand::getId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .collect(Collectors.toList());
+    }
+
+    private boolean matchesNormalizedKeyword(String value, String normalizedKeyword) {
+        String normalizedValue = normalizeSearchText(value);
+        if (normalizedValue.isBlank()) {
+            return false;
+        }
+
+        if (normalizedValue.contains(normalizedKeyword)) {
+            return true;
+        }
+
+        List<String> tokens = Arrays.stream(normalizedKeyword.split("\\s+"))
+                .filter(token -> token.length() > 1)
+                .collect(Collectors.toList());
+
+        return !tokens.isEmpty() && tokens.stream().allMatch(normalizedValue::contains);
+    }
+
+    private String normalizeSearchText(String value) {
+        if (value == null || value.isBlank()) {
+            return "";
+        }
+
+        return Normalizer.normalize(value, Normalizer.Form.NFD)
+                .replaceAll("[\\p{InCombiningDiacriticalMarks}]", "")
+                .replace('đ', 'd')
+                .replace('Đ', 'D')
+                .toLowerCase(Locale.ROOT)
+                .replaceAll("[^a-z0-9]+", " ")
+                .trim();
+    }
+
+    private List<Long> resolveCategoryFilterIds(Long categoryId) {
+        if (categoryId == null) {
+            return Collections.emptyList();
+        }
+
+        Category root = categoryRepository.findById(categoryId)
+                .orElseThrow(() -> new NotFoundException("Không tìm thấy danh mục với ID: " + categoryId));
+
+        if (root.getStatus() != CategoryStatus.ACTIVE) {
+            throw new BadRequestException("Danh mục không hoạt động.");
+        }
+
+        List<Category> activeCategories = categoryRepository.findAll().stream()
+                .filter(category -> category.getStatus() == CategoryStatus.ACTIVE)
+                .collect(Collectors.toList());
+
+        Map<Long, List<Category>> childrenByParentId = activeCategories.stream()
+                .filter(category -> category.getParent() != null && category.getParent().getId() != null)
+                .collect(Collectors.groupingBy(category -> category.getParent().getId()));
+
+        LinkedHashSet<Long> ids = new LinkedHashSet<>();
+        collectCategoryAndChildren(root.getId(), childrenByParentId, ids);
+        return new ArrayList<>(ids);
+    }
+
+    private void collectCategoryAndChildren(
+            Long categoryId,
+            Map<Long, List<Category>> childrenByParentId,
+            Set<Long> targetIds) {
+        if (categoryId == null || !targetIds.add(categoryId)) {
+            return;
+        }
+
+        childrenByParentId.getOrDefault(categoryId, Collections.emptyList())
+                .forEach(child -> collectCategoryAndChildren(child.getId(), childrenByParentId, targetIds));
+    }
+
+    private void validatePriceRange(BigDecimal minPrice, BigDecimal maxPrice) {
+        if (minPrice != null && minPrice.compareTo(BigDecimal.ZERO) < 0) {
+            throw new BadRequestException("Giá tối thiểu không được âm.");
+        }
+
+        if (maxPrice != null && maxPrice.compareTo(BigDecimal.ZERO) < 0) {
+            throw new BadRequestException("Giá tối đa không được âm.");
+        }
+
+        if (minPrice != null && maxPrice != null && minPrice.compareTo(maxPrice) > 0) {
+            throw new BadRequestException("Giá tối thiểu không được lớn hơn giá tối đa.");
+        }
+    }
+
+    private List<String> normalizePackagingValues(String packaging) {
+        if (packaging == null || packaging.isBlank()) {
+            return Collections.emptyList();
+        }
+
+        return Arrays.stream(packaging.split(","))
+                .map(String::trim)
+                .filter(value -> !value.isBlank())
+                .map(value -> value.toLowerCase(Locale.ROOT))
+                .distinct()
+                .limit(20)
+                .collect(Collectors.toList());
+    }
+
+    private List<String> resolvePackagingValues(List<String> packagingValues, List<Long> packagingValueIds) {
+        LinkedHashSet<String> values = new LinkedHashSet<>();
+        if (packagingValues != null) {
+            values.addAll(packagingValues);
+        }
+
+        if (packagingValueIds != null && !packagingValueIds.isEmpty()) {
+            attributeValueRepository.findAllById(packagingValueIds).stream()
+                    .map(AttributeValue::getValue)
+                    .filter(Objects::nonNull)
+                    .map(String::trim)
+                    .filter(value -> !value.isBlank())
+                    .map(value -> value.toLowerCase(Locale.ROOT))
+                    .forEach(values::add);
+        }
+
+        return values.stream()
+                .limit(50)
+                .collect(Collectors.toList());
+    }
+
+    private List<Long> normalizePackagingValueIds(String packagingValueIds) {
+        if (packagingValueIds == null || packagingValueIds.isBlank()) {
+            return Collections.emptyList();
+        }
+
+        return Arrays.stream(packagingValueIds.split(","))
+                .map(String::trim)
+                .filter(value -> !value.isBlank())
+                .map(value -> {
+                    try {
+                        return Long.valueOf(value);
+                    } catch (NumberFormatException ex) {
+                        return null;
+                    }
+                })
+                .filter(Objects::nonNull)
+                .distinct()
+                .limit(50)
+                .collect(Collectors.toList());
+    }
+
+    private ProductResponse applyPublicListVariantFilters(
+            ProductResponse product,
+            BigDecimal minPrice,
+            BigDecimal maxPrice,
+            List<Long> packagingValueIds,
+            List<String> packagingValues) {
+        if (product == null || product.getVariants() == null) {
+            return product;
+        }
+
+        boolean hasPackagingFilter = (packagingValueIds != null && !packagingValueIds.isEmpty())
+                || (packagingValues != null && !packagingValues.isEmpty());
+
+        List<ProductVariantResponse> filteredVariants = product.getVariants().stream()
+                .filter(variant -> variant.getQuantity() != null && variant.getQuantity() > 0)
+                .filter(variant -> matchesVariantPriceRange(variant, minPrice, maxPrice))
+                .filter(variant -> !hasPackagingFilter || matchesVariantPackaging(variant, packagingValueIds, packagingValues))
+                .collect(Collectors.toList());
+
+        product.setVariants(filteredVariants);
+        product.setInventory(filteredVariants.stream()
+                .map(ProductVariantResponse::getQuantity)
+                .filter(Objects::nonNull)
+                .mapToInt(Integer::intValue)
+                .sum());
+
+        return product;
+    }
+
+    private boolean matchesVariantPriceRange(ProductVariantResponse variant, BigDecimal minPrice, BigDecimal maxPrice) {
+        if (minPrice == null && maxPrice == null) {
+            return true;
+        }
+
+        BigDecimal price = variant != null ? variant.getPrice() : null;
+        return price != null
+                && (minPrice == null || price.compareTo(minPrice) >= 0)
+                && (maxPrice == null || price.compareTo(maxPrice) <= 0);
+    }
+
+    private boolean matchesVariantPackaging(
+            ProductVariantResponse variant,
+            List<Long> packagingValueIds,
+            List<String> packagingValues) {
+        boolean hasValueIdFilter = packagingValueIds != null && !packagingValueIds.isEmpty();
+        boolean hasValueFilter = packagingValues != null && !packagingValues.isEmpty();
+
+        if (!hasValueIdFilter && !hasValueFilter) {
+            return true;
+        }
+
+        if (variant == null || variant.getAttributeValues() == null) {
+            return false;
+        }
+
+        if (hasValueIdFilter) {
+            boolean matchedById = variant.getAttributeValues().stream()
+                    .map(AttributeValueResponse::getValueId)
+                    .filter(Objects::nonNull)
+                    .anyMatch(packagingValueIds::contains);
+            if (matchedById) {
+                return true;
+            }
+        }
+
+        return variant.getAttributeValues().stream()
+                .map(AttributeValueResponse::getValue)
+                .filter(Objects::nonNull)
+                .map(value -> value.toLowerCase(Locale.ROOT))
+                .anyMatch(packagingValues::contains);
+    }
+
+    private String blankToNull(String value) {
+        return value == null || value.isBlank() ? null : value.trim();
     }
 }

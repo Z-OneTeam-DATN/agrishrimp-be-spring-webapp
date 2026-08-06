@@ -2,7 +2,9 @@ package com.zone.agri.repository;
 
 import com.zone.agri.entity.Branch;
 import com.zone.agri.entity.enums.BranchStatus;
+import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
@@ -30,7 +32,7 @@ public interface BranchRepository extends JpaRepository<Branch, Long> {
     @Query("SELECT COUNT(b) > 0 FROM Branch b WHERE b.phone = :phone AND b.id <> :id")
     boolean existsByPhoneForUpdate(@Param("phone") String phone, @Param("id") Long id);
 
-    @Query("SELECT (COUNT(s) + COUNT(r)) FROM Branch b " +
+    @Query("SELECT (COALESCE(COUNT(DISTINCT s),0) + COALESCE(COUNT(DISTINCT r),0)) FROM Branch b " +
             "LEFT JOIN b.sentTransfers s " +
             "LEFT JOIN b.receivedTransfers r " +
             "WHERE b.id = :id")
@@ -39,7 +41,9 @@ public interface BranchRepository extends JpaRepository<Branch, Long> {
     @Query("SELECT b FROM Branch b WHERE b.name = :name")
     Optional<Branch> findByName(@Param("name") String name);
 
-    List<Branch> findByStatusAndDistrictId(BranchStatus status, Integer districtId);
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT b FROM Branch b WHERE b.id = :id")
+    Optional<Branch> findByIdForUpdate(@Param("id") Long id);
 
     List<Branch> findByStatusAndProvinceId(BranchStatus status, Integer provinceId);
 

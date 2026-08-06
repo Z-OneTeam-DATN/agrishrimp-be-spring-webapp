@@ -50,7 +50,7 @@ public class UserRequest {
     @Schema(description = "Giới tính (0: Nữ, 1: Nam, 2: Khác)", example = "1", allowableValues = {"0", "1", "2"})
     Integer gender;
 
-    @Schema(description = "Trạng thái tài khoản", allowableValues = {"ACTIVE", "INACTIVE", "BANNED"}, example = "ACTIVE")
+    @Schema(description = "Trạng thái tài khoản", allowableValues = {"ACTIVE", "INACTIVE"}, example = "ACTIVE")
     String status;
 
     @Schema(description = "URL ảnh đại diện của người dùng", example = "https://res.cloudinary.com/avatar.png")

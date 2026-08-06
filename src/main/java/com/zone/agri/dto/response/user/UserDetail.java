@@ -42,4 +42,9 @@ public class UserDetail implements Serializable {
     LocalDateTime createdAt;
 
     LocalDateTime updatedAt;
+
+    // Dung noi bo de JWTFilter / AuthController.refresh doi chieu token con hieu luc hay khong
+    // sau khi doi mat khau — khong lo ra ngoai API vi UserDetail dung @JsonInclude(NON_NULL) va
+    // cac endpoint tra ve UserDetail cho FE khong set truong nay.
+    Integer tokenVersion;
 }

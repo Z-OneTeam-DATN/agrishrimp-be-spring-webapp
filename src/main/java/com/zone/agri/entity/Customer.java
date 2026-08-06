@@ -46,9 +46,6 @@ public class Customer {
     @Enumerated(EnumType.STRING)
     private CustomerStatus status;
 
-    @Column(columnDefinition = "TEXT")
-    private String note;
-
     // Liên kết với User để đăng nhập
     @OneToOne(cascade = CascadeType.ALL)
     @JoinColumn(name = "user_id", referencedColumnName = "id")
@@ -63,10 +60,6 @@ public class Customer {
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "staff_assigned_id")
     private User staffAssigned;
-
-    // 🆕 Ghi chú nội bộ (không shared với customer)
-    @Column(columnDefinition = "TEXT")
-    private String internalNotes;
 
     @CreationTimestamp
     private LocalDateTime createdAt;

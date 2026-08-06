@@ -17,6 +17,11 @@ public class ConfirmOrderResponse {
     private Long orderId;
     private String orderCode;
     private String status;
+    private String legacyStatus;
+    private String paymentStatus;
+    private String fulfillmentStatus;
+    private String stockStatus;
+    private java.time.LocalDateTime autoApproveAt;
     private String voucherCode;
     private List<SubOrderSummaryDto> subOrders;
     private BigDecimal totalAmount;

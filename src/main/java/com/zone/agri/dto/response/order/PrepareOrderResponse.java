@@ -1,23 +1,33 @@
 package com.zone.agri.dto.response.order;
 
+import java.math.BigDecimal;
+import java.time.LocalDateTime;
+import java.util.List;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
-
-import java.math.BigDecimal;
-import java.util.List;
 
 @Data
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
 public class PrepareOrderResponse {
-    /** Token để dùng trong /confirm — lưu trong Redis 30 phút */
     private String prepareToken;
-    /** true nếu toàn bộ giỏ hàng có thể thực hiện */
+    private LocalDateTime expiresAt;
+    private Long addressId;
+    private String deliveryAddress;
+    private Integer deliveryDistrictId;
+    private String deliveryWardCode;
+    private String receiverName;
+    private String receiverPhone;
     private Boolean canFulfill;
+    private Boolean canPlaceOrder;
+    private Boolean requiresManualApproval;
     private String voucherCode;
+    private String stockStatus;
+    private PreparePrimaryBranchDto primaryBranch;
+    private List<SuggestedTransferDto> suggestedTransfers;
     private List<SubOrderDraftDto> subOrders;
     private BigDecimal totalSubtotal;
     private BigDecimal discountAmount;
