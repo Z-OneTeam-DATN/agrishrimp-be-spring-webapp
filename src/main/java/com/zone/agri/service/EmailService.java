@@ -71,6 +71,28 @@ public class EmailService {
         sendEmail(toEmail, subject, htmlContent);
     }
 
+    public void sendWelcomeEmail(String toEmail, String name) {
+        String subject = "[AgriShrimp] Chào mừng bạn đến với AgriShrimp";
+        String body = """
+                <p style="font-size:16px;color:#374151;line-height:1.8;">
+                    Xin chào <strong>%s</strong>,
+                </p>
+                <p style="font-size:15px;color:#374151;line-height:1.8;">
+                    Cảm ơn bạn đã đăng ký tài khoản <strong>AgriShrimp</strong>. Tài khoản của bạn
+                    đã được tạo thành công và có thể sử dụng ngay.
+                </p>
+
+                <div style="background:#f0f9ff;border-left:4px solid #1e40af;border-radius:8px;padding:14px 18px;margin:16px 0;">
+                    <p style="margin:0;font-size:14px;color:#1e40af;line-height:1.7;">
+                        Bạn có thể đăng nhập để theo dõi đơn hàng, lưu địa chỉ nhận hàng và khám phá các dịch vụ hỗ trợ nuôi tôm thông minh.
+                    </p>
+                </div>
+                """.formatted(name);
+
+        String htmlContent = buildEmailTemplate("Chào Mừng Đến Với AgriShrimp", body, "Khám phá ngay →");
+        sendEmail(toEmail, subject, htmlContent);
+    }
+
     public void sendWarningEmail(String toEmail, String name, double reputationScore) {
         String subject = "[AgriShrimp] ⚠️ Cảnh báo: Tỉ lệ nhận hàng thấp";
         String body = """
