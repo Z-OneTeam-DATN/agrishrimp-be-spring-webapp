@@ -304,6 +304,9 @@ public class DataSeeder implements CommandLineRunner {
 
         Role superAdminRole = saveRole("SUPER_ADMIN", "Siêu quản trị", true, superAdminPermissions);
         Role adminRole = saveRole("ADMIN", "Quản trị viên", true, superAdminPermissions);
+        // Role mac dinh cho luong dang ky tai khoan khach hang trong AuthService.signup().
+        // Khong gan permission quan tri de user moi khong truy cap duoc cac workspace noi bo.
+        saveRole("USER", "Người dùng", true, Set.of());
 
         ensureUser(
                 "superadmin@agrishrimp.vn",
@@ -750,7 +753,11 @@ public class DataSeeder implements CommandLineRunner {
                     existingRole.setIsSystem(isSystem);
                     existingRole.setIsActive(true);
                     existingRole.setDescription("Vai trò " + displayName);
-                    existingRole.getPermissions().clear();
+                    if (existingRole.getPermissions() == null) {
+                        existingRole.setPermissions(new HashSet<>());
+                    } else {
+                        existingRole.getPermissions().clear();
+                    }
                     existingRole.getPermissions().addAll(permissions);
                     return roleRepository.save(existingRole);
                 })
