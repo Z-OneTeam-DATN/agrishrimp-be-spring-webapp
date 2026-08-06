@@ -155,23 +155,6 @@ function Start-BackgroundCommand {
         -PassThru
 }
 
-$sshPath = Get-CommandPath -Name "ssh"
-$sshpassPath = Get-CommandPath -Name "sshpass"
-$sshOptions = @(
-    "-4",
-    "-o", "StrictHostKeyChecking=accept-new",
-    "-o", "PreferredAuthentications=password",
-    "-o", "PasswordAuthentication=yes",
-    "-o", "PubkeyAuthentication=no",
-    "-o", "ConnectTimeout=10",
-    "-o", "ConnectionAttempts=1",
-    "-o", "NumberOfPasswordPrompts=1",
-    "-o", "ServerAliveInterval=10",
-    "-o", "ServerAliveCountMax=2",
-    "-o", "LogLevel=ERROR"
-)
-$sshOptionText = $sshOptions -join " "
-
 Write-Step "Checking tunnel ports"
 
 $mysqlTunnelExists = Test-PortListening -Port $localMysqlPort
@@ -191,10 +174,26 @@ if ($mysqlTunnelExists -or $redisTunnelExists) {
 }
 
 if ($SkipTunnelSetup -and -not $reuseExistingTunnel) {
-    throw "SkipTunnelSetup was requested, but no existing tunnel is listening on localhost:$localMysqlPort and localhost:$localRedisPort."
+    Write-Host "SkipTunnelSetup was requested; skipping SSH tunnel creation." -ForegroundColor Yellow
 }
 
 if (-not $reuseExistingTunnel -and -not $SkipTunnelSetup) {
+    $sshPath = Get-CommandPath -Name "ssh"
+    $sshpassCmd = Get-Command "sshpass" -ErrorAction SilentlyContinue
+    $sshpassPath = if ($sshpassCmd) { $sshpassCmd.Source } else { $null }
+
+    $sshOptions = @(
+        "-4",
+        "-o", "StrictHostKeyChecking=accept-new",
+        "-o", "PreferredAuthentications=password,publickey",
+        "-o", "ConnectTimeout=10",
+        "-o", "ConnectionAttempts=1",
+        "-o", "ServerAliveInterval=10",
+        "-o", "ServerAliveCountMax=2",
+        "-o", "LogLevel=ERROR"
+    )
+    $sshOptionText = $sshOptions -join " "
+
     $passwordFile = Join-Path $stateDir "sshpass.txt"
     $parentPasswordFile = Join-Path (Split-Path $workspaceRoot -Parent) ".live-local\sshpass.txt"
     
@@ -226,14 +225,18 @@ docker run -d --name agri-redis-proxy --network agrishrimp-net -p 127.0.0.1:${re
 echo REMOTE_PROXY_READY
 "@
         $remoteProxyCommand = $remoteProxyCommand -replace "`r", ""
-        & $sshpassPath -f $passwordFile `
-            $sshPath `
-            @sshOptions `
-            $SshHost `
-            $remoteProxyCommand | Out-Null
+        if ($sshpassPath) {
+            & $sshpassPath -f $passwordFile $sshPath @sshOptions $SshHost $remoteProxyCommand | Out-Null
+        } else {
+            & $sshPath @sshOptions $SshHost $remoteProxyCommand | Out-Null
+        }
 
         Write-Step "Starting local SSH tunnel for MySQL and Redis"
-        $tunnelCommand = "& '$sshpassPath' -f '$passwordFile' '$sshPath' $sshOptionText -o ExitOnForwardFailure=yes -N -L ${localMysqlPort}:127.0.0.1:${remoteMysqlProxyPort} -L ${localRedisPort}:127.0.0.1:${remoteRedisProxyPort} $SshHost"
+        if ($sshpassPath) {
+            $tunnelCommand = "& '$sshpassPath' -f '$passwordFile' '$sshPath' $sshOptionText -o ExitOnForwardFailure=yes -N -L ${localMysqlPort}:127.0.0.1:${remoteMysqlProxyPort} -L ${localRedisPort}:127.0.0.1:${remoteRedisProxyPort} $SshHost"
+        } else {
+            $tunnelCommand = "& '$sshPath' $sshOptionText -o ExitOnForwardFailure=yes -N -L ${localMysqlPort}:127.0.0.1:${remoteMysqlProxyPort} -L ${localRedisPort}:127.0.0.1:${remoteRedisProxyPort} $SshHost"
+        }
         $tunnelProcess = Start-BackgroundCommand `
             -Command $tunnelCommand `
             -WorkingDirectory $workspaceRoot
@@ -261,6 +264,6 @@ if ($SkipTunnelSetup -or $reuseExistingTunnel) {
 Write-Host "State: $stateDir"
 Write-Host ""
 Write-Host "Run BE:" -ForegroundColor Cyan
-Write-Host '.\mvnw.cmd spring-boot:run "-Dspring-boot.run.profiles=dev,live-local" "-Dspring-boot.run.jvmArguments=-Dspring.devtools.restart.enabled=false"'
+Write-Host '$env:JAVA_HOME="C:\Users\ACER\AppData\Roaming\.minecraft\runtime\java-runtime-delta\windows\java-runtime-delta"; $env:PATH="$env:JAVA_HOME\bin;$env:PATH"; .\mvnw.cmd spring-boot:run "-Dspring-boot.run.profiles=dev,live-local" "-Dspring-boot.run.jvmArguments=-Dspring.devtools.restart.enabled=false"'
 Write-Host "Run FE:" -ForegroundColor Cyan
 Write-Host "npm run dev"

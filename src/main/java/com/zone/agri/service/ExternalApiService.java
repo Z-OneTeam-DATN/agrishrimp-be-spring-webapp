@@ -119,27 +119,29 @@ public class ExternalApiService {
 
         VietQrResponse.BusinessData merged = new VietQrResponse.BusinessData();
         merged.setTaxCode(firstNonBlank(rawByField.get(FIELD_TAX_CODE), normalizedTaxCode));
-        merged.setName(rawByField.get(FIELD_NAME));
+        merged.setName(cleanCompanyName(rawByField.get(FIELD_NAME), normalizedTaxCode));
         merged.setAddress(rawByField.get(FIELD_ADDRESS));
         merged.setOwner(rawByField.get(FIELD_OWNER));
-        merged.setPhone(rawByField.get(FIELD_PHONE));
+        merged.setPhone(normalizePhone(rawByField.get(FIELD_PHONE)));
         merged.setEmail(rawByField.get(FIELD_EMAIL));
         merged.setStatus(rawByField.get(FIELD_STATUS));
-        merged.setIssueDate(rawByField.get(FIELD_ISSUE_DATE));
+        merged.setIssueDate(normalizeDate(rawByField.get(FIELD_ISSUE_DATE)));
         merged.setTaxAuthority(firstNonBlank(rawByField.get(FIELD_TAX_AUTHORITY), inferTaxAuthorityFromAddress(merged.getAddress())));
         merged.setMainBusinessSector(rawByField.get(FIELD_MAIN_BUSINESS_SECTOR));
 
+        boolean multiSourceAgreement = vietQrData.isPresent() && (doanhNghiepData.isPresent() || masothueData.isPresent() || esgooData.isPresent());
+
         Map<String, String> fieldStatuses = new LinkedHashMap<>();
-        fieldStatuses.put(FIELD_NAME, isNotBlank(merged.getName()) ? "FOUND" : "SOURCE_MISSING");
-        fieldStatuses.put(FIELD_ADDRESS, isNotBlank(merged.getAddress()) ? "FOUND" : "SOURCE_MISSING");
+        fieldStatuses.put(FIELD_TAX_CODE, "VERIFIED");
+        fieldStatuses.put(FIELD_NAME, isNotBlank(merged.getName()) ? (multiSourceAgreement ? "VERIFIED" : "FOUND") : "SOURCE_MISSING");
+        fieldStatuses.put(FIELD_ADDRESS, isNotBlank(merged.getAddress()) ? (multiSourceAgreement ? "VERIFIED" : "FOUND") : "SOURCE_MISSING");
         fieldStatuses.put(FIELD_OWNER, isNotBlank(merged.getOwner()) ? "FOUND" : "SOURCE_MISSING");
         fieldStatuses.put(FIELD_PHONE, isNotBlank(merged.getPhone()) ? "FOUND" : "SOURCE_MISSING");
         fieldStatuses.put(FIELD_EMAIL, isNotBlank(merged.getEmail()) ? "FOUND" : "SOURCE_MISSING");
         fieldStatuses.put(FIELD_STATUS, isNotBlank(merged.getStatus()) ? "FOUND" : "SOURCE_MISSING");
         fieldStatuses.put(FIELD_ISSUE_DATE, isNotBlank(merged.getIssueDate()) ? "FOUND" : "SOURCE_MISSING");
-        fieldStatuses.put(FIELD_TAX_AUTHORITY, isNotBlank(merged.getTaxAuthority()) ? "FOUND" : "SOURCE_MISSING");
+        fieldStatuses.put(FIELD_TAX_AUTHORITY, isNotBlank(merged.getTaxAuthority()) ? (rawByField.containsKey(FIELD_TAX_AUTHORITY) ? "FOUND" : "INFERRED") : "SOURCE_MISSING");
         fieldStatuses.put(FIELD_MAIN_BUSINESS_SECTOR, isNotBlank(merged.getMainBusinessSector()) ? "FOUND" : "SOURCE_MISSING");
-        fieldStatuses.put(FIELD_TAX_CODE, "FOUND");
 
         merged.setFieldStatuses(fieldStatuses);
         merged.setFieldSources(fieldSources);
@@ -355,6 +357,44 @@ public class ExternalApiService {
         return trimmed;
     }
 
+    private String cleanCompanyName(String name, String taxCode) {
+        if (name == null || name.trim().isEmpty()) return name;
+        String trimmed = name.trim();
+        if (trimmed.contains(" - ")) {
+            String[] parts = trimmed.split(" - ", 2);
+            String prefixDigits = parts[0].replaceAll("\\D+", "");
+            if (!prefixDigits.isEmpty() && taxCode != null && prefixDigits.equals(taxCode.replaceAll("\\D+", ""))) {
+                return parts[1].trim();
+            }
+        }
+        return trimmed;
+    }
+
+    private String normalizeDate(String dateStr) {
+        if (dateStr == null || dateStr.trim().isEmpty()) return null;
+        String cleaned = dateStr.trim();
+        if ("1970-01-01".equals(cleaned) || "0000-00-00".equals(cleaned)) return null;
+
+        if (cleaned.matches("^\\d{4}-\\d{2}-\\d{2}$")) {
+            return cleaned;
+        }
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile("^(\\d{1,2})[\\/\\-](\\d{1,2})[\\/\\-](\\d{4})").matcher(cleaned);
+        if (m.find()) {
+            String day = String.format("%02d", Integer.parseInt(m.group(1)));
+            String month = String.format("%02d", Integer.parseInt(m.group(2)));
+            String year = m.group(3);
+            return year + "-" + month + "-" + day;
+        }
+        return cleaned;
+    }
+
+    private String normalizePhone(String phone) {
+        if (phone == null || phone.trim().isEmpty()) return null;
+        String digits = phone.replaceAll("[^0-9+]", "").trim();
+        if (digits.length() < 7 || digits.length() > 15) return null;
+        return digits;
+    }
+
 
     private String determinePrimarySource(Map<String, String> fieldSources) {
         if (fieldSources.isEmpty())
@@ -466,8 +506,11 @@ public class ExternalApiService {
         try {
             String url = "https://doanhnghiep.biz/" + taxCode;
             org.jsoup.nodes.Document doc = org.jsoup.Jsoup.connect(url)
-                    .userAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-                    .timeout(10000)
+                    .userAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
+                    .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8")
+                    .header("Accept-Language", "vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7")
+                    .referrer("https://doanhnghiep.biz/")
+                    .timeout(8000)
                     .get();
 
             org.jsoup.nodes.Element table = doc.selectFirst("table.company-table");
@@ -477,24 +520,26 @@ public class ExternalApiService {
 
             // Verify tax code matches
             String scrapedTaxCode = null;
-            org.jsoup.nodes.Element mstRow = table.selectFirst("tr td:contains(Số ĐKKD) + td, tr td:contains(MST) + td, tr td:contains(mã số thuế) + td");
-            if (mstRow == null) {
-                // fallback to searching all cells
+            org.jsoup.nodes.Element mstEl = table.selectFirst("td[itemprop=taxID], *[itemprop=taxID]");
+            if (mstEl != null) {
+                scrapedTaxCode = mstEl.text().trim();
+            } else {
                 for (org.jsoup.nodes.Element tr : table.select("tr")) {
                     org.jsoup.select.Elements tds = tr.select("td, th");
-                    if (tds.size() >= 2 && (tds.get(0).text().contains("MST") || tds.get(0).text().contains("ĐKKD") || tds.get(0).text().contains("Mã số thuế"))) {
-                        scrapedTaxCode = tds.get(1).text().trim();
-                        break;
+                    if (tds.size() >= 2) {
+                        String label = tds.get(0).text().toLowerCase();
+                        if (label.contains("mst") || label.contains("dkkd") || label.contains("mã số thuế")) {
+                            scrapedTaxCode = tds.get(1).text().trim();
+                            break;
+                        }
                     }
                 }
-            } else {
-                scrapedTaxCode = mstRow.text().trim();
             }
 
             String cleanScraped = scrapedTaxCode == null ? "" : scrapedTaxCode.replaceAll("\\s+", "").replace("-", "");
             String cleanInput = taxCode.replaceAll("\\s+", "").replace("-", "");
 
-            if (cleanScraped.isEmpty() || !cleanScraped.contains(cleanInput)) {
+            if (!cleanScraped.isEmpty() && !cleanScraped.contains(cleanInput)) {
                 log.warn("DoanhNghiepBiz tax code mismatch. Expected: {}, Scraped: {}", taxCode, scrapedTaxCode);
                 return Optional.empty();
             }
@@ -504,52 +549,109 @@ public class ExternalApiService {
 
             // Name
             org.jsoup.nodes.Element nameEl = table.selectFirst("th[itemprop=name]");
+            if (nameEl == null) {
+                nameEl = doc.selectFirst("h5, h1");
+            }
             if (nameEl != null) {
-                mapped.setName(nameEl.text().trim());
+                String nameText = nameEl.text().trim();
+                if (nameText.contains(" - ")) {
+                    String[] parts = nameText.split(" - ", 2);
+                    if (parts[0].replaceAll("\\D+", "").equals(cleanInput)) {
+                        nameText = parts[1].trim();
+                    }
+                }
+                mapped.setName(nameText);
             }
 
             // Incorporated Date (Ngày cấp)
-            org.jsoup.nodes.Element incDateEl = table.selectFirst("td[itemprop=IncorporatedDate]");
-            if (incDateEl != null) {
+            org.jsoup.nodes.Element incDateEl = table.selectFirst("td[itemprop=IncorporatedDate], *[itemprop=IncorporatedDate]");
+            if (incDateEl != null && !incDateEl.text().trim().isEmpty()) {
                 mapped.setIssueDate(incDateEl.text().trim());
             }
 
             // Start Date (Ngày hoạt động) if Incorporated Date is empty
             if (mapped.getIssueDate() == null || mapped.getIssueDate().isEmpty()) {
-                org.jsoup.nodes.Element startDateEl = table.selectFirst("td[itemprop=StartDate]");
-                if (startDateEl != null) {
+                org.jsoup.nodes.Element startDateEl = table.selectFirst("td[itemprop=StartDate], *[itemprop=StartDate]");
+                if (startDateEl != null && !startDateEl.text().trim().isEmpty()) {
                     mapped.setIssueDate(startDateEl.text().trim());
                 }
             }
 
+            // Fallback issue date search
+            if (mapped.getIssueDate() == null || mapped.getIssueDate().isEmpty()) {
+                for (org.jsoup.nodes.Element tr : table.select("tr")) {
+                    org.jsoup.select.Elements tds = tr.select("td");
+                    if (tds.size() >= 2) {
+                        String label = tds.get(0).text().toLowerCase();
+                        if (label.contains("ngày cấp") || label.contains("ngày thành lập") || label.contains("ngày hoạt động")) {
+                            mapped.setIssueDate(tds.get(1).text().trim());
+                            break;
+                        }
+                    }
+                }
+            }
+
             // Status
-            org.jsoup.nodes.Element statusEl = table.selectFirst("td[itemprop=Status]");
+            org.jsoup.nodes.Element statusEl = table.selectFirst("td[itemprop=Status], *[itemprop=Status]");
             if (statusEl != null) {
                 mapped.setStatus(statusEl.text().trim());
             }
 
             // Address
-            org.jsoup.nodes.Element addressEl = table.selectFirst("td[itemprop=address]");
+            org.jsoup.nodes.Element addressEl = table.selectFirst("td[itemprop=address], *[itemprop=address]");
             if (addressEl != null) {
                 mapped.setAddress(addressEl.text().trim());
             }
 
             // Owner (Người đại diện)
-            org.jsoup.nodes.Element ownerEl = table.selectFirst("span[itemprop=Owner] a");
-            if (ownerEl != null) {
+            org.jsoup.nodes.Element ownerEl = table.selectFirst("span[itemprop=Owner] a, *[itemprop=Owner] a, tr[itemprop=Owner] a, span[itemprop=Owner]");
+            if (ownerEl != null && !ownerEl.text().trim().isEmpty()) {
                 mapped.setOwner(ownerEl.text().trim());
+            } else {
+                for (org.jsoup.nodes.Element tr : table.select("tr")) {
+                    org.jsoup.select.Elements tds = tr.select("td");
+                    if (tds.size() >= 2) {
+                        String label = tds.get(0).text().toLowerCase();
+                        if (label.contains("đại diện") || label.contains("chủ sở hữu") || label.contains("giám đốc")) {
+                            mapped.setOwner(tds.get(1).text().trim());
+                            break;
+                        }
+                    }
+                }
             }
 
             // Phone
-            org.jsoup.nodes.Element phoneEl = table.selectFirst("td[itemprop=Phone]");
-            if (phoneEl != null) {
+            org.jsoup.nodes.Element phoneEl = table.selectFirst("td[itemprop=Phone], *[itemprop=Phone]");
+            if (phoneEl != null && !phoneEl.text().trim().isEmpty()) {
                 mapped.setPhone(phoneEl.text().trim());
+            } else {
+                for (org.jsoup.nodes.Element tr : table.select("tr")) {
+                    org.jsoup.select.Elements tds = tr.select("td");
+                    if (tds.size() >= 2) {
+                        String label = tds.get(0).text().toLowerCase();
+                        if (label.contains("điện thoại") || label.contains("sđt") || label.contains("phone")) {
+                            mapped.setPhone(tds.get(1).text().trim());
+                            break;
+                        }
+                    }
+                }
             }
 
             // Business Line (Ngành nghề)
-            org.jsoup.nodes.Element businessLineEl = table.selectFirst("td[itemprop=BusinessLine]");
-            if (businessLineEl != null) {
+            org.jsoup.nodes.Element businessLineEl = table.selectFirst("td[itemprop=BusinessLine], *[itemprop=BusinessLine]");
+            if (businessLineEl != null && !businessLineEl.text().trim().isEmpty()) {
                 mapped.setMainBusinessSector(businessLineEl.text().trim());
+            } else {
+                for (org.jsoup.nodes.Element tr : table.select("tr")) {
+                    org.jsoup.select.Elements tds = tr.select("td");
+                    if (tds.size() >= 2) {
+                        String label = tds.get(0).text().toLowerCase();
+                        if (label.contains("ngành nghề") || label.contains("lĩnh vực")) {
+                            mapped.setMainBusinessSector(tds.get(1).text().trim());
+                            break;
+                        }
+                    }
+                }
             }
 
             // Email (Cloudflare protected email)
@@ -578,11 +680,26 @@ public class ExternalApiService {
 
     private Optional<VietQrResponse.BusinessData> fetchFromMasoThueCom(String taxCode) {
         try {
-            String url = "https://masothue.com/Search/?q=" + taxCode + "&type=auto";
-            org.jsoup.nodes.Document doc = org.jsoup.Jsoup.connect(url)
-                    .userAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-                    .timeout(10000)
-                    .get();
+            String url = "https://masothue.com/" + taxCode;
+            org.jsoup.nodes.Document doc;
+            try {
+                doc = org.jsoup.Jsoup.connect(url)
+                        .userAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
+                        .header("Accept-Language", "vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7")
+                        .referrer("https://masothue.com/")
+                        .followRedirects(true)
+                        .timeout(8000)
+                        .get();
+            } catch (Exception e) {
+                url = "https://masothue.com/Search/?q=" + taxCode + "&type=auto";
+                doc = org.jsoup.Jsoup.connect(url)
+                        .userAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
+                        .header("Accept-Language", "vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7")
+                        .referrer("https://masothue.com/")
+                        .followRedirects(true)
+                        .timeout(8000)
+                        .get();
+            }
 
             org.jsoup.nodes.Element table = doc.selectFirst("table.table-taxinfo");
             if (table == null) {
@@ -591,27 +708,26 @@ public class ExternalApiService {
 
             // Verify tax code matches
             String scrapedTaxCode = null;
-            org.jsoup.nodes.Element mstRow = table.selectFirst("tr td:contains(Mã số thuế) + td");
-            if (mstRow == null) {
-                mstRow = table.selectFirst("tr td:contains(Mã số thuế) a");
-            }
-            if (mstRow == null) {
-                // fallback to searching all cells
+            org.jsoup.nodes.Element mstEl = table.selectFirst("td[itemprop=taxID], *[itemprop=taxID]");
+            if (mstEl != null) {
+                scrapedTaxCode = mstEl.text().trim();
+            } else {
                 for (org.jsoup.nodes.Element tr : table.select("tr")) {
                     org.jsoup.select.Elements tds = tr.select("td, th");
-                    if (tds.size() >= 2 && tds.get(0).text().contains("Mã số thuế")) {
-                        scrapedTaxCode = tds.get(1).text().trim();
-                        break;
+                    if (tds.size() >= 2) {
+                        String label = tds.get(0).text().toLowerCase();
+                        if (label.contains("mã số thuế") || label.contains("mst")) {
+                            scrapedTaxCode = tds.get(1).text().trim();
+                            break;
+                        }
                     }
                 }
-            } else {
-                scrapedTaxCode = mstRow.text().trim();
             }
 
             String cleanScraped = scrapedTaxCode == null ? "" : scrapedTaxCode.replaceAll("\\s+", "").replace("-", "");
             String cleanInput = taxCode.replaceAll("\\s+", "").replace("-", "");
 
-            if (cleanScraped.isEmpty() || !cleanScraped.contains(cleanInput)) {
+            if (!cleanScraped.isEmpty() && !cleanScraped.contains(cleanInput)) {
                 log.warn("MasoThue tax code mismatch. Expected: {}, Scraped: {}", taxCode, scrapedTaxCode);
                 return Optional.empty();
             }
@@ -632,21 +748,26 @@ public class ExternalApiService {
             }
 
             // Owner (Người đại diện)
-            org.jsoup.nodes.Element ownerEl = table.selectFirst("tr[itemprop=alumni] span[itemprop=name] a");
+            org.jsoup.nodes.Element ownerEl = table.selectFirst("tr[itemprop=alumni] span[itemprop=name] a, tr[itemprop=alumni] td:eq(1) a, tr[itemprop=alumni] td:eq(1)");
             if (ownerEl == null) {
-                ownerEl = table.selectFirst("tr[itemprop=alumni] td:eq(1) a");
+                for (org.jsoup.nodes.Element tr : table.select("tr")) {
+                    org.jsoup.select.Elements tds = tr.select("td");
+                    if (tds.size() >= 2) {
+                        String label = tds.get(0).text().toLowerCase();
+                        if (label.contains("người đại diện") || label.contains("đại diện pháp luật") || label.contains("chủ sở hữu")) {
+                            ownerEl = tds.get(1);
+                            break;
+                        }
+                    }
+                }
             }
-            if (ownerEl != null) {
+            if (ownerEl != null && !ownerEl.text().trim().isEmpty()) {
                 mapped.setOwner(ownerEl.text().trim());
             }
 
             // Phone
-            org.jsoup.nodes.Element phoneEl = table.selectFirst("td[itemprop=telephone]");
-            if (phoneEl == null) {
-                phoneEl = table.selectFirst("span#tel-full");
-            }
+            org.jsoup.nodes.Element phoneEl = table.selectFirst("td[itemprop=telephone], span#tel-full");
             if (phoneEl != null) {
-                // remove hide-data button if any
                 org.jsoup.nodes.Element btn = phoneEl.selectFirst("button");
                 if (btn != null) {
                     btn.remove();
@@ -655,38 +776,38 @@ public class ExternalApiService {
             }
 
             // Issue Date (Ngày hoạt động)
-            org.jsoup.nodes.Element trDate = table.select("tr").stream()
-                    .filter(tr -> tr.text().contains("Ngày hoạt động"))
-                    .findFirst()
-                    .orElse(null);
-            if (trDate != null) {
-                org.jsoup.nodes.Element valTd = trDate.select("td").get(1);
-                if (valTd != null) {
-                    mapped.setIssueDate(valTd.text().trim());
+            for (org.jsoup.nodes.Element tr : table.select("tr")) {
+                org.jsoup.select.Elements tds = tr.select("td");
+                if (tds.size() >= 2) {
+                    String label = tds.get(0).text().toLowerCase();
+                    if (label.contains("ngày hoạt động") || label.contains("ngày cấp") || label.contains("ngày thành lập")) {
+                        mapped.setIssueDate(tds.get(1).text().trim());
+                        break;
+                    }
                 }
             }
 
             // Tax Authority (Quản lý bởi)
-            org.jsoup.nodes.Element trAuth = table.select("tr").stream()
-                    .filter(tr -> tr.text().contains("Quản lý bởi"))
-                    .findFirst()
-                    .orElse(null);
-            if (trAuth != null) {
-                org.jsoup.nodes.Element valTd = trAuth.select("td").get(1);
-                if (valTd != null) {
-                    mapped.setTaxAuthority(valTd.text().trim());
+            for (org.jsoup.nodes.Element tr : table.select("tr")) {
+                org.jsoup.select.Elements tds = tr.select("td");
+                if (tds.size() >= 2) {
+                    String label = tds.get(0).text().toLowerCase();
+                    if (label.contains("quản lý bởi") || label.contains("cơ quan thuế")) {
+                        mapped.setTaxAuthority(tds.get(1).text().trim());
+                        break;
+                    }
                 }
             }
 
             // Main Business Sector (Ngành nghề chính)
-            org.jsoup.nodes.Element trSector = table.select("tr").stream()
-                    .filter(tr -> tr.text().contains("Ngành nghề chính"))
-                    .findFirst()
-                    .orElse(null);
-            if (trSector != null) {
-                org.jsoup.nodes.Element valTd = trSector.select("td").get(1);
-                if (valTd != null) {
-                    mapped.setMainBusinessSector(valTd.text().trim());
+            for (org.jsoup.nodes.Element tr : table.select("tr")) {
+                org.jsoup.select.Elements tds = tr.select("td");
+                if (tds.size() >= 2) {
+                    String label = tds.get(0).text().toLowerCase();
+                    if (label.contains("ngành nghề chính") || label.contains("ngành nghề kinh doanh")) {
+                        mapped.setMainBusinessSector(tds.get(1).text().trim());
+                        break;
+                    }
                 }
             }
 
