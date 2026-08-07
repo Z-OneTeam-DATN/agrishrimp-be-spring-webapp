@@ -4,8 +4,9 @@ import java.util.Set;
 
 public final class RoleUtils {
 
-    private static final Set<String> ADMIN_LIKE_ROLES = Set.of("ADMIN", "SUPER_ADMIN", "ADMINISTRATOR");
-    private static final Set<String> ADMIN_LIKE_AUTHORITIES = Set.of("ROLE_ADMIN", "ROLE_SUPER_ADMIN", "ROLE_ADMINISTRATOR");
+    private static final Set<String> ADMIN_LIKE_ROLES = Set.of("ADMIN", "SUPER_ADMIN");
+    private static final Set<String> ADMIN_LIKE_AUTHORITIES = Set.of("ROLE_ADMIN", "ROLE_SUPER_ADMIN");
+    private static final Set<String> SUPER_ADMIN_AUTHORITIES = Set.of("ROLE_SUPER_ADMIN");
 
     private RoleUtils() {
     }
@@ -32,5 +33,16 @@ public final class RoleUtils {
                 .map(RoleUtils::normalizeRoleSlug)
                 .map(slug -> "ROLE_" + slug)
                 .anyMatch(ADMIN_LIKE_AUTHORITIES::contains);
+    }
+
+    public static boolean hasSuperAdminAuthority(Set<String> authorities) {
+        if (authorities == null || authorities.isEmpty()) {
+            return false;
+        }
+
+        return authorities.stream()
+                .map(RoleUtils::normalizeRoleSlug)
+                .map(slug -> "ROLE_" + slug)
+                .anyMatch(SUPER_ADMIN_AUTHORITIES::contains);
     }
 }

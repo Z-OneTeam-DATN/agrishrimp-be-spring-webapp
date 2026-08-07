@@ -74,7 +74,7 @@ class CustomerServiceTest {
     @BeforeEach
     void setUp() {
         customerRole = Role.builder()
-                .slug("USER")
+                .slug("CUSTOMER")
                 .displayName("Khach hang")
                 .isActive(true)
                 .isSystem(true)
@@ -156,8 +156,8 @@ class CustomerServiceTest {
     @Test
     void getCustomerDetailById_shouldSupportWebsiteUsersWithoutCustomerProfile() {
         Role websiteUserRole = Role.builder()
-                .slug("USER")
-                .displayName("Nguoi dung")
+                .slug("CUSTOMER")
+                .displayName("Khach hang")
                 .isActive(true)
                 .isSystem(true)
                 .build();

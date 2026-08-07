@@ -106,7 +106,7 @@ public class AuthController {
     // ---------------------------------------------------------
     // POST /api/auth/signup — Đăng ký tài khoản mới
     // ---------------------------------------------------------
-    @Operation(summary = "Đăng ký tài khoản", description = "Tạo tài khoản mới bằng email/SĐT, mật khẩu và Captcha. Mặc định nhận role USER.")
+    @Operation(summary = "Đăng ký tài khoản", description = "Tạo tài khoản mới bằng email/SĐT, mật khẩu và Captcha. Mặc định nhận role CUSTOMER.")
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Đăng ký thành công", content = @Content(schema = @Schema(implementation = AuthResponse.class))),
             @ApiResponse(responseCode = "400", description = "Dữ liệu không hợp lệ hoặc Captcha thất bại"),

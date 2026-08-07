@@ -50,7 +50,7 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class CustomerService {
 
-    private static final Set<String> MANAGED_CUSTOMER_ROLE_SLUGS = Set.of("USER");
+    private static final Set<String> MANAGED_CUSTOMER_ROLE_SLUGS = Set.of("CUSTOMER");
     private static final long MIN_SETTLED_ORDERS_FOR_RISK_ASSESSMENT = 3L;
     private static final double LOW_RISK_REPUTATION_THRESHOLD = 80.0;
     private static final double HIGH_RISK_REPUTATION_THRESHOLD = 50.0;
@@ -85,8 +85,8 @@ public class CustomerService {
                 ? req.getPhone().replaceAll("\\s+", "")
                 : "123456";
 
-        Role customerRole = roleRepository.findBySlug("USER")
-                .orElseThrow(() -> new NotFoundException("Role USER chua duoc cau hinh"));
+        Role customerRole = roleRepository.findBySlug("CUSTOMER")
+                .orElseThrow(() -> new NotFoundException("Role CUSTOMER chua duoc cau hinh"));
 
         User newUser = User.builder()
                 .fullName(req.getName())
@@ -476,7 +476,7 @@ public class CustomerService {
     }
 
     public List<Map<String, Object>> getStaffByBranch(Long branchId) {
-        return userRepository.findByBranchIdAndRole(branchId, "MANAGER");
+        return userRepository.findByBranchIdAndRole(branchId, "STAFF");
     }
 
     public List<?> getAllBranches() {

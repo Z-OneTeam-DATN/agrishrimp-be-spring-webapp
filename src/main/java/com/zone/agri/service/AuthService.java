@@ -54,7 +54,7 @@ public class AuthService {
 
     private static final Pattern EMAIL_PATTERN = Pattern.compile("^[\\w-\\.]+@([\\w-]+\\.)+[\\w-]{2,4}$");
 
-    private static final String ROLE_USER = "USER";
+    private static final String ROLE_CUSTOMER = "CUSTOMER";
 
     // =========================================================
     // ĐĂNG NHẬP (LOCAL: email + password + captcha)
@@ -119,9 +119,9 @@ public class AuthService {
             throw new ConflictException("Email này đã được sử dụng", true);
         }
 
-        // 4. Lấy role mặc định USER
-        Role defaultRole = roleRepository.findBySlug(ROLE_USER)
-                .orElseThrow(() -> new BadRequestException("Cấu hình hệ thống lỗi: Role USER chưa được tạo"));
+        // 4. Lấy role mặc định CUSTOMER
+        Role defaultRole = roleRepository.findBySlug(ROLE_CUSTOMER)
+                .orElseThrow(() -> new BadRequestException("Cấu hình hệ thống lỗi: Role CUSTOMER chưa được tạo"));
 
         // 5. Tạo user mới
         User newUser = User.builder()
@@ -233,8 +233,8 @@ public class AuthService {
 
         if (user == null) {
             // Người dùng mới — tự động đăng ký
-            Role defaultRole = roleRepository.findBySlug(ROLE_USER)
-                    .orElseThrow(() -> new BadRequestException("Cấu hình hệ thống lỗi: Role USER chưa được tạo"));
+            Role defaultRole = roleRepository.findBySlug(ROLE_CUSTOMER)
+                    .orElseThrow(() -> new BadRequestException("Cấu hình hệ thống lỗi: Role CUSTOMER chưa được tạo"));
 
             user = User.builder()
                     .email(email)
