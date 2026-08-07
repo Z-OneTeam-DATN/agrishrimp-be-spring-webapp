@@ -54,18 +54,22 @@ import com.zone.agri.repository.SupplierRepository;
 import com.zone.agri.repository.UserRepository;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
-import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.TreeSet;
+import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.core.env.Environment;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
@@ -76,6 +80,11 @@ import org.springframework.transaction.annotation.Transactional;
 @RequiredArgsConstructor
 @Slf4j
 public class DataSeeder implements CommandLineRunner {
+
+    private static final String CUSTOMER_ROLE_SLUG = "CUSTOMER";
+    private static final String LEGACY_USER_ROLE_SLUG = "USER";
+    private static final String ACTIVITY_LOG_MODULE_CODE = "ACTIVITY_LOG";
+    private static final String ACTIVITY_LOG_VIEW_PERMISSION_CODE = "ACTIVITY_LOG_VIEW";
 
     private final RoleRepository roleRepository;
     private final PermissionRepository permissionRepository;
@@ -94,234 +103,15 @@ public class DataSeeder implements CommandLineRunner {
     private final InventoryTransactionRepository inventoryTransactionRepository;
     private final OrderRepository orderRepository;
     private final OrderItemRepository orderItemRepository;
+    private final Environment environment;
 
     @Override
     @Transactional
     public void run(String... args) {
         boolean hasExistingRoles = roleRepository.count() > 0;
 
-        log.info(">>> ĐỒNG BỘ DỮ LIỆU NỀN TẢNG HỆ THỐNG (permissions, roles, users)...");
-
-        Permission mDash = pMod("Tổng quan hệ thống", "DASHBOARD", PermissionGroup.SYSTEM);
-        Permission aDashV = pAct("Xem tổng quan", "DASHBOARD_VIEW", PermissionGroup.SYSTEM, mDash);
-        Permission mWspace = pMod("Bàn làm việc", "WORKSPACE", PermissionGroup.SYSTEM);
-        Permission aWspaceV = pAct("Xem bàn làm việc", "WORKSPACE_VIEW", PermissionGroup.SYSTEM, mWspace);
-
-        Permission mRpt = pMod("Báo cáo", "REPORT", PermissionGroup.REPORT);
-        Permission aRptSale = pAct("Báo cáo doanh thu", "REPORT_REVENUE_VIEW", PermissionGroup.REPORT, mRpt);
-        Permission aRptInv = pAct("Báo cáo kho", "REPORT_INVENTORY_VIEW", PermissionGroup.REPORT, mRpt);
-        Permission aRptInvAllBranches = pAct(
-                "Xem báo cáo kho mọi chi nhánh",
-                "REPORT_INVENTORY_VIEW_ALL_BRANCHES",
-                PermissionGroup.REPORT,
-                mRpt);
-        Permission aRptFin = pAct("Báo cáo tài chính", "REPORT_FINANCE_VIEW", PermissionGroup.REPORT, mRpt);
-        Permission aRptFinAllBranches = pAct(
-                "Xem báo cáo tài chính mọi chi nhánh",
-                "REPORT_FINANCE_VIEW_ALL_BRANCHES",
-                PermissionGroup.REPORT,
-                mRpt);
-
-        Permission mUser = pMod("Quản lý nhân viên", "STAFF", PermissionGroup.ADMINISTRATION);
-        Permission aUserV = pAct("Xem nhân viên", "STAFF_VIEW", PermissionGroup.ADMINISTRATION, mUser);
-        Permission aUserC = pAct("Thêm nhân viên", "STAFF_CREATE", PermissionGroup.ADMINISTRATION, mUser);
-        Permission aUserU = pAct("Sửa nhân viên", "STAFF_UPDATE", PermissionGroup.ADMINISTRATION, mUser);
-        Permission aUserD = pAct("Xóa nhân viên", "STAFF_DELETE", PermissionGroup.ADMINISTRATION, mUser);
-
-        Permission mBranch = pMod("Quản lý chi nhánh", "BRANCH", PermissionGroup.ADMINISTRATION);
-        Permission aBranchV = pAct("Xem chi nhánh", "BRANCH_VIEW", PermissionGroup.ADMINISTRATION, mBranch);
-        Permission aBranchC = pAct("Thêm chi nhánh", "BRANCH_CREATE", PermissionGroup.ADMINISTRATION, mBranch);
-        Permission aBranchU = pAct("Sửa chi nhánh", "BRANCH_UPDATE", PermissionGroup.ADMINISTRATION, mBranch);
-        Permission aBranchD = pAct("Xóa chi nhánh", "BRANCH_DELETE", PermissionGroup.ADMINISTRATION, mBranch);
-
-        Permission mRole = pMod("Quản lý vai trò", "ROLE", PermissionGroup.ADMINISTRATION);
-        Permission aRoleV = pAct("Xem vai trò", "ROLE_VIEW", PermissionGroup.ADMINISTRATION, mRole);
-        Permission aRoleC = pAct("Tạo vai trò", "ROLE_CREATE", PermissionGroup.ADMINISTRATION, mRole);
-        Permission aRoleU = pAct("Sửa vai trò", "ROLE_UPDATE", PermissionGroup.ADMINISTRATION, mRole);
-        Permission aRoleD = pAct("Xóa vai trò", "ROLE_DELETE", PermissionGroup.ADMINISTRATION, mRole);
-
-        Permission mOrder = pMod("Quản lý đơn hàng", "ORDER", PermissionGroup.SALES);
-        Permission aOrdV = pAct("Xem đơn hàng", "ORDER_VIEW", PermissionGroup.SALES, mOrder);
-        Permission aOrdC = pAct("Tạo đơn hàng", "ORDER_CREATE", PermissionGroup.SALES, mOrder);
-        Permission aOrdU = pAct("Cập nhật đơn hàng", "ORDER_UPDATE", PermissionGroup.SALES, mOrder);
-        Permission aOrdCnf = pAct("Xác nhận đơn hàng", "ORDER_CONFIRM", PermissionGroup.SALES, mOrder);
-        Permission aOrdShip = pAct("Giao hàng", "ORDER_SHIP", PermissionGroup.SALES, mOrder);
-        Permission aOrdX = pAct("Huỷ đơn hàng", "ORDER_CANCEL", PermissionGroup.SALES, mOrder);
-        Permission aOrdDone = pAct("Hoàn tất đơn hàng", "ORDER_COMPLETE", PermissionGroup.SALES, mOrder);
-        Permission aOrdExport = pAct("Xuất danh sách đơn hàng", "ORDER_EXPORT", PermissionGroup.SALES, mOrder);
-        Permission aOrdRefund = pAct("Hoàn tiền đơn hàng", "ORDER_REFUND", PermissionGroup.SALES, mOrder);
-        Permission aOrdD = pAct("Xóa đơn hàng", "ORDER_DELETE", PermissionGroup.SALES, mOrder);
-
-        Permission mCus = pMod("Quản lý khách hàng", "CUSTOMER", PermissionGroup.SALES);
-        Permission aCusV = pAct("Xem khách hàng", "CUSTOMER_VIEW", PermissionGroup.SALES, mCus);
-        Permission aCusC = pAct("Thêm khách hàng", "CUSTOMER_CREATE", PermissionGroup.SALES, mCus);
-        Permission aCusU = pAct("Sửa khách hàng", "CUSTOMER_UPDATE", PermissionGroup.SALES, mCus);
-        Permission aCusD = pAct("Xóa khách hàng", "CUSTOMER_DELETE", PermissionGroup.SALES, mCus);
-
-        Permission mVou = pMod("Quản lý mã giảm giá", "VOUCHER", PermissionGroup.SALES);
-        Permission aVouV = pAct("Xem mã giảm giá", "VOUCHER_VIEW", PermissionGroup.SALES, mVou);
-        Permission aVouC = pAct("Thêm mã giảm giá", "VOUCHER_CREATE", PermissionGroup.SALES, mVou);
-        Permission aVouU = pAct("Sửa mã giảm giá", "VOUCHER_UPDATE", PermissionGroup.SALES, mVou);
-        Permission aVouD = pAct("Xóa mã giảm giá", "VOUCHER_DELETE", PermissionGroup.SALES, mVou);
-
-        Permission mProd = pMod("Quản lý sản phẩm", "PRODUCT", PermissionGroup.PRODUCT_CATALOG);
-        Permission aProdV = pAct("Xem sản phẩm", "PRODUCT_VIEW", PermissionGroup.PRODUCT_CATALOG, mProd);
-        Permission aProdC = pAct("Thêm sản phẩm", "PRODUCT_CREATE", PermissionGroup.PRODUCT_CATALOG, mProd);
-        Permission aProdU = pAct("Sửa sản phẩm", "PRODUCT_UPDATE", PermissionGroup.PRODUCT_CATALOG, mProd);
-        Permission aProdD = pAct("Xóa sản phẩm", "PRODUCT_DELETE", PermissionGroup.PRODUCT_CATALOG, mProd);
-
-        Permission mCat = pMod("Quản lý danh mục", "CATEGORY", PermissionGroup.PRODUCT_CATALOG);
-        Permission aCatV = pAct("Xem danh mục", "CATEGORY_VIEW", PermissionGroup.PRODUCT_CATALOG, mCat);
-        Permission aCatC = pAct("Thêm danh mục", "CATEGORY_CREATE", PermissionGroup.PRODUCT_CATALOG, mCat);
-        Permission aCatU = pAct("Sửa danh mục", "CATEGORY_UPDATE", PermissionGroup.PRODUCT_CATALOG, mCat);
-        Permission aCatD = pAct("Xóa danh mục", "CATEGORY_DELETE", PermissionGroup.PRODUCT_CATALOG, mCat);
-
-        Permission mAttr = pMod("Quản lý thuộc tính", "ATTRIBUTE", PermissionGroup.PRODUCT_CATALOG);
-        Permission aAttrV = pAct("Xem thuộc tính", "ATTRIBUTE_VIEW", PermissionGroup.PRODUCT_CATALOG, mAttr);
-        Permission aAttrC = pAct("Thêm thuộc tính", "ATTRIBUTE_CREATE", PermissionGroup.PRODUCT_CATALOG, mAttr);
-        Permission aAttrU = pAct("Sửa thuộc tính", "ATTRIBUTE_UPDATE", PermissionGroup.PRODUCT_CATALOG, mAttr);
-        Permission aAttrD = pAct("Xóa thuộc tính", "ATTRIBUTE_DELETE", PermissionGroup.PRODUCT_CATALOG, mAttr);
-
-        Permission mSup = pMod("Quản lý nhà cung cấp", "SUPPLIER", PermissionGroup.INVENTORY);
-        Permission aSupV = pAct("Xem nhà cung cấp", "SUPPLIER_VIEW", PermissionGroup.INVENTORY, mSup);
-        Permission aSupC = pAct("Thêm nhà cung cấp", "SUPPLIER_CREATE", PermissionGroup.INVENTORY, mSup);
-        Permission aSupU = pAct("Sửa nhà cung cấp", "SUPPLIER_UPDATE", PermissionGroup.INVENTORY, mSup);
-        Permission aSupD = pAct("Xóa nhà cung cấp", "SUPPLIER_DELETE", PermissionGroup.INVENTORY, mSup);
-
-        Permission mDriver = pMod("Quản lý tài xế", "DRIVER", PermissionGroup.INVENTORY);
-        Permission aDriverV = pAct("Xem tài xế", "DRIVER_VIEW", PermissionGroup.INVENTORY, mDriver);
-        Permission aDriverC = pAct("Thêm tài xế", "DRIVER_CREATE", PermissionGroup.INVENTORY, mDriver);
-        Permission aDriverU = pAct("Sửa tài xế", "DRIVER_UPDATE", PermissionGroup.INVENTORY, mDriver);
-        Permission aDriverD = pAct("Xóa tài xế", "DRIVER_DELETE", PermissionGroup.INVENTORY, mDriver);
-
-        Permission mImp = pMod("Quản lý nhập hàng", "IMPORT", PermissionGroup.INVENTORY);
-        Permission aImpV = pAct("Xem phiếu nhập", "IMPORT_VIEW", PermissionGroup.INVENTORY, mImp);
-        Permission aImpC = pAct("Tạo phiếu nhập", "IMPORT_CREATE", PermissionGroup.INVENTORY, mImp);
-        Permission aImpU = pAct("Sửa phiếu nhập", "IMPORT_UPDATE", PermissionGroup.INVENTORY, mImp);
-        Permission aImpA = pAct("Duyệt phiếu nhập", "IMPORT_APPROVE", PermissionGroup.INVENTORY, mImp);
-        Permission aImpX = pAct("Hủy phiếu nhập", "IMPORT_CANCEL", PermissionGroup.INVENTORY, mImp);
-        Permission aImpD = pAct("Xóa phiếu nhập", "IMPORT_DELETE", PermissionGroup.INVENTORY, mImp);
-
-        Permission mExp = pMod("Quản lý xuất hàng", "EXPORT", PermissionGroup.INVENTORY);
-        Permission aExpV = pAct("Xem phiếu xuất", "EXPORT_VIEW", PermissionGroup.INVENTORY, mExp);
-        Permission aExpC = pAct("Tạo phiếu xuất", "EXPORT_CREATE", PermissionGroup.INVENTORY, mExp);
-        Permission aExpA = pAct("Duyệt phiếu xuất", "EXPORT_APPROVE", PermissionGroup.INVENTORY, mExp);
-        Permission aExpU = pAct("Sửa phiếu xuất", "EXPORT_UPDATE", PermissionGroup.INVENTORY, mExp);
-        Permission aExpX = pAct("Hủy phiếu xuất", "EXPORT_CANCEL", PermissionGroup.INVENTORY, mExp);
-        Permission aExpD = pAct("Xóa phiếu xuất", "EXPORT_DELETE", PermissionGroup.INVENTORY, mExp);
-
-        Permission mTrf = pMod("Quản lý điều chuyển", "TRANSFER", PermissionGroup.INVENTORY);
-        Permission aTrfV = pAct("Xem phiếu điều chuyển", "TRANSFER_VIEW", PermissionGroup.INVENTORY, mTrf);
-        Permission aTrfC = pAct("Tạo phiếu điều chuyển", "TRANSFER_CREATE", PermissionGroup.INVENTORY, mTrf);
-        Permission aTrfA = pAct("Duyệt điều chuyển", "TRANSFER_APPROVE", PermissionGroup.INVENTORY, mTrf);
-        Permission aTrfX = pAct("Hủy điều chuyển", "TRANSFER_CANCEL", PermissionGroup.INVENTORY, mTrf);
-        Permission aTrfD = pAct("Xóa điều chuyển", "TRANSFER_DELETE", PermissionGroup.INVENTORY, mTrf);
-        Permission aTrfU = pAct("Sửa điều chuyển", "TRANSFER_UPDATE", PermissionGroup.INVENTORY, mTrf);
-
-        Permission mChk = pMod("Kiểm kê kho", "INVENTORY_CHECK", PermissionGroup.INVENTORY);
-        Permission aChkV = pAct("Xem phiếu kiểm kê", "INVENTORY_CHECK_VIEW", PermissionGroup.INVENTORY, mChk);
-        Permission aChkC = pAct("Tạo phiếu kiểm kê", "INVENTORY_CHECK_CREATE", PermissionGroup.INVENTORY, mChk);
-        Permission aChkA = pAct("Duyệt phiếu kiểm kê", "INVENTORY_CHECK_APPROVE", PermissionGroup.INVENTORY, mChk);
-        Permission aChkU = pAct("Sửa phiếu kiểm kê", "INVENTORY_CHECK_UPDATE", PermissionGroup.INVENTORY, mChk);
-        Permission aChkX = pAct("Hủy phiếu kiểm kê", "INVENTORY_CHECK_CANCEL", PermissionGroup.INVENTORY, mChk);
-        Permission aChkD = pAct("Xóa phiếu kiểm kê", "INVENTORY_CHECK_DELETE", PermissionGroup.INVENTORY, mChk);
-
-        Permission mPurchaseRequest = pMod("Yêu cầu mua nhà cung cấp", "PURCHASE_REQUEST", PermissionGroup.INVENTORY);
-        Permission aPurchaseRequestV = pAct("Xem yêu cầu mua", "PURCHASE_REQUEST_VIEW", PermissionGroup.INVENTORY, mPurchaseRequest);
-        Permission aPurchaseRequestC = pAct("Tạo yêu cầu mua", "PURCHASE_REQUEST_CREATE", PermissionGroup.INVENTORY, mPurchaseRequest);
-        Permission aPurchaseRequestU = pAct("Sửa yêu cầu mua", "PURCHASE_REQUEST_UPDATE", PermissionGroup.INVENTORY, mPurchaseRequest);
-        Permission aPurchaseRequestA = pAct("Duyệt yêu cầu mua", "PURCHASE_REQUEST_APPROVE", PermissionGroup.INVENTORY, mPurchaseRequest);
-        Permission aPurchaseRequestD = pAct("Xóa yêu cầu mua", "PURCHASE_REQUEST_DELETE", PermissionGroup.INVENTORY, mPurchaseRequest);
-
-        Permission mBanner = pMod("Quản lý banner", "BANNER", PermissionGroup.SETTING);
-        Permission aBannerV = pAct("Xem banner", "BANNER_VIEW", PermissionGroup.SETTING, mBanner);
-        Permission aBannerC = pAct("Tạo banner", "BANNER_CREATE", PermissionGroup.SETTING, mBanner);
-        Permission aBannerE = pAct("Sửa banner", "BANNER_EDIT", PermissionGroup.SETTING, mBanner);
-        Permission aBannerD = pAct("Xóa banner", "BANNER_DELETE", PermissionGroup.SETTING, mBanner);
-
-        Permission mBlog = pMod("Quản lý blog", "BLOG", PermissionGroup.SETTING);
-        Permission aBlogV = pAct("Xem blog", "BLOG_VIEW", PermissionGroup.SETTING, mBlog);
-        Permission aBlogC = pAct("Tạo blog", "BLOG_CREATE", PermissionGroup.SETTING, mBlog);
-        Permission aBlogE = pAct("Sửa blog", "BLOG_EDIT", PermissionGroup.SETTING, mBlog);
-        Permission aBlogD = pAct("Xóa blog", "BLOG_DELETE", PermissionGroup.SETTING, mBlog);
-        Permission aBlogA = pAct("Duyệt blog", "BLOG_APPROVE", PermissionGroup.SETTING, mBlog);
-
-        Permission mSet = pMod("Cài đặt hệ thống", "SETTING", PermissionGroup.SETTING);
-        Permission aSetV = pAct("Xem cài đặt", "SETTING_VIEW", PermissionGroup.SETTING, mSet);
-        Permission aSetU = pAct("Cập nhật cài đặt", "SETTING_UPDATE", PermissionGroup.SETTING, mSet);
-
-        Permission mChat = pMod("Chat với khách hàng", "CHAT", PermissionGroup.COMMUNICATION);
-        Permission aChatV = pAct("Xem hội thoại chat", "CHAT_VIEW", PermissionGroup.COMMUNICATION, mChat);
-        Permission aChatM = pAct("Quản lý chat (ghim, phân công)", "CHAT_MANAGE", PermissionGroup.COMMUNICATION, mChat);
-        Permission mCustomerAdvisor = pMod("Tư vấn khách hàng", "CUSTOMER_ADVISOR", PermissionGroup.COMMUNICATION);
-        Permission aCustomerAdvisorUse = pAct(
-                "Sử dụng workspace tư vấn khách hàng",
-                "CUSTOMER_ADVISOR_USE",
-                PermissionGroup.COMMUNICATION,
-                mCustomerAdvisor);
-
-        Permission mAgronomistWorkspace = pMod("Workspace kỹ sư nông nghiệp", "AGRONOMIST_WORKSPACE", PermissionGroup.AI_KNOWLEDGE);
-        Permission aAgronomistWorkspaceUse = pAct(
-                "Sử dụng workspace kỹ sư nông nghiệp",
-                "AGRONOMIST_WORKSPACE_USE",
-                PermissionGroup.AI_KNOWLEDGE,
-                mAgronomistWorkspace);
-        Permission mAiKnowledge = pMod("Tri thức AI doctor", "AI_KNOWLEDGE", PermissionGroup.AI_KNOWLEDGE);
-        Permission aAiKnowledgeView = pAct("Xem tri thức AI", "AI_KNOWLEDGE_VIEW", PermissionGroup.AI_KNOWLEDGE, mAiKnowledge);
-        Permission aAiKnowledgeCreate = pAct("Tạo tri thức AI", "AI_KNOWLEDGE_CREATE", PermissionGroup.AI_KNOWLEDGE, mAiKnowledge);
-        Permission aAiKnowledgeUpdate = pAct("Cập nhật tri thức AI", "AI_KNOWLEDGE_UPDATE", PermissionGroup.AI_KNOWLEDGE, mAiKnowledge);
-        Permission aAiKnowledgeApprove = pAct("Duyệt tri thức AI", "AI_KNOWLEDGE_APPROVE", PermissionGroup.AI_KNOWLEDGE, mAiKnowledge);
-        Permission aAiImportKnowledge = pAct("Import tri thức AI", "AI_IMPORT_KNOWLEDGE", PermissionGroup.AI_KNOWLEDGE, mAiKnowledge);
-        Permission aAiCaseReview = pAct("Xử lý case AI", "AI_CASE_REVIEW", PermissionGroup.AI_KNOWLEDGE, mAiKnowledge);
-
-        Set<Permission> superAdminPermissions = Set.of(
-                aDashV, aWspaceV,
-                aRptSale, aRptInv, aRptInvAllBranches, aRptFin, aRptFinAllBranches,
-                aUserV, aUserC, aUserU, aUserD,
-                aRoleV, aRoleC, aRoleU, aRoleD,
-                aBranchV, aBranchC, aBranchU, aBranchD,
-                aProdV, aProdC, aProdU, aProdD,
-                aCatV, aCatC, aCatU, aCatD,
-                aAttrV, aAttrC, aAttrU, aAttrD,
-                aImpV, aImpC, aImpA, aImpU, aImpX, aImpD,
-                aExpV, aExpC, aExpA, aExpU, aExpX, aExpD,
-                aTrfV, aTrfC, aTrfA, aTrfU, aTrfX, aTrfD,
-                aChkV, aChkC, aChkA, aChkU, aChkX, aChkD,
-                aPurchaseRequestV, aPurchaseRequestC, aPurchaseRequestU, aPurchaseRequestA, aPurchaseRequestD,
-                aCusV, aCusC, aCusU, aCusD,
-                aVouV, aVouC, aVouU, aVouD,
-                aSupV, aSupC, aSupU, aSupD,
-                aDriverV, aDriverC, aDriverU, aDriverD,
-                aOrdV, aOrdC, aOrdU, aOrdD, aOrdCnf, aOrdShip, aOrdX, aOrdDone, aOrdRefund, aOrdExport,
-                aBannerV, aBannerC, aBannerE, aBannerD,
-                aBlogV, aBlogC, aBlogE, aBlogD, aBlogA,
-                aSetV, aSetU,
-                aChatV, aChatM,
-                aCustomerAdvisorUse,
-                aAgronomistWorkspaceUse,
-                aAiKnowledgeView, aAiKnowledgeCreate, aAiKnowledgeUpdate,
-                aAiKnowledgeApprove, aAiImportKnowledge, aAiCaseReview);
-
-        Role superAdminRole = saveRole("SUPER_ADMIN", "Siêu quản trị", true, superAdminPermissions);
-        Role adminRole = saveRole("ADMIN", "Quản trị viên", true, superAdminPermissions);
-        // Role mac dinh cho luong dang ky tai khoan khach hang trong AuthService.signup().
-        // Khong gan permission quan tri de user moi khong truy cap duoc cac workspace noi bo.
-        saveRole("USER", "Người dùng", true, Set.of());
-
-        ensureUser(
-                "superadmin@agrishrimp.vn",
-                "Super Admin",
-                "0901000001",
-                "123456",
-                superAdminRole,
-                UserStatus.ACTIVE);
-        ensureUser(
-                "admin@agrishrimp.vn",
-                "Admin",
-                "0901000002",
-                "123456",
-                adminRole,
-                UserStatus.ACTIVE);
+        log.info(">>> ĐỒNG BỘ ROLE HỆ THỐNG VÀ MAPPING PERMISSION HIỆN CÓ...");
+        seedSystemRolesAndBootstrapSuperAdmin();
 
         if (hasExistingRoles) {
             log.info(">>> ĐỒNG BỘ DỮ LIỆU NỀN TẢNG HOÀN TẤT.");
@@ -725,98 +515,402 @@ public class DataSeeder implements CommandLineRunner {
                 });
     }
 
-    private Permission pMod(String name, String code, PermissionGroup group) {
-        return permissionRepository.findByCode(code)
+    private void seedSystemRolesAndBootstrapSuperAdmin() {
+        Set<String> roleSlugsBeforeSeed = roleRepository.findAll().stream()
+                .map(Role::getSlug)
+                .filter(slug -> slug != null && !slug.isBlank())
+                .collect(Collectors.toCollection(TreeSet::new));
+        log.info("Roles trước khi seed: {} [{}]",
+                roleSlugsBeforeSeed.size(),
+                String.join(", ", roleSlugsBeforeSeed));
+
+        seedActivityLogPermissionIfMissing();
+        List<Permission> allPermissions = permissionRepository.findAll();
+        Map<String, Permission> permissionsByCode = allPermissions.stream()
+                .filter(permission -> permission.getCode() != null && !permission.getCode().isBlank())
+                .collect(Collectors.toMap(
+                        permission -> permission.getCode().trim(),
+                        permission -> permission,
+                        (existing, duplicate) -> existing));
+
+        log.info("Permission hiện có trong DB: {} [{}]",
+                permissionsByCode.size(),
+                permissionsByCode.keySet().stream().sorted().collect(Collectors.joining(", ")));
+
+        List<RoleSeedSpec> roleSpecs = buildRoleSeedSpecs();
+        Set<String> explicitlyMappedCodes = roleSpecs.stream()
+                .map(RoleSeedSpec::permissionCodes)
+                .flatMap(Collection::stream)
+                .collect(Collectors.toCollection(TreeSet::new));
+        explicitlyMappedCodes.addAll(superAdminOnlyPermissionCodes());
+
+        Map<String, Integer> mappedCounts = new HashMap<>();
+        Map<String, Role> seededRoles = new HashMap<>();
+        for (RoleSeedSpec spec : roleSpecs) {
+            Set<Permission> permissions = resolveExistingPermissions(
+                    spec.slug(),
+                    spec.permissionCodes(),
+                    permissionsByCode);
+            Role role = upsertSystemRole(spec, permissions);
+            seededRoles.put(role.getSlug(), role);
+            mappedCounts.put(role.getSlug(), role.getPermissions() == null ? 0 : role.getPermissions().size());
+        }
+
+        RoleSeedSpec superAdminSpec = new RoleSeedSpec(
+                "SUPER_ADMIN",
+                "Siêu quản trị viên",
+                "Quyền cao nhất, quản lý toàn bộ hệ thống",
+                Set.of());
+        Role superAdminRole = upsertSystemRole(superAdminSpec, new HashSet<>(allPermissions));
+        seededRoles.put(superAdminRole.getSlug(), superAdminRole);
+        mappedCounts.put(
+                superAdminRole.getSlug(),
+                superAdminRole.getPermissions() == null ? 0 : superAdminRole.getPermissions().size());
+
+        Set<String> unmappedCodes = permissionsByCode.keySet().stream()
+                .filter(code -> !explicitlyMappedCodes.contains(code))
+                .collect(Collectors.toCollection(TreeSet::new));
+        if (unmappedCodes.isEmpty()) {
+            log.info("Unmapped permissions: 0");
+        } else {
+            log.warn("Unmapped permissions: {} [{}]", unmappedCodes.size(), String.join(", ", unmappedCodes));
+        }
+
+        log.info("| Role | Số Permission | Mô tả |");
+        log.info("|---|---:|---|");
+        roleSpecs.forEach(spec -> log.info(
+                "| {} | {} | {} |",
+                spec.slug(),
+                mappedCounts.getOrDefault(spec.slug(), 0),
+                spec.displayName()));
+        log.info("| SUPER_ADMIN | {}/{} | Toàn hệ thống |",
+                mappedCounts.getOrDefault("SUPER_ADMIN", 0),
+                allPermissions.size());
+
+        migrateLegacyUserRoleToCustomer(seededRoles.get(CUSTOMER_ROLE_SLUG));
+        bootstrapSuperAdmin(superAdminRole);
+    }
+
+    private List<RoleSeedSpec> buildRoleSeedSpecs() {
+        return List.of(
+                new RoleSeedSpec(
+                        CUSTOMER_ROLE_SLUG,
+                        "Khách hàng",
+                        "Người dùng cuối của hệ thống",
+                        Set.of()),
+                new RoleSeedSpec(
+                        "STAFF",
+                        "Nhân viên bán hàng / Tư vấn",
+                        "Tiếp nhận, tư vấn và xử lý đơn hàng trong phạm vi nghiệp vụ bán hàng",
+                        codes(
+                                "DASHBOARD", "DASHBOARD_VIEW",
+                                "WORKSPACE", "WORKSPACE_VIEW",
+                                "REPORT", "REPORT_INVENTORY_VIEW",
+                                "ORDER", "ORDER_VIEW", "ORDER_CREATE", "ORDER_UPDATE", "ORDER_CONFIRM",
+                                "ORDER_SHIP", "ORDER_CANCEL", "ORDER_COMPLETE", "ORDER_EXPORT",
+                                "CUSTOMER", "CUSTOMER_VIEW",
+                                "VOUCHER", "VOUCHER_VIEW",
+                                "PRODUCT", "PRODUCT_VIEW",
+                                "CATEGORY", "CATEGORY_VIEW",
+                                "ATTRIBUTE", "ATTRIBUTE_VIEW",
+                                "CHAT", "CHAT_VIEW", "CHAT_MANAGE",
+                                "CUSTOMER_ADVISOR", "CUSTOMER_ADVISOR_USE")),
+                new RoleSeedSpec(
+                        "WAREHOUSE_MANAGER",
+                        "Quản lý kho / Thủ kho",
+                        "Quản lý tồn kho, nhập xuất, điều chuyển, kiểm kê và yêu cầu mua hàng",
+                        codes(
+                                "DASHBOARD", "DASHBOARD_VIEW",
+                                "WORKSPACE", "WORKSPACE_VIEW",
+                                "REPORT", "REPORT_INVENTORY_VIEW",
+                                "PRODUCT", "PRODUCT_VIEW",
+                                "CATEGORY", "CATEGORY_VIEW",
+                                "ATTRIBUTE", "ATTRIBUTE_VIEW",
+                                "SUPPLIER", "SUPPLIER_VIEW", "SUPPLIER_CREATE", "SUPPLIER_UPDATE", "SUPPLIER_DELETE",
+                                "DRIVER", "DRIVER_VIEW", "DRIVER_CREATE", "DRIVER_UPDATE", "DRIVER_DELETE",
+                                "IMPORT", "IMPORT_VIEW", "IMPORT_CREATE", "IMPORT_UPDATE", "IMPORT_APPROVE",
+                                "IMPORT_CANCEL", "IMPORT_DELETE",
+                                "EXPORT", "EXPORT_VIEW", "EXPORT_CREATE", "EXPORT_UPDATE", "EXPORT_APPROVE",
+                                "EXPORT_CANCEL", "EXPORT_DELETE",
+                                "TRANSFER", "TRANSFER_VIEW", "TRANSFER_CREATE", "TRANSFER_UPDATE", "TRANSFER_APPROVE",
+                                "TRANSFER_CANCEL", "TRANSFER_DELETE",
+                                "INVENTORY_CHECK", "INVENTORY_CHECK_VIEW", "INVENTORY_CHECK_CREATE",
+                                "INVENTORY_CHECK_UPDATE", "INVENTORY_CHECK_APPROVE", "INVENTORY_CHECK_CANCEL",
+                                "INVENTORY_CHECK_DELETE",
+                                "PURCHASE_REQUEST", "PURCHASE_REQUEST_VIEW", "PURCHASE_REQUEST_CREATE",
+                                "PURCHASE_REQUEST_UPDATE", "PURCHASE_REQUEST_APPROVE", "PURCHASE_REQUEST_DELETE")),
+                new RoleSeedSpec(
+                        "AGRONOMIST",
+                        "Kỹ sư nông nghiệp",
+                        "Quản lý tri thức AI Doctor, xử lý ca bệnh và tư vấn kỹ thuật",
+                        codes(
+                                "DASHBOARD", "DASHBOARD_VIEW",
+                                "WORKSPACE", "WORKSPACE_VIEW",
+                                "PRODUCT", "PRODUCT_VIEW",
+                                "CATEGORY", "CATEGORY_VIEW",
+                                "CHAT", "CHAT_VIEW",
+                                "CUSTOMER_ADVISOR", "CUSTOMER_ADVISOR_USE",
+                                "AGRONOMIST_WORKSPACE", "AGRONOMIST_WORKSPACE_USE",
+                                "AI_KNOWLEDGE", "AI_KNOWLEDGE_VIEW", "AI_KNOWLEDGE_CREATE",
+                                "AI_KNOWLEDGE_UPDATE", "AI_KNOWLEDGE_APPROVE", "AI_IMPORT_KNOWLEDGE",
+                                "AI_CASE_REVIEW")),
+                new RoleSeedSpec(
+                        "ADMIN",
+                        "Quản trị viên",
+                        "Quản lý hoạt động doanh nghiệp trong phạm vi được phân quyền",
+                        codes(
+                                "DASHBOARD", "DASHBOARD_VIEW",
+                                "WORKSPACE", "WORKSPACE_VIEW",
+                                "REPORT", "REPORT_REVENUE_VIEW", "REPORT_INVENTORY_VIEW",
+                                "REPORT_INVENTORY_VIEW_ALL_BRANCHES", "REPORT_FINANCE_VIEW",
+                                "REPORT_FINANCE_VIEW_ALL_BRANCHES",
+                                "STAFF", "STAFF_VIEW", "STAFF_CREATE", "STAFF_UPDATE", "STAFF_DELETE",
+                                "BRANCH", "BRANCH_VIEW", "BRANCH_CREATE", "BRANCH_UPDATE", "BRANCH_DELETE",
+                                "ORDER", "ORDER_VIEW", "ORDER_CREATE", "ORDER_UPDATE", "ORDER_CONFIRM",
+                                "ORDER_SHIP", "ORDER_CANCEL", "ORDER_COMPLETE", "ORDER_EXPORT", "ORDER_REFUND",
+                                "ORDER_DELETE",
+                                "CUSTOMER", "CUSTOMER_VIEW", "CUSTOMER_CREATE", "CUSTOMER_UPDATE", "CUSTOMER_DELETE",
+                                "VOUCHER", "VOUCHER_VIEW", "VOUCHER_CREATE", "VOUCHER_UPDATE", "VOUCHER_DELETE",
+                                "PRODUCT", "PRODUCT_VIEW", "PRODUCT_CREATE", "PRODUCT_UPDATE", "PRODUCT_DELETE",
+                                "CATEGORY", "CATEGORY_VIEW", "CATEGORY_CREATE", "CATEGORY_UPDATE", "CATEGORY_DELETE",
+                                "ATTRIBUTE", "ATTRIBUTE_VIEW", "ATTRIBUTE_CREATE", "ATTRIBUTE_UPDATE", "ATTRIBUTE_DELETE",
+                                "SUPPLIER", "SUPPLIER_VIEW", "SUPPLIER_CREATE", "SUPPLIER_UPDATE", "SUPPLIER_DELETE",
+                                "DRIVER", "DRIVER_VIEW", "DRIVER_CREATE", "DRIVER_UPDATE", "DRIVER_DELETE",
+                                "IMPORT", "IMPORT_VIEW",
+                                "EXPORT", "EXPORT_VIEW",
+                                "TRANSFER", "TRANSFER_VIEW",
+                                "INVENTORY_CHECK", "INVENTORY_CHECK_VIEW",
+                                "PURCHASE_REQUEST", "PURCHASE_REQUEST_VIEW",
+                                ACTIVITY_LOG_MODULE_CODE, ACTIVITY_LOG_VIEW_PERMISSION_CODE,
+                                "BANNER", "BANNER_VIEW", "BANNER_CREATE", "BANNER_EDIT", "BANNER_DELETE",
+                                "BLOG", "BLOG_VIEW", "BLOG_CREATE", "BLOG_EDIT", "BLOG_DELETE", "BLOG_APPROVE",
+                                "SETTING", "SETTING_VIEW", "SETTING_UPDATE",
+                                "CHAT", "CHAT_VIEW", "CHAT_MANAGE")));
+    }
+
+    private void seedActivityLogPermissionIfMissing() {
+        Permission activityLogModule = permissionRepository.findByCode(ACTIVITY_LOG_MODULE_CODE)
                 .orElseGet(() -> permissionRepository.save(Permission.builder()
-                        .name(name)
-                        .code(code)
-                        .groupName(group)
+                        .name("Nhật ký hoạt động")
+                        .code(ACTIVITY_LOG_MODULE_CODE)
+                        .groupName(PermissionGroup.SYSTEM)
                         .type(PermissionType.MODULE)
                         .build()));
-    }
 
-    private Permission pAct(String name, String code, PermissionGroup group, Permission parent) {
-        return permissionRepository.findByCode(code)
+        Permission activityLogView = permissionRepository.findByCode(ACTIVITY_LOG_VIEW_PERMISSION_CODE)
                 .orElseGet(() -> permissionRepository.save(Permission.builder()
-                        .name(name)
-                        .code(code)
-                        .groupName(group)
+                        .name("Xem nhật ký hoạt động")
+                        .code(ACTIVITY_LOG_VIEW_PERMISSION_CODE)
+                        .groupName(PermissionGroup.SYSTEM)
                         .type(PermissionType.ACTION)
-                        .parentId(parent.getId())
+                        .parentId(activityLogModule.getId())
                         .build()));
+
+        boolean changed = false;
+        if (activityLogView.getParentId() == null && activityLogModule.getId() != null) {
+            activityLogView.setParentId(activityLogModule.getId());
+            changed = true;
+        }
+        if (activityLogView.getGroupName() == null) {
+            activityLogView.setGroupName(PermissionGroup.SYSTEM);
+            changed = true;
+        }
+        if (activityLogView.getType() == null) {
+            activityLogView.setType(PermissionType.ACTION);
+            changed = true;
+        }
+        if (changed) {
+            permissionRepository.save(activityLogView);
+        }
     }
 
-    private Role saveRole(String slug, String displayName, boolean isSystem, Set<Permission> permissions) {
-        return roleRepository.findBySlug(slug)
+    private Set<String> superAdminOnlyPermissionCodes() {
+        return codes("ROLE", "ROLE_VIEW", "ROLE_CREATE", "ROLE_UPDATE", "ROLE_DELETE");
+    }
+
+    private Set<String> codes(String... permissionCodes) {
+        Set<String> codes = new LinkedHashSet<>();
+        for (String code : permissionCodes) {
+            codes.add(code);
+        }
+        return codes;
+    }
+
+    private Set<Permission> resolveExistingPermissions(
+            String roleSlug,
+            Set<String> desiredCodes,
+            Map<String, Permission> permissionsByCode) {
+        Set<Permission> permissions = new LinkedHashSet<>();
+        Set<String> missingCodes = new TreeSet<>();
+        for (String code : desiredCodes) {
+            Permission permission = permissionsByCode.get(code);
+            if (permission == null) {
+                missingCodes.add(code);
+            } else {
+                permissions.add(permission);
+            }
+        }
+
+        if (!missingCodes.isEmpty()) {
+            log.warn("Role {} bỏ qua {} permission chưa tồn tại trong DB: {}",
+                    roleSlug,
+                    missingCodes.size(),
+                    String.join(", ", missingCodes));
+        }
+        return permissions;
+    }
+
+    private Role upsertSystemRole(RoleSeedSpec spec, Set<Permission> permissions) {
+        return roleRepository.findBySlug(spec.slug())
                 .map(existingRole -> {
-                    existingRole.setDisplayName(displayName);
-                    existingRole.setIsSystem(isSystem);
+                    existingRole.setDisplayName(spec.displayName());
+                    existingRole.setIsSystem(true);
                     existingRole.setIsActive(true);
-                    existingRole.setDescription("Vai trò " + displayName);
+                    existingRole.setDescription(spec.description());
                     if (existingRole.getPermissions() == null) {
                         existingRole.setPermissions(new HashSet<>());
-                    } else {
-                        existingRole.getPermissions().clear();
                     }
+                    int before = existingRole.getPermissions().size();
                     existingRole.getPermissions().addAll(permissions);
-                    return roleRepository.save(existingRole);
+                    Role saved = roleRepository.save(existingRole);
+                    int after = saved.getPermissions() == null ? 0 : saved.getPermissions().size();
+                    log.info("Role {} already exists, added {} missing permissions",
+                            spec.slug(),
+                            Math.max(0, after - before));
+                    logRetainedExtraPermissions(spec, permissions, saved);
+                    return saved;
                 })
-                .orElseGet(() -> roleRepository.save(Role.builder()
-                        .slug(slug)
-                        .displayName(displayName)
-                        .isSystem(isSystem)
-                        .isActive(true)
-                        .description("Vai trò " + displayName)
-                        .permissions(new HashSet<>(permissions))
-                        .build()));
+                .orElseGet(() -> {
+                    Role role = roleRepository.save(Role.builder()
+                            .slug(spec.slug())
+                            .displayName(spec.displayName())
+                            .isSystem(true)
+                            .isActive(true)
+                            .description(spec.description())
+                            .permissions(new HashSet<>(permissions))
+                            .build());
+                    log.info("Role {} created", spec.slug());
+                    return role;
+                });
     }
 
-    private void ensureUser(
-            String email,
-            String fullName,
-            String phoneNumber,
-            String rawPassword,
-            Role role,
-            UserStatus status) {
-        findBootstrapUser(email, phoneNumber, role.getSlug())
-                .map(existingUser -> {
-                    existingUser.setFullName(fullName);
-                    if (!userRepository.existsByEmailAndIdNot(email, existingUser.getId())) {
-                        existingUser.setEmail(email);
-                    } else {
-                        log.warn("Seeder giữ nguyên email hiện tại cho user id={} vì email {} đang thuộc user khác",
-                                existingUser.getId(), email);
-                    }
-                    if (!userRepository.existsByPhoneNumberAndIdNot(phoneNumber, existingUser.getId())) {
-                        existingUser.setPhoneNumber(phoneNumber);
-                    } else {
-                        log.warn("Seeder giữ nguyên số điện thoại hiện tại cho user id={} vì số {} đang thuộc user khác",
-                                existingUser.getId(), phoneNumber);
-                    }
-                    existingUser.setStatus(status);
-                    existingUser.setRole(role);
-                    existingUser.setProvider(AuthProvider.LOCAL);
-                    existingUser.setGender(Gender.MALE);
-                    existingUser.setDateOfBirth(LocalDate.of(1985, 3, 15));
-                    return userRepository.save(existingUser);
-                })
-                .orElseGet(() -> userRepository.save(User.builder()
-                        .fullName(fullName)
-                        .email(email)
-                        .phoneNumber(phoneNumber)
-                        .passwordHash(passwordEncoder.encode(rawPassword))
-                        .status(status)
-                        .role(role)
+    private void logRetainedExtraPermissions(RoleSeedSpec spec, Set<Permission> mappedPermissions, Role role) {
+        if ("SUPER_ADMIN".equals(spec.slug()) || role.getPermissions() == null) {
+            return;
+        }
+
+        Set<String> mappedCodes = mappedPermissions.stream()
+                .map(Permission::getCode)
+                .collect(Collectors.toCollection(TreeSet::new));
+        Set<String> retainedExtraCodes = role.getPermissions().stream()
+                .map(Permission::getCode)
+                .filter(code -> code != null && !mappedCodes.contains(code))
+                .collect(Collectors.toCollection(TreeSet::new));
+
+        if (!retainedExtraCodes.isEmpty()) {
+            log.warn("Role {} đang có {} permission ngoài mapping chuẩn; seeder giữ nguyên: {}",
+                    spec.slug(),
+                    retainedExtraCodes.size(),
+                    String.join(", ", retainedExtraCodes));
+        }
+    }
+
+    private void migrateLegacyUserRoleToCustomer(Role customerRole) {
+        if (customerRole == null) {
+            log.warn("Không thể migrate legacy role USER: role CUSTOMER chưa sẵn sàng.");
+            return;
+        }
+
+        Optional<Role> legacyUserRoleOpt = roleRepository.findBySlug(LEGACY_USER_ROLE_SLUG);
+        if (legacyUserRoleOpt.isEmpty()) {
+            log.info("Legacy role USER không tồn tại trong DB.");
+            return;
+        }
+
+        Role legacyUserRole = legacyUserRoleOpt.get();
+        Set<Permission> legacyPermissions = Optional.ofNullable(legacyUserRole.getPermissions())
+                .orElseGet(Set::of);
+        if (!legacyPermissions.isEmpty()) {
+            if (customerRole.getPermissions() == null) {
+                customerRole.setPermissions(new HashSet<>());
+            }
+            int before = customerRole.getPermissions().size();
+            customerRole.getPermissions().addAll(legacyPermissions);
+            Role savedCustomerRole = roleRepository.save(customerRole);
+            int added = Math.max(0, Optional.ofNullable(savedCustomerRole.getPermissions()).orElseGet(Set::of).size() - before);
+            log.warn("Legacy role USER có {} permission; đã copy {} permission còn thiếu sang CUSTOMER để bảo toàn quyền.",
+                    legacyPermissions.size(),
+                    added);
+        }
+
+        long legacyUserCount = userRepository.countByRole_Slug(LEGACY_USER_ROLE_SLUG);
+        if (legacyUserCount > 0) {
+            List<User> legacyUsers = userRepository.findAllByRole_Slug(LEGACY_USER_ROLE_SLUG);
+            legacyUsers.forEach(user -> user.setRole(customerRole));
+            userRepository.saveAll(legacyUsers);
+            log.warn("Đã migrate {} tài khoản từ role USER sang CUSTOMER.", legacyUsers.size());
+        } else {
+            log.info("Không có tài khoản nào đang mang legacy role USER.");
+        }
+
+        long remainingLegacyUsers = legacyUserRole.getId() == null
+                ? userRepository.countByRole_Slug(LEGACY_USER_ROLE_SLUG)
+                : roleRepository.countUsersByRoleId(legacyUserRole.getId());
+        if (remainingLegacyUsers == 0) {
+            legacyUserRole.setPermissions(new HashSet<>());
+            roleRepository.save(legacyUserRole);
+            roleRepository.delete(legacyUserRole);
+            log.warn("Đã xóa legacy role USER sau khi xác nhận không còn tài khoản FK; permissions đã được bảo toàn trên CUSTOMER.");
+        } else {
+            log.warn("Legacy role USER vẫn còn {} tài khoản sau migration; cần kiểm tra thủ công.", remainingLegacyUsers);
+        }
+    }
+
+    private void bootstrapSuperAdmin(Role superAdminRole) {
+        Optional<User> existingSuperAdmin = userRepository.findFirstByRole_SlugOrderByIdAsc("SUPER_ADMIN");
+        if (existingSuperAdmin.isPresent()) {
+            log.info("Bootstrap SUPER_ADMIN skipped: existing user id={} already has SUPER_ADMIN role",
+                    existingSuperAdmin.get().getId());
+            return;
+        }
+
+        String email = environment.getProperty("BOOTSTRAP_ADMIN_EMAIL");
+        String password = environment.getProperty("BOOTSTRAP_ADMIN_PASSWORD");
+        if (email == null || email.isBlank() || password == null || password.isBlank()) {
+            log.warn("Bootstrap SUPER_ADMIN skipped: BOOTSTRAP_ADMIN_EMAIL/BOOTSTRAP_ADMIN_PASSWORD not configured");
+            return;
+        }
+
+        String normalizedEmail = email.trim();
+        User bootstrapUser = userRepository.findByEmail(normalizedEmail)
+                .orElseGet(() -> User.builder()
+                        .email(normalizedEmail)
+                        .fullName("Bootstrap Super Admin")
                         .gender(Gender.MALE)
-                        .dateOfBirth(LocalDate.of(1985, 3, 15))
                         .provider(AuthProvider.LOCAL)
-                        .build()));
+                        .build());
+
+        if (bootstrapUser.getFullName() == null || bootstrapUser.getFullName().isBlank()) {
+            bootstrapUser.setFullName("Bootstrap Super Admin");
+        }
+        bootstrapUser.setEmail(normalizedEmail);
+        bootstrapUser.setPasswordHash(passwordEncoder.encode(password));
+        bootstrapUser.setStatus(UserStatus.ACTIVE);
+        bootstrapUser.setRole(superAdminRole);
+        bootstrapUser.setProvider(AuthProvider.LOCAL);
+        if (bootstrapUser.getGender() == null) {
+            bootstrapUser.setGender(Gender.MALE);
+        }
+
+        User savedUser = userRepository.save(bootstrapUser);
+        log.info("Bootstrap SUPER_ADMIN user ready: id={}, email={}", savedUser.getId(), normalizedEmail);
     }
 
-    private Optional<User> findBootstrapUser(String email, String phoneNumber, String roleSlug) {
-        return userRepository.findByEmail(email)
-                .or(() -> userRepository.findByPhoneNumber(phoneNumber))
-                .or(() -> userRepository.findFirstByRole_SlugOrderByIdAsc(roleSlug));
+    private record RoleSeedSpec(
+            String slug,
+            String displayName,
+            String description,
+            Set<String> permissionCodes) {
     }
 }
 

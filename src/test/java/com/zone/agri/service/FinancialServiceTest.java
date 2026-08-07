@@ -18,6 +18,7 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
 
 import com.zone.agri.dto.response.financial.CashbookReportResponse;
@@ -384,13 +385,19 @@ class FinancialServiceTest {
                 .role(RoleDto.builder().slug(roleSlug).build())
                 .build();
 
+        List<SimpleGrantedAuthority> authorities = "ADMIN".equals(roleSlug)
+                ? List.of(
+                        new SimpleGrantedAuthority("REPORT_FINANCE_VIEW"),
+                        new SimpleGrantedAuthority("REPORT_FINANCE_VIEW_ALL_BRANCHES"))
+                : List.of(new SimpleGrantedAuthority("REPORT_FINANCE_VIEW"));
+
         CustomUserDetail principal = new CustomUserDetail(
                 "tester",
                 "password",
                 true,
                 true,
                 userDetail,
-                List.of());
+                authorities);
 
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken(principal, null, principal.getAuthorities()));

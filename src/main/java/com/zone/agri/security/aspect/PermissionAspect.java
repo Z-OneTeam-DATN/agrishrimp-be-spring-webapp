@@ -56,8 +56,8 @@ public class PermissionAspect {
                 .map(GrantedAuthority::getAuthority)
                 .collect(Collectors.toSet());
 
-        // ADMIN bypass: ROLE_ADMIN được qua mọi permission check
-        if (RoleUtils.hasAdminLikeAuthority(userAuthorities)) return;
+        // SUPER_ADMIN bypasses permission checks; ADMIN must still have the explicit permission.
+        if (RoleUtils.hasSuperAdminAuthority(userAuthorities)) return;
 
         // 4. Kiểm tra OR logic — có ít nhất một permission là đủ
         boolean hasPermission = Arrays.stream(requiredCodes)

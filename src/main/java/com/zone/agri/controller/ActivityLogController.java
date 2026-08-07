@@ -2,6 +2,7 @@ package com.zone.agri.controller;
 
 import com.zone.agri.dto.response.activity.ActivityLogModuleResponse;
 import com.zone.agri.dto.response.activity.ActivityLogResponse;
+import com.zone.agri.security.annotation.RequirePermission;
 import com.zone.agri.service.ActivityLogService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -20,6 +21,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/api/admin/activity-logs")
 @RequiredArgsConstructor
+@RequirePermission("ACTIVITY_LOG_VIEW")
 @Tag(name = "Activity Logs", description = "Nhật ký hoạt động hệ thống")
 public class ActivityLogController {
 

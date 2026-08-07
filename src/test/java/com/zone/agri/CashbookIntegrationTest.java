@@ -8,6 +8,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.test.context.TestPropertySource;
 import java.time.LocalDate;
@@ -50,7 +51,9 @@ class CashbookIntegrationTest {
                 true,
                 true,
                 userDetail,
-                List.of());
+                List.of(
+                        new SimpleGrantedAuthority("REPORT_FINANCE_VIEW"),
+                        new SimpleGrantedAuthority("REPORT_FINANCE_VIEW_ALL_BRANCHES")));
 
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken(principal, null, principal.getAuthorities()));

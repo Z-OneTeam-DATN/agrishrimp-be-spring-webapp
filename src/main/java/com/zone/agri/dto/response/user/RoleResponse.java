@@ -36,6 +36,6 @@ public class RoleResponse {
     Long memberCount;
 
     @Schema(description = "Danh sách các mã quyền hạn (Permission Codes) được gán cho vai trò này", 
-            example = "[\"DASHBOARD_VIEW\", \"USER_MANAGE\", \"PRODUCT_CREATE\"]")
+            example = "[\"DASHBOARD_VIEW\", \"STAFF_VIEW\", \"PRODUCT_CREATE\"]")
     List<String> permissionCodes;
 }
