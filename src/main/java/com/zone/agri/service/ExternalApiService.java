@@ -124,7 +124,11 @@ public class ExternalApiService {
 
         VietQrResponse.BusinessData merged = new VietQrResponse.BusinessData();
         merged.setTaxCode(firstNonBlank(rawByField.get(FIELD_TAX_CODE), normalizedTaxCode));
-        merged.setName(cleanCompanyName(rawByField.get(FIELD_NAME), normalizedTaxCode));
+        String companyName = cleanCompanyName(rawByField.get(FIELD_NAME), normalizedTaxCode);
+        if (!isNotBlank(companyName)) {
+            companyName = "Doanh nghiệp MST " + normalizedTaxCode;
+        }
+        merged.setName(companyName);
         merged.setAddress(rawByField.get(FIELD_ADDRESS));
         merged.setOwner(rawByField.get(FIELD_OWNER));
         merged.setPhone(normalizePhone(rawByField.get(FIELD_PHONE)));
@@ -175,7 +179,15 @@ public class ExternalApiService {
 
     private Optional<VietQrResponse.BusinessData> fetchFromVietQr(String taxCode) {
         try {
-            ResponseEntity<VietQrResponse> response = restTemplate.getForEntity(VIETQR_API_URL + taxCode,
+            HttpHeaders headers = new HttpHeaders();
+            headers.set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36");
+            headers.set("Accept", "application/json");
+            HttpEntity<Void> entity = new HttpEntity<>(headers);
+
+            ResponseEntity<VietQrResponse> response = restTemplate.exchange(
+                    VIETQR_API_URL + taxCode,
+                    HttpMethod.GET,
+                    entity,
                     VietQrResponse.class);
             VietQrResponse body = response.getBody();
             if (body != null && "00".equals(body.getCode()) && body.getData() != null) {
