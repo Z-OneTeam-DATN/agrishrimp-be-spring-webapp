@@ -53,6 +53,20 @@ public class UserService {
         }
     }
 
+    @Transactional
+    public UserResponse updateMyAvatar(String contact, String avatarUrl) {
+        if (avatarUrl == null || avatarUrl.isBlank()) {
+            throw new IllegalArgumentException("Đường dẫn ảnh đại diện không hợp lệ");
+        }
+
+        User user = userRepository.findByEmail(contact)
+                .or(() -> userRepository.findByPhoneNumber(contact))
+                .orElseThrow(() -> new NotFoundException("Không tìm thấy người dùng"));
+
+        user.setAvatarUrl(avatarUrl.trim());
+        return mapUserToResponse(userRepository.save(user));
+    }
+
     /**
      * Cập nhật thông tin và trả về dữ liệu mới để Frontend đồng bộ UI
      */
