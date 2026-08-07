@@ -78,11 +78,12 @@ public class ExternalApiService {
         CompletableFuture<Optional<VietQrResponse.BusinessData>> xInvoiceFuture = CompletableFuture.supplyAsync(() -> fetchFromXInvoice(normalizedTaxCode));
         CompletableFuture<Optional<VietQrResponse.BusinessData>> doanhNghiepFuture = CompletableFuture.supplyAsync(() -> fetchFromDoanhNghiepBiz(normalizedTaxCode));
         CompletableFuture<Optional<VietQrResponse.BusinessData>> masothueFuture = CompletableFuture.supplyAsync(() -> fetchFromMasoThueCom(normalizedTaxCode));
+        CompletableFuture<Optional<VietQrResponse.BusinessData>> hosoCongTyFuture = CompletableFuture.supplyAsync(() -> fetchFromHosoCongTy(normalizedTaxCode));
         CompletableFuture<Optional<VietQrResponse.BusinessData>> internalFuture = CompletableFuture.supplyAsync(() -> fetchFromInternalSupplier(normalizedTaxCode));
 
         // Wait for all fetches to complete, or time out after 10 seconds
         try {
-            CompletableFuture.allOf(vietQrFuture, esgooFuture, ttdnFuture, xInvoiceFuture, doanhNghiepFuture, masothueFuture, internalFuture)
+            CompletableFuture.allOf(vietQrFuture, esgooFuture, ttdnFuture, xInvoiceFuture, doanhNghiepFuture, masothueFuture, hosoCongTyFuture, internalFuture)
                     .get(10, TimeUnit.SECONDS);
         } catch (Exception e) {
             log.warn("One or more tax code APIs timed out or failed to complete in 10s: {}", e.getMessage());
@@ -93,13 +94,17 @@ public class ExternalApiService {
         queriedSources.add("DOANH_NGHIEP_BIZ");
         doanhNghiepData.ifPresent(data -> absorbData(data, "DOANH_NGHIEP_BIZ", rawByField, fieldSources));
 
-        Optional<VietQrResponse.BusinessData> xInvoiceData = joinFuture(xInvoiceFuture);
-        queriedSources.add("XINVOICE");
-        xInvoiceData.ifPresent(data -> absorbData(data, "XINVOICE", rawByField, fieldSources));
-
         Optional<VietQrResponse.BusinessData> masothueData = joinFuture(masothueFuture);
         queriedSources.add("MA_SO_THUE");
         masothueData.ifPresent(data -> absorbData(data, "MA_SO_THUE", rawByField, fieldSources));
+
+        Optional<VietQrResponse.BusinessData> hosoCongTyData = joinFuture(hosoCongTyFuture);
+        queriedSources.add("HOSO_CONG_TY");
+        hosoCongTyData.ifPresent(data -> absorbData(data, "HOSO_CONG_TY", rawByField, fieldSources));
+
+        Optional<VietQrResponse.BusinessData> xInvoiceData = joinFuture(xInvoiceFuture);
+        queriedSources.add("XINVOICE");
+        xInvoiceData.ifPresent(data -> absorbData(data, "XINVOICE", rawByField, fieldSources));
 
         Optional<VietQrResponse.BusinessData> vietQrData = joinFuture(vietQrFuture);
         queriedSources.add("VIETQR");
@@ -161,11 +166,9 @@ public class ExternalApiService {
 
     private Optional<VietQrResponse.BusinessData> joinFuture(CompletableFuture<Optional<VietQrResponse.BusinessData>> future) {
         try {
-            if (future.isDone() && !future.isCompletedExceptionally()) {
-                return future.getNow(Optional.empty());
-            }
+            return future.get(4, TimeUnit.SECONDS);
         } catch (Exception e) {
-            log.warn("Error joining future: {}", e.getMessage());
+            log.debug("Error joining future: {}", e.getMessage());
         }
         return Optional.empty();
     }
@@ -814,6 +817,83 @@ public class ExternalApiService {
             return Optional.of(mapped);
         } catch (Exception e) {
             log.warn("Error scraping from MasoThueCom for taxCode {}: {}", taxCode, e.getMessage());
+        }
+        return Optional.empty();
+    }
+
+    private Optional<VietQrResponse.BusinessData> fetchFromHosoCongTy(String taxCode) {
+        try {
+            String cleanTaxCode = taxCode.replaceAll("\\s+", "").replace("-", "");
+            String url = "https://hosocongty.vn/search?q=" + cleanTaxCode;
+            org.jsoup.nodes.Document doc = org.jsoup.Jsoup.connect(url)
+                    .userAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
+                    .header("Accept-Language", "vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7")
+                    .referrer("https://hosocongty.vn/")
+                    .timeout(6000)
+                    .get();
+
+            org.jsoup.nodes.Element detailBlock = doc.selectFirst("ul.hoso-ct, div.hoso-detail, table");
+            if (detailBlock == null) {
+                org.jsoup.nodes.Element link = doc.selectFirst("ul.list-hoso a[href]");
+                if (link != null) {
+                    String href = link.attr("abs:href");
+                    doc = org.jsoup.Jsoup.connect(href)
+                            .userAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
+                            .timeout(6000)
+                            .get();
+                }
+            }
+
+            VietQrResponse.BusinessData mapped = new VietQrResponse.BusinessData();
+            mapped.setTaxCode(taxCode);
+
+            for (org.jsoup.nodes.Element el : doc.select("ul.hoso-ct li, tr, div.info-row, p")) {
+                String text = el.text();
+                String lower = text.toLowerCase();
+                if ((lower.contains("tên công ty") || lower.contains("tên chính thức")) && mapped.getName() == null) {
+                    String[] parts = text.split(":", 2);
+                    if (parts.length == 2 && !parts[1].trim().isEmpty()) {
+                        mapped.setName(parts[1].trim());
+                    }
+                }
+                if ((lower.contains("đại diện") || lower.contains("chủ sở hữu") || lower.contains("giám đốc")) && mapped.getOwner() == null) {
+                    String[] parts = text.split(":", 2);
+                    if (parts.length == 2 && !parts[1].trim().isEmpty()) {
+                        String rawOwner = parts[1].trim().replaceAll("(?i)\\s*\\(.*?\\)", "").replaceAll("(?i)\\s*\\[.*?\\]", "").trim();
+                        mapped.setOwner(rawOwner);
+                    }
+                }
+                if ((lower.contains("ngày cấp") || lower.contains("ngày thành lập") || lower.contains("ngày hoạt động") || lower.contains("bắt đầu")) && mapped.getIssueDate() == null) {
+                    String[] parts = text.split(":", 2);
+                    if (parts.length == 2 && !parts[1].trim().isEmpty()) {
+                        mapped.setIssueDate(parts[1].trim());
+                    }
+                }
+                if ((lower.contains("quản lý bởi") || lower.contains("cơ quan thuế")) && mapped.getTaxAuthority() == null) {
+                    String[] parts = text.split(":", 2);
+                    if (parts.length == 2 && !parts[1].trim().isEmpty()) {
+                        mapped.setTaxAuthority(parts[1].trim());
+                    }
+                }
+                if ((lower.contains("ngành nghề") || lower.contains("lĩnh vực")) && mapped.getMainBusinessSector() == null) {
+                    String[] parts = text.split(":", 2);
+                    if (parts.length == 2 && !parts[1].trim().isEmpty()) {
+                        mapped.setMainBusinessSector(parts[1].trim());
+                    }
+                }
+                if ((lower.contains("địa chỉ") || lower.contains("trụ sở")) && mapped.getAddress() == null) {
+                    String[] parts = text.split(":", 2);
+                    if (parts.length == 2 && !parts[1].trim().isEmpty()) {
+                        mapped.setAddress(parts[1].trim());
+                    }
+                }
+            }
+
+            if (mapped.getName() != null || mapped.getOwner() != null || mapped.getIssueDate() != null) {
+                return Optional.of(mapped);
+            }
+        } catch (Exception e) {
+            log.debug("Error scraping from HosoCongTy for taxCode {}: {}", taxCode, e.getMessage());
         }
         return Optional.empty();
     }
