@@ -16,6 +16,10 @@ public class VariantRequest {
     @Size(max = 50, message = "Mã vạch không được vượt quá 50 ký tự")
     private String barcode;
 
+    private String image;
+
+    private String imageUrl;
+
     /** Danh sách ID của các giá trị thuộc tính (Phân loại) */
     @NotEmpty(message = "Biến thể phải có ít nhất 1 thuộc tính")
     private List<Long> attributeValueIds;
