@@ -43,7 +43,7 @@ public class RoleController {
     }
 
     @GetMapping
-    @RequirePermission("ROLE_VIEW")
+    @RequirePermission({"ROLE_VIEW", "STAFF_CREATE"})
     @Operation(
         summary = "Danh sách vai trò (Lọc & Tìm kiếm)",
         description = "Hỗ trợ tìm kiếm theo tên/mã và lọc theo trạng thái/nguồn gốc vai trò. Kết quả trả về có phân trang."

@@ -40,6 +40,15 @@ public class UserController {
         return ResponseEntity.ok(userService.uploadAvatar(file));
     }
 
+    @Operation(summary = "Cập nhật ảnh đại diện cá nhân", description = "Lưu URL ảnh đại diện đã upload cho user hiện tại")
+    @SecurityRequirement(name = "bearerAuth")
+    @PostMapping("/update-avatar")
+    public ResponseEntity<UserResponse> updateMyAvatar(@RequestParam String avatarUrl) {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        String contact = auth.getName();
+        return ResponseEntity.ok(userService.updateMyAvatar(contact, avatarUrl));
+    }
+
     @Operation(summary = "Tự cập nhật Profile cá nhân", description = "Trả về dữ liệu mới nhất để Frontend đồng bộ UI")
     @SecurityRequirement(name = "bearerAuth")
     @PostMapping("/edit-profile")

@@ -34,7 +34,7 @@ public class BranchController {
     // VIEW
     @Operation(summary = "Lấy danh sách chi nhánh", description = "Trả về toàn bộ danh sách chi nhánh và kho đang hoạt động.")
     @SecurityRequirement(name = "bearerAuth")
-    @RequirePermission("BRANCH_VIEW")
+    @RequirePermission({"BRANCH_VIEW", "STAFF_CREATE"})
     @GetMapping()
     public ResponseEntity<List<BranchDTO>> getAll() {
         return ResponseEntity.ok(branchService.getAll());
