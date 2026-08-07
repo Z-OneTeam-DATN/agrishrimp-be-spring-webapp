@@ -109,9 +109,25 @@ public class CartService {
                     .price(sellingPrice)
                     .quantity(item.getQuantity())
                     .stock(totalStock)
-                    .image(variant.getImageUrl())
+                    .image(resolveCartImageUrl(variant, product))
                     .build();
         }).toList();
+    }
+
+    private String resolveCartImageUrl(ProductVariant variant, Product product) {
+        if (variant != null && variant.getImageUrl() != null && !variant.getImageUrl().isBlank()) {
+            return variant.getImageUrl();
+        }
+
+        if (product == null || product.getProductImages() == null) {
+            return null;
+        }
+
+        return product.getProductImages().stream()
+                .map(image -> image != null ? image.getImageUrl() : null)
+                .filter(imageUrl -> imageUrl != null && !imageUrl.isBlank())
+                .findFirst()
+                .orElse(null);
     }
 
     private BigDecimal resolveDisplayImportPrice(Inventory inventory, Long variantId,
