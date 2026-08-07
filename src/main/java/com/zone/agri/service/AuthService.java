@@ -136,6 +136,12 @@ public class AuthService {
 
         userRepository.save(newUser);
 
+        try {
+            emailService.sendWelcomeEmail(email, newUser.getFullName());
+        } catch (Exception e) {
+            log.warn("Welcome email was not sent to {}: {}", email, e.getMessage());
+        }
+
         // 6. Tạo token
         CustomUserDetail userDetails = (CustomUserDetail) userDetailsService.loadUserByUsername(email);
         return buildAuthResponse(userDetails, newUser);
