@@ -61,3 +61,6 @@ GEMINI.md
 
 # Maven local cache
 .m2/
+
+# Live local PID files
+.live-local/*.pid
