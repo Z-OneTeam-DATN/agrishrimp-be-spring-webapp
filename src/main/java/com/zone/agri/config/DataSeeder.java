@@ -524,7 +524,7 @@ public class DataSeeder implements CommandLineRunner {
                 roleSlugsBeforeSeed.size(),
                 String.join(", ", roleSlugsBeforeSeed));
 
-        seedActivityLogPermissionIfMissing();
+        seedSystemPermissionsIfMissing();
         List<Permission> allPermissions = permissionRepository.findAll();
         Map<String, Permission> permissionsByCode = allPermissions.stream()
                 .filter(permission -> permission.getCode() != null && !permission.getCode().isBlank())
@@ -688,40 +688,243 @@ public class DataSeeder implements CommandLineRunner {
                                 "CHAT", "CHAT_VIEW", "CHAT_MANAGE")));
     }
 
-    private void seedActivityLogPermissionIfMissing() {
-        Permission activityLogModule = permissionRepository.findByCode(ACTIVITY_LOG_MODULE_CODE)
-                .orElseGet(() -> permissionRepository.save(Permission.builder()
-                        .name("Nhật ký hoạt động")
-                        .code(ACTIVITY_LOG_MODULE_CODE)
-                        .groupName(PermissionGroup.SYSTEM)
-                        .type(PermissionType.MODULE)
-                        .build()));
+    private void seedSystemPermissionsIfMissing() {
+        Map<String, Permission> modulesByCode = new HashMap<>();
+        int createdModules = 0;
+        int createdActions = 0;
 
-        Permission activityLogView = permissionRepository.findByCode(ACTIVITY_LOG_VIEW_PERMISSION_CODE)
-                .orElseGet(() -> permissionRepository.save(Permission.builder()
-                        .name("Xem nhật ký hoạt động")
-                        .code(ACTIVITY_LOG_VIEW_PERMISSION_CODE)
-                        .groupName(PermissionGroup.SYSTEM)
+        for (PermissionModuleSeedSpec spec : systemPermissionModules()) {
+            Optional<Permission> existingModule = permissionRepository.findByCode(spec.code());
+            Permission module = existingModule
+                    .map(permission -> alignPermissionMetadata(
+                            permission,
+                            spec.name(),
+                            spec.groupName(),
+                            PermissionType.MODULE,
+                            null))
+                    .orElseGet(() -> permissionRepository.save(Permission.builder()
+                            .name(spec.name())
+                            .code(spec.code())
+                            .groupName(spec.groupName())
+                            .type(PermissionType.MODULE)
+                            .build()));
+            if (existingModule.isEmpty()) {
+                createdModules++;
+            }
+            modulesByCode.put(spec.code(), module);
+        }
+
+        for (PermissionActionSeedSpec spec : systemPermissionActions()) {
+            Permission parent = modulesByCode.get(spec.parentCode());
+            Long parentId = parent == null ? null : parent.getId();
+
+            Optional<Permission> existingAction = permissionRepository.findByCode(spec.code());
+            if (existingAction.isPresent()) {
+                alignPermissionMetadata(
+                        existingAction.get(),
+                        spec.name(),
+                        spec.groupName(),
+                        PermissionType.ACTION,
+                        parentId);
+            } else {
+                permissionRepository.save(Permission.builder()
+                        .name(spec.name())
+                        .code(spec.code())
+                        .groupName(spec.groupName())
                         .type(PermissionType.ACTION)
-                        .parentId(activityLogModule.getId())
-                        .build()));
+                        .parentId(parentId)
+                        .build());
+                createdActions++;
+            }
+        }
 
+        log.info("System permissions synchronized: created {} modules, {} actions",
+                createdModules,
+                createdActions);
+    }
+
+    private Permission alignPermissionMetadata(
+            Permission permission,
+            String name,
+            PermissionGroup groupName,
+            PermissionType type,
+            Long parentId) {
         boolean changed = false;
-        if (activityLogView.getParentId() == null && activityLogModule.getId() != null) {
-            activityLogView.setParentId(activityLogModule.getId());
+        if (!name.equals(permission.getName())) {
+            permission.setName(name);
             changed = true;
         }
-        if (activityLogView.getGroupName() == null) {
-            activityLogView.setGroupName(PermissionGroup.SYSTEM);
+        if (permission.getGroupName() != groupName) {
+            permission.setGroupName(groupName);
             changed = true;
         }
-        if (activityLogView.getType() == null) {
-            activityLogView.setType(PermissionType.ACTION);
+        if (permission.getType() != type) {
+            permission.setType(type);
             changed = true;
         }
-        if (changed) {
-            permissionRepository.save(activityLogView);
+        if (parentId == null ? permission.getParentId() != null : !parentId.equals(permission.getParentId())) {
+            permission.setParentId(parentId);
+            changed = true;
         }
+        return changed ? permissionRepository.save(permission) : permission;
+    }
+
+    private List<PermissionModuleSeedSpec> systemPermissionModules() {
+        return List.of(
+                module("Tổng quan", "DASHBOARD", PermissionGroup.SYSTEM),
+                module("Workspace", "WORKSPACE", PermissionGroup.SYSTEM),
+                module("Nhật ký hoạt động", ACTIVITY_LOG_MODULE_CODE, PermissionGroup.SYSTEM),
+                module("Báo cáo", "REPORT", PermissionGroup.REPORT),
+                module("Nhân viên", "STAFF", PermissionGroup.ADMINISTRATION),
+                module("Chi nhánh", "BRANCH", PermissionGroup.ADMINISTRATION),
+                module("Vai trò", "ROLE", PermissionGroup.ADMINISTRATION),
+                module("Đơn hàng", "ORDER", PermissionGroup.SALES),
+                module("Khách hàng", "CUSTOMER", PermissionGroup.SALES),
+                module("Voucher", "VOUCHER", PermissionGroup.SALES),
+                module("Sản phẩm", "PRODUCT", PermissionGroup.PRODUCT_CATALOG),
+                module("Danh mục", "CATEGORY", PermissionGroup.PRODUCT_CATALOG),
+                module("Thuộc tính", "ATTRIBUTE", PermissionGroup.PRODUCT_CATALOG),
+                module("Nhà cung cấp", "SUPPLIER", PermissionGroup.INVENTORY),
+                module("Tài xế", "DRIVER", PermissionGroup.INVENTORY),
+                module("Nhập hàng", "IMPORT", PermissionGroup.INVENTORY),
+                module("Xuất hàng", "EXPORT", PermissionGroup.INVENTORY),
+                module("Điều chuyển", "TRANSFER", PermissionGroup.INVENTORY),
+                module("Kiểm kê kho", "INVENTORY_CHECK", PermissionGroup.INVENTORY),
+                module("Yêu cầu mua NCC", "PURCHASE_REQUEST", PermissionGroup.INVENTORY),
+                module("Banner", "BANNER", PermissionGroup.SETTING),
+                module("Blog", "BLOG", PermissionGroup.SETTING),
+                module("Cài đặt", "SETTING", PermissionGroup.SETTING),
+                module("Chat", "CHAT", PermissionGroup.COMMUNICATION),
+                module("Tư vấn khách hàng", "CUSTOMER_ADVISOR", PermissionGroup.COMMUNICATION),
+                module("Workspace kỹ sư", "AGRONOMIST_WORKSPACE", PermissionGroup.AI_KNOWLEDGE),
+                module("Tri thức AI", "AI_KNOWLEDGE", PermissionGroup.AI_KNOWLEDGE));
+    }
+
+    private List<PermissionActionSeedSpec> systemPermissionActions() {
+        return List.of(
+                action("Xem tổng quan", "DASHBOARD_VIEW", PermissionGroup.SYSTEM, "DASHBOARD"),
+                action("Xem workspace", "WORKSPACE_VIEW", PermissionGroup.SYSTEM, "WORKSPACE"),
+                action("Xem nhật ký", ACTIVITY_LOG_VIEW_PERMISSION_CODE, PermissionGroup.SYSTEM, ACTIVITY_LOG_MODULE_CODE),
+
+                action("Báo cáo doanh thu", "REPORT_REVENUE_VIEW", PermissionGroup.REPORT, "REPORT"),
+                action("Báo cáo tồn kho", "REPORT_INVENTORY_VIEW", PermissionGroup.REPORT, "REPORT"),
+                action("Tồn kho mọi chi nhánh", "REPORT_INVENTORY_VIEW_ALL_BRANCHES", PermissionGroup.REPORT, "REPORT"),
+                action("Báo cáo tài chính", "REPORT_FINANCE_VIEW", PermissionGroup.REPORT, "REPORT"),
+                action("Tài chính mọi chi nhánh", "REPORT_FINANCE_VIEW_ALL_BRANCHES", PermissionGroup.REPORT, "REPORT"),
+
+                action("Xem nhân viên", "STAFF_VIEW", PermissionGroup.ADMINISTRATION, "STAFF"),
+                action("Thêm nhân viên", "STAFF_CREATE", PermissionGroup.ADMINISTRATION, "STAFF"),
+                action("Sửa nhân viên", "STAFF_UPDATE", PermissionGroup.ADMINISTRATION, "STAFF"),
+                action("Xóa nhân viên", "STAFF_DELETE", PermissionGroup.ADMINISTRATION, "STAFF"),
+                action("Xem chi nhánh", "BRANCH_VIEW", PermissionGroup.ADMINISTRATION, "BRANCH"),
+                action("Thêm chi nhánh", "BRANCH_CREATE", PermissionGroup.ADMINISTRATION, "BRANCH"),
+                action("Sửa chi nhánh", "BRANCH_UPDATE", PermissionGroup.ADMINISTRATION, "BRANCH"),
+                action("Xóa chi nhánh", "BRANCH_DELETE", PermissionGroup.ADMINISTRATION, "BRANCH"),
+                action("Xem vai trò", "ROLE_VIEW", PermissionGroup.ADMINISTRATION, "ROLE"),
+                action("Tạo vai trò", "ROLE_CREATE", PermissionGroup.ADMINISTRATION, "ROLE"),
+                action("Sửa vai trò", "ROLE_UPDATE", PermissionGroup.ADMINISTRATION, "ROLE"),
+                action("Xóa vai trò", "ROLE_DELETE", PermissionGroup.ADMINISTRATION, "ROLE"),
+
+                action("Xem đơn hàng", "ORDER_VIEW", PermissionGroup.SALES, "ORDER"),
+                action("Tạo đơn hàng", "ORDER_CREATE", PermissionGroup.SALES, "ORDER"),
+                action("Cập nhật đơn hàng", "ORDER_UPDATE", PermissionGroup.SALES, "ORDER"),
+                action("Xác nhận đơn hàng", "ORDER_CONFIRM", PermissionGroup.SALES, "ORDER"),
+                action("Giao hàng", "ORDER_SHIP", PermissionGroup.SALES, "ORDER"),
+                action("Hủy đơn hàng", "ORDER_CANCEL", PermissionGroup.SALES, "ORDER"),
+                action("Hoàn tất đơn hàng", "ORDER_COMPLETE", PermissionGroup.SALES, "ORDER"),
+                action("Xuất DS đơn hàng", "ORDER_EXPORT", PermissionGroup.SALES, "ORDER"),
+                action("Hoàn tiền", "ORDER_REFUND", PermissionGroup.SALES, "ORDER"),
+                action("Xóa đơn hàng", "ORDER_DELETE", PermissionGroup.SALES, "ORDER"),
+                action("Xem khách hàng", "CUSTOMER_VIEW", PermissionGroup.SALES, "CUSTOMER"),
+                action("Thêm khách hàng", "CUSTOMER_CREATE", PermissionGroup.SALES, "CUSTOMER"),
+                action("Sửa khách hàng", "CUSTOMER_UPDATE", PermissionGroup.SALES, "CUSTOMER"),
+                action("Xóa khách hàng", "CUSTOMER_DELETE", PermissionGroup.SALES, "CUSTOMER"),
+                action("Xem voucher", "VOUCHER_VIEW", PermissionGroup.SALES, "VOUCHER"),
+                action("Thêm voucher", "VOUCHER_CREATE", PermissionGroup.SALES, "VOUCHER"),
+                action("Sửa voucher", "VOUCHER_UPDATE", PermissionGroup.SALES, "VOUCHER"),
+                action("Xóa voucher", "VOUCHER_DELETE", PermissionGroup.SALES, "VOUCHER"),
+
+                action("Xem sản phẩm", "PRODUCT_VIEW", PermissionGroup.PRODUCT_CATALOG, "PRODUCT"),
+                action("Thêm sản phẩm", "PRODUCT_CREATE", PermissionGroup.PRODUCT_CATALOG, "PRODUCT"),
+                action("Sửa sản phẩm", "PRODUCT_UPDATE", PermissionGroup.PRODUCT_CATALOG, "PRODUCT"),
+                action("Xóa sản phẩm", "PRODUCT_DELETE", PermissionGroup.PRODUCT_CATALOG, "PRODUCT"),
+                action("Xem danh mục", "CATEGORY_VIEW", PermissionGroup.PRODUCT_CATALOG, "CATEGORY"),
+                action("Thêm danh mục", "CATEGORY_CREATE", PermissionGroup.PRODUCT_CATALOG, "CATEGORY"),
+                action("Sửa danh mục", "CATEGORY_UPDATE", PermissionGroup.PRODUCT_CATALOG, "CATEGORY"),
+                action("Xóa danh mục", "CATEGORY_DELETE", PermissionGroup.PRODUCT_CATALOG, "CATEGORY"),
+                action("Xem thuộc tính", "ATTRIBUTE_VIEW", PermissionGroup.PRODUCT_CATALOG, "ATTRIBUTE"),
+                action("Thêm thuộc tính", "ATTRIBUTE_CREATE", PermissionGroup.PRODUCT_CATALOG, "ATTRIBUTE"),
+                action("Sửa thuộc tính", "ATTRIBUTE_UPDATE", PermissionGroup.PRODUCT_CATALOG, "ATTRIBUTE"),
+                action("Xóa thuộc tính", "ATTRIBUTE_DELETE", PermissionGroup.PRODUCT_CATALOG, "ATTRIBUTE"),
+
+                action("Xem nhà cung cấp", "SUPPLIER_VIEW", PermissionGroup.INVENTORY, "SUPPLIER"),
+                action("Thêm nhà cung cấp", "SUPPLIER_CREATE", PermissionGroup.INVENTORY, "SUPPLIER"),
+                action("Sửa nhà cung cấp", "SUPPLIER_UPDATE", PermissionGroup.INVENTORY, "SUPPLIER"),
+                action("Xóa nhà cung cấp", "SUPPLIER_DELETE", PermissionGroup.INVENTORY, "SUPPLIER"),
+                action("Xem tài xế", "DRIVER_VIEW", PermissionGroup.INVENTORY, "DRIVER"),
+                action("Thêm tài xế", "DRIVER_CREATE", PermissionGroup.INVENTORY, "DRIVER"),
+                action("Sửa tài xế", "DRIVER_UPDATE", PermissionGroup.INVENTORY, "DRIVER"),
+                action("Xóa tài xế", "DRIVER_DELETE", PermissionGroup.INVENTORY, "DRIVER"),
+                action("Xem phiếu nhập", "IMPORT_VIEW", PermissionGroup.INVENTORY, "IMPORT"),
+                action("Tạo phiếu nhập", "IMPORT_CREATE", PermissionGroup.INVENTORY, "IMPORT"),
+                action("Sửa phiếu nhập", "IMPORT_UPDATE", PermissionGroup.INVENTORY, "IMPORT"),
+                action("Duyệt phiếu nhập", "IMPORT_APPROVE", PermissionGroup.INVENTORY, "IMPORT"),
+                action("Hủy phiếu nhập", "IMPORT_CANCEL", PermissionGroup.INVENTORY, "IMPORT"),
+                action("Xóa phiếu nhập", "IMPORT_DELETE", PermissionGroup.INVENTORY, "IMPORT"),
+                action("Xem phiếu xuất", "EXPORT_VIEW", PermissionGroup.INVENTORY, "EXPORT"),
+                action("Tạo phiếu xuất", "EXPORT_CREATE", PermissionGroup.INVENTORY, "EXPORT"),
+                action("Duyệt phiếu xuất", "EXPORT_APPROVE", PermissionGroup.INVENTORY, "EXPORT"),
+                action("Sửa phiếu xuất", "EXPORT_UPDATE", PermissionGroup.INVENTORY, "EXPORT"),
+                action("Hủy phiếu xuất", "EXPORT_CANCEL", PermissionGroup.INVENTORY, "EXPORT"),
+                action("Xóa phiếu xuất", "EXPORT_DELETE", PermissionGroup.INVENTORY, "EXPORT"),
+                action("Xem điều chuyển", "TRANSFER_VIEW", PermissionGroup.INVENTORY, "TRANSFER"),
+                action("Tạo điều chuyển", "TRANSFER_CREATE", PermissionGroup.INVENTORY, "TRANSFER"),
+                action("Duyệt điều chuyển", "TRANSFER_APPROVE", PermissionGroup.INVENTORY, "TRANSFER"),
+                action("Hủy điều chuyển", "TRANSFER_CANCEL", PermissionGroup.INVENTORY, "TRANSFER"),
+                action("Xóa điều chuyển", "TRANSFER_DELETE", PermissionGroup.INVENTORY, "TRANSFER"),
+                action("Sửa điều chuyển", "TRANSFER_UPDATE", PermissionGroup.INVENTORY, "TRANSFER"),
+                action("Xem kiểm kê", "INVENTORY_CHECK_VIEW", PermissionGroup.INVENTORY, "INVENTORY_CHECK"),
+                action("Tạo kiểm kê", "INVENTORY_CHECK_CREATE", PermissionGroup.INVENTORY, "INVENTORY_CHECK"),
+                action("Duyệt kiểm kê", "INVENTORY_CHECK_APPROVE", PermissionGroup.INVENTORY, "INVENTORY_CHECK"),
+                action("Sửa kiểm kê", "INVENTORY_CHECK_UPDATE", PermissionGroup.INVENTORY, "INVENTORY_CHECK"),
+                action("Hủy kiểm kê", "INVENTORY_CHECK_CANCEL", PermissionGroup.INVENTORY, "INVENTORY_CHECK"),
+                action("Xóa kiểm kê", "INVENTORY_CHECK_DELETE", PermissionGroup.INVENTORY, "INVENTORY_CHECK"),
+                action("Xem yêu cầu mua", "PURCHASE_REQUEST_VIEW", PermissionGroup.INVENTORY, "PURCHASE_REQUEST"),
+                action("Tạo yêu cầu mua", "PURCHASE_REQUEST_CREATE", PermissionGroup.INVENTORY, "PURCHASE_REQUEST"),
+                action("Sửa yêu cầu mua", "PURCHASE_REQUEST_UPDATE", PermissionGroup.INVENTORY, "PURCHASE_REQUEST"),
+                action("Duyệt yêu cầu mua", "PURCHASE_REQUEST_APPROVE", PermissionGroup.INVENTORY, "PURCHASE_REQUEST"),
+                action("Xóa yêu cầu mua", "PURCHASE_REQUEST_DELETE", PermissionGroup.INVENTORY, "PURCHASE_REQUEST"),
+
+                action("Xem banner", "BANNER_VIEW", PermissionGroup.SETTING, "BANNER"),
+                action("Tạo banner", "BANNER_CREATE", PermissionGroup.SETTING, "BANNER"),
+                action("Sửa banner", "BANNER_EDIT", PermissionGroup.SETTING, "BANNER"),
+                action("Xóa banner", "BANNER_DELETE", PermissionGroup.SETTING, "BANNER"),
+                action("Xem blog", "BLOG_VIEW", PermissionGroup.SETTING, "BLOG"),
+                action("Tạo blog", "BLOG_CREATE", PermissionGroup.SETTING, "BLOG"),
+                action("Sửa blog", "BLOG_EDIT", PermissionGroup.SETTING, "BLOG"),
+                action("Xóa blog", "BLOG_DELETE", PermissionGroup.SETTING, "BLOG"),
+                action("Duyệt blog", "BLOG_APPROVE", PermissionGroup.SETTING, "BLOG"),
+                action("Xem cài đặt", "SETTING_VIEW", PermissionGroup.SETTING, "SETTING"),
+                action("Cập nhật cài đặt", "SETTING_UPDATE", PermissionGroup.SETTING, "SETTING"),
+
+                action("Xem chat", "CHAT_VIEW", PermissionGroup.COMMUNICATION, "CHAT"),
+                action("Quản lý chat", "CHAT_MANAGE", PermissionGroup.COMMUNICATION, "CHAT"),
+                action("Dùng tư vấn KH", "CUSTOMER_ADVISOR_USE", PermissionGroup.COMMUNICATION, "CUSTOMER_ADVISOR"),
+                action("Dùng workspace kỹ sư", "AGRONOMIST_WORKSPACE_USE", PermissionGroup.AI_KNOWLEDGE, "AGRONOMIST_WORKSPACE"),
+                action("Xem tri thức AI", "AI_KNOWLEDGE_VIEW", PermissionGroup.AI_KNOWLEDGE, "AI_KNOWLEDGE"),
+                action("Tạo tri thức AI", "AI_KNOWLEDGE_CREATE", PermissionGroup.AI_KNOWLEDGE, "AI_KNOWLEDGE"),
+                action("Sửa tri thức AI", "AI_KNOWLEDGE_UPDATE", PermissionGroup.AI_KNOWLEDGE, "AI_KNOWLEDGE"),
+                action("Duyệt tri thức AI", "AI_KNOWLEDGE_APPROVE", PermissionGroup.AI_KNOWLEDGE, "AI_KNOWLEDGE"),
+                action("Import tri thức AI", "AI_IMPORT_KNOWLEDGE", PermissionGroup.AI_KNOWLEDGE, "AI_KNOWLEDGE"),
+                action("Xử lý case AI", "AI_CASE_REVIEW", PermissionGroup.AI_KNOWLEDGE, "AI_KNOWLEDGE"));
+    }
+
+    private PermissionModuleSeedSpec module(String name, String code, PermissionGroup groupName) {
+        return new PermissionModuleSeedSpec(name, code, groupName);
+    }
+
+    private PermissionActionSeedSpec action(String name, String code, PermissionGroup groupName, String parentCode) {
+        return new PermissionActionSeedSpec(name, code, groupName, parentCode);
     }
 
     private Set<String> superAdminOnlyPermissionCodes() {
@@ -911,6 +1114,19 @@ public class DataSeeder implements CommandLineRunner {
             String displayName,
             String description,
             Set<String> permissionCodes) {
+    }
+
+    private record PermissionModuleSeedSpec(
+            String name,
+            String code,
+            PermissionGroup groupName) {
+    }
+
+    private record PermissionActionSeedSpec(
+            String name,
+            String code,
+            PermissionGroup groupName,
+            String parentCode) {
     }
 }
 
