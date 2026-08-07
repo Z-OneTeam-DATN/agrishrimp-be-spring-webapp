@@ -310,7 +310,11 @@ public class ProductService {
                 MultipartFile vFile = variantImages.get(i);
                 if (vFile != null && !vFile.isEmpty()) {
                     CloudinaryService.UploadResult res = cloudinaryService.upload(vFile, "products/variants");
-                    finalImageUrl = res.secureUrl();
+                    if (finalImageUrl != null && !finalImageUrl.trim().isEmpty()) {
+                        finalImageUrl = finalImageUrl + "," + res.secureUrl();
+                    } else {
+                        finalImageUrl = res.secureUrl();
+                    }
                 }
             }
 
@@ -965,13 +969,17 @@ public class ProductService {
         for (int i = 0; i < variantRequests.size(); i++) {
             VariantRequest vReq = variantRequests.get(i);
 
-            String imageUrl = null;
+            String imageUrl = vReq.getImage() != null ? vReq.getImage() : vReq.getImageUrl();
             String imagePublicId = null;
             if (variantImages != null && i < variantImages.size()) {
                 MultipartFile imgFile = variantImages.get(i);
                 if (imgFile != null && !imgFile.isEmpty()) {
                     CloudinaryService.UploadResult result = cloudinaryService.upload(imgFile, "products/variants");
-                    imageUrl = result.secureUrl();
+                    if (imageUrl != null && !imageUrl.trim().isEmpty()) {
+                        imageUrl = imageUrl + "," + result.secureUrl();
+                    } else {
+                        imageUrl = result.secureUrl();
+                    }
                     imagePublicId = result.publicId();
                 }
             }
