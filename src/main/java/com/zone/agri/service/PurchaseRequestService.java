@@ -709,6 +709,10 @@ public class PurchaseRequestService {
     }
 
     private void validatePurchaseRequestBranch(Branch branch) {
+        if (RoleUtils.hasSuperAdminAuthority(AuthUtils.getAuthorities())) {
+            return;
+        }
+
         if (enforceMainWarehousePurchaseRequests()) {
             Branch mainWarehouse = resolveMainWarehouseBranch();
             if (branch == null || branch.getId() == null || !Objects.equals(branch.getId(), mainWarehouse.getId())) {
