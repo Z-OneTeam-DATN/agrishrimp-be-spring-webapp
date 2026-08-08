@@ -98,7 +98,7 @@ public class RoleController {
     @RequirePermission("ROLE_UPDATE")
     @Operation(
         summary = "Cập nhật vai trò",
-        description = "Chỉnh sửa thông tin và quyền hạn của vai trò. Không cho phép sửa vai trò hệ thống (isSystem = true).",
+        description = "Chỉnh sửa thông tin và quyền hạn của vai trò. SUPER_ADMIN được cập nhật quyền của vai trò hệ thống, ngoại trừ vai trò SUPER_ADMIN.",
         responses = {
             @ApiResponse(responseCode = "200", description = "Cập nhật thành công",
                          content = @Content(schema = @Schema(implementation = RoleResponse.class))),
