@@ -62,6 +62,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
@@ -75,8 +76,21 @@ import java.util.stream.Collectors;
 import lombok.Builder;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.poi.ss.usermodel.BorderStyle;
+import org.apache.poi.ss.usermodel.Cell;
+import org.apache.poi.ss.usermodel.CellStyle;
+import org.apache.poi.ss.usermodel.DataValidation;
+import org.apache.poi.ss.usermodel.DataValidationConstraint;
+import org.apache.poi.ss.usermodel.DataValidationHelper;
+import org.apache.poi.ss.usermodel.FillPatternType;
+import org.apache.poi.ss.usermodel.Font;
+import org.apache.poi.ss.usermodel.HorizontalAlignment;
+import org.apache.poi.ss.usermodel.IndexedColors;
 import org.apache.poi.ss.usermodel.Row;
 import org.apache.poi.ss.usermodel.Sheet;
+import org.apache.poi.ss.usermodel.VerticalAlignment;
+import org.apache.poi.ss.util.CellRangeAddress;
+import org.apache.poi.ss.util.CellRangeAddressList;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Sort;
@@ -107,6 +121,8 @@ public class AiKnowledgeService {
     // "gần đạt" — đủ để chủ động hỏi thêm các dấu hiệu phân biệt còn thiếu (qua Gemini) thay vì
     // rơi thẳng vào fallback cứng như trước.
     private static final double NEAR_MISS_THRESHOLD_RATIO = 0.6D;
+    private static final int CHAT_CLARIFY_CANDIDATE_LIMIT = 4;
+    private static final double RELATED_DISEASE_MIN_SCORE = 0.25D;
 
     private final ObjectMapper objectMapper;
     private final AiKnowledgeCategoryRepository categoryRepository;
@@ -418,7 +434,7 @@ public class AiKnowledgeService {
     @Transactional(readOnly = true)
     public AiKnowledgeImportPreviewResponse previewImport(MultipartFile file, String mode) {
         try (XSSFWorkbook workbook = new XSSFWorkbook(file.getInputStream())) {
-            Sheet sheet = workbook.getSheetAt(0);
+            Sheet sheet = resolveImportSheet(workbook);
             List<AiKnowledgeImportPreviewRowResponse> rows = new ArrayList<>();
 
             for (int rowIndex = 1; rowIndex <= sheet.getLastRowNum(); rowIndex++) {
@@ -474,8 +490,20 @@ public class AiKnowledgeService {
     public byte[] buildImportTemplate() {
         try (XSSFWorkbook workbook = new XSSFWorkbook();
              ByteArrayOutputStream outputStream = new ByteArrayOutputStream()) {
+            CellStyle titleStyle = createTemplateTitleStyle(workbook);
+            CellStyle sectionStyle = createTemplateSectionStyle(workbook);
+            CellStyle guideKeyStyle = createTemplateGuideKeyStyle(workbook);
+            CellStyle guideValueStyle = createTemplateGuideValueStyle(workbook);
+            CellStyle headerStyle = createTemplateHeaderStyle(workbook);
+            CellStyle requiredHeaderStyle = createTemplateRequiredHeaderStyle(workbook);
+            CellStyle bodyStyle = createTemplateBodyStyle(workbook);
+            CellStyle numberStyle = createTemplateNumberStyle(workbook);
+            CellStyle exampleStyle = createTemplateExampleStyle(workbook);
+
+            Sheet guideSheet = workbook.createSheet("README_HUONG_DAN");
+            buildTemplateGuideSheet(guideSheet, titleStyle, sectionStyle, guideKeyStyle, guideValueStyle);
+
             Sheet sheet = workbook.createSheet("knowledge");
-            Row header = sheet.createRow(0);
             List<String> headers = List.of(
                     "type",
                     "category",
@@ -491,40 +519,380 @@ public class AiKnowledgeService {
                     "confidence_threshold",
                     "enabled");
 
+            List<String> requiredHeaders = List.of("type", "category", "code", "name");
+            Row header = sheet.createRow(0);
+            header.setHeightInPoints(30);
             for (int index = 0; index < headers.size(); index++) {
-                header.createCell(index).setCellValue(headers.get(index));
-                sheet.setColumnWidth(index, 24 * 256);
+                Cell cell = header.createCell(index);
+                cell.setCellValue(headers.get(index));
+                boolean required = requiredHeaders.contains(headers.get(index))
+                        || "answer_html".equals(headers.get(index))
+                        || "symptoms_keywords".equals(headers.get(index))
+                        || "signs_summary".equals(headers.get(index));
+                cell.setCellStyle(required ? requiredHeaderStyle : headerStyle);
             }
 
-            Row faqExample = sheet.createRow(1);
-            faqExample.createCell(0).setCellValue("FAQ");
-            faqExample.createCell(1).setCellValue("Tư vấn chung");
-            faqExample.createCell(2).setCellValue("FAQ_WHITE_SPOT");
-            faqExample.createCell(3).setCellValue("Dấu hiệu bệnh đốm trắng");
-            faqExample.createCell(4).setCellValue("bệnh đốm trắng, đốm trắng, white spot");
-            faqExample.createCell(6).setCellValue("<p>Bệnh đốm trắng thường có biểu hiện thân tôm xuất hiện đốm trắng rõ trên vỏ.</p>");
-            faqExample.createCell(10).setCellValue(0.4D);
-            faqExample.createCell(12).setCellValue("true");
+            int rowIndex = 1;
+            rowIndex = addTemplateRow(sheet, rowIndex, exampleStyle, numberStyle, List.of(
+                    "FAQ",
+                    "Tư vấn chung",
+                    "FAQ_WHITE_SPOT",
+                    "Dấu hiệu nhận biết bệnh đốm trắng",
+                    "bệnh đốm trắng, đốm trắng, white spot, WSSV",
+                    "",
+                    "<p><strong>Dấu hiệu thường gặp:</strong> tôm xuất hiện đốm trắng trên vỏ, bơi lờ đờ, giảm ăn, có thể chết nhanh khi bệnh nặng.</p><p><strong>Lưu ý:</strong> chỉ nhìn bằng mắt chưa đủ kết luận 100%; nên gửi mẫu PCR khi nghi WSSV.</p>",
+                    "",
+                    "",
+                    "",
+                    0.4D,
+                    "",
+                    "true"));
 
-            Row diseaseExample = sheet.createRow(2);
-            diseaseExample.createCell(0).setCellValue("DISEASE");
-            diseaseExample.createCell(1).setCellValue("Bệnh virus");
-            diseaseExample.createCell(2).setCellValue("WSSV");
-            diseaseExample.createCell(3).setCellValue("Bệnh đốm trắng");
-            diseaseExample.createCell(4).setCellValue("white spot syndrome virus, wssv");
-            diseaseExample.createCell(5).setCellValue("đốm trắng trên vỏ, bơi lờ đờ, giảm ăn");
-            diseaseExample.createCell(7).setCellValue("Tôm có đốm trắng, giảm ăn và yếu nhanh.");
-            diseaseExample.createCell(8).setCellValue("môi trường biến động | nhiễm virus | mật độ nuôi cao");
-            diseaseExample.createCell(9).setCellValue("Giai đoạn 1::Ổn định môi trường | Giảm sốc::101,102 || Giai đoạn 2::Theo dõi sức ăn | Bổ sung khoáng::103");
-            diseaseExample.createCell(10).setCellValue(0.45D);
-            diseaseExample.createCell(11).setCellValue(0.7D);
-            diseaseExample.createCell(12).setCellValue("true");
+            rowIndex = addTemplateRow(sheet, rowIndex, bodyStyle, numberStyle, List.of(
+                    "DISEASE",
+                    "Bệnh virus",
+                    "WSSV",
+                    "Bệnh đốm trắng",
+                    "white spot syndrome virus, wssv, bệnh đốm trắng",
+                    "đốm trắng trên vỏ, bơi lờ đờ, giảm ăn, tôm tấp mé, chết nhanh, vỏ mềm",
+                    "",
+                    "Tôm giảm ăn, bơi lờ đờ/tấp mé, xuất hiện đốm trắng trên vỏ hoặc giáp đầu ngực; có thể chết nhanh trong vài ngày.",
+                    "môi trường biến động | mầm bệnh WSSV | con giống nhiễm virus | mật độ nuôi cao",
+                    "Giai đoạn 1::Tạm ngưng/giảm thức ăn khi tôm giảm ăn | Tăng oxy, giữ DO ổn định | Hạn chế thay nước đột ngột:: || Giai đoạn 2::Vớt tôm chết, cô lập ao nghi bệnh | Kiểm tra pH, kiềm, độ mặn, nhiệt độ | Lấy mẫu PCR WSSV càng sớm càng tốt:: || Giai đoạn 3::Ổn định môi trường, sát khuẩn dụng cụ riêng | Không tự dùng kháng sinh vì đây là bệnh virus | Báo kỹ thuật nếu tôm chết tăng::",
+                    0.45D,
+                    0.7D,
+                    "true"));
+
+            rowIndex = addTemplateRow(sheet, rowIndex, bodyStyle, numberStyle, List.of(
+                    "DISEASE",
+                    "Bệnh vi khuẩn",
+                    "AHPND_EMS",
+                    "Hoại tử gan tụy cấp",
+                    "AHPND, EMS, hoại tử gan tụy, gan tụy nhạt",
+                    "tôm bỏ ăn, gan tụy nhạt màu, ruột rỗng, chết sớm, mềm vỏ, bơi yếu",
+                    "",
+                    "Tôm giảm ăn nhanh, ruột rỗng, gan tụy nhạt/teo, chết rải rác hoặc tăng nhanh trong giai đoạn đầu vụ.",
+                    "Vibrio gây độc | đáy ao bẩn | thức ăn dư | stress môi trường | mật độ nuôi cao",
+                    "Giai đoạn 1::Giảm 30-50% thức ăn, siphon đáy và vớt xác | Tăng oxy, kiểm tra NH3/NO2/pH/kiềm:: || Giai đoạn 2::Dùng vi sinh xử lý đáy/nước theo khuyến cáo nhãn | Bổ sung khoáng, vitamin và chất hỗ trợ gan tụy:: || Giai đoạn 3::Nếu chết tăng, gửi mẫu xét nghiệm Vibrio/AHPND | Không xả nước ao bệnh ra ngoài khi chưa xử lý::",
+                    0.45D,
+                    0.7D,
+                    "true"));
+
+            rowIndex = addTemplateRow(sheet, rowIndex, bodyStyle, numberStyle, List.of(
+                    "DISEASE",
+                    "Bệnh đường ruột",
+                    "EHP_WHITE_FECES",
+                    "EHP và phân trắng",
+                    "EHP, phân trắng, white feces, tôm chậm lớn",
+                    "phân trắng nổi mặt nước, ruột đứt khúc, tôm chậm lớn, mềm vỏ, ăn yếu",
+                    "",
+                    "Xuất hiện dây phân trắng nổi trên mặt nước hoặc sàng ăn, tôm chậm lớn, ruột không đầy, sức ăn giảm kéo dài.",
+                    "EHP | Vibrio đường ruột | đáy ao dơ | thức ăn kém | quản lý môi trường chưa ổn",
+                    "Giai đoạn 1::Giảm thức ăn, kiểm tra sàng ăn kỹ | Siphon phân/thức ăn dư, xử lý đáy ao:: || Giai đoạn 2::Bổ sung men tiêu hóa, vitamin và khoáng | Dùng vi sinh cạnh tranh, ổn định nước:: || Giai đoạn 3::Nếu kéo dài, xét nghiệm EHP và kiểm tra Vibrio | Theo dõi tăng trưởng, điều chỉnh khẩu phần::",
+                    0.45D,
+                    0.7D,
+                    "true"));
+
+            addTemplateRow(sheet, rowIndex, bodyStyle, numberStyle, List.of(
+                    "DISEASE",
+                    "Bệnh virus",
+                    "YHD",
+                    "Bệnh đầu vàng",
+                    "yellow head disease, YHD, đầu vàng, mang vàng",
+                    "đầu ngực vàng, mang vàng, bơi lờ đờ, giảm ăn đột ngột, chết nhanh",
+                    "",
+                    "Tôm giảm ăn đột ngột, phần đầu ngực/mang chuyển vàng, bơi yếu và có thể chết nhanh khi bùng phát.",
+                    "virus YHV | con giống mang mầm bệnh | stress môi trường | lây lan qua nước/dụng cụ",
+                    "Giai đoạn 1::Ngưng chuyển tôm/nước/dụng cụ sang ao khác | Tăng oxy, giữ môi trường ổn định:: || Giai đoạn 2::Vớt tôm chết, khử trùng dụng cụ | Lấy mẫu xét nghiệm YHV/PCR:: || Giai đoạn 3::Quản lý an toàn sinh học, hạn chế xả thải | Báo kỹ thuật khi tỷ lệ chết tăng::",
+                    0.45D,
+                    0.7D,
+                    "true"));
+
+            formatKnowledgeSheet(sheet);
+            addKnowledgeSheetValidation(sheet);
+
+            Sheet formatSheet = workbook.createSheet("FORMAT_THAM_CHIEU");
+            buildTemplateFormatSheet(formatSheet, titleStyle, sectionStyle, guideKeyStyle, guideValueStyle);
+
+            workbook.setActiveSheet(workbook.getSheetIndex(guideSheet));
 
             workbook.write(outputStream);
             return outputStream.toByteArray();
         } catch (IOException exception) {
             throw new RuntimeException("Không thể tạo file mẫu import tri thức", exception);
         }
+    }
+
+    private Sheet resolveImportSheet(XSSFWorkbook workbook) {
+        Sheet sheet = workbook.getSheet("knowledge");
+        return sheet != null ? sheet : workbook.getSheetAt(0);
+    }
+
+    private void buildTemplateGuideSheet(
+            Sheet sheet,
+            CellStyle titleStyle,
+            CellStyle sectionStyle,
+            CellStyle keyStyle,
+            CellStyle valueStyle) {
+        sheet.setColumnWidth(0, 28 * 256);
+        sheet.setColumnWidth(1, 110 * 256);
+
+        int rowIndex = 0;
+        Row titleRow = sheet.createRow(rowIndex++);
+        titleRow.setHeightInPoints(32);
+        createStyledCell(titleRow, 0, "HƯỚNG DẪN IMPORT PHÁC ĐỒ AI DOCTOR", titleStyle);
+        createStyledCell(titleRow, 1, "Đọc kỹ sheet này trước khi nhập dữ liệu vào sheet knowledge.", titleStyle);
+
+        rowIndex++;
+        rowIndex = addGuideSection(sheet, rowIndex, "CÁCH DÙNG", sectionStyle);
+        rowIndex = addGuideRow(sheet, rowIndex, "Sheet nhập dữ liệu", "Nhập/sửa dữ liệu ở sheet knowledge. Không đổi tên sheet, không đổi tên cột, không xóa dòng header.", keyStyle, valueStyle);
+        rowIndex = addGuideRow(sheet, rowIndex, "Dòng ví dụ", "Các dòng mẫu từ dòng 2 trở xuống dùng để tham khảo format. Có thể xóa hoặc sửa thành dữ liệu thật trước khi import.", keyStyle, valueStyle);
+        rowIndex = addGuideRow(sheet, rowIndex, "Import mode", "OVERWRITE: cập nhật nếu code đã tồn tại. UPSERT_NEW: bỏ qua code đã tồn tại, chỉ thêm mới.", keyStyle, valueStyle);
+        rowIndex = addGuideRow(sheet, rowIndex, "Trạng thái sau import", "Dữ liệu hợp lệ sẽ vào trạng thái CHỜ DUYỆT/IN_REVIEW để kỹ sư kiểm tra trước khi dùng chính thức.", keyStyle, valueStyle);
+
+        rowIndex++;
+        rowIndex = addGuideSection(sheet, rowIndex, "CỘT BẮT BUỘC", sectionStyle);
+        rowIndex = addGuideRow(sheet, rowIndex, "FAQ", "Bắt buộc: type, category, code, name, answer_html. Nên có aliases hoặc symptoms_keywords để AI nhận diện câu hỏi.", keyStyle, valueStyle);
+        rowIndex = addGuideRow(sheet, rowIndex, "DISEASE", "Bắt buộc: type, category, code, name, symptoms_keywords, signs_summary. Nên có aliases, causes, treatment_stages.", keyStyle, valueStyle);
+        rowIndex = addGuideRow(sheet, rowIndex, "code", "Viết không dấu, không khoảng trắng, nên dùng chữ hoa và dấu gạch dưới. Ví dụ: WSSV, AHPND_EMS, EHP_WHITE_FECES.", keyStyle, valueStyle);
+
+        rowIndex++;
+        rowIndex = addGuideSection(sheet, rowIndex, "QUY ƯỚC FORMAT", sectionStyle);
+        rowIndex = addGuideRow(sheet, rowIndex, "aliases / symptoms_keywords", "Nhiều từ khóa phân tách bằng dấu phẩy. Ví dụ: đốm trắng trên vỏ, bơi lờ đờ, giảm ăn.", keyStyle, valueStyle);
+        rowIndex = addGuideRow(sheet, rowIndex, "causes", "Nhiều nguyên nhân phân tách bằng dấu |. Ví dụ: môi trường biến động | mật độ nuôi cao | mầm bệnh.", keyStyle, valueStyle);
+        rowIndex = addGuideRow(sheet, rowIndex, "treatment_stages", "Mỗi giai đoạn dùng: Tên giai đoạn::Việc cần làm 1 | Việc cần làm 2::productId1,productId2. Nhiều giai đoạn phân tách bằng ||.", keyStyle, valueStyle);
+        rowIndex = addGuideRow(sheet, rowIndex, "threshold", "match_threshold và confidence_threshold nhập số từ 0 đến 1. Gợi ý: FAQ 0.35-0.45, DISEASE 0.40-0.50, confidence 0.65-0.75.", keyStyle, valueStyle);
+        rowIndex = addGuideRow(sheet, rowIndex, "enabled", "Nhập true để bật, false để tắt. Nếu để trống hệ thống hiểu là true.", keyStyle, valueStyle);
+
+        rowIndex++;
+        rowIndex = addGuideSection(sheet, rowIndex, "LƯU Ý AN TOÀN", sectionStyle);
+        addGuideRow(sheet, rowIndex, "Nội dung phác đồ", "Không ghi liều lượng nguy hiểm hoặc khẳng định chẩn đoán 100% nếu cần xét nghiệm. Với bệnh virus, nên hướng dẫn xét nghiệm/PCR và quản lý an toàn sinh học.", keyStyle, valueStyle);
+    }
+
+    private void buildTemplateFormatSheet(
+            Sheet sheet,
+            CellStyle titleStyle,
+            CellStyle sectionStyle,
+            CellStyle keyStyle,
+            CellStyle valueStyle) {
+        sheet.setColumnWidth(0, 24 * 256);
+        sheet.setColumnWidth(1, 18 * 256);
+        sheet.setColumnWidth(2, 64 * 256);
+        sheet.setColumnWidth(3, 58 * 256);
+
+        Row titleRow = sheet.createRow(0);
+        titleRow.setHeightInPoints(30);
+        createStyledCell(titleRow, 0, "THAM CHIẾU FORMAT TỪNG CỘT", titleStyle);
+
+        Row header = sheet.createRow(2);
+        createStyledCell(header, 0, "Cột", sectionStyle);
+        createStyledCell(header, 1, "Bắt buộc", sectionStyle);
+        createStyledCell(header, 2, "Cách nhập", sectionStyle);
+        createStyledCell(header, 3, "Ví dụ", sectionStyle);
+
+        int rowIndex = 3;
+        rowIndex = addFormatRow(sheet, rowIndex, "type", "Có", "Chỉ nhập FAQ hoặc DISEASE.", "DISEASE", keyStyle, valueStyle);
+        rowIndex = addFormatRow(sheet, rowIndex, "category", "Có", "Nhóm tri thức/phác đồ. Nếu chưa có, hệ thống tự tạo category.", "Bệnh virus", keyStyle, valueStyle);
+        rowIndex = addFormatRow(sheet, rowIndex, "code", "Có", "Mã duy nhất để cập nhật về sau. Nên viết HOA_KHONG_DAU.", "WSSV", keyStyle, valueStyle);
+        rowIndex = addFormatRow(sheet, rowIndex, "name", "Có", "Tên câu hỏi FAQ hoặc tên bệnh/phác đồ.", "Bệnh đốm trắng", keyStyle, valueStyle);
+        rowIndex = addFormatRow(sheet, rowIndex, "aliases", "Không", "Tên gọi khác, phân tách bằng dấu phẩy.", "white spot syndrome virus, bệnh đốm trắng", keyStyle, valueStyle);
+        rowIndex = addFormatRow(sheet, rowIndex, "symptoms_keywords", "DISEASE có", "Từ khóa triệu chứng, phân tách bằng dấu phẩy.", "đốm trắng trên vỏ, bơi lờ đờ, giảm ăn", keyStyle, valueStyle);
+        rowIndex = addFormatRow(sheet, rowIndex, "answer_html", "FAQ có", "Câu trả lời dạng HTML đơn giản: <p>, <strong>, <ul><li>.", "<p>Nội dung tư vấn...</p>", keyStyle, valueStyle);
+        rowIndex = addFormatRow(sheet, rowIndex, "signs_summary", "DISEASE có", "Tóm tắt dấu hiệu chính để AI hiển thị/tư vấn.", "Tôm giảm ăn, bơi yếu, có đốm trắng trên vỏ.", keyStyle, valueStyle);
+        rowIndex = addFormatRow(sheet, rowIndex, "causes", "Không", "Nhiều nguyên nhân phân tách bằng dấu |.", "môi trường biến động | mầm bệnh | mật độ cao", keyStyle, valueStyle);
+        rowIndex = addFormatRow(sheet, rowIndex, "treatment_stages", "Không", "Tên giai đoạn::Việc 1 | Việc 2::ID sản phẩm. Nhiều giai đoạn phân tách bằng ||.", "Giai đoạn 1::Tăng oxy | Giảm thức ăn::101,102 || Giai đoạn 2::Xét nghiệm PCR::", keyStyle, valueStyle);
+        rowIndex = addFormatRow(sheet, rowIndex, "match_threshold", "Không", "Số 0-1. Ngưỡng khớp từ khóa; thấp hơn dễ khớp hơn.", "0.45", keyStyle, valueStyle);
+        rowIndex = addFormatRow(sheet, rowIndex, "confidence_threshold", "Không", "Số 0-1. Ngưỡng tin cậy khi chẩn đoán bằng ảnh.", "0.70", keyStyle, valueStyle);
+        addFormatRow(sheet, rowIndex, "enabled", "Không", "true để bật, false để tắt.", "true", keyStyle, valueStyle);
+    }
+
+    private int addTemplateRow(Sheet sheet, int rowIndex, CellStyle textStyle, CellStyle numberStyle, List<?> values) {
+        Row row = sheet.createRow(rowIndex);
+        row.setHeightInPoints(88);
+        for (int columnIndex = 0; columnIndex < values.size(); columnIndex++) {
+            Object value = values.get(columnIndex);
+            Cell cell = row.createCell(columnIndex);
+            if (value instanceof Number number) {
+                cell.setCellValue(number.doubleValue());
+                cell.setCellStyle(numberStyle);
+            } else {
+                cell.setCellValue(value == null ? "" : value.toString());
+                cell.setCellStyle(textStyle);
+            }
+        }
+        return rowIndex + 1;
+    }
+
+    private int addGuideSection(Sheet sheet, int rowIndex, String title, CellStyle style) {
+        Row row = sheet.createRow(rowIndex);
+        row.setHeightInPoints(24);
+        createStyledCell(row, 0, title, style);
+        createStyledCell(row, 1, "", style);
+        return rowIndex + 1;
+    }
+
+    private int addGuideRow(Sheet sheet, int rowIndex, String key, String value, CellStyle keyStyle, CellStyle valueStyle) {
+        Row row = sheet.createRow(rowIndex);
+        row.setHeightInPoints(42);
+        createStyledCell(row, 0, key, keyStyle);
+        createStyledCell(row, 1, value, valueStyle);
+        return rowIndex + 1;
+    }
+
+    private int addFormatRow(
+            Sheet sheet,
+            int rowIndex,
+            String column,
+            String required,
+            String format,
+            String example,
+            CellStyle keyStyle,
+            CellStyle valueStyle) {
+        Row row = sheet.createRow(rowIndex);
+        row.setHeightInPoints(48);
+        createStyledCell(row, 0, column, keyStyle);
+        createStyledCell(row, 1, required, valueStyle);
+        createStyledCell(row, 2, format, valueStyle);
+        createStyledCell(row, 3, example, valueStyle);
+        return rowIndex + 1;
+    }
+
+    private void formatKnowledgeSheet(Sheet sheet) {
+        int[] widths = {
+                14, 22, 22, 30, 44, 54, 72, 54, 54, 96, 18, 22, 14
+        };
+        for (int index = 0; index < widths.length; index++) {
+            sheet.setColumnWidth(index, widths[index] * 256);
+        }
+        sheet.createFreezePane(0, 1);
+        sheet.setAutoFilter(new CellRangeAddress(0, 0, 0, 12));
+    }
+
+    private void addKnowledgeSheetValidation(Sheet sheet) {
+        DataValidationHelper helper = sheet.getDataValidationHelper();
+
+        DataValidationConstraint typeConstraint = helper.createExplicitListConstraint(new String[]{"FAQ", "DISEASE"});
+        DataValidation typeValidation = helper.createValidation(
+                typeConstraint,
+                new CellRangeAddressList(1, 5000, 0, 0));
+        typeValidation.setShowErrorBox(true);
+        sheet.addValidationData(typeValidation);
+
+        DataValidationConstraint enabledConstraint = helper.createExplicitListConstraint(new String[]{"true", "false"});
+        DataValidation enabledValidation = helper.createValidation(
+                enabledConstraint,
+                new CellRangeAddressList(1, 5000, 12, 12));
+        enabledValidation.setShowErrorBox(true);
+        sheet.addValidationData(enabledValidation);
+    }
+
+    private Cell createStyledCell(Row row, int columnIndex, String value, CellStyle style) {
+        Cell cell = row.createCell(columnIndex);
+        cell.setCellValue(value);
+        cell.setCellStyle(style);
+        return cell;
+    }
+
+    private CellStyle createTemplateTitleStyle(XSSFWorkbook workbook) {
+        CellStyle style = workbook.createCellStyle();
+        Font font = workbook.createFont();
+        font.setBold(true);
+        font.setFontHeightInPoints((short) 16);
+        font.setColor(IndexedColors.DARK_BLUE.getIndex());
+        style.setFont(font);
+        style.setWrapText(true);
+        style.setVerticalAlignment(VerticalAlignment.CENTER);
+        return style;
+    }
+
+    private CellStyle createTemplateSectionStyle(XSSFWorkbook workbook) {
+        CellStyle style = workbook.createCellStyle();
+        Font font = workbook.createFont();
+        font.setBold(true);
+        font.setColor(IndexedColors.WHITE.getIndex());
+        style.setFont(font);
+        style.setFillForegroundColor(IndexedColors.DARK_BLUE.getIndex());
+        style.setFillPattern(FillPatternType.SOLID_FOREGROUND);
+        style.setAlignment(HorizontalAlignment.LEFT);
+        style.setVerticalAlignment(VerticalAlignment.CENTER);
+        style.setWrapText(true);
+        applyThinBorder(style);
+        return style;
+    }
+
+    private CellStyle createTemplateGuideKeyStyle(XSSFWorkbook workbook) {
+        CellStyle style = workbook.createCellStyle();
+        Font font = workbook.createFont();
+        font.setBold(true);
+        font.setColor(IndexedColors.DARK_BLUE.getIndex());
+        style.setFont(font);
+        style.setFillForegroundColor(IndexedColors.PALE_BLUE.getIndex());
+        style.setFillPattern(FillPatternType.SOLID_FOREGROUND);
+        style.setVerticalAlignment(VerticalAlignment.TOP);
+        style.setWrapText(true);
+        applyThinBorder(style);
+        return style;
+    }
+
+    private CellStyle createTemplateGuideValueStyle(XSSFWorkbook workbook) {
+        CellStyle style = workbook.createCellStyle();
+        style.setVerticalAlignment(VerticalAlignment.TOP);
+        style.setWrapText(true);
+        applyThinBorder(style);
+        return style;
+    }
+
+    private CellStyle createTemplateHeaderStyle(XSSFWorkbook workbook) {
+        CellStyle style = workbook.createCellStyle();
+        Font font = workbook.createFont();
+        font.setBold(true);
+        font.setColor(IndexedColors.WHITE.getIndex());
+        style.setFont(font);
+        style.setFillForegroundColor(IndexedColors.BLUE_GREY.getIndex());
+        style.setFillPattern(FillPatternType.SOLID_FOREGROUND);
+        style.setAlignment(HorizontalAlignment.CENTER);
+        style.setVerticalAlignment(VerticalAlignment.CENTER);
+        style.setWrapText(true);
+        applyThinBorder(style);
+        return style;
+    }
+
+    private CellStyle createTemplateRequiredHeaderStyle(XSSFWorkbook workbook) {
+        CellStyle style = createTemplateHeaderStyle(workbook);
+        style.setFillForegroundColor(IndexedColors.DARK_BLUE.getIndex());
+        return style;
+    }
+
+    private CellStyle createTemplateBodyStyle(XSSFWorkbook workbook) {
+        CellStyle style = workbook.createCellStyle();
+        style.setVerticalAlignment(VerticalAlignment.TOP);
+        style.setWrapText(true);
+        applyThinBorder(style);
+        return style;
+    }
+
+    private CellStyle createTemplateExampleStyle(XSSFWorkbook workbook) {
+        CellStyle style = createTemplateBodyStyle(workbook);
+        style.setFillForegroundColor(IndexedColors.LEMON_CHIFFON.getIndex());
+        style.setFillPattern(FillPatternType.SOLID_FOREGROUND);
+        return style;
+    }
+
+    private CellStyle createTemplateNumberStyle(XSSFWorkbook workbook) {
+        CellStyle style = createTemplateBodyStyle(workbook);
+        style.setDataFormat(workbook.createDataFormat().getFormat("0.00"));
+        return style;
+    }
+
+    private void applyThinBorder(CellStyle style) {
+        style.setBorderTop(BorderStyle.THIN);
+        style.setBorderBottom(BorderStyle.THIN);
+        style.setBorderLeft(BorderStyle.THIN);
+        style.setBorderRight(BorderStyle.THIN);
+        style.setTopBorderColor(IndexedColors.GREY_25_PERCENT.getIndex());
+        style.setBottomBorderColor(IndexedColors.GREY_25_PERCENT.getIndex());
+        style.setLeftBorderColor(IndexedColors.GREY_25_PERCENT.getIndex());
+        style.setRightBorderColor(IndexedColors.GREY_25_PERCENT.getIndex());
     }
 
     /**
@@ -720,7 +1088,7 @@ public class AiKnowledgeService {
             // về lý thuyết có thể prompt-inject Gemini in ra thẻ HTML/script trong questionText.
             // Lưu turns ở trên vẫn giữ bản gốc (chưa escape) để gửi lại đúng nguyên văn cho Gemini
             // ở lượt sau — chỉ escape đúng lúc trả ra ngoài.
-            return buildChatResponse(escapeHtml(question), session.getSessionId(), Collections.emptyList());
+            return buildChatResponse(formatPlainTextAsHtml(question), session.getSessionId(), Collections.emptyList());
         }
 
         log.warn("[AiChatClarify] sessionId={} Gemini tra ve output khong hop le: responseType={}",
@@ -888,7 +1256,7 @@ public class AiKnowledgeService {
 
     private String buildFreeConsultAnswerHtml(String geminiText, AiKnowledgeChatConfig config, boolean isGreetingOnly) {
         StringBuilder builder = new StringBuilder();
-        builder.append("<p>").append(escapeHtml(geminiText).replace("\n", "<br>")).append("</p>");
+        builder.append("<p>").append(formatPlainTextAsHtml(geminiText)).append("</p>");
 
         if (isGreetingOnly) {
             return builder.toString();
@@ -911,6 +1279,13 @@ public class AiKnowledgeService {
         }
         builder.append("</em></p>");
         return builder.toString();
+    }
+
+    private String formatPlainTextAsHtml(String text) {
+        return escapeHtml(text)
+                .replace("\r\n", "\n")
+                .replace("\r", "\n")
+                .replace("\n", "<br>");
     }
 
     private boolean isRepeatOfLastAssistantQuestion(AiChatClarifySession session, String newQuestion) {
@@ -1356,7 +1731,7 @@ public class AiKnowledgeService {
                     .matched(false)
                     .matchType(AiKnowledgeMatchType.AMBIGUOUS)
                     .score(diseaseMatch.score())
-                    .clarifyCandidates(qualifyingDiseases)
+                    .clarifyCandidates(buildClarifyCandidateList(normalizedMessage, snapshot.diseaseEntries, diseaseMatch.disease()))
                     .build();
         }
 
@@ -1369,7 +1744,7 @@ public class AiKnowledgeService {
                     .matched(false)
                     .matchType(AiKnowledgeMatchType.DISEASE_KNOWLEDGE)
                     .score(diseaseMatch.score())
-                    .clarifyCandidates(List.of(diseaseMatch.disease()))
+                    .clarifyCandidates(buildClarifyCandidateList(normalizedMessage, snapshot.diseaseEntries, diseaseMatch.disease()))
                     .build();
         }
 
@@ -1396,7 +1771,7 @@ public class AiKnowledgeService {
                         .matched(false)
                         .matchType(AiKnowledgeMatchType.DISEASE_KNOWLEDGE)
                         .score(diseaseMatch.score())
-                        .clarifyCandidates(List.of(diseaseMatch.disease()))
+                        .clarifyCandidates(buildClarifyCandidateList(normalizedMessage, snapshot.diseaseEntries, diseaseMatch.disease()))
                         .build();
             }
         }
@@ -1409,9 +1784,7 @@ public class AiKnowledgeService {
         Set<String> messageTokens = new LinkedHashSet<>(AiKnowledgeTextUtils.tokenize(normalizedMessage));
 
         for (PreparedDisease disease : diseases) {
-            double score = scoreAgainstKeywords(normalizedMessage, messageTokens, disease.keywords());
-            score += disease.entity().getCanonical() != null && disease.entity().getCanonical() ? 0.03D : 0D;
-            score += Math.min(defaultInt(disease.entity().getPriority(), 0), 10) * 0.002D;
+            double score = scoreDiseaseForMessage(disease, normalizedMessage, messageTokens);
 
             if (score > best.score()) {
                 best = MatchScore.disease(score, disease);
@@ -1428,14 +1801,66 @@ public class AiKnowledgeService {
         Set<String> messageTokens = new LinkedHashSet<>(AiKnowledgeTextUtils.tokenize(normalizedMessage));
         List<PreparedDisease> qualifying = new ArrayList<>();
         for (PreparedDisease disease : diseases) {
-            double score = scoreAgainstKeywords(normalizedMessage, messageTokens, disease.keywords());
-            score += disease.entity().getCanonical() != null && disease.entity().getCanonical() ? 0.03D : 0D;
-            score += Math.min(defaultInt(disease.entity().getPriority(), 0), 10) * 0.002D;
+            double score = scoreDiseaseForMessage(disease, normalizedMessage, messageTokens);
             if (score >= defaultDouble(disease.entity().getMatchThreshold(), 0.4D)) {
                 qualifying.add(disease);
             }
         }
         return qualifying;
+    }
+
+    private List<PreparedDisease> buildClarifyCandidateList(
+            String normalizedMessage,
+            List<PreparedDisease> diseases,
+            PreparedDisease primaryDisease) {
+        Set<String> messageTokens = new LinkedHashSet<>(AiKnowledgeTextUtils.tokenize(normalizedMessage));
+        List<CandidateDiseaseScore> scoredDiseases = diseases.stream()
+                .map(disease -> new CandidateDiseaseScore(
+                        disease,
+                        scoreDiseaseForMessage(disease, normalizedMessage, messageTokens)))
+                .sorted(Comparator.comparingDouble(CandidateDiseaseScore::score).reversed())
+                .toList();
+
+        List<PreparedDisease> result = new ArrayList<>();
+        Set<String> addedCodes = new LinkedHashSet<>();
+        addClarifyCandidate(result, addedCodes, primaryDisease);
+
+        for (CandidateDiseaseScore scored : scoredDiseases) {
+            if (result.size() >= CHAT_CLARIFY_CANDIDATE_LIMIT) {
+                break;
+            }
+            if (scored.score() <= 0D) {
+                continue;
+            }
+
+            double threshold = defaultDouble(scored.disease().entity().getMatchThreshold(), 0.4D);
+            boolean relatedEnough = scored.score() >= Math.max(RELATED_DISEASE_MIN_SCORE, threshold * NEAR_MISS_THRESHOLD_RATIO);
+            boolean needAtLeastTwoCandidates = result.size() < 2 && scored.score() > 0D;
+            if (relatedEnough || needAtLeastTwoCandidates) {
+                addClarifyCandidate(result, addedCodes, scored.disease());
+            }
+        }
+
+        if (result.isEmpty()) {
+            addClarifyCandidate(result, addedCodes, primaryDisease);
+        }
+        return result;
+    }
+
+    private void addClarifyCandidate(List<PreparedDisease> result, Set<String> addedCodes, PreparedDisease disease) {
+        if (disease == null || trimToNull(disease.entity().getCode()) == null) {
+            return;
+        }
+        if (addedCodes.add(disease.entity().getCode())) {
+            result.add(disease);
+        }
+    }
+
+    private double scoreDiseaseForMessage(PreparedDisease disease, String normalizedMessage, Set<String> messageTokens) {
+        double score = scoreAgainstKeywords(normalizedMessage, messageTokens, disease.keywords());
+        score += disease.entity().getCanonical() != null && disease.entity().getCanonical() ? 0.03D : 0D;
+        score += Math.min(defaultInt(disease.entity().getPriority(), 0), 10) * 0.002D;
+        return score;
     }
 
     private MatchScore matchKeywordSetFromText(String normalizedMessage, List<PreparedKeywordSet> keywordSets) {
@@ -2460,6 +2885,11 @@ public class AiKnowledgeService {
             Double score,
             String answerHtml,
             List<PreparedDisease> clarifyCandidates) {
+    }
+
+    private record CandidateDiseaseScore(
+            PreparedDisease disease,
+            double score) {
     }
 
     private record MatchScore(
