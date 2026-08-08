@@ -57,8 +57,16 @@ public class VoucherService {
     }
 
     public List<VoucherResponse> getAllVouchers(String keyword, VoucherStatus status) {
-        List<Voucher> vouchers = voucherRepository.searchVouchers(keyword, status);
-        return vouchers.stream().map(this::convertToResponseWithDerivedStatus).toList();
+        String normalizedKeyword = keyword != null ? keyword.trim() : null;
+        if (normalizedKeyword != null && normalizedKeyword.isBlank()) {
+            normalizedKeyword = null;
+        }
+
+        List<Voucher> vouchers = voucherRepository.searchVouchers(normalizedKeyword, null);
+        return vouchers.stream()
+                .filter(voucher -> status == null || deriveVoucherStatus(voucher) == status)
+                .map(this::convertToResponseWithDerivedStatus)
+                .toList();
     }
 
     public VoucherResponse getVoucherById(Long id) {
@@ -74,6 +82,12 @@ public class VoucherService {
 
         String normalized = code.trim().toUpperCase();
         return normalized.isBlank() ? null : normalized;
+    }
+
+    private void validateUsageLimit(Integer maxUsagePerUser) {
+        if (maxUsagePerUser == null || maxUsagePerUser <= 0) {
+            throw new BadRequestException("Lượt dùng tối đa mỗi người phải lớn hơn 0");
+        }
     }
 
     private void validateBusinessRules(VoucherRequest request, boolean allowPastEndDate) {
@@ -92,7 +106,7 @@ public class VoucherService {
             }
 
             if (request.getMaxDiscount() == null || request.getMaxDiscount().compareTo(BigDecimal.ZERO) <= 0) {
-                throw new BadRequestException("Voucher theo phần trăm BẮT BUỘC phải có mức Giảm tối đa (VNĐ) để tránh lỗ!");
+                throw new BadRequestException("Voucher theo phần trăm bắt buộc phải có mức giảm tối đa (VNĐ) để tránh lỗ.");
             }
 
             if (request.getValue().compareTo(MAX_PERCENT_ALLOW) > 0) {
@@ -107,7 +121,7 @@ public class VoucherService {
             if (minOrder.compareTo(BigDecimal.ZERO) > 0) {
                 BigDecimal halfMinOrder = minOrder.divide(new BigDecimal("2"), 2, java.math.RoundingMode.HALF_UP);
                 if (request.getValue().compareTo(halfMinOrder) > 0) {
-                    throw new BadRequestException("Mức giảm (VNĐ) không được vượt quá một nửa Đơn tối thiểu");
+                    throw new BadRequestException("Mức giảm (VNĐ) không được vượt quá một nửa đơn tối thiểu");
                 }
             }
         }
@@ -119,7 +133,8 @@ public class VoucherService {
         if (voucherRepository.existsByCode(normalizedCode)) {
             throw new ConflictException("Mã voucher '" + request.getCode() + "' đã tồn tại!");
         }
-        
+
+        validateUsageLimit(request.getMaxUsagePerUser());
         validateBusinessRules(request, false);
 
         Voucher voucher = new Voucher();
@@ -137,10 +152,11 @@ public class VoucherService {
         if (voucherRepository.existsByCodeAndIdNot(normalizedCode, id)) {
             throw new ConflictException("Mã voucher '" + request.getCode() + "' đã tồn tại!");
         }
-        
+
         boolean allowPastEndDate = voucher.getEndDate() != null
                 && voucher.getEndDate().isBefore(LocalDateTime.now());
 
+        validateUsageLimit(request.getMaxUsagePerUser());
         validateBusinessRules(request, allowPastEndDate);
 
         mapToEntity(voucher, request, normalizedCode);

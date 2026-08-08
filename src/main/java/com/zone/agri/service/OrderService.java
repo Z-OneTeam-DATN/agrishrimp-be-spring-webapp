@@ -332,6 +332,14 @@ public class OrderService {
         String sessionCode = String.valueOf(webhookData.getOrderCode());
         PayOSCheckoutSession session = getPayosSession(sessionCode);
         if (session != null) {
+            if (!matchesWebhookAmount(session.getTotalAmount(), webhookData.getAmount())) {
+                log.warn(
+                        "Skip paid webhook for PayOS session {} because amount mismatch. Expected {}, actual {}",
+                        sessionCode,
+                        session.getTotalAmount(),
+                        webhookData.getAmount());
+                return;
+            }
             if (PAYOS_SESSION_STATUS_CANCELLED.equals(session.getStatus())
                     || PAYOS_SESSION_STATUS_EXPIRED.equals(session.getStatus())) {
                 log.warn("Received paid webhook for session {} but it is already {}. Skip auto-create to avoid duplicates.",
@@ -348,8 +356,20 @@ public class OrderService {
         if (orderOpt.isEmpty()) {
             orderOpt = orderRepository.findByCode("ORD" + webhookData.getOrderCode());
         }
-        if (orderOpt.isPresent() && !PaymentStatus.PAID.equals(orderOpt.get().getPaymentStatus())) {
-            payOSService.markOrderPaid(orderOpt.get());
+        if (orderOpt.isPresent()) {
+            Order order = orderOpt.get();
+            if (!matchesWebhookAmount(order.getFinalAmount(), webhookData.getAmount())) {
+                log.warn(
+                        "Skip paid webhook for order {} because amount mismatch. Expected {}, actual {}",
+                        order.getCode(),
+                        order.getFinalAmount(),
+                        webhookData.getAmount());
+                return;
+            }
+
+            if (!PaymentStatus.PAID.equals(order.getPaymentStatus())) {
+                payOSService.markOrderPaid(order);
+            }
         }
     }
 
@@ -1300,6 +1320,15 @@ public class OrderService {
             payOSService.markOrderPaid(order);
             return;
         }
+    }
+
+    private boolean matchesWebhookAmount(BigDecimal expectedAmount, Integer actualAmount) {
+        if (expectedAmount == null || actualAmount == null) {
+            return false;
+        }
+
+        return expectedAmount.stripTrailingZeros()
+                .compareTo(BigDecimal.valueOf(actualAmount.longValue()).stripTrailingZeros()) == 0;
     }
 
     private BranchOrderResponse mapSubOrderToBranchOrderResponse(SubOrder subOrder) {

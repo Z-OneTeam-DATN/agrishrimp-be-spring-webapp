@@ -9,6 +9,7 @@ import com.zone.agri.entity.SubOrder;
 import com.zone.agri.entity.User;
 import com.zone.agri.entity.enums.OrderStatus;
 import com.zone.agri.entity.enums.PaymentMethod;
+import com.zone.agri.entity.enums.PaymentStatus;
 import com.zone.agri.exception.BadRequestException;
 import com.zone.agri.exception.NotFoundException;
 import com.zone.agri.repository.BranchRepository;
@@ -64,11 +65,15 @@ public class HandoverService {
                 throw new BadRequestException("Đơn hàng #" + subOrder.getId() + " chưa sẵn sàng để bàn giao");
             }
 
+            if ((subOrder.getOrder().getPaymentMethod() == PaymentMethod.PAYOS
+                    || subOrder.getOrder().getPaymentMethod() == PaymentMethod.TRANSFER)
+                    && subOrder.getOrder().getPaymentStatus() != PaymentStatus.PAID) {
+                throw new BadRequestException(
+                        "Đơn hàng #" + subOrder.getId() + " chưa hoàn tất thanh toán online nên không thể bàn giao");
+            }
+
             if (subOrder.getOrder().getPaymentMethod() == PaymentMethod.COD) {
-                BigDecimal subAmount = subOrder.getSubtotal().add(
-                        subOrder.getShippingFee() != null ? subOrder.getShippingFee() : BigDecimal.ZERO
-                );
-                totalCod = totalCod.add(subAmount);
+                totalCod = totalCod.add(calculateCollectableCod(subOrder));
             }
         }
 
@@ -102,6 +107,32 @@ public class HandoverService {
         }
 
         return savedHandover;
+    }
+
+    private BigDecimal calculateCollectableCod(SubOrder subOrder) {
+        BigDecimal subtotal = subOrder.getSubtotal() != null ? subOrder.getSubtotal() : BigDecimal.ZERO;
+        BigDecimal shippingFee = subOrder.getShippingFee() != null ? subOrder.getShippingFee() : BigDecimal.ZERO;
+
+        if (subOrder.getOrder() == null) {
+            return subtotal.add(shippingFee);
+        }
+
+        BigDecimal orderSubtotal = subOrder.getOrder().getTotalAmount() != null
+                ? subOrder.getOrder().getTotalAmount()
+                : BigDecimal.ZERO;
+        BigDecimal discountAmount = subOrder.getOrder().getDiscountAmount() != null
+                ? subOrder.getOrder().getDiscountAmount()
+                : BigDecimal.ZERO;
+
+        BigDecimal allocatedDiscount = BigDecimal.ZERO;
+        if (discountAmount.compareTo(BigDecimal.ZERO) > 0 && orderSubtotal.compareTo(BigDecimal.ZERO) > 0) {
+            allocatedDiscount = discountAmount
+                    .multiply(subtotal)
+                    .divide(orderSubtotal, 2, java.math.RoundingMode.HALF_UP);
+        }
+
+        BigDecimal collectableCod = subtotal.add(shippingFee).subtract(allocatedDiscount);
+        return collectableCod.max(BigDecimal.ZERO);
     }
 
     public List<HandoverResponse> getHandoverList(Long branchId) {

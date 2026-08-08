@@ -6,6 +6,7 @@ import com.zone.agri.dto.response.order.OutOfStockItemDto;
 import com.zone.agri.dto.response.order.SubOrderDraftDto;
 import com.zone.agri.entity.Inventory;
 import com.zone.agri.entity.ProductVariant;
+import com.zone.agri.exception.BadRequestException;
 import com.zone.agri.repository.InventoryRepository;
 import com.zone.agri.repository.InventoryTransactionRepository;
 import com.zone.agri.service.BranchSearchService.BranchWithRealDistance;
@@ -139,6 +140,11 @@ public class InventoryAllocationService {
                         inventoryMatrix,
                         categoryId,
                         transferImportPriceCache);
+            }
+
+            if (lastUnitPrice.compareTo(BigDecimal.ZERO) <= 0 && totalAvailableAcrossBranches > 0) {
+                throw new BadRequestException("San pham " + variantName
+                        + " chua co gia ban hop le. Vui long kiem tra gia nhap ton kho truoc khi dat hang.");
             }
 
             allocatedItems.add(OrderItemDto.builder()
