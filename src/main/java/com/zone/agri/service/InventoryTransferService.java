@@ -170,9 +170,9 @@ public class InventoryTransferService {
 
         return branchRepo.findAll().stream()
                 .filter(branch -> branch.getName() != null
-                        && branch.getName().trim().toLowerCase().contains("kho tĂ¡Â»â€¢ng"))
+                        && branch.getName().trim().toLowerCase().contains("kho tổng"))
                 .findFirst()
-                .orElseThrow(() -> new RuntimeException("KhÄ‚Â´ng tÄ‚Â¬m thĂ¡ÂºÂ¥y kho tĂ¡Â»â€¢ng Ă„â€˜Ă¡Â»Æ’ Ă„â€˜iĂ¡Â»Âu chuyĂ¡Â»Æ’n bĂ¡Â»â€¢ sung"));
+                .orElseThrow(() -> new RuntimeException("Không tìm thấy kho tổng để điều chuyển bổ sung"));
     }
 
     private Branch resolveSystemDefectBranch() {
@@ -180,10 +180,10 @@ public class InventoryTransferService {
                 .orElseGet(() -> branchRepo.save(Branch.builder()
                         .branchCode(SYSTEM_DEFECT_BRANCH_CODE)
                         .branchType("WAREHOUSE")
-                        .name("Kho lĂ¡Â»â€”i hĂ¡Â»â€¡ thĂ¡Â»â€˜ng")
+                        .name("Kho lỗi hệ thống")
                         .phone(SYSTEM_DEFECT_BRANCH_PHONE)
                         .email("system-defect@agrishrimp.vn")
-                        .addressDetail("Kho Ă¡ÂºÂ£o dÄ‚Â¹ng Ă„â€˜Ă¡Â»Æ’ gom hÄ‚Â ng lĂ¡Â»â€”i hoĂ¡ÂºÂ·c thiĂ¡ÂºÂ¿u phÄ‚Â¡t sinh tĂ¡Â»Â« Ă„â€˜iĂ¡Â»Âu chuyĂ¡Â»Æ’n nĂ¡Â»â„¢i bĂ¡Â»â„¢")
+                        .addressDetail("Kho ảo dùng để gom hàng lỗi hoặc thiếu phát sinh từ điều chuyển nội bộ")
                         .status(BranchStatus.ACTIVE)
                         .build()));
     }
@@ -483,14 +483,14 @@ public class InventoryTransferService {
         }
 
         subOrder = subOrderRepo.findByIdWithItems(subOrder.getId())
-                .orElseThrow(() -> new RuntimeException("Khong tim thay phan don can dieu chuyen bo sung"));
+                .orElseThrow(() -> new RuntimeException("Không tìm thấy phân đơn cần điều chuyển bổ sung"));
         boolean hasMissingItems = subOrder.getItems() != null
                 && subOrder.getItems().stream()
                         .anyMatch(item -> Objects.requireNonNullElse(item.getMissingQuantity(), 0) > 0);
         if (!hasMissingItems
                 || (subOrder.getStatus() != OrderStatus.PENDING
                         && subOrder.getStatus() != OrderStatus.AWAITING_REPLENISHMENT)) {
-            throw new BadRequestException("Chi co the tao dieu chuyen bo sung cho phan don dang cho dieu chuyen");
+            throw new BadRequestException("Chỉ có thể tạo điều chuyển bổ sung cho phân đơn đang chờ điều chuyển");
         }
 
         String referenceCode = subOrder.getOrder().getCode() + "-SUB-" + subOrder.getId();
@@ -515,7 +515,7 @@ public class InventoryTransferService {
             if (missingQty <= 0 || item.getProductVariant() == null) {
                 continue;
             }
-            // KiĂ¡Â»Æ’m tra tĂ¡Â»â€œn kho kho tĂ¡Â»â€¢ng
+            // Kiểm tra tồn kho kho tổng
             int warehouseQty = inventoryRepo
                     .findByProductVariantId(item.getProductVariant().getId()).stream()
                     .filter(inv -> inv.getBranch() != null
@@ -525,13 +525,13 @@ public class InventoryTransferService {
                     .sum();
             if (ENFORCE_SOURCE_STOCK_CHECK_ON_CREATE && warehouseQty < missingQty) {
                 throw new RuntimeException(
-                        "Kho tĂ¡Â»â€¢ng khÄ‚Â´ng Ă„â€˜Ă¡Â»Â§ hÄ‚Â ng Ă„â€˜Ă¡Â»Æ’ Ă„â€˜iĂ¡Â»Âu chuyĂ¡Â»Æ’n bĂ¡Â»â€¢ sung cho SKU: " + item.getProductVariant().getSku());
+                        "Kho tổng không đủ hàng để điều chuyển bổ sung cho SKU: " + item.getProductVariant().getSku());
             }
             transferItems.merge(item.getProductVariant().getSku(), missingQty, Integer::sum);
         }
 
         if (transferItems.isEmpty()) {
-            throw new RuntimeException("KhÄ‚Â´ng cÄ‚Â³ sĂ¡ÂºÂ£n phĂ¡ÂºÂ©m nÄ‚Â o cĂ¡ÂºÂ§n Ă„â€˜iĂ¡Â»Âu chuyĂ¡Â»Æ’n bĂ¡Â»â€¢ sung tĂ¡Â»Â« kho tĂ¡Â»â€¢ng");
+            throw new RuntimeException("Không có sản phẩm nào cần điều chuyển bổ sung từ kho tổng");
         }
 
         List<InventoryTransfer> transfers = new ArrayList<>();
@@ -551,7 +551,7 @@ public class InventoryTransferService {
                     TransferItemRequest itemRequest = new TransferItemRequest();
                     itemRequest.setSku(itemEntry.getKey());
                     itemRequest.setQuantity(itemEntry.getValue());
-                    itemRequest.setItemNote("Tu dong bo sung cho phan don " + referenceCode);
+                    itemRequest.setItemNote("Tự động bổ sung cho phân đơn " + referenceCode);
                     return itemRequest;
                 })
                 .toList();
@@ -572,7 +572,7 @@ public class InventoryTransferService {
         Branch toBranch = subOrder.getBranch();
         Map<Long, Map<String, Integer>> transferPlanBySourceBranch = buildAutoReplenishmentPlan(subOrder, warehouse);
         if (transferPlanBySourceBranch.isEmpty()) {
-            throw new RuntimeException("Khong co san pham nao can dieu chuyen bo sung");
+            throw new RuntimeException("Không có sản phẩm nào cần điều chuyển bổ sung");
         }
 
         List<InventoryTransfer> transfers = new ArrayList<>();
@@ -592,7 +592,7 @@ public class InventoryTransferService {
                         TransferItemRequest itemRequest = new TransferItemRequest();
                         itemRequest.setSku(itemEntry.getKey());
                         itemRequest.setQuantity(itemEntry.getValue());
-                        itemRequest.setItemNote("Tu dong bo sung cho phan don " + referenceCode);
+                        itemRequest.setItemNote("Tự động bổ sung cho phân đơn " + referenceCode);
                         return itemRequest;
                     })
                     .toList());
@@ -640,7 +640,7 @@ public class InventoryTransferService {
             if (remainingMissing > 0 && warehouseId != null && !Objects.equals(warehouseId, toBranchId)) {
                 if (ENFORCE_SOURCE_STOCK_CHECK_ON_CREATE
                         && resolveAvailableQuantityAtBranch(item.getProductVariant().getId(), warehouseId) < remainingMissing) {
-                    throw new RuntimeException("Kho tong khong du hang de dieu chuyen bo sung cho SKU: " + sku);
+                    throw new RuntimeException("Kho tổng không đủ hàng để điều chuyển bổ sung cho SKU: " + sku);
                 }
                 transferPlanBySourceBranch
                         .computeIfAbsent(warehouseId, ignored -> new LinkedHashMap<>())
@@ -808,7 +808,7 @@ public class InventoryTransferService {
 
     private SubOrder loadReplenishmentSubOrder(Long subOrderId) {
         return subOrderRepo.findByIdWithItems(subOrderId)
-                .orElseThrow(() -> new BadRequestException("Khong tim thay phan don can dieu chuyen bo sung."));
+                .orElseThrow(() -> new BadRequestException("Không tìm thấy phân đơn cần điều chuyển bổ sung."));
     }
 
     private boolean canReplenishSubOrder(SubOrder subOrder) {
@@ -828,7 +828,7 @@ public class InventoryTransferService {
 
     private void validateReplenishmentSubOrder(SubOrder subOrder) {
         if (!canReplenishSubOrder(subOrder)) {
-            throw new BadRequestException("Chi co the tao dieu chuyen bo sung cho phan don dang cho dieu chuyen.");
+            throw new BadRequestException("Chỉ có thể tạo điều chuyển bổ sung cho phân đơn đang chờ điều chuyển.");
         }
     }
 
@@ -931,7 +931,7 @@ public class InventoryTransferService {
                     TransferItemRequest itemRequest = new TransferItemRequest();
                     itemRequest.setSku(itemEntry.getKey());
                     itemRequest.setQuantity(itemEntry.getValue());
-                    itemRequest.setItemNote("Tu dong bo sung cho phan don " + referenceCode);
+                    itemRequest.setItemNote("Tự động bổ sung cho phân đơn " + referenceCode);
                     return itemRequest;
                 })
                 .toList());
@@ -959,10 +959,10 @@ public class InventoryTransferService {
     }
 
     // ==========================================
-    // LUĂ¡Â»â€™NG 4 & 5 Ă¢â‚¬â€œ BĂ†Â¯Ă¡Â»ÂC 2: DUYĂ¡Â»â€ T (Admin duyĂ¡Â»â€¡t)
-    // - Flow 4 (STOCK_TRANSFER): PENDING Ă¢â€ â€™ APPROVED + Reserve kho nguĂ¡Â»â€œn
-    // - Flow 5 (INTERNAL_SALE) : SOURCE_CONFIRMED Ă¢â€ â€™ APPROVED + Validate giÄ‚Â¡ Ă„â€˜iĂ¡Â»Âu
-    // chuyĂ¡Â»Æ’n
+    // LUỒNG 4 & 5 – BƯỚC 2: DUYỆT (Admin duyệt)
+    // - Flow 4 (STOCK_TRANSFER): PENDING → APPROVED + Reserve kho nguồn
+    // - Flow 5 (INTERNAL_SALE) : SOURCE_CONFIRMED → APPROVED + Validate giá điều
+    // chuyển
     // ==========================================
     @Transactional
     public void approveTransfer(Long transferId) {
@@ -1007,7 +1007,7 @@ public class InventoryTransferService {
         }
 
         User currentUser = getCurrentUser();
-        assertBranchActor(currentUser, transfer.getFromBranch(), "xac nhan nguon");
+        assertBranchActor(currentUser, transfer.getFromBranch(), "xác nhận nguồn");
         if (transfer.getTransferBusinessType() == TransferBusinessType.INTERNAL_SALE) {
             validateInternalSalePricesForTransfer(transfer);
         }
@@ -1025,7 +1025,7 @@ public class InventoryTransferService {
         inventoryCheckGuardService.assertStockMutationAllowed(
                 transfer.getFromBranch().getId(),
                 transfer.getDetails().stream().map(detail -> detail.getProductVariant().getId()).toList(),
-                "xuat hang dieu chuyen"
+                "xuất hàng điều chuyển"
         );
 
         if (transfer.getStatus() != InventoryTransferStatus.APPROVED) {
@@ -1064,7 +1064,7 @@ public class InventoryTransferService {
                         .newBalance(Objects.requireNonNullElse(batch.getQuantity(), 0)
                                 + Objects.requireNonNullElse(batch.getDefectiveQuantity(), 0))
                         .referenceCode(transfer.getTransferCode())
-                        .reason("Xuat dieu chuyen (Phieu: " + transfer.getTransferCode() + ")")
+                        .reason("Xuất điều chuyển (Phiếu: " + transfer.getTransferCode() + ")")
                         .createdAt(LocalDateTime.now())
                         .inventory(batch)
                         .build());
@@ -1093,7 +1093,7 @@ public class InventoryTransferService {
         }
 
         User currentUser = getCurrentUser();
-        assertBranchActor(currentUser, transfer.getToBranch(), "bat dau kiem hang");
+        assertBranchActor(currentUser, transfer.getToBranch(), "bắt đầu kiểm hàng");
         transfer.setInspectionStartedBy(currentUser);
         transfer.setInspectionStartedAt(LocalDateTime.now());
         transfer.setStatus(InventoryTransferStatus.INSPECTING);
@@ -1106,7 +1106,7 @@ public class InventoryTransferService {
         inventoryCheckGuardService.assertStockMutationAllowed(
                 transfer.getToBranch().getId(),
                 transfer.getDetails().stream().map(detail -> detail.getProductVariant().getId()).toList(),
-                "nhan hang dieu chuyen"
+                "nhận hàng điều chuyển"
         );
 
         if (transfer.getStatus() != InventoryTransferStatus.INSPECTING) {
@@ -1117,7 +1117,7 @@ public class InventoryTransferService {
         }
 
         User currentUser = getCurrentUser();
-        assertBranchActor(currentUser, transfer.getToBranch(), "nhan hang");
+        assertBranchActor(currentUser, transfer.getToBranch(), "nhận hàng");
 
         Map<Long, InventoryTransferDetail> detailMap = transfer.getDetails().stream()
                 .collect(Collectors.toMap(
@@ -1235,7 +1235,7 @@ public class InventoryTransferService {
 
             List<Inventory> batches = inventoryRepo.findForUpdateFIFO(fromBranchId, variantId);
 
-            // TĂ¡Â»â€¢ng khĂ¡ÂºÂ£ dĂ¡Â»Â¥ng = quantity - reservedQuantity
+            // Tổng khả dụng = quantity - reservedQuantity
             int totalAvailable = batches.stream()
                     .mapToInt(b -> Math.max(0,
                             Objects.requireNonNullElse(b.getQuantity(), 0)
@@ -1260,11 +1260,11 @@ public class InventoryTransferService {
 
             if (totalAvailable < qtyNeeded) {
                 throw new RuntimeException(String.format(
-                        "Kho nguĂ¡Â»â€œn khÄ‚Â´ng Ă„â€˜Ă¡Â»Â§ tĂ¡Â»â€œn kho khĂ¡ÂºÂ£ dĂ¡Â»Â¥ng Ă„â€˜Ă¡Â»Æ’ Reserve cho SKU %s. CĂ¡ÂºÂ§n: %d, KhĂ¡ÂºÂ£ dĂ¡Â»Â¥ng: %d",
+                        "Kho nguồn không đủ tồn kho khả dụng để Reserve cho SKU %s. Cần: %d, Khả dụng: %d",
                         detail.getProductVariant().getSku(), qtyNeeded, totalAvailable));
             }
 
-            // Reserve theo thĂ¡Â»Â© tĂ¡Â»Â± FIFO
+            // Reserve theo thứ tự FIFO
             int toReserve = qtyNeeded;
             for (Inventory batch : batches) {
                 if (toReserve <= 0)
@@ -1284,7 +1284,7 @@ public class InventoryTransferService {
     }
 
     // ==========================================
-    // HELPER: GIĂ¡ÂºÂ¢I PHÄ‚â€œNG RESERVE (dÄ‚Â¹ng khi hĂ¡Â»Â§y phiĂ¡ÂºÂ¿u Ă„â€˜Ä‚Â£ Ă„â€˜Ă†Â°Ă¡Â»Â£c
+    // HELPER: GIẢI PHÓNG RESERVE (dùng khi hủy phiếu đã được
     // APPROVED/SOURCE_CONFIRMED)
     // ==========================================
     private void releaseReservedStock(InventoryTransfer transfer) {
@@ -1332,7 +1332,7 @@ public class InventoryTransferService {
                     .newBalance(Objects.requireNonNullElse(sBatch.getQuantity(), 0)
                             + Objects.requireNonNullElse(sBatch.getDefectiveQuantity(), 0))
                     .referenceCode(transfer.getTransferCode())
-                    .reason("XuĂ¡ÂºÂ¥t Ă„â€˜iĂ¡Â»Âu chuyĂ¡Â»Æ’n (PhiĂ¡ÂºÂ¿u: " + transfer.getTransferCode() + ")")
+                    .reason("Xuất điều chuyển (Phiếu: " + transfer.getTransferCode() + ")")
                     .createdAt(LocalDateTime.now())
                     .inventory(sBatch)
                     .build());
@@ -1413,7 +1413,7 @@ public class InventoryTransferService {
                 .newBalance(Objects.requireNonNullElse(inv.getQuantity(), 0)
                         + Objects.requireNonNullElse(inv.getDefectiveQuantity(), 0))
                 .referenceCode(transfer.getTransferCode())
-                .reason("NhĂ¡ÂºÂ­p Ă„â€˜iĂ¡Â»Âu chuyĂ¡Â»Æ’n QC (PhiĂ¡ÂºÂ¿u: " + transfer.getTransferCode() + ")")
+                .reason("Nhập điều chuyển QC (Phiếu: " + transfer.getTransferCode() + ")")
                 .createdAt(LocalDateTime.now())
                 .inventory(inv)
                 .build());
@@ -1490,17 +1490,17 @@ public class InventoryTransferService {
     }
 
     // ==========================================
-    // HÄ‚â‚¬M LĂ¡ÂºÂ¤Y CHI TIĂ¡ÂºÂ¾T
+    // HÀM LẤY CHI TIẾT
     // ==========================================
     public TransferDetailResponse getById(Long id) {
         InventoryTransfer transfer = transferRepo.findByIdWithDetails(id)
-                .orElseThrow(() -> new RuntimeException("KhÄ‚Â´ng tÄ‚Â¬m thĂ¡ÂºÂ¥y phiĂ¡ÂºÂ¿u Ă„â€˜iĂ¡Â»Âu chuyĂ¡Â»Æ’n ID: " + id));
+                .orElseThrow(() -> new RuntimeException("Không tìm thấy phiếu điều chuyển ID: " + id));
         assertTransferParticipantAccess(transfer);
         return convertToDetailResponse(transfer);
     }
 
     // ==========================================
-    // HÄ‚â‚¬M LĂ¡ÂºÂ¤Y DANH SÄ‚ÂCH
+    // HÀM LẤY DANH SÁCH
     // ==========================================
     public Page<TransferResponse> getTransfers(String keyword, String statusStr, Pageable pageable) {
         InventoryTransferStatus status = null;
@@ -1519,14 +1519,14 @@ public class InventoryTransferService {
     @Transactional
     public void rejectTransfer(Long id) {
         InventoryTransfer transfer = transferRepo.findById(id)
-                .orElseThrow(() -> new RuntimeException("KhÄ‚Â´ng tÄ‚Â¬m thĂ¡ÂºÂ¥y phiĂ¡ÂºÂ¿u Ă„â€˜iĂ¡Â»Âu chuyĂ¡Â»Æ’n"));
+                .orElseThrow(() -> new RuntimeException("Không tìm thấy phiếu điều chuyển"));
 
-        // Cho phÄ‚Â©p tĂ¡Â»Â« chĂ¡Â»â€˜i Ă¡Â»Å¸ cĂ¡ÂºÂ£ PENDING vÄ‚Â  SOURCE_CONFIRMED
+        // Cho phép từ chối ở cả PENDING và SOURCE_CONFIRMED
         if (transfer.getStatus() != InventoryTransferStatus.PENDING
                 && transfer.getStatus() != InventoryTransferStatus.SOURCE_CONFIRMED) {
-            throw new RuntimeException("ChĂ¡Â»â€° cÄ‚Â³ thĂ¡Â»Æ’ tĂ¡Â»Â« chĂ¡Â»â€˜i phiĂ¡ÂºÂ¿u Ă„â€˜ang Ă¡Â»Å¸ trĂ¡ÂºÂ¡ng thÄ‚Â¡i ChĂ¡Â»Â duyĂ¡Â»â€¡t hoĂ¡ÂºÂ·c ChĂ¡Â»Â xÄ‚Â¡c nhĂ¡ÂºÂ­n nguĂ¡Â»â€œn!");
+            throw new RuntimeException("Chỉ có thể từ chối phiếu đang ở trạng thái Chờ duyệt hoặc Chờ xác nhận nguồn!");
         }
-        // GiĂ¡ÂºÂ£i phÄ‚Â³ng reservation nĂ¡ÂºÂ¿u Branch A Ă„â€˜Ä‚Â£ confirm
+        // Giải phóng reservation nếu Branch A đã confirm
         if (transfer.getStatus() == InventoryTransferStatus.SOURCE_CONFIRMED) {
             releaseReservedStock(transfer);
         }
@@ -1539,14 +1539,14 @@ public class InventoryTransferService {
         InventoryTransfer transfer = transferRepo.findById(id).orElseThrow();
         if (transfer.getStatus() == InventoryTransferStatus.COMPLETED
                 || transfer.getStatus() == InventoryTransferStatus.CANCELLED) {
-            throw new RuntimeException("KhÄ‚Â´ng thĂ¡Â»Æ’ hĂ¡Â»Â§y phiĂ¡ÂºÂ¿u Ă„â€˜Ä‚Â£ hoÄ‚Â n thÄ‚Â nh hoĂ¡ÂºÂ·c Ă„â€˜Ä‚Â£ hĂ¡Â»Â§y!");
+            throw new RuntimeException("Không thể hủy phiếu đã hoàn thành hoặc đã hủy!");
         }
         if (transfer.getStatus() == InventoryTransferStatus.SHIPPING
                 || transfer.getStatus() == InventoryTransferStatus.INSPECTING) {
             throw new RuntimeException(
-                    "KhÄ‚Â´ng thĂ¡Â»Æ’ hĂ¡Â»Â§y phiĂ¡ÂºÂ¿u Ă„â€˜ang vĂ¡ÂºÂ­n chuyĂ¡Â»Æ’n hoĂ¡ÂºÂ·c Ă„â€˜ang kiĂ¡Â»Æ’m hÄ‚Â ng. Vui lÄ‚Â²ng liÄ‚Âªn hĂ¡Â»â€¡ nguoi co quyen duyet.");
+                    "Không thể hủy phiếu đang vận chuyển hoặc đang kiểm hàng. Vui lòng liên hệ người có quyền duyệt.");
         }
-        // NĂ¡ÂºÂ¿u Ă„â€˜Ä‚Â£ Reserve kho (APPROVED hoĂ¡ÂºÂ·c SOURCE_CONFIRMED) thÄ‚Â¬ phĂ¡ÂºÂ£i giĂ¡ÂºÂ£i phÄ‚Â³ng
+        // Nếu đã Reserve kho (APPROVED hoặc SOURCE_CONFIRMED) thì phải giải phóng
         if (transfer.getStatus() == InventoryTransferStatus.APPROVED
                 || transfer.getStatus() == InventoryTransferStatus.SOURCE_CONFIRMED) {
             releaseReservedStock(transfer);
@@ -1579,22 +1579,22 @@ public class InventoryTransferService {
     public void deleteTransfer(Long id) {
         InventoryTransfer transfer = transferRepo.findById(id).orElseThrow();
         if (transfer.getStatus() != InventoryTransferStatus.PENDING) {
-            throw new RuntimeException("ChĂ¡Â»â€° cÄ‚Â³ thĂ¡Â»Æ’ xÄ‚Â³a hoÄ‚Â n toÄ‚Â n phiĂ¡ÂºÂ¿u Ă„â€˜ang Ă¡Â»Å¸ trĂ¡ÂºÂ¡ng thÄ‚Â¡i ChĂ¡Â»Â xuĂ¡ÂºÂ¥t (PENDING)!");
+            throw new RuntimeException("Chỉ có thể xóa hoàn toàn phiếu đang ở trạng thái Chờ xuất (PENDING)!");
         }
         transferRepo.delete(transfer);
     }
 
     // ==========================================
-    // MERGE HÄ‚â‚¬NG VÄ‚â‚¬O PHIĂ¡ÂºÂ¾U Ă„ÂANG PENDING (GOM Ă„ÂĂ†Â N)
+    // MERGE HÀNG VÀO PHIẾU ĐANG PENDING (GOM ĐƠN)
     // ==========================================
 
     /**
-     * GĂ¡Â»â„¢p thÄ‚Âªm hÄ‚Â ng hÄ‚Â³a ({sku Ă¢â€ â€™ qty}) vÄ‚Â o phiĂ¡ÂºÂ¿u Ă„â€˜iĂ¡Â»Âu chuyĂ¡Â»Æ’n Ă„â€˜ang PENDING.
+     * Gộp thêm hàng hóa ({sku → qty}) vào phiếu điều chuyển đang PENDING.
      * <p>
-     * Quy tĂ¡ÂºÂ¯c:
-     * - NĂ¡ÂºÂ¿u SKU Ă„â€˜Ä‚Â£ cÄ‚Â³ trong phiĂ¡ÂºÂ¿u Ă¢â€ â€™ cĂ¡Â»â„¢ng thÄ‚Âªm quantity
-     * - NĂ¡ÂºÂ¿u SKU chĂ†Â°a cÄ‚Â³ Ă¢â€ â€™ thÄ‚Âªm dÄ‚Â²ng detail mĂ¡Â»â€ºi
-     * - CĂ¡ÂºÂ­p nhĂ¡ÂºÂ­t lĂ¡ÂºÂ¡i totalQuantity vÄ‚Â  totalValue (tÄ‚Â­nh theo giÄ‚Â¡ vĂ¡Â»â€˜n FIFO kho xuĂ¡ÂºÂ¥t)
+     * Quy tắc:
+     * - Nếu SKU đã có trong phiếu → cộng thêm quantity
+     * - Nếu SKU chưa có → thêm dòng detail mới
+     * - Cập nhật lại totalQuantity và totalValue (tính theo giá vốn FIFO kho xuất)
      */
     @Transactional
     public void mergeItemsIntoTransfer(InventoryTransfer transfer,
@@ -1616,7 +1616,7 @@ public class InventoryTransferService {
             if (variant == null)
                 continue;
 
-            // TÄ‚Â¬m dÄ‚Â²ng chi tiĂ¡ÂºÂ¿t hiĂ¡Â»â€¡n tĂ¡ÂºÂ¡i trong phiĂ¡ÂºÂ¿u
+            // Tìm dòng chi tiết hiện tại trong phiếu
             com.zone.agri.entity.InventoryTransferDetail existing = transferDetailRepo
                     .findByInventoryTransferIdAndProductVariantId(
                             transfer.getId(), variant.getId())
@@ -1640,11 +1640,11 @@ public class InventoryTransferService {
                 transferDetailRepo.save(newDetail);
             }
 
-            // CĂ¡Â»â„¢ng thÄ‚Âªm giÄ‚Â¡ trĂ¡Â»â€¹ FIFO cĂ¡Â»Â§a lÄ‚Â´ hÄ‚Â ng mĂ¡Â»â€ºi vÄ‚Â o totalValue
+            // Cộng thêm giá trị FIFO của lô hàng mới vào totalValue
             addedValue = addedValue.add(estimateFifoValue(fromBranchId, variant.getId(), addQty));
         }
 
-        // CĂ¡ÂºÂ­p nhĂ¡ÂºÂ­t totals trĂ¡Â»Â±c tiĂ¡ÂºÂ¿p trÄ‚Âªn transfer
+        // Cập nhật totals trực tiếp trên transfer
         int newTotalQty = transferDetailRepo.findByInventoryTransferId(transfer.getId())
                 .stream().mapToInt(d -> Objects.requireNonNullElse(d.getQuantity(), 0)).sum();
         transfer.setTotalQuantity(newTotalQty);
@@ -1655,7 +1655,7 @@ public class InventoryTransferService {
                 skuQuantities.size(), transfer.getTransferCode(), newTotalQty);
     }
 
-    /** Ă†Â¯Ă¡Â»â€ºc tÄ‚Â­nh giÄ‚Â¡ trĂ¡Â»â€¹ FIFO cho qty Ă„â€˜Ă†Â¡n vĂ¡Â»â€¹ cĂ¡Â»Â§a mĂ¡Â»â„¢t variant tĂ¡ÂºÂ¡i kho xuĂ¡ÂºÂ¥t. */
+    /** Ước tính giá trị FIFO cho qty đơn vị của một variant tại kho xuất. */
     private BigDecimal estimateFifoValue(Long fromBranchId, Long variantId, int qty) {
         List<Inventory> batches = inventoryRepo.findByProductVariantId(variantId).stream()
                 .filter(inv -> inv.getBranch().getId().equals(fromBranchId)
@@ -1677,7 +1677,7 @@ public class InventoryTransferService {
     }
 
     // ==========================================
-    // HÄ‚â‚¬M CONVERT DTO (PRIVATE)
+    // HÀM CONVERT DTO (PRIVATE)
     // ==========================================
     private String safeUserName(User user) {
         return user != null && user.getFullName() != null && !user.getFullName().isBlank()
@@ -1716,12 +1716,12 @@ public class InventoryTransferService {
 
     private String buildAutoReplenishmentDescription(SubOrder subOrder) {
         String orderCode = subOrder.getOrder() != null ? subOrder.getOrder().getCode() : "N/A";
-        String branchName = subOrder.getBranch() != null ? subOrder.getBranch().getName() : "chi nhanh nhan";
-        return "Tu dong tao tu don thieu hang " + orderCode + " cho " + branchName;
+        String branchName = subOrder.getBranch() != null ? subOrder.getBranch().getName() : "chi nhánh nhận";
+        return "Tự động tạo từ đơn thiếu hàng " + orderCode + " cho " + branchName;
     }
 
     private String buildAutoReplenishmentDescription(String referenceCode, Branch destinationBranch) {
-        return "Tu dong tao tu don thieu hang "
+        return "Tự động tạo từ đơn thiếu hàng "
                 + referenceCode
                 + " cho "
                 + safeBranchName(destinationBranch);
@@ -1877,7 +1877,7 @@ public class InventoryTransferService {
                         .variantId(d.getProductVariant().getId())
                         .productName(d.getProductVariant().getProduct().getName())
                         .sku(d.getProductVariant().getSku())
-                        .unit("Cai")
+                        .unit("Cái")
                         .quantityRequested(d.getQuantityRequested())
                         .quantityReal(d.getQuantityReal())
                         .quantityAccepted(d.getQuantityAccepted())
@@ -1904,7 +1904,7 @@ public class InventoryTransferService {
             return Double.MAX_VALUE;
         }
 
-        final int EARTH_RADIUS = 6371; // BÄ‚Â¡n kÄ‚Â­nh TrÄ‚Â¡i Ă„ÂĂ¡ÂºÂ¥t tÄ‚Â­nh bĂ¡ÂºÂ±ng km
+        final int EARTH_RADIUS = 6371; // Bán kính Trái Đất tính bằng km
 
         double dLat = Math.toRadians(lat2 - lat1);
         double dLng = Math.toRadians(lng2 - lng1);

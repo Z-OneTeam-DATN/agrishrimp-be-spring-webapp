@@ -9,6 +9,8 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.time.LocalDate;
+import java.time.YearMonth;
 import java.util.List;
 
 @RestController
@@ -46,8 +48,23 @@ public class DashboardController {
     public ResponseEntity<MonthlyBusinessResultsResponse> getMonthlyResults(
             @RequestParam(required = false) Long branchId,
             @RequestParam(required = false)
-            @org.springframework.format.annotation.DateTimeFormat(pattern = "yyyy-MM") java.time.YearMonth yearMonth) {
+            @org.springframework.format.annotation.DateTimeFormat(pattern = "yyyy-MM") YearMonth yearMonth) {
         return ResponseEntity.ok(dashboardService.getMonthlyResults(branchId, yearMonth));
+    }
+
+    @Operation(summary = "Kết quả kinh doanh theo khoảng ngày hoặc khoảng tháng")
+    @GetMapping("/business-results")
+    public ResponseEntity<MonthlyBusinessResultsResponse> getBusinessResults(
+            @RequestParam(required = false) Long branchId,
+            @RequestParam(required = false)
+            @org.springframework.format.annotation.DateTimeFormat(iso = org.springframework.format.annotation.DateTimeFormat.ISO.DATE) LocalDate startDate,
+            @RequestParam(required = false)
+            @org.springframework.format.annotation.DateTimeFormat(iso = org.springframework.format.annotation.DateTimeFormat.ISO.DATE) LocalDate endDate,
+            @RequestParam(required = false)
+            @org.springframework.format.annotation.DateTimeFormat(pattern = "yyyy-MM") YearMonth startMonth,
+            @RequestParam(required = false)
+            @org.springframework.format.annotation.DateTimeFormat(pattern = "yyyy-MM") YearMonth endMonth) {
+        return ResponseEntity.ok(dashboardService.getBusinessResults(branchId, startDate, endDate, startMonth, endMonth));
     }
 
     @Operation(summary = "Hoạt động gần đây")
