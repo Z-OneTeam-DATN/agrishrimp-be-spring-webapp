@@ -709,7 +709,7 @@ public class InventoryService {
 
     private PurchaseRequest resolveLinkedPurchaseRequestForCreate(InventoryReceiptRequest request) {
         if (request.getPurchaseRequestId() == null) {
-            throw new BadRequestException("Phiáº¿u nháº­p nhĂ  cung cáº¥p báº¯t buá»™c pháº£i liĂªn káº¿t vá»›i phiáº¿u yĂªu cáº§u mua.");
+            throw new BadRequestException("Phiếu nhập nhà cung cấp bắt buộc phải liên kết với phiếu yêu cầu mua.");
         }
         PurchaseRequest pr = purchaseRequestRepository.findByIdWithDetails(request.getPurchaseRequestId())
                 .orElseThrow(() -> new NotFoundException("Không tìm thấy phiếu yêu cầu mua ID: " + request.getPurchaseRequestId()));
