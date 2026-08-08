@@ -28,7 +28,6 @@ public class VoucherRequest {
     @NotNull(message = "Loại giảm giá không được để trống")
     private VoucherDiscountType discountType;
 
-    // ĐÃ ĐỔI THÀNH value
     @NotNull(message = "Giá trị giảm giá không được để trống")
     @Min(value = 0, message = "Giá trị giảm giá phải lớn hơn hoặc bằng 0")
     private BigDecimal value;
@@ -36,9 +35,8 @@ public class VoucherRequest {
     @Min(value = 0, message = "Giảm tối đa phải lớn hơn hoặc bằng 0")
     private BigDecimal maxDiscount;
 
-    // ĐÃ ĐỔI THÀNH maxUsagePerUser
-    @NotNull(message = "Số lần sử dụng tối đa mỗi người không được để trống")
-    @Positive(message = "Số lần sử dụng tối đa phải lớn hơn 0")
+    @NotNull(message = "Lượt dùng tối đa mỗi người không được để trống")
+    @Positive(message = "Lượt dùng tối đa mỗi người phải lớn hơn 0")
     private Integer maxUsagePerUser;
 
     @NotNull(message = "Giá trị đơn hàng tối thiểu không được để trống")

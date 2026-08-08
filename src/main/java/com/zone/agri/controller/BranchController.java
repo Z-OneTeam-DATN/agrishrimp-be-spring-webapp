@@ -124,7 +124,10 @@ public class BranchController {
             @Valid @RequestBody FindNearestBranchRequest request) {
 
         List<BranchSearchService.BranchWithRealDistance> nearest =
-                branchSearchService.findNearestBranches(request.getLat(), request.getLng());
+                branchSearchService.findNearestBranches(
+                        request.getLat(),
+                        request.getLng(),
+                        request.getRadiusKm());
 
         List<NearestBranchResponse> response = nearest.stream()
                 .limit(request.getLimit() != null ? request.getLimit() : 5)

@@ -1,6 +1,7 @@
 package com.zone.agri.controller;
 
 import com.zone.agri.dto.response.admin.AttributeDTO;
+import com.zone.agri.entity.enums.AttributeStatus;
 import com.zone.agri.security.annotation.RequirePermission;
 import com.zone.agri.service.AttributeService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -30,8 +31,10 @@ public class AttributeController {
     @SecurityRequirement(name = "bearerAuth")
     @RequirePermission("ATTRIBUTE_VIEW")
     @GetMapping
-    public ResponseEntity<List<AttributeDTO>> getAll() {
-        return ResponseEntity.ok(service.getAll());
+    public ResponseEntity<List<AttributeDTO>> getAll(
+            @RequestParam(required = false) String keyword,
+            @RequestParam(required = false) AttributeStatus status) {
+        return ResponseEntity.ok(service.getAll(keyword, status));
     }
 
     @Operation(summary = "Chi tiết thuộc tính", description = "Lấy thông tin chi tiết và các giá trị con của một thuộc tính.")

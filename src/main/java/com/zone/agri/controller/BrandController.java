@@ -3,6 +3,7 @@ package com.zone.agri.controller;
 import com.zone.agri.dto.request.product.BrandRequest;
 import com.zone.agri.dto.response.common.ApiResponse;
 import com.zone.agri.dto.response.product.BrandResponse;
+import com.zone.agri.entity.enums.BrandStatus;
 import com.zone.agri.security.annotation.RequirePermission;
 import com.zone.agri.service.BrandService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -32,8 +33,9 @@ public class BrandController {
     @RequirePermission("PRODUCT_VIEW")
     @GetMapping
     public ResponseEntity<ApiResponse<List<BrandResponse>>> getAll(
-            @RequestParam(required = false) String keyword) {
-        List<BrandResponse> data = brandService.getAllBrands(keyword);
+            @RequestParam(required = false) String keyword,
+            @RequestParam(required = false) BrandStatus status) {
+        List<BrandResponse> data = brandService.getAllBrands(keyword, status);
         ApiResponse<List<BrandResponse>> response = ApiResponse.success(data, "Lấy danh sách thương hiệu thành công");
         return ResponseEntity.ok(response);
     }

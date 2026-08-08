@@ -4,6 +4,7 @@ import com.zone.agri.dto.response.geo.CoordinateDto;
 import com.zone.agri.dto.response.geo.RoutingResult;
 import com.zone.agri.entity.Branch;
 import com.zone.agri.entity.enums.BranchStatus;
+import com.zone.agri.exception.BadRequestException;
 import com.zone.agri.repository.BranchRepository;
 import com.zone.agri.utils.HaversineUtils;
 import lombok.RequiredArgsConstructor;
@@ -59,7 +60,8 @@ public class BranchSearchService {
      * ORS chỉ được gọi cho top {@code orsTopN} gần nhất; các chi nhánh còn lại
      * dùng Haversine estimate để tránh tốn API quota.
      */
-    public List<BranchWithRealDistance> findNearestBranches(double userLat, double userLng) {
+    public List<BranchWithRealDistance> findNearestBranches(double userLat, double userLng, Integer radiusKm) {
+        validateCoordinates(userLat, userLng);
         List<Branch> allActive = branchRepository.findByStatus(BranchStatus.ACTIVE);
 
         if (allActive.isEmpty()) {
@@ -69,6 +71,13 @@ public class BranchSearchService {
 
         // Haversine sort toàn bộ (không giới hạn)
         List<BranchWithDistance> sorted = sortByHaversine(userLat, userLng, allActive);
+        int effectiveRadiusKm = radiusKm != null && radiusKm > 0 ? radiusKm : 15;
+        sorted = sorted.stream()
+                .filter(candidate -> candidate.distanceKm() <= effectiveRadiusKm)
+                .toList();
+        if (sorted.isEmpty()) {
+            return List.of();
+        }
 
         // ORS enrich top N, Haversine fallback cho phần còn lại
         return enrichWithRealDistance(userLat, userLng, sorted);
@@ -193,8 +202,20 @@ public class BranchSearchService {
             result.add(createRealDistance(bwd, 999_999));
         }
 
-        result.sort(Comparator.comparingDouble(BranchWithRealDistance::durationSeconds));
+        result.sort(Comparator.comparingDouble(BranchWithRealDistance::durationSeconds)
+                .thenComparingDouble(BranchWithRealDistance::distanceKm)
+                .thenComparing(candidate -> candidate.branch().getId(), Comparator.nullsLast(Long::compareTo)));
         return result;
+    }
+
+    private void validateCoordinates(double userLat, double userLng) {
+        if (Double.isNaN(userLat) || Double.isNaN(userLng)
+                || Double.isInfinite(userLat) || Double.isInfinite(userLng)) {
+            throw new BadRequestException("Tọa độ không hợp lệ");
+        }
+        if (userLat < -90 || userLat > 90 || userLng < -180 || userLng > 180) {
+            throw new BadRequestException("Tọa độ không hợp lệ");
+        }
     }
 
     private double estimateDuration(double distanceKm) {

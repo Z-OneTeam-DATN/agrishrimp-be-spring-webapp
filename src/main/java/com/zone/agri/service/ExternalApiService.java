@@ -60,6 +60,8 @@ public class ExternalApiService {
     private static final String FIELD_ISSUE_DATE = "issueDate";
     private static final String FIELD_TAX_AUTHORITY = "taxAuthority";
     private static final String FIELD_MAIN_BUSINESS_SECTOR = "mainBusinessSector";
+    private static final long TAX_LOOKUP_SOURCE_TIMEOUT_SECONDS = 6;
+    private static final long TAX_LOOKUP_TOTAL_TIMEOUT_SECONDS = 7;
 
     public VietQrResponse.BusinessData getBusinessByTaxCode(String taxCode) {
         String normalizedTaxCode = taxCode == null ? "" : taxCode.trim();
@@ -71,54 +73,62 @@ public class ExternalApiService {
         Map<String, String> rawByField = new LinkedHashMap<>();
         Map<String, String> fieldSources = new LinkedHashMap<>();
 
-        // Start all fetches in parallel
-        CompletableFuture<Optional<VietQrResponse.BusinessData>> vietQrFuture = CompletableFuture.supplyAsync(() -> fetchFromVietQr(normalizedTaxCode));
-        CompletableFuture<Optional<VietQrResponse.BusinessData>> esgooFuture = CompletableFuture.supplyAsync(() -> fetchFromEsgoo(normalizedTaxCode));
-        CompletableFuture<Optional<VietQrResponse.BusinessData>> ttdnFuture = CompletableFuture.supplyAsync(() -> fetchFromThongTinDoanhNghiep(normalizedTaxCode));
-        CompletableFuture<Optional<VietQrResponse.BusinessData>> xInvoiceFuture = CompletableFuture.supplyAsync(() -> fetchFromXInvoice(normalizedTaxCode));
-        CompletableFuture<Optional<VietQrResponse.BusinessData>> doanhNghiepFuture = CompletableFuture.supplyAsync(() -> fetchFromDoanhNghiepBiz(normalizedTaxCode));
-        CompletableFuture<Optional<VietQrResponse.BusinessData>> masothueFuture = CompletableFuture.supplyAsync(() -> fetchFromMasoThueCom(normalizedTaxCode));
-        CompletableFuture<Optional<VietQrResponse.BusinessData>> hosoCongTyFuture = CompletableFuture.supplyAsync(() -> fetchFromHosoCongTy(normalizedTaxCode));
-        CompletableFuture<Optional<VietQrResponse.BusinessData>> internalFuture = CompletableFuture.supplyAsync(() -> fetchFromInternalSupplier(normalizedTaxCode));
+        CompletableFuture<Optional<VietQrResponse.BusinessData>> vietQrFuture =
+                supplyTaxLookupAsync("VIETQR", () -> fetchFromVietQr(normalizedTaxCode));
+        CompletableFuture<Optional<VietQrResponse.BusinessData>> esgooFuture =
+                supplyTaxLookupAsync("ESGOO", () -> fetchFromEsgoo(normalizedTaxCode));
+        CompletableFuture<Optional<VietQrResponse.BusinessData>> ttdnFuture =
+                supplyTaxLookupAsync("THONG_TIN_DOANH_NGHIEP", () -> fetchFromThongTinDoanhNghiep(normalizedTaxCode));
+        CompletableFuture<Optional<VietQrResponse.BusinessData>> xInvoiceFuture =
+                supplyTaxLookupAsync("XINVOICE", () -> fetchFromXInvoice(normalizedTaxCode));
+        CompletableFuture<Optional<VietQrResponse.BusinessData>> doanhNghiepFuture =
+                supplyTaxLookupAsync("DOANH_NGHIEP_BIZ", () -> fetchFromDoanhNghiepBiz(normalizedTaxCode));
+        CompletableFuture<Optional<VietQrResponse.BusinessData>> masothueFuture =
+                supplyTaxLookupAsync("MA_SO_THUE", () -> fetchFromMasoThueCom(normalizedTaxCode));
+        CompletableFuture<Optional<VietQrResponse.BusinessData>> hosoCongTyFuture =
+                supplyTaxLookupAsync("HOSO_CONG_TY", () -> fetchFromHosoCongTy(normalizedTaxCode));
+        CompletableFuture<Optional<VietQrResponse.BusinessData>> internalFuture =
+                supplyTaxLookupAsync("INTERNAL_SUPPLIER", () -> fetchFromInternalSupplier(normalizedTaxCode));
 
-        // Wait for all fetches to complete, or time out after 10 seconds
         try {
             CompletableFuture.allOf(vietQrFuture, esgooFuture, ttdnFuture, xInvoiceFuture, doanhNghiepFuture, masothueFuture, hosoCongTyFuture, internalFuture)
-                    .get(10, TimeUnit.SECONDS);
+                    .get(TAX_LOOKUP_TOTAL_TIMEOUT_SECONDS, TimeUnit.SECONDS);
         } catch (Exception e) {
-            log.warn("One or more tax code APIs timed out or failed to complete in 10s: {}", e.getMessage());
+            log.warn("One or more tax code APIs timed out or failed to complete in {}s: {}",
+                    TAX_LOOKUP_TOTAL_TIMEOUT_SECONDS,
+                    e.getMessage());
         }
 
         // Gather completed results in priority order
-        Optional<VietQrResponse.BusinessData> doanhNghiepData = joinFuture(doanhNghiepFuture);
+        Optional<VietQrResponse.BusinessData> doanhNghiepData = getCompletedLookup(doanhNghiepFuture);
         queriedSources.add("DOANH_NGHIEP_BIZ");
         doanhNghiepData.ifPresent(data -> absorbData(data, "DOANH_NGHIEP_BIZ", rawByField, fieldSources));
 
-        Optional<VietQrResponse.BusinessData> masothueData = joinFuture(masothueFuture);
+        Optional<VietQrResponse.BusinessData> masothueData = getCompletedLookup(masothueFuture);
         queriedSources.add("MA_SO_THUE");
         masothueData.ifPresent(data -> absorbData(data, "MA_SO_THUE", rawByField, fieldSources));
 
-        Optional<VietQrResponse.BusinessData> hosoCongTyData = joinFuture(hosoCongTyFuture);
+        Optional<VietQrResponse.BusinessData> hosoCongTyData = getCompletedLookup(hosoCongTyFuture);
         queriedSources.add("HOSO_CONG_TY");
         hosoCongTyData.ifPresent(data -> absorbData(data, "HOSO_CONG_TY", rawByField, fieldSources));
 
-        Optional<VietQrResponse.BusinessData> xInvoiceData = joinFuture(xInvoiceFuture);
+        Optional<VietQrResponse.BusinessData> xInvoiceData = getCompletedLookup(xInvoiceFuture);
         queriedSources.add("XINVOICE");
         xInvoiceData.ifPresent(data -> absorbData(data, "XINVOICE", rawByField, fieldSources));
 
-        Optional<VietQrResponse.BusinessData> vietQrData = joinFuture(vietQrFuture);
+        Optional<VietQrResponse.BusinessData> vietQrData = getCompletedLookup(vietQrFuture);
         queriedSources.add("VIETQR");
         vietQrData.ifPresent(data -> absorbData(data, "VIETQR", rawByField, fieldSources));
 
-        Optional<VietQrResponse.BusinessData> esgooData = joinFuture(esgooFuture);
+        Optional<VietQrResponse.BusinessData> esgooData = getCompletedLookup(esgooFuture);
         queriedSources.add("ESGOO");
         esgooData.ifPresent(data -> absorbData(data, "ESGOO", rawByField, fieldSources));
 
-        Optional<VietQrResponse.BusinessData> ttdnData = joinFuture(ttdnFuture);
+        Optional<VietQrResponse.BusinessData> ttdnData = getCompletedLookup(ttdnFuture);
         queriedSources.add("THONG_TIN_DOANH_NGHIEP");
         ttdnData.ifPresent(data -> absorbData(data, "THONG_TIN_DOANH_NGHIEP", rawByField, fieldSources));
 
-        Optional<VietQrResponse.BusinessData> internalData = joinFuture(internalFuture);
+        Optional<VietQrResponse.BusinessData> internalData = getCompletedLookup(internalFuture);
         queriedSources.add("INTERNAL_SUPPLIER");
         internalData.ifPresent(data -> absorbData(data, "INTERNAL_SUPPLIER", rawByField, fieldSources));
 
@@ -183,11 +193,23 @@ public class ExternalApiService {
         return merged;
     }
 
-    private Optional<VietQrResponse.BusinessData> joinFuture(CompletableFuture<Optional<VietQrResponse.BusinessData>> future) {
+    private CompletableFuture<Optional<VietQrResponse.BusinessData>> supplyTaxLookupAsync(
+            String source,
+            java.util.function.Supplier<Optional<VietQrResponse.BusinessData>> supplier) {
+        return CompletableFuture
+                .supplyAsync(supplier)
+                .completeOnTimeout(Optional.empty(), TAX_LOOKUP_SOURCE_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+                .exceptionally(e -> {
+                    log.debug("Tax lookup source {} failed: {}", source, e.getMessage());
+                    return Optional.empty();
+                });
+    }
+
+    private Optional<VietQrResponse.BusinessData> getCompletedLookup(CompletableFuture<Optional<VietQrResponse.BusinessData>> future) {
         try {
-            return future.get(4, TimeUnit.SECONDS);
+            return future.getNow(Optional.empty());
         } catch (Exception e) {
-            log.debug("Error joining future: {}", e.getMessage());
+            log.debug("Error reading tax lookup future: {}", e.getMessage());
         }
         return Optional.empty();
     }

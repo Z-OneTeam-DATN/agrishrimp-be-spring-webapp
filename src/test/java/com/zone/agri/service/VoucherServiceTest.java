@@ -175,6 +175,62 @@ class VoucherServiceTest {
     }
 
     @Test
+    void getAllVouchers_shouldFilterByDerivedActiveStatus() {
+        Voucher activeVoucher = Voucher.builder()
+                .id(1L)
+                .code("ACTIVE10")
+                .title("Active voucher")
+                .discountType(VoucherDiscountType.FIXED)
+                .value(new BigDecimal("10000"))
+                .maxUsagePerUser(1)
+                .minOrderValue(BigDecimal.ZERO)
+                .startDate(LocalDateTime.now().minusDays(1))
+                .endDate(LocalDateTime.now().plusDays(1))
+                .quantity(10)
+                .status(VoucherStatus.ACTIVE)
+                .build();
+
+        Voucher inactiveVoucher = Voucher.builder()
+                .id(2L)
+                .code("INACTIVE10")
+                .title("Inactive voucher")
+                .discountType(VoucherDiscountType.FIXED)
+                .value(new BigDecimal("10000"))
+                .maxUsagePerUser(1)
+                .minOrderValue(BigDecimal.ZERO)
+                .startDate(LocalDateTime.now().minusDays(1))
+                .endDate(LocalDateTime.now().plusDays(1))
+                .quantity(10)
+                .status(VoucherStatus.INACTIVE)
+                .build();
+
+        Voucher expiredVoucher = Voucher.builder()
+                .id(3L)
+                .code("EXPIRED10")
+                .title("Expired voucher")
+                .discountType(VoucherDiscountType.FIXED)
+                .value(new BigDecimal("10000"))
+                .maxUsagePerUser(1)
+                .minOrderValue(BigDecimal.ZERO)
+                .startDate(LocalDateTime.now().minusDays(3))
+                .endDate(LocalDateTime.now().minusHours(1))
+                .quantity(10)
+                .status(VoucherStatus.ACTIVE)
+                .build();
+
+        when(voucherRepository.searchVouchers(any(), any())).thenReturn(List.of(
+                activeVoucher,
+                inactiveVoucher,
+                expiredVoucher));
+
+        List<VoucherResponse> responses = voucherService.getAllVouchers(null, VoucherStatus.ACTIVE);
+
+        assertThat(responses).hasSize(1);
+        assertThat(responses.get(0).getCode()).isEqualTo("ACTIVE10");
+        assertThat(responses.get(0).getStatus()).isEqualTo(VoucherStatus.ACTIVE);
+    }
+
+    @Test
     void getVoucherByCode_shouldReturnDerivedExpiredStatus() {
         Voucher voucher = Voucher.builder()
                 .id(2L)
@@ -195,6 +251,16 @@ class VoucherServiceTest {
         VoucherResponse response = voucherService.getVoucherByCode("expired");
 
         assertThat(response.getStatus()).isEqualTo(VoucherStatus.EXPIRED);
+    }
+
+    @Test
+    void createVoucher_shouldRejectZeroUsageLimit() {
+        percentVoucherRequest.setMaxUsagePerUser(0);
+        when(voucherRepository.existsByCode(anyString())).thenReturn(false);
+
+        assertThatThrownBy(() -> voucherService.createVoucher(percentVoucherRequest))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessageContaining("0");
     }
 
     private VoucherRequest buildFixedVoucherRequest(BigDecimal value) {

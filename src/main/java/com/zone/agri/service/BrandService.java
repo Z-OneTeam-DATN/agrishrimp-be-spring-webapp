@@ -14,6 +14,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.Locale;
 import java.util.stream.Collectors;
 
 @Service
@@ -34,10 +35,15 @@ public class BrandService {
     }
 
     @Transactional(readOnly = true)
-    public List<BrandResponse> getAllBrands(String keyword) {
+    public List<BrandResponse> getAllBrands(String keyword, BrandStatus status) {
+        String normalizedKeyword = normalizeBrandName(keyword);
         List<Brand> brands;
-        if (keyword != null && !keyword.trim().isEmpty()) {
-            brands = brandRepository.findByNameContainingIgnoreCaseOrderByIdDesc(keyword.trim());
+        if (normalizedKeyword != null && !normalizedKeyword.isEmpty() && status != null) {
+            brands = brandRepository.findByNameContainingIgnoreCaseAndStatusOrderByIdDesc(normalizedKeyword, status);
+        } else if (normalizedKeyword != null && !normalizedKeyword.isEmpty()) {
+            brands = brandRepository.findByNameContainingIgnoreCaseOrderByIdDesc(normalizedKeyword);
+        } else if (status != null) {
+            brands = brandRepository.findByStatusOrderByIdDesc(status);
         } else {
             brands = brandRepository.findAllByOrderByIdDesc();
         }
@@ -54,14 +60,15 @@ public class BrandService {
     }
 
     public BrandResponse createBrand(BrandRequest request) {
-        if (brandRepository.existsByNameIgnoreCase(request.getName().trim())) {
-            throw new ConflictException("Tên thương hiệu đã tồn tại: " + request.getName());
+        String normalizedName = requireBrandName(request.getName());
+        if (brandRepository.existsByNameIgnoreCase(normalizedName)) {
+            throw new ConflictException("Tên thương hiệu đã tồn tại: " + normalizedName);
         }
 
         BrandStatus status = request.getStatus() != null ? request.getStatus() : BrandStatus.ACTIVE;
 
         Brand brand = Brand.builder()
-                .name(request.getName().trim())
+                .name(normalizedName)
                 .status(status)
                 .build();
         handleImageUpload(brand, request.getLogoUrl());
@@ -74,11 +81,12 @@ public class BrandService {
         Brand brand = brandRepository.findById(id)
                 .orElseThrow(() -> new NotFoundException("Không tìm thấy thương hiệu với ID: " + id));
 
-        if (brandRepository.existsByNameIgnoreCaseAndIdNot(request.getName().trim(), id)) {
-            throw new ConflictException("Tên thương hiệu đã tồn tại: " + request.getName());
+        String normalizedName = requireBrandName(request.getName());
+        if (brandRepository.existsByNameIgnoreCaseAndIdNot(normalizedName, id)) {
+            throw new ConflictException("Tên thương hiệu đã tồn tại: " + normalizedName);
         }
 
-        brand.setName(request.getName().trim());
+        brand.setName(normalizedName);
         handleImageUpload(brand, request.getLogoUrl());
         if (request.getStatus() != null) {
             brand.setStatus(request.getStatus());
@@ -94,6 +102,23 @@ public class BrandService {
         } else {
             brand.setLogoUrl(logoUrl != null ? logoUrl.trim() : null);
         }
+    }
+
+    private String normalizeBrandName(String value) {
+        if (value == null) {
+            return null;
+        }
+
+        String normalized = value.trim().replaceAll("\\s+", " ");
+        return normalized.isEmpty() ? null : normalized;
+    }
+
+    private String requireBrandName(String value) {
+        String normalized = normalizeBrandName(value);
+        if (normalized == null) {
+            throw new BadRequestException("Tên thương hiệu không được để trống");
+        }
+        return normalized;
     }
 
     public void deleteBrand(Long id) {

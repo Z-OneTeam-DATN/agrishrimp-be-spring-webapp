@@ -12,6 +12,7 @@ import com.zone.agri.entity.enums.PaymentStatus;
 import com.zone.agri.entity.enums.StockStatus;
 import com.zone.agri.repository.OrderRepository;
 import com.zone.agri.repository.SubOrderRepository;
+import java.math.BigDecimal;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.security.InvalidKeyException;
@@ -143,10 +144,33 @@ public class PayOSService {
     }
 
     public boolean checkPaymentStatus(Order order) {
-        return checkPaymentStatus(parseOrderCode(order));
+        if (order == null) {
+            return false;
+        }
+
+        PayOSApiResponse.PayOSLinkData paymentData = fetchPaymentStatusData(parseOrderCode(order));
+        if (paymentData == null || !"PAID".equalsIgnoreCase(paymentData.getStatus())) {
+            return false;
+        }
+
+        if (!matchesExpectedAmount(order.getFinalAmount(), paymentData.getAmount())) {
+            log.warn(
+                    "PayOS amount mismatch for order {}: expected {}, actual {}",
+                    order.getCode(),
+                    order.getFinalAmount(),
+                    paymentData.getAmount());
+            return false;
+        }
+
+        return true;
     }
 
     public boolean checkPaymentStatus(long orderCode) {
+        PayOSApiResponse.PayOSLinkData paymentData = fetchPaymentStatusData(orderCode);
+        return paymentData != null && "PAID".equalsIgnoreCase(paymentData.getStatus());
+    }
+
+    private PayOSApiResponse.PayOSLinkData fetchPaymentStatusData(long orderCode) {
         try {
             String url = PAYOS_URL + "/" + orderCode;
 
@@ -162,12 +186,12 @@ public class PayOSService {
 
             PayOSApiResponse apiResponse = resp.getBody();
             if (apiResponse != null && "00".equals(apiResponse.getCode()) && apiResponse.getData() != null) {
-                return "PAID".equalsIgnoreCase(apiResponse.getData().getStatus());
+                return apiResponse.getData();
             }
         } catch (Exception e) {
             log.warn("Failed to check PayOS status for orderCode {}: {}", orderCode, e.getMessage());
         }
-        return false;
+        return null;
     }
 
     public void cancelPaymentLink(Order order) {
@@ -230,6 +254,15 @@ public class PayOSService {
 
         if (orderOpt.isPresent()) {
             Order order = orderOpt.get();
+            if (!matchesExpectedAmount(order.getFinalAmount(), webhookData != null ? webhookData.getAmount() : null)) {
+                log.warn(
+                        "Skip webhook for order {} because amount mismatch. Expected {}, actual {}",
+                        order.getCode(),
+                        order.getFinalAmount(),
+                        webhookData != null ? webhookData.getAmount() : null);
+                return;
+            }
+
             if (!PaymentStatus.PAID.equals(order.getPaymentStatus())) {
                 markOrderPaid(order);
                 log.info("Order {} marked as PAID via Webhook", order.getCode());
@@ -330,5 +363,13 @@ public class PayOSService {
 
     private String urlEncode(String value) {
         return URLEncoder.encode(value, StandardCharsets.UTF_8);
+    }
+
+    private boolean matchesExpectedAmount(BigDecimal expectedAmount, Integer actualAmount) {
+        if (expectedAmount == null || actualAmount == null) {
+            return false;
+        }
+
+        return expectedAmount.stripTrailingZeros().compareTo(BigDecimal.valueOf(actualAmount).stripTrailingZeros()) == 0;
     }
 }

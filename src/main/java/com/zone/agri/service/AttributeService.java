@@ -5,7 +5,9 @@ import com.zone.agri.dto.response.product.AttributeValueResponse;
 import com.zone.agri.entity.Attribute;
 import com.zone.agri.entity.AttributeValue;
 import com.zone.agri.entity.enums.AttributeStatus;
+import com.zone.agri.exception.BadRequestException;
 import com.zone.agri.exception.ConflictException;
+import com.zone.agri.exception.NotFoundException;
 import com.zone.agri.repository.AttributeRepository;
 import com.zone.agri.repository.AttributeValueRepository;
 import com.zone.agri.repository.SKUAttributeValueRepository;
@@ -22,6 +24,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -37,7 +40,22 @@ public class AttributeService {
 
     @Transactional(readOnly = true)
     public List<AttributeDTO> getAll() {
-        return repository.findAll().stream().map(this::toDTO).collect(Collectors.toList());
+        return getAll(null, null);
+    }
+
+    @Transactional(readOnly = true)
+    public List<AttributeDTO> getAll(String keyword, AttributeStatus status) {
+        String normalizedKeyword = normalizeText(keyword);
+        return repository.findAll().stream()
+                .filter(attribute -> normalizedKeyword == null
+                        || normalizeText(attribute.getName()).toLowerCase(Locale.forLanguageTag("vi-VN"))
+                                .contains(normalizedKeyword.toLowerCase(Locale.forLanguageTag("vi-VN"))))
+                .filter(attribute -> status == null
+                        || Objects.equals(
+                                attribute.getStatus() != null ? attribute.getStatus() : AttributeStatus.ACTIVE,
+                                status))
+                .map(this::toDTO)
+                .collect(Collectors.toList());
     }
 
     @Transactional(readOnly = true)
@@ -51,17 +69,23 @@ public class AttributeService {
     @Transactional(readOnly = true)
     public AttributeDTO getById(Long id) {
         Attribute attr = repository.findById(id)
-                .orElseThrow(() -> new RuntimeException("Khong tim thay thuoc tinh!"));
+                .orElseThrow(() -> new NotFoundException("Không tìm thấy thuộc tính"));
         return toDTO(attr);
     }
 
     @Transactional
     public AttributeDTO create(AttributeDTO dto) {
+        String normalizedName = requireAttributeName(dto.getName());
+        if (repository.existsByNameIgnoreCase(normalizedName)) {
+            throw new ConflictException("Tên thuộc tính đã tồn tại: " + normalizedName, true);
+        }
+
         dto.setCode(resolveAttributeCode(dto.getCode(), dto.getName(), null, null));
+        dto.setName(normalizedName);
 
         List<String> sanitizedValues = sanitizeDistinctValues(dto.getValues());
         if (sanitizedValues.isEmpty()) {
-            throw new ConflictException("Thuoc tinh phai co it nhat 1 gia tri!", true);
+            throw new ConflictException("Thuộc tính phải có ít nhất 1 giá trị!", true);
         }
         validateNoCrossAttributeValueConflict(sanitizedValues, null);
         dto.setValues(sanitizedValues);
@@ -74,14 +98,37 @@ public class AttributeService {
     @Transactional
     public AttributeDTO update(Long id, AttributeDTO dto) {
         Attribute attr = repository.findById(id)
-                .orElseThrow(() -> new RuntimeException("Khong tim thay thuoc tinh!"));
+                .orElseThrow(() -> new NotFoundException("Không tìm thấy thuộc tính"));
+
+        String normalizedName = requireAttributeName(dto.getName());
+        if (repository.existsByNameIgnoreCaseAndIdNot(normalizedName, id)) {
+            throw new ConflictException("Tên thuộc tính đã tồn tại: " + normalizedName, true);
+        }
+
+        dto.setName(normalizedName);
 
         dto.setCode(resolveAttributeCode(dto.getCode(), dto.getName(), id, attr.getCode()));
 
         List<String> newValues = sanitizeDistinctValues(dto.getValues());
 
         if (newValues.isEmpty()) {
-            throw new ConflictException("Thuoc tinh phai co it nhat 1 gia tri!", true);
+            throw new ConflictException("Thuộc tính phải có ít nhất 1 giá trị!", true);
+        }
+
+        Set<String> existingValueKeys = attr.getAttributeValues() == null
+                ? Set.of()
+                : attr.getAttributeValues().stream()
+                        .map(AttributeValue::getValue)
+                        .map(this::normalizeAttributeValueForCompare)
+                        .filter(value -> !value.isEmpty())
+                        .collect(Collectors.toSet());
+        boolean hasNewValues = newValues.stream()
+                .map(this::normalizeAttributeValueForCompare)
+                .anyMatch(compareKey -> !existingValueKeys.contains(compareKey));
+        AttributeStatus targetStatus = dto.getStatus() != null ? dto.getStatus() : attr.getStatus();
+        if (Boolean.TRUE.equals(hasNewValues)
+                && (attr.getStatus() == AttributeStatus.INACTIVE || targetStatus == AttributeStatus.INACTIVE)) {
+            throw new ConflictException("Không thể thêm giá trị mới vào thuộc tính đang ẩn.", true);
         }
 
         validateNoCrossAttributeValueConflict(newValues, id);
@@ -100,8 +147,8 @@ public class AttributeService {
         for (AttributeValue value : valuesToRemove) {
             if (skuAttributeValueRepository.existsByAttributeValueId(value.getId())) {
                 throw new ConflictException(
-                        "Khong the xoa gia tri '" + value.getValue()
-                                + "' vi dang duoc su dung boi bien the san pham.",
+                        "Không thể xóa giá trị '" + value.getValue()
+                                + "' vì đang được sử dụng bởi biến thể sản phẩm.",
                         true);
             }
         }
@@ -115,7 +162,7 @@ public class AttributeService {
             return toDTO(repository.saveAndFlush(attr));
         } catch (DataIntegrityViolationException e) {
             throw new ConflictException(
-                    "Khong the luu vi co gia tri thuoc tinh vua xoa dang duoc gan cho bien the san pham!",
+                    "Không thể lưu vì có giá trị thuộc tính vừa xóa đang được gán cho biến thể sản phẩm!",
                     true);
         }
     }
@@ -125,8 +172,11 @@ public class AttributeService {
         boolean isUsedInProducts = skuAttributeValueRepository.existsByAttributeId(id);
         if (isUsedInProducts) {
             throw new ConflictException(
-                    "Khong the xoa thuoc tinh nay vi no dang duoc gan cho cac bien the san pham.",
+                    "Không thể xóa thuộc tính này vì nó đang được gán cho các biến thể sản phẩm.",
                     true);
+        }
+        if (!repository.existsById(id)) {
+            throw new NotFoundException("Không tìm thấy thuộc tính");
         }
         repository.deleteById(id);
     }
@@ -225,7 +275,7 @@ public class AttributeService {
     }
 
     private void mapToEntity(Attribute entity, AttributeDTO dto) {
-        entity.setName(dto.getName());
+        entity.setName(requireAttributeName(dto.getName()));
         if (dto.getCode() != null) {
             entity.setCode(dto.getCode().trim().toUpperCase(Locale.ROOT));
         }
@@ -318,15 +368,32 @@ public class AttributeService {
             Attribute parentAttribute = attributeValue.getAttribute();
             String attributeName = parentAttribute != null && hasText(parentAttribute.getName())
                     ? parentAttribute.getName().trim()
-                    : "thuoc tinh khac";
+                    : "thuộc tính khác";
 
             throw new ConflictException(
-                    "Gia tri '" + requestedValuesByKey.get(compareKey)
-                            + "' da ton tai o thuoc tinh '" + attributeName
-                            + "' (khong phan biet hoa thuong).",
+                    "Giá trị '" + requestedValuesByKey.get(compareKey)
+                            + "' đã tồn tại ở thuộc tính '" + attributeName
+                            + "' (không phân biệt hoa thường).",
                     true
             );
         }
+    }
+
+    private String normalizeText(String value) {
+        if (value == null) {
+            return null;
+        }
+
+        String normalized = value.trim().replaceAll("\\s+", " ");
+        return normalized.isEmpty() ? null : normalized;
+    }
+
+    private String requireAttributeName(String value) {
+        String normalized = normalizeText(value);
+        if (normalized == null) {
+            throw new BadRequestException("Tên thuộc tính không được để trống");
+        }
+        return normalized;
     }
 
     private String normalizeAttributeValueForCompare(String value) {
