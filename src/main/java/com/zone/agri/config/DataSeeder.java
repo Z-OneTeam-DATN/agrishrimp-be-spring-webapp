@@ -119,8 +119,13 @@ public class DataSeeder implements CommandLineRunner {
             log.info(">>> KHỞI TẠO DỮ LIỆU NỀN TẢNG HOÀN TẤT.");
         }
 
-        // TỰ ĐỘNG SEED DỮ LIỆU MẪU BÁO CÁO TÀI CHÍNH (8 THÁNG)
-        seedFinancialDataIfEmpty();
+        if (Boolean.parseBoolean(environment.getProperty(
+                "app.startup.seed-data.financial-sample.enabled",
+                "false"))) {
+            seedFinancialDataIfEmpty();
+        } else {
+            log.info(">>> SEED DỮ LIỆU TÀI CHÍNH MẪU ĐANG TẮT.");
+        }
     }
 
     private void seedFinancialDataIfEmpty() {
