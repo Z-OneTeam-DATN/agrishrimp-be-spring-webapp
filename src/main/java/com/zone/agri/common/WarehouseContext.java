@@ -55,6 +55,10 @@ public class WarehouseContext {
             throw new SignInRequiredException("Vui lòng đăng nhập");
         }
 
+        if (isSuperAdmin()) {
+            return null;
+        }
+
         boolean hasWarehousePermission = WAREHOUSE_AUTHORITIES.stream()
                 .anyMatch(AuthUtils::hasAuthority);
         if (!hasWarehousePermission) {
@@ -68,6 +72,10 @@ public class WarehouseContext {
      * Nếu user đang bị scope theo một chi nhánh thì không được truy cập kho khác.
      */
     public void assertAccess(Long targetWarehouseId) {
+        if (isSuperAdmin()) {
+            return;
+        }
+
         Long allowed = resolveWarehouseId();
         if (allowed != null && !allowed.equals(targetWarehouseId)) {
             throw new Forbidden("Không được phép truy cập kho khác");
@@ -75,9 +83,6 @@ public class WarehouseContext {
     }
 
     public boolean isSuperAdmin() {
-        UserDetail user = AuthUtils.getUserDetail();
-        return user != null
-                && user.getBranchId() == null
-                && WAREHOUSE_AUTHORITIES.stream().anyMatch(AuthUtils::hasAuthority);
+        return RoleUtils.hasSuperAdminAuthority(AuthUtils.getAuthorities());
     }
 }
