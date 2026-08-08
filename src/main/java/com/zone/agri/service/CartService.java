@@ -7,6 +7,10 @@ import com.zone.agri.entity.Product;
 import com.zone.agri.entity.ProductVariant;
 import com.zone.agri.entity.SKUAttributeValue;
 import com.zone.agri.entity.User;
+import com.zone.agri.entity.enums.BranchStatus;
+import com.zone.agri.entity.enums.CategoryStatus;
+import com.zone.agri.entity.enums.ProductStatus;
+import com.zone.agri.entity.enums.VariantStatus;
 import com.zone.agri.exception.BadRequestException;
 import com.zone.agri.repository.CartItemRepository;
 import com.zone.agri.repository.InventoryRepository;
@@ -77,10 +81,7 @@ public class CartService {
 
             List<Inventory> batches = inventoryMap.getOrDefault(variant.getId(), List.of());
 
-            int totalStock = batches.stream()
-                    .filter(inv -> inv.getQuantity() != null && inv.getQuantity() > 0)
-                    .mapToInt(Inventory::getQuantity)
-                    .sum();
+            int totalStock = resolveSellableStock(batches, variant);
 
             Inventory fifoBatch = batches.stream()
                     .filter(inv -> inv.getQuantity() != null && inv.getQuantity() > 0)
@@ -191,6 +192,10 @@ public class CartService {
 
     @Transactional
     public void updateCartQuantity(Long userId, Long variantId, Integer delta) {
+        if (delta == null || delta == 0) {
+            throw new BadRequestException("Số lượng cập nhật không hợp lệ");
+        }
+
         User user = userRepo.findById(userId)
                 .orElseThrow(() -> new BadRequestException("Không tìm thấy User"));
         ProductVariant variant = variantRepo.findById(variantId)
@@ -212,7 +217,18 @@ public class CartService {
             return;
         }
 
-        // Cart no longer blocks by current stock. Shortage is handled later in prepare/confirm order flow.
+        assertVariantAvailableForCart(variant);
+        int sellableStock = resolveSellableStock(
+                inventoryRepository.findByProductVariantIdWithBranch(variantId),
+                variant);
+        if (sellableStock <= 0) {
+            throw new BadRequestException("Sản phẩm không còn khả dụng");
+        }
+        if (newQuantity > sellableStock) {
+            throw new BadRequestException(
+                    "Số lượng yêu cầu vượt quá tồn kho hiện có (" + sellableStock + ")");
+        }
+
         cartItem.setQuantity(newQuantity);
         cartItemRepo.save(cartItem);
     }
@@ -227,5 +243,40 @@ public class CartService {
         }
 
         cartItemRepo.delete(item);
+    }
+
+    private void assertVariantAvailableForCart(ProductVariant variant) {
+        if (variant == null) {
+            throw new BadRequestException("Không tìm thấy sản phẩm");
+        }
+        if (variant.getStatus() != VariantStatus.ACTIVE) {
+            throw new BadRequestException("Sản phẩm không còn khả dụng");
+        }
+
+        Product product = variant.getProduct();
+        if (product == null || product.getStatus() != ProductStatus.ACTIVE) {
+            throw new BadRequestException("Sản phẩm không còn khả dụng");
+        }
+        if (product.getCategory() == null
+                || product.getCategory().getStatus() != CategoryStatus.ACTIVE) {
+            throw new BadRequestException("Sản phẩm không còn khả dụng");
+        }
+    }
+
+    private int resolveSellableStock(List<Inventory> batches, ProductVariant variant) {
+        if (variant == null
+                || variant.getStatus() != VariantStatus.ACTIVE
+                || variant.getProduct() == null
+                || variant.getProduct().getStatus() != ProductStatus.ACTIVE
+                || variant.getProduct().getCategory() == null
+                || variant.getProduct().getCategory().getStatus() != CategoryStatus.ACTIVE) {
+            return 0;
+        }
+
+        return batches.stream()
+                .filter(inv -> inv.getBranch() != null && inv.getBranch().getStatus() == BranchStatus.ACTIVE)
+                .filter(inv -> inv.getQuantity() != null && inv.getQuantity() > 0)
+                .mapToInt(Inventory::getQuantity)
+                .sum();
     }
 }

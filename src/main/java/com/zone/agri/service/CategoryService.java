@@ -2,6 +2,7 @@ package com.zone.agri.service;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.stream.Collectors;
 
 import org.springframework.stereotype.Service;
@@ -29,8 +30,8 @@ public class CategoryService {
 
     @Transactional(readOnly = true)
     public List<CategoryDTO> getAllCategories(String keyword, CategoryStatus status) {
-        List<Category> categories = categoryRepository.searchCategories(keyword, status);
-        // Pre-calculate counts in batch if needed or at least minimize overhead
+        String normalizedKeyword = normalizeSearchKeyword(keyword);
+        List<Category> categories = categoryRepository.searchCategories(normalizedKeyword, status);
         return categories.stream().map(this::convertToDTO).collect(Collectors.toList());
     }
 
@@ -49,11 +50,13 @@ public class CategoryService {
 
     @Transactional
     public CategoryDTO createCategory(CategoryDTO dto) {
-        if (categoryRepository.existsByNameIgnoreCase(dto.getName())) {
-            throw new ConflictException("Tên danh mục '" + dto.getName() + "' đã tồn tại!", true);
+        String normalizedName = normalizeCategoryName(dto.getName());
+        if (categoryRepository.existsByNameIgnoreCase(normalizedName)) {
+            throw new ConflictException("Tên danh mục '" + normalizedName + "' đã tồn tại!", true);
         }
 
         Category category = new Category();
+        dto.setName(normalizedName);
         mapToEntity(category, dto);
         return convertToDTO(categoryRepository.save(category));
     }
@@ -63,11 +66,22 @@ public class CategoryService {
         Category category = categoryRepository.findById(id)
                 .orElseThrow(() -> new NotFoundException("Không tìm thấy danh mục"));
 
-        if (categoryRepository.existsByNameIgnoreCaseAndIdNot(dto.getName(), id)) {
-            throw new ConflictException("Tên danh mục '" + dto.getName() + "' đã tồn tại!", true);
+        String normalizedName = normalizeCategoryName(dto.getName());
+        if (categoryRepository.existsByNameIgnoreCaseAndIdNot(normalizedName, id)) {
+            throw new ConflictException("Tên danh mục '" + normalizedName + "' đã tồn tại!", true);
         }
 
         CategoryStatus oldStatus = category.getStatus();
+        CategoryStatus nextStatus = dto.getStatus() != null ? dto.getStatus() : oldStatus;
+        if (oldStatus == CategoryStatus.ACTIVE
+                && nextStatus == CategoryStatus.INACTIVE
+                && hasActiveDescendant(category)) {
+            throw new ConflictException(
+                    "Không thể ẩn danh mục cha khi vẫn còn danh mục con đang hiển thị.",
+                    true);
+        }
+
+        dto.setName(normalizedName);
         mapToEntity(category, dto);
 
         // Logic ẩn sản phẩm & danh mục con khi ẩn danh mục cha
@@ -104,21 +118,77 @@ public class CategoryService {
     }
 
     private void mapToEntity(Category entity, CategoryDTO dto) {
-        entity.setName(dto.getName());
-        entity.setStatus(dto.getStatus());
+        entity.setName(normalizeCategoryName(dto.getName()));
+        entity.setStatus(dto.getStatus() != null ? dto.getStatus() : CategoryStatus.ACTIVE);
         handleImageUpload(entity, dto.getImageUrl());
 
         if (dto.getParentId() != null) {
             if (entity.getId() != null && entity.getId().equals(dto.getParentId())) {
                 throw new ConflictException("Danh mục không thể làm cha của chính nó!", true);
             }
+
             Category parent = categoryRepository.findById(dto.getParentId())
                     .orElseThrow(
                             () -> new NotFoundException("Không tìm thấy danh mục cha với ID: " + dto.getParentId()));
+            if (parent.getStatus() == CategoryStatus.INACTIVE) {
+                throw new ConflictException(
+                        "Không thể tạo hoặc cập nhật danh mục con dưới danh mục cha đang ẩn.",
+                        true);
+            }
+            if (entity.getId() != null && isDescendantOf(parent, entity.getId())) {
+                throw new ConflictException(
+                        "Không thể chọn danh mục con làm danh mục cha vì sẽ tạo vòng lặp cây danh mục.",
+                        true);
+            }
             entity.setParent(parent);
         } else {
             entity.setParent(null);
         }
+    }
+
+    private String normalizeCategoryName(String name) {
+        if (name == null) {
+            return "";
+        }
+
+        return name.trim().replaceAll("\\s+", " ");
+    }
+
+    private String normalizeSearchKeyword(String keyword) {
+        if (keyword == null) {
+            return null;
+        }
+
+        String normalized = keyword.trim();
+        return normalized.isEmpty() ? null : normalized;
+    }
+
+    private boolean isDescendantOf(Category candidateParent, Long categoryId) {
+        Category current = candidateParent;
+        while (current != null) {
+            if (current.getId() != null && current.getId().equals(categoryId)) {
+                return true;
+            }
+            current = current.getParent();
+        }
+        return false;
+    }
+
+    private boolean hasActiveDescendant(Category category) {
+        List<Category> children = category.getChildren();
+        if (children == null || children.isEmpty()) {
+            return false;
+        }
+
+        for (Category child : children) {
+            if (child.getStatus() == null || child.getStatus() == CategoryStatus.ACTIVE) {
+                return true;
+            }
+            if (hasActiveDescendant(child)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private void cascadeHide(Category category) {
