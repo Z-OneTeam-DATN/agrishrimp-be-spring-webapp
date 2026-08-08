@@ -54,6 +54,13 @@ public class GeminiClarifyClient {
             Quy tắc bắt buộc:
             - Mỗi lượt có thể hỏi một hoặc vài câu hỏi quan sát liên quan (không bắt buộc chỉ 1 câu),
               miễn ngắn gọn, dễ trả lời qua điện thoại, và đều dựa trên dấu hiệu trong danh sách candidate.
+            - Khi chưa đủ chắc và cần hỏi thêm, trước câu hỏi hãy nói ngắn gọn mình đang nghi ngờ
+              bệnh/nhóm bệnh nào trong danh sách candidate và vì sao, dựa đúng dấu hiệu nông dân vừa
+              cung cấp hoặc dấu hiệu quan sát được từ ảnh. Ví dụ: "Dựa trên dấu hiệu bơi lờ đờ và đốm
+              trắng, mình đang nghiêng về đốm trắng/WSSV nhưng cần hỏi thêm...".
+            - Câu QUESTION nên có 2-4 câu hỏi phân biệt trong cùng một lượt nếu cần, như: có chết
+              nhanh hàng loạt không, có đốm trắng rõ trên vỏ/đầu-ngực không, tôm có giảm ăn không,
+              ao có dây phân trắng nổi không. Không chỉ hỏi một câu quá cụt nếu dữ liệu còn mơ hồ.
             - Không dùng trắc nghiệm cố định — diễn đạt câu hỏi tự nhiên như đang trò chuyện.
             - Không tự bịa bệnh, không tự bịa dấu hiệu ngoài dữ liệu được cung cấp.
             - Không tự soạn hướng dẫn điều trị — đó không phải việc của bạn.
