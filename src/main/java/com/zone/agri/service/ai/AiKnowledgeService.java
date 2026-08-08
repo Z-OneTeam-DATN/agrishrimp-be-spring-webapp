@@ -1366,11 +1366,10 @@ public class AiKnowledgeService {
                 && diseaseMatch.score() + 0.05D >= keywordMatch.score();
         if (diseaseWins) {
             return MatchOutcome.builder()
-                    .matched(true)
+                    .matched(false)
                     .matchType(AiKnowledgeMatchType.DISEASE_KNOWLEDGE)
-                    .knowledgeCode(diseaseMatch.disease().entity().getCode())
                     .score(diseaseMatch.score())
-                    .answerHtml(buildRequestImageAnswerHtml(diseaseMatch.disease()))
+                    .clarifyCandidates(List.of(diseaseMatch.disease()))
                     .build();
         }
 
@@ -1657,15 +1656,32 @@ public class AiKnowledgeService {
     }
 
     /**
-     * Anh gui len KHONG PHAI anh tom (mon an da nau chin, anh khong lien quan...) — co chu dich
-     * KHONG dung buildUnrecognizedDiagnosisResponse: ham do goi THEM 1 lan freeConsult() rieng,
-     * ghep 2 doan van Gemini sinh ra doc lap voi nhau (moi doan lai tu chao rieng) → cau tra loi
-     * bi thua/lap y (vd 2 lan "Chao ban"). O day chi dung DUNG 1 lan mo ta anh da co san tu
-     * describeImage() (khong goi Gemini lan 2), va khong tao review case — khong co gi de ky su
-     * xem xet tu 1 buc anh khong lien quan den chan doan.
+     * YOLO bao NON_SHRIMP nhung Gemini Vision co the van thay day la anh tom (model detect fail
+     * vi goc chup/nen anh/box khong ro). Khi narrative co dau hieu nhin thay tom, fallback sang
+     * free-consult de LLM neu nghi ngo + hoi them nhu luong cu; chi bao "gui lai anh" neu ca Gemini
+     * cung khong thay tom.
      */
     public AiDoctorDiagnosisResponse buildNonShrimpImageResponse(
-            AiPredictResponse predictResponse, String diagnosisImageUrl, String geminiImageDescription) {
+            AiPredictResponse predictResponse,
+            String diagnosisImageUrl,
+            String userSymptoms,
+            String sessionId,
+            Long userId,
+            String geminiImageDescription,
+            boolean allowReviewCase) {
+        if (looksLikeShrimpObservation(geminiImageDescription)) {
+            log.info("[AiNonShrimpFallback] YOLO NON_SHRIMP nhung Gemini thay dau hieu tom, chuyen sang tu van mo");
+            return buildUnrecognizedDiagnosisResponse(
+                    predictResponse,
+                    null,
+                    diagnosisImageUrl,
+                    userSymptoms,
+                    sessionId,
+                    userId,
+                    geminiImageDescription,
+                    allowReviewCase);
+        }
+
         String observationHtml = trimToNull(geminiImageDescription) != null
                 ? buildImageObservationPrefixHtml(geminiImageDescription, null, null)
                 : "";
@@ -1679,6 +1695,37 @@ public class AiKnowledgeService {
                 .topPredictions(toTopPredictions(predictResponse))
                 .aiDescription(html)
                 .build();
+    }
+
+    private boolean looksLikeShrimpObservation(String geminiImageDescription) {
+        String normalized = AiKnowledgeTextUtils.normalize(geminiImageDescription);
+        if (normalized == null || normalized.isBlank()) {
+            return false;
+        }
+
+        List<String> negativePhrases = List.of(
+                "khong thay tom",
+                "chua thay tom",
+                "khong co tom",
+                "khong phai tom",
+                "khong nhan dien duoc tom",
+                "khong nhin thay tom");
+        if (negativePhrases.stream().anyMatch(normalized::contains)) {
+            return false;
+        }
+
+        List<String> shrimpObservationKeywords = List.of(
+                "tom",
+                "mang tom",
+                "vo tom",
+                "than tom",
+                "dau nguc",
+                "duoi tom",
+                "chan bo",
+                "chan boi",
+                "phan quat duoi",
+                "gan tuy");
+        return shrimpObservationKeywords.stream().anyMatch(normalized::contains);
     }
 
     private String buildFarmerContextForImageSuggestion(String userSymptoms, String geminiImageDescription) {
