@@ -20,6 +20,7 @@ import java.sql.Date;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.YearMonth;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -202,6 +203,49 @@ public class DashboardService {
         return yesterday == 0 && today > 0;
     }
 
+    private MonthlyBusinessResultsResponse buildBusinessResultsResponse(
+            String periodKey,
+            LocalDateTime currentStart,
+            LocalDateTime currentEnd,
+            LocalDateTime previousStart,
+            LocalDateTime previousEnd,
+            Long finalBranchId) {
+        BigDecimal currentRevenue = sumNetRevenue(currentStart, currentEnd, finalBranchId);
+        BigDecimal previousRevenue = sumNetRevenue(previousStart, previousEnd, finalBranchId);
+
+        BigDecimal currentCost = getSafeBigDecimal(orderRepository.sumTotalCost(currentStart, currentEnd, finalBranchId));
+        BigDecimal previousCost = getSafeBigDecimal(orderRepository.sumTotalCost(previousStart, previousEnd, finalBranchId));
+
+        long currentOrders;
+        long previousOrders;
+        if (finalBranchId != null) {
+            currentOrders = subOrderRepository.countSuccessByBranchId(currentStart, currentEnd, finalBranchId);
+            previousOrders = subOrderRepository.countSuccessByBranchId(previousStart, previousEnd, finalBranchId);
+        } else {
+            currentOrders = orderRepository.countSuccessOrders(currentStart, currentEnd, null);
+            previousOrders = orderRepository.countSuccessOrders(previousStart, previousEnd, null);
+        }
+
+        BigDecimal currentProfit = currentRevenue.subtract(currentCost);
+        BigDecimal previousProfit = previousRevenue.subtract(previousCost);
+
+        return MonthlyBusinessResultsResponse.builder()
+                .yearMonth(periodKey)
+                .currentMonthRevenue(currentRevenue)
+                .previousMonthRevenue(previousRevenue)
+                .revenueChangePercent(calculateGrowthPercent(currentRevenue, previousRevenue))
+                .revenueIsNew(isNewBaseline(currentRevenue, previousRevenue))
+                .currentMonthProfit(currentProfit)
+                .previousMonthProfit(previousProfit)
+                .profitChangePercent(calculateGrowthPercent(currentProfit, previousProfit))
+                .profitIsNew(isNewBaseline(currentProfit, previousProfit))
+                .currentMonthOrders(currentOrders)
+                .previousMonthOrders(previousOrders)
+                .orderChangePercent(calculateGrowthPercent(currentOrders, previousOrders))
+                .orderIsNew(isNewBaseline(currentOrders, previousOrders))
+                .build();
+    }
+
     // 2.2 KẾT QUẢ KINH DOANH NGÀY
     public DailyBusinessResultsResponse getDailyResults(Long branchId) {
         Long finalBranchId = resolveBranchId(branchId);
@@ -268,39 +312,103 @@ public class DashboardService {
         LocalDateTime previousStart = previousMonth.atDay(1).atStartOfDay();
         LocalDateTime previousEnd = previousMonth.atEndOfMonth().atTime(java.time.LocalTime.MAX);
 
-        BigDecimal currentRevenue = sumNetRevenue(currentStart, currentEnd, finalBranchId);
-        BigDecimal previousRevenue = sumNetRevenue(previousStart, previousEnd, finalBranchId);
+        return buildBusinessResultsResponse(
+                targetMonth.toString(),
+                currentStart,
+                currentEnd,
+                previousStart,
+                previousEnd,
+                finalBranchId);
+    }
 
-        BigDecimal currentCost = getSafeBigDecimal(orderRepository.sumTotalCost(currentStart, currentEnd, finalBranchId));
-        BigDecimal previousCost = getSafeBigDecimal(orderRepository.sumTotalCost(previousStart, previousEnd, finalBranchId));
+    public MonthlyBusinessResultsResponse getBusinessResults(
+            Long branchId,
+            LocalDate startDate,
+            LocalDate endDate,
+            YearMonth startMonth,
+            YearMonth endMonth) {
+        Long finalBranchId = resolveBranchId(branchId);
+        LocalDate today = LocalDate.now();
+        LocalDateTime now = LocalDateTime.now();
 
-        long currentOrders, previousOrders;
-        if (finalBranchId != null) {
-            currentOrders = subOrderRepository.countSuccessByBranchId(currentStart, currentEnd, finalBranchId);
-            previousOrders = subOrderRepository.countSuccessByBranchId(previousStart, previousEnd, finalBranchId);
-        } else {
-            currentOrders = orderRepository.countSuccessOrders(currentStart, currentEnd, null);
-            previousOrders = orderRepository.countSuccessOrders(previousStart, previousEnd, null);
+        if (startMonth != null || endMonth != null) {
+            YearMonth periodStartMonth = startMonth != null ? startMonth : endMonth;
+            YearMonth periodEndMonth = endMonth != null ? endMonth : periodStartMonth;
+
+            if (periodStartMonth.isAfter(periodEndMonth)) {
+                YearMonth swap = periodStartMonth;
+                periodStartMonth = periodEndMonth;
+                periodEndMonth = swap;
+            }
+
+            YearMonth currentMonth = YearMonth.now();
+            if (periodEndMonth.isAfter(currentMonth)) {
+                periodEndMonth = currentMonth;
+            }
+            if (periodStartMonth.isAfter(periodEndMonth)) {
+                periodStartMonth = periodEndMonth;
+            }
+
+            long monthCount = ChronoUnit.MONTHS.between(periodStartMonth, periodEndMonth) + 1;
+            YearMonth previousEndMonth = periodStartMonth.minusMonths(1);
+            YearMonth previousStartMonth = previousEndMonth.minusMonths(monthCount - 1);
+
+            LocalDateTime currentStart = periodStartMonth.atDay(1).atStartOfDay();
+            LocalDateTime currentEnd = periodEndMonth.equals(currentMonth)
+                    ? now
+                    : periodEndMonth.atEndOfMonth().atTime(java.time.LocalTime.MAX);
+            LocalDateTime previousStart = previousStartMonth.atDay(1).atStartOfDay();
+            LocalDateTime previousEnd = previousEndMonth.atEndOfMonth().atTime(java.time.LocalTime.MAX);
+
+            String periodKey = periodStartMonth.equals(periodEndMonth)
+                    ? periodStartMonth.toString()
+                    : periodStartMonth + ".." + periodEndMonth;
+
+            return buildBusinessResultsResponse(
+                    periodKey,
+                    currentStart,
+                    currentEnd,
+                    previousStart,
+                    previousEnd,
+                    finalBranchId);
         }
 
-        BigDecimal currentProfit = currentRevenue.subtract(currentCost);
-        BigDecimal previousProfit = previousRevenue.subtract(previousCost);
+        LocalDate periodStartDate = startDate != null ? startDate : today;
+        LocalDate periodEndDate = endDate != null ? endDate : periodStartDate;
+        if (periodStartDate.isAfter(periodEndDate)) {
+            LocalDate swap = periodStartDate;
+            periodStartDate = periodEndDate;
+            periodEndDate = swap;
+        }
+        if (periodEndDate.isAfter(today)) {
+            periodEndDate = today;
+        }
+        if (periodStartDate.isAfter(periodEndDate)) {
+            periodStartDate = periodEndDate;
+        }
 
-        return MonthlyBusinessResultsResponse.builder()
-                .yearMonth(targetMonth.toString())
-                .currentMonthRevenue(currentRevenue)
-                .previousMonthRevenue(previousRevenue)
-                .revenueChangePercent(calculateGrowthPercent(currentRevenue, previousRevenue))
-                .revenueIsNew(isNewBaseline(currentRevenue, previousRevenue))
-                .currentMonthProfit(currentProfit)
-                .previousMonthProfit(previousProfit)
-                .profitChangePercent(calculateGrowthPercent(currentProfit, previousProfit))
-                .profitIsNew(isNewBaseline(currentProfit, previousProfit))
-                .currentMonthOrders(currentOrders)
-                .previousMonthOrders(previousOrders)
-                .orderChangePercent(calculateGrowthPercent(currentOrders, previousOrders))
-                .orderIsNew(isNewBaseline(currentOrders, previousOrders))
-                .build();
+        long dayCount = ChronoUnit.DAYS.between(periodStartDate, periodEndDate) + 1;
+        LocalDate previousEndDate = periodStartDate.minusDays(1);
+        LocalDate previousStartDate = previousEndDate.minusDays(dayCount - 1);
+
+        LocalDateTime currentStart = periodStartDate.atStartOfDay();
+        LocalDateTime currentEnd = periodEndDate.equals(today)
+                ? now
+                : periodEndDate.atTime(java.time.LocalTime.MAX);
+        LocalDateTime previousStart = previousStartDate.atStartOfDay();
+        LocalDateTime previousEnd = previousEndDate.atTime(java.time.LocalTime.MAX);
+
+        String periodKey = periodStartDate.equals(periodEndDate)
+                ? periodStartDate.toString()
+                : periodStartDate + ".." + periodEndDate;
+
+        return buildBusinessResultsResponse(
+                periodKey,
+                currentStart,
+                currentEnd,
+                previousStart,
+                previousEnd,
+                finalBranchId);
     }
 
     // 2.4 HOẠT ĐỘNG GẦN ĐÂY
