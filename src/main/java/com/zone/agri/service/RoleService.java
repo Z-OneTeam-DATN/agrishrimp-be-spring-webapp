@@ -16,6 +16,8 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.zone.agri.common.AuthUtils;
+import com.zone.agri.common.RoleUtils;
 import com.zone.agri.dto.request.user.RoleRequest;
 import com.zone.agri.dto.response.user.RoleResponse;
 import com.zone.agri.entity.Permission;
@@ -36,6 +38,7 @@ import lombok.extern.slf4j.Slf4j;
 public class RoleService {
 
     private static final int ROLE_SLUG_MAX_LENGTH = 50;
+    private static final String SUPER_ADMIN_SLUG = "SUPER_ADMIN";
     private static final Map<String, String> LEGACY_PERMISSION_ALIASES;
 
     static {
@@ -90,10 +93,19 @@ public class RoleService {
                 .orElseThrow(() -> new NotFoundException("Không tìm thấy vai trò với ID: " + roleId));
 
         if (Boolean.TRUE.equals(existingRole.getIsSystem())) {
-            throw new Forbidden("Không thể chỉnh sửa vai trò hệ thống");
+            if (!RoleUtils.hasSuperAdminAuthority(AuthUtils.getAuthorities())) {
+                throw new Forbidden("Chỉ SUPER_ADMIN được chỉnh sửa quyền của vai trò hệ thống");
+            }
+
+            if (isSuperAdminRole(existingRole)) {
+                throw new Forbidden("Không thể chỉnh sửa vai trò SUPER_ADMIN");
+            }
+
+            existingRole.setPermissions(resolvePermissions(request));
+        } else {
+            saveRoleFromRequest(existingRole, request);
         }
 
-        saveRoleFromRequest(existingRole, request);
         long memberCount = roleRepository.countUsersByRoleId(roleId);
         return mapToResponse(roleRepository.save(existingRole), memberCount);
     }
@@ -144,6 +156,16 @@ public class RoleService {
             role.setSlug(generateUniqueSlug(normalizedRoleName, role.getId()));
         }
 
+        role.setDisplayName(normalizedRoleName);
+        role.setDescription(request.getDescription());
+        role.setIsActive("active".equalsIgnoreCase(request.getStatus()));
+        role.setIsSystem(Boolean.TRUE.equals(role.getIsSystem()));
+        role.setPermissions(resolvePermissions(request));
+
+        return role;
+    }
+
+    private Set<Permission> resolvePermissions(RoleRequest request) {
         List<String> allCodes = new ArrayList<>();
         if (request.getEnabledScreens() != null)
             allCodes.addAll(request.getEnabledScreens());
@@ -178,13 +200,11 @@ public class RoleService {
             throw new BadRequestException("Mã quyền không tồn tại: " + String.join(", ", invalidCodes));
         }
 
-        role.setDisplayName(normalizedRoleName);
-        role.setDescription(request.getDescription());
-        role.setIsActive("active".equalsIgnoreCase(request.getStatus()));
-        role.setIsSystem(Boolean.TRUE.equals(role.getIsSystem()));
-        role.setPermissions(permissions);
+        return permissions;
+    }
 
-        return role;
+    private boolean isSuperAdminRole(Role role) {
+        return role != null && SUPER_ADMIN_SLUG.equalsIgnoreCase(role.getSlug());
     }
 
     private String generateUniqueSlug(String roleName, Long currentRoleId) {

@@ -978,6 +978,15 @@ public class DataSeeder implements CommandLineRunner {
                     if (existingRole.getPermissions() == null) {
                         existingRole.setPermissions(new HashSet<>());
                     }
+
+                    if (!"SUPER_ADMIN".equals(spec.slug()) && !existingRole.getPermissions().isEmpty()) {
+                        Role saved = roleRepository.save(existingRole);
+                        log.info("Role {} already exists, retained {} configured permissions",
+                                spec.slug(),
+                                saved.getPermissions() == null ? 0 : saved.getPermissions().size());
+                        return saved;
+                    }
+
                     int before = existingRole.getPermissions().size();
                     existingRole.getPermissions().addAll(permissions);
                     Role saved = roleRepository.save(existingRole);
