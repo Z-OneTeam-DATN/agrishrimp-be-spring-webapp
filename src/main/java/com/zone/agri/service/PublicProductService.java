@@ -177,6 +177,7 @@ public class PublicProductService {
             categoryInfo = PublicProductResponse.CategoryInfo.builder()
                     .id(product.getCategory().getId())
                     .name(product.getCategory().getName())
+                    .slug(product.getCategory().getSlug())
                     .build();
         }
 

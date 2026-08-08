@@ -11,6 +11,7 @@ public class CategoryDTO {
     @NotBlank(message = "Tên danh mục không được để trống")
     private String name;
 
+    private String slug;
     private String imageUrl;
     private CategoryStatus status;
     private Long parentId;

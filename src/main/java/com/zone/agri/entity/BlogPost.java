@@ -39,6 +39,22 @@ public class BlogPost {
     @Column(name = "thumbnail_public_id", length = 255)
     String thumbnailPublicId;
 
+    @Column(name = "seo_title", length = 255)
+    String seoTitle;
+
+    @Column(name = "meta_description", length = 320)
+    String metaDescription;
+
+    @Column(name = "canonical_url", length = 500)
+    String canonicalUrl;
+
+    /** Admin-only editorial note. Do not render as meta keywords. */
+    @Column(name = "focus_keyword", length = 255)
+    String focusKeyword;
+
+    @Column(name = "cover_image_alt", length = 255)
+    String coverImageAlt;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "status", length = 20)
     BlogPostStatus status;

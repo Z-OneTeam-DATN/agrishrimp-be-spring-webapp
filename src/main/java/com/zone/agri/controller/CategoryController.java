@@ -156,6 +156,7 @@ public class CategoryController {
         return CategoryResponse.builder()
                 .id(dto.getId())
                 .name(dto.getName())
+                .slug(dto.getSlug())
                 .imageUrl(dto.getImageUrl())
                 .status(dto.getStatus())
                 .parentId(dto.getParentId())

@@ -25,6 +25,8 @@ public class Category {
     @Column(name = "name", length = 255,unique = true)
     String name;
 
+    @Column(name = "slug", length = 180, unique = true)
+    String slug;
 
     @Column(name = "image_url", columnDefinition = "TEXT")
     String imageUrl;

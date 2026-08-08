@@ -8,9 +8,14 @@ import org.springframework.context.annotation.Configuration;
 
 import javax.sql.DataSource;
 import java.sql.Connection;
+import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.Statement;
+import java.text.Normalizer;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
+import java.util.Set;
 
 /**
  * Applies idempotent schema patches that Hibernate update mode cannot handle
@@ -62,6 +67,8 @@ public class SchemaUpdateConfig implements BeanPostProcessor {
             patchBranches(conn, stmt);
             patchUsers(conn, stmt);
             patchCustomers(conn, stmt);
+            patchCategorySlugs(conn, stmt);
+            patchBlogSeoFields(conn, stmt);
 
             executeSql(stmt,
                     "Patch inventory_notes adds check_scope_type",
@@ -512,6 +519,100 @@ public class SchemaUpdateConfig implements BeanPostProcessor {
         ensureColumnWithLegacyBackfill(conn, stmt, tableName, "internal_notes", "TEXT NULL", List.of());
     }
 
+    private void patchCategorySlugs(Connection conn, Statement stmt) {
+        String tableName = "category";
+        if (!tableExists(conn, tableName)) {
+            log.info("Skip category slug schema patch because table '{}' does not exist yet.", tableName);
+            return;
+        }
+
+        ensureColumnWithLegacyBackfill(conn, stmt, tableName, "slug", "VARCHAR(180) NULL", List.of());
+        if (!columnExists(conn, tableName, "slug")) {
+            return;
+        }
+
+        Set<String> usedSlugs = new HashSet<>();
+        if (tableExists(conn, "products") && columnExists(conn, "products", "slug")) {
+            try (ResultSet rs = stmt.executeQuery("SELECT slug FROM products WHERE slug IS NOT NULL AND TRIM(slug) <> ''")) {
+                while (rs.next()) {
+                    usedSlugs.add(rs.getString("slug").trim().toLowerCase(Locale.ROOT));
+                }
+            } catch (Exception e) {
+                log.debug("Skipped loading product slugs for category collision check: {}", e.getMessage());
+            }
+        }
+
+        try (ResultSet rs = stmt.executeQuery("SELECT id, name, slug FROM category ORDER BY id ASC");
+             PreparedStatement update = conn.prepareStatement("UPDATE category SET slug = ? WHERE id = ?")) {
+            while (rs.next()) {
+                Long id = rs.getLong("id");
+                String current = normalizeSlug(rs.getString("slug"));
+                String base = current.isBlank() ? normalizeSlug(rs.getString("name")) : current;
+                if (base.isBlank() || isReservedCategorySlug(base)) {
+                    base = "danh-muc";
+                }
+
+                String candidate = base;
+                int suffix = 2;
+                while (usedSlugs.contains(candidate) || isReservedCategorySlug(candidate)) {
+                    candidate = base + "-" + suffix++;
+                }
+                usedSlugs.add(candidate);
+
+                if (!candidate.equals(current)) {
+                    update.setString(1, candidate);
+                    update.setLong(2, id);
+                    update.addBatch();
+                }
+            }
+            update.executeBatch();
+            log.info("Schema patch OK - Backfilled category.slug values");
+        } catch (Exception e) {
+            log.debug("Schema patch skipped/warn - Backfill category.slug: {}", e.getMessage());
+        }
+
+        if (!indexExists(conn, tableName, "uq_category_slug")) {
+            executeSql(stmt,
+                    "Patch category adds unique index on slug",
+                    "CREATE UNIQUE INDEX uq_category_slug ON category (slug)");
+        }
+    }
+
+    private void patchBlogSeoFields(Connection conn, Statement stmt) {
+        String tableName = "blog_posts";
+        if (!tableExists(conn, tableName)) {
+            log.info("Skip blog SEO schema patch because table '{}' does not exist yet.", tableName);
+            return;
+        }
+
+        ensureColumnWithLegacyBackfill(conn, stmt, tableName, "seo_title", "VARCHAR(255) NULL", List.of());
+        ensureColumnWithLegacyBackfill(conn, stmt, tableName, "meta_description", "VARCHAR(320) NULL", List.of());
+        ensureColumnWithLegacyBackfill(conn, stmt, tableName, "canonical_url", "VARCHAR(500) NULL", List.of());
+        ensureColumnWithLegacyBackfill(conn, stmt, tableName, "focus_keyword", "VARCHAR(255) NULL", List.of());
+        ensureColumnWithLegacyBackfill(conn, stmt, tableName, "cover_image_alt", "VARCHAR(255) NULL", List.of());
+    }
+
+    private String normalizeSlug(String input) {
+        if (input == null || input.isBlank()) {
+            return "";
+        }
+        return Normalizer.normalize(input, Normalizer.Form.NFD)
+                .replaceAll("\\p{M}", "")
+                .replace('đ', 'd')
+                .replace('Đ', 'D')
+                .toLowerCase(Locale.ROOT)
+                .replaceAll("[^a-z0-9\\s-]", " ")
+                .replaceAll("[\\s-]+", "-")
+                .replaceAll("^-|-$", "");
+    }
+
+    private boolean isReservedCategorySlug(String slug) {
+        return Set.of(
+                "admin", "api", "ai-doctor", "benh-tom", "blog", "checkout", "dang-nhap",
+                "danh-muc", "gioi-thieu", "login", "san-pham", "signup", "vat-tu-thuy-san"
+        ).contains(slug);
+    }
+
     private void patchInventoryTransfers(Connection conn, Statement stmt) {
         String tableName = "inventory_transfers";
         if (!tableExists(conn, tableName)) {
@@ -698,6 +799,26 @@ public class SchemaUpdateConfig implements BeanPostProcessor {
             }
         } catch (Exception e) {
             log.debug("Failed checking column {}.{} existence: {}", tableName, columnName, e.getMessage());
+            return false;
+        }
+    }
+
+    private boolean indexExists(Connection conn, String tableName, String indexName) {
+        String sql = """
+                SELECT 1
+                FROM information_schema.STATISTICS
+                WHERE TABLE_SCHEMA = DATABASE()
+                  AND TABLE_NAME = ?
+                  AND INDEX_NAME = ?
+                """;
+        try (var ps = conn.prepareStatement(sql)) {
+            ps.setString(1, tableName);
+            ps.setString(2, indexName);
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next();
+            }
+        } catch (Exception e) {
+            log.debug("Failed checking index {} on {}: {}", indexName, tableName, e.getMessage());
             return false;
         }
     }

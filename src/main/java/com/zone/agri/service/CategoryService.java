@@ -3,6 +3,7 @@ package com.zone.agri.service;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 import org.springframework.stereotype.Service;
@@ -24,6 +25,10 @@ import lombok.extern.slf4j.Slf4j;
 @RequiredArgsConstructor
 @Slf4j
 public class CategoryService {
+    private static final Set<String> RESERVED_CATEGORY_SLUGS = Set.of(
+            "admin", "api", "ai-doctor", "benh-tom", "blog", "checkout", "dang-nhap",
+            "danh-muc", "gioi-thieu", "login", "san-pham", "signup", "vat-tu-thuy-san");
+
     private final CategoryRepository categoryRepository;
     private final ProductRepository productRepository;
     private final CloudinaryService cloudinaryService;
@@ -103,9 +108,35 @@ public class CategoryService {
             return "";
         String normalized = java.text.Normalizer.normalize(input, java.text.Normalizer.Form.NFD);
         return normalized.replaceAll("[\\p{InCombiningDiacriticalMarks}]", "")
-                .toLowerCase(java.util.Locale.ENGLISH)
+                .toLowerCase(Locale.ENGLISH)
                 .replaceAll("[^a-z0-9\\s]", "")
-                .replaceAll("\\s+", "-");
+                .replaceAll("\\s+", "-")
+                .replaceAll("^-|-$", "");
+    }
+
+    private String resolveCategorySlug(Category entity, CategoryDTO dto) {
+        String currentSlug = entity.getSlug();
+        if (currentSlug != null && !currentSlug.isBlank()) {
+            return currentSlug;
+        }
+
+        String seed = dto.getSlug() != null && !dto.getSlug().isBlank() ? dto.getSlug() : dto.getName();
+        String base = toSlug(seed);
+        if (base.isBlank() || RESERVED_CATEGORY_SLUGS.contains(base)) {
+            base = "danh-muc";
+        }
+
+        String candidate = base;
+        int suffix = 2;
+        Long currentId = entity.getId();
+        while (
+                productRepository.existsBySlug(candidate)
+                        || (currentId == null
+                        ? categoryRepository.existsBySlugIgnoreCase(candidate)
+                        : categoryRepository.existsBySlugIgnoreCaseAndIdNot(candidate, currentId))) {
+            candidate = base + "-" + suffix++;
+        }
+        return candidate;
     }
 
     private void handleImageUpload(Category category, String imageUrl) {
@@ -119,6 +150,7 @@ public class CategoryService {
 
     private void mapToEntity(Category entity, CategoryDTO dto) {
         entity.setName(normalizeCategoryName(dto.getName()));
+        entity.setSlug(resolveCategorySlug(entity, dto));
         entity.setStatus(dto.getStatus() != null ? dto.getStatus() : CategoryStatus.ACTIVE);
         handleImageUpload(entity, dto.getImageUrl());
 
@@ -244,6 +276,7 @@ public class CategoryService {
         CategoryDTO dto = new CategoryDTO();
         dto.setId(entity.getId());
         dto.setName(entity.getName());
+        dto.setSlug(entity.getSlug());
         dto.setImageUrl(entity.getImageUrl());
         dto.setStatus(entity.getStatus());
 
@@ -269,9 +302,20 @@ public class CategoryService {
     }
 
     @Transactional(readOnly = true)
+    public CategoryDTO getPublicCategoryBySlug(String slug) {
+        Category category = categoryRepository.findBySlugIgnoreCase(slug)
+                .orElseThrow(() -> new NotFoundException("Không tìm thấy danh mục với slug: " + slug));
+        if (category.getStatus() != CategoryStatus.ACTIVE) {
+            throw new NotFoundException("Danh mục không tồn tại hoặc đã ngừng hoạt động.");
+        }
+        return convertToDTO(category);
+    }
+
+    @Transactional(readOnly = true)
     public CategoryDTO getCategoryById(Long id) {
         Category category = categoryRepository.findById(id)
                 .orElseThrow(() -> new NotFoundException("Không tìm thấy danh mục với ID: " + id));
         return convertToDTO(category);
     }
+
 }

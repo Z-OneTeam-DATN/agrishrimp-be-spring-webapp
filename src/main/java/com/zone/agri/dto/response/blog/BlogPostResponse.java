@@ -17,6 +17,11 @@ public class BlogPostResponse {
     private String excerpt;
     private String content;
     private String thumbnailUrl;
+    private String seoTitle;
+    private String metaDescription;
+    private String canonicalUrl;
+    private String focusKeyword;
+    private String coverImageAlt;
     private String status;
     private String reviewNote;
     private Long viewCount;
