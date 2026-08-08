@@ -852,12 +852,13 @@ public class PurchaseRequestService {
 
     private PurchaseRequestResponse.ItemResponse mapItemToResponse(PurchaseRequestItem item) {
         ProductVariant variant = item.getProductVariant();
+        Product product = variant != null ? variant.getProduct() : null;
         return PurchaseRequestResponse.ItemResponse.builder()
                 .id(item.getId())
                 .productVariantId(variant != null ? variant.getId() : null)
                 .productCode(variant != null ? variant.getSku() : "")
-                .productName(variant != null && variant.getProduct() != null ? variant.getProduct().getName() : "")
-                .imageUrl(variant != null ? variant.getImageUrl() : null)
+                .productName(product != null ? product.getName() : "")
+                .imageUrl(resolveItemImageUrl(variant, product))
                 .requestedQty(Objects.requireNonNullElse(item.getRequestedQty(), 0))
                 .deliveredQty(Objects.requireNonNullElse(item.getDeliveredQty(), 0))
                 .acceptedQty(Objects.requireNonNullElse(item.getAcceptedQty(), 0))
@@ -866,6 +867,35 @@ public class PurchaseRequestService {
                 .unitPrice(Objects.requireNonNullElse(item.getUnitPrice(), BigDecimal.ZERO))
                 .note(item.getNote())
                 .build();
+    }
+
+    private String resolveItemImageUrl(ProductVariant variant, Product product) {
+        String variantImage = firstImageUrl(variant != null ? variant.getImageUrl() : null);
+        if (variantImage != null) {
+            return variantImage;
+        }
+
+        if (product == null || product.getProductImages() == null) {
+            return null;
+        }
+
+        return product.getProductImages().stream()
+                .map(image -> firstImageUrl(image != null ? image.getImageUrl() : null))
+                .filter(Objects::nonNull)
+                .findFirst()
+                .orElse(null);
+    }
+
+    private String firstImageUrl(String imageUrl) {
+        if (imageUrl == null || imageUrl.isBlank()) {
+            return null;
+        }
+
+        return Arrays.stream(imageUrl.split(","))
+                .map(String::trim)
+                .filter(url -> !url.isBlank())
+                .findFirst()
+                .orElse(null);
     }
 }
 

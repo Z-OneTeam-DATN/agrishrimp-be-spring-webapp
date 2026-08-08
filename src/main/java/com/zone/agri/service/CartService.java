@@ -20,6 +20,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.util.Arrays;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
@@ -115,8 +116,9 @@ public class CartService {
     }
 
     private String resolveCartImageUrl(ProductVariant variant, Product product) {
-        if (variant != null && variant.getImageUrl() != null && !variant.getImageUrl().isBlank()) {
-            return variant.getImageUrl();
+        String variantImage = firstImageUrl(variant != null ? variant.getImageUrl() : null);
+        if (variantImage != null) {
+            return variantImage;
         }
 
         if (product == null || product.getProductImages() == null) {
@@ -124,8 +126,20 @@ public class CartService {
         }
 
         return product.getProductImages().stream()
-                .map(image -> image != null ? image.getImageUrl() : null)
+                .map(image -> firstImageUrl(image != null ? image.getImageUrl() : null))
                 .filter(imageUrl -> imageUrl != null && !imageUrl.isBlank())
+                .findFirst()
+                .orElse(null);
+    }
+
+    private String firstImageUrl(String imageUrl) {
+        if (imageUrl == null || imageUrl.isBlank()) {
+            return null;
+        }
+
+        return Arrays.stream(imageUrl.split(","))
+                .map(String::trim)
+                .filter(url -> !url.isBlank())
                 .findFirst()
                 .orElse(null);
     }
