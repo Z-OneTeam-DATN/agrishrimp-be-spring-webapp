@@ -27,6 +27,7 @@ import com.zone.agri.exception.BadRequestException;
 import com.zone.agri.repository.AiDoctorClarifySessionRepository;
 import com.zone.agri.repository.AiDoctorDiagnosisHistoryRepository;
 import com.zone.agri.service.ai.AiKnowledgeService;
+import com.zone.agri.utils.AiTextFormatUtils;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -217,13 +218,16 @@ public class AiDoctorClarifyService {
         }
 
         if ("QUESTION".equalsIgnoreCase(responseType) && trimToNull(llmResult.getQuestionText()) != null) {
-            appendAssistantTurn(session, llmResult.getQuestionText().trim());
+            // Luu vao lich su hoi-dap dung PLAIN TEXT (khong phai HTML) — day la du lieu gui lai cho
+            // chinh Gemini o luot sau, khong nen lam ban ro noi dung bang the HTML.
+            String plainQuestionText = llmResult.getQuestionText().trim();
+            appendAssistantTurn(session, plainQuestionText);
             session.setTurnCount(session.getTurnCount() + 1);
             sessionRepository.save(session);
             return AiDoctorClarifyResponse.builder()
                     .diagnosisId(session.getDiagnosisId())
                     .type("QUESTION")
-                    .message(llmResult.getQuestionText().trim())
+                    .message(buildClarifyMessageHtml(plainQuestionText, candidates, session.getImageUrl()))
                     .turnsUsed(session.getTurnCount())
                     .build();
         }
@@ -388,9 +392,26 @@ public class AiDoctorClarifyService {
         return AiDoctorClarifyResponse.builder()
                 .diagnosisId(session.getDiagnosisId())
                 .type("QUESTION")
-                .message(lastQuestion)
+                .message(buildClarifyMessageHtml(lastQuestion, readCandidates(session), session.getImageUrl()))
                 .turnsUsed(session.getTurnCount())
                 .build();
+    }
+
+    /**
+     * Ghep cau hoi cua Gemini (van ban thuan) + bang cac benh candidate (du lieu CO CAU TRUC da co
+     * san, khong dua vao Gemini tu mo ta lai bang van xuoi) + anh chan doan (neu co) thanh 1 khoi
+     * HTML de FE render dang bot-html — thay vi 1 doan van dai kho doc.
+     */
+    private String buildClarifyMessageHtml(String questionText, List<AiClarifyCandidateSummary> candidates, String imageUrl) {
+        StringBuilder html = new StringBuilder(AiTextFormatUtils.plainTextToHtml(questionText));
+        List<String[]> rows = candidates.stream()
+                .map(c -> new String[] {
+                        c.getNameVi() != null ? c.getNameVi() : c.getDiseaseCode(),
+                        trimToNull(c.getSignsSummary()) != null ? c.getSignsSummary() : c.getSymptomKeywordsRaw()
+                })
+                .toList();
+        html.append(AiTextFormatUtils.buildDiseaseCandidatesTableHtml(rows, imageUrl));
+        return html.toString();
     }
 
     // =========================================================
