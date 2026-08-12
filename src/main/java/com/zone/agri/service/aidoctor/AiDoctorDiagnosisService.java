@@ -3,6 +3,7 @@ package com.zone.agri.service.aidoctor;
 import com.zone.agri.common.CloudinaryService;
 import com.zone.agri.client.ai.AiDiagnosisClient;
 import com.zone.agri.client.ai.GeminiClarifyClient;
+import com.zone.agri.dto.ai.AiImageNarrativeResult;
 import com.zone.agri.dto.ai.AiPredictResponse;
 import com.zone.agri.dto.ai.AiPredictionItem;
 import com.zone.agri.dto.response.ai.AiDoctorDiagnosisResponse;
@@ -97,7 +98,7 @@ public class AiDoctorDiagnosisService {
         // 1a. Bat song song mo ta anh tu Gemini ngay tu dau (doc bytes 1 lan tren thread hien tai
         // roi truyen byte[] thuan vao task async — khong doc MultipartFile tu thread khac, vi
         // AiDiagnosisClient.predict(image) cung dang doc chinh MultipartFile nay dong thoi ben duoi).
-        CompletableFuture<String> narrativeFuture = kickOffNarrativeDescription(image, normalizedSymptoms, traceId);
+        CompletableFuture<AiImageNarrativeResult> narrativeFuture = kickOffNarrativeDescription(image, normalizedSymptoms, traceId);
 
         // 2. AI predict-image (fail → toàn bộ request fail, không graceful)
         AiPredictResponse predictResponse = aiDiagnosisClient.predict(image);
@@ -110,13 +111,21 @@ public class AiDoctorDiagnosisService {
             throw new BadRequestException(
                     "Ảnh quá mờ hoặc chất lượng thấp. Vui lòng chụp lại ảnh rõ hơn.");
         }
-        if ("NON_SHRIMP".equals(aiStatus)) {
-            log.info("[AiDoctor] traceId={} NON_SHRIMP image, tra loi than thien bang mo ta cua Gemini "
-                    + "thay vi bao loi chung chung", traceId);
-            // Truoc day throw BadRequestException ngay tai day — bo qua luon narrativeFuture da kich
-            // hoat song song o tren (Gemini van bi goi nhung ket qua bi vut di), khien nguoi dung chi
-            // thay 1 toast loi chung chung thay vi duoc bac si AI mo ta that su thay gi trong anh.
-            String narrativeText = resolveNarrativeGracefully(narrativeFuture, traceId);
+
+        // Doi Gemini 1 lan duy nhat, dung chung cho moi nhanh con lai (khac BLURRY, khong can Gemini).
+        // YOLO chi duoc train phan biet 5 lop TRONG PHAM VI tom, khong co lop "khong phai tom" —
+        // gap anh la, cho, meo... no van co gang gan vao 1 trong 5 lop da biet (thuong roi vao
+        // Healthy vi day la lop "khong co dau hieu ton thuong ro" trong du lieu train). Gemini duoc
+        // hoi rieng "day co phai la con tom khong" de lam luoi an toan bat truong hop nay. Neu Gemini
+        // fail/timeout, narrative=null va GIU NGUYEN ket qua YOLO nhu cu (fail-open, khong regress).
+        AiImageNarrativeResult narrative = resolveNarrativeGracefully(narrativeFuture, traceId);
+        String narrativeText = narrative != null ? narrative.getDescription() : null;
+        boolean geminiConfirmsNotShrimp = narrative != null && !narrative.isShrimp();
+
+        if ("NON_SHRIMP".equals(aiStatus) || geminiConfirmsNotShrimp) {
+            log.info("[AiDoctor] traceId={} NON_SHRIMP image (yoloStatus={}, geminiConfirmsNotShrimp={}), "
+                    + "tra loi than thien bang mo ta cua Gemini thay vi bao loi chung chung",
+                    traceId, aiStatus, geminiConfirmsNotShrimp);
             AiDoctorDiagnosisResponse response = aiKnowledgeService.buildNonShrimpImageResponse(
                     predictResponse,
                     diagnosisImageUrl,
@@ -140,7 +149,6 @@ public class AiDoctorDiagnosisService {
         }
 
         AiPredictionItem finalPrediction = predictResponse.getFinalPrediction();
-        String narrativeText = resolveNarrativeGracefully(narrativeFuture, traceId);
 
         if (finalPrediction == null || finalPrediction.getDiseaseCode() == null) {
             log.warn("[AiDoctor] traceId={} AI khong nhan ra benh, chuyen sang goi y Gemini tu do", traceId);
@@ -227,7 +235,7 @@ public class AiDoctorDiagnosisService {
         return response;
     }
 
-    private CompletableFuture<String> kickOffNarrativeDescription(MultipartFile image, String userSymptoms, String traceId) {
+    private CompletableFuture<AiImageNarrativeResult> kickOffNarrativeDescription(MultipartFile image, String userSymptoms, String traceId) {
         byte[] imageBytes;
         String contentType;
         try {
@@ -245,7 +253,7 @@ public class AiDoctorDiagnosisService {
                 () -> geminiClarifyClient.describeImage(userSymptoms, imageBase64, mimeType));
     }
 
-    private String resolveNarrativeGracefully(CompletableFuture<String> narrativeFuture, String traceId) {
+    private AiImageNarrativeResult resolveNarrativeGracefully(CompletableFuture<AiImageNarrativeResult> narrativeFuture, String traceId) {
         try {
             return narrativeFuture.get(narrativeJoinTimeoutSeconds, TimeUnit.SECONDS);
         } catch (Exception e) {

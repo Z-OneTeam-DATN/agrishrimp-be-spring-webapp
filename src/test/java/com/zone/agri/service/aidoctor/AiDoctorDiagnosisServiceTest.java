@@ -10,6 +10,7 @@ import static org.mockito.Mockito.when;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zone.agri.client.ai.AiDiagnosisClient;
 import com.zone.agri.client.ai.GeminiClarifyClient;
+import com.zone.agri.dto.ai.AiImageNarrativeResult;
 import com.zone.agri.dto.ai.AiPredictResponse;
 import com.zone.agri.dto.ai.AiPredictionItem;
 import com.zone.agri.dto.response.ai.AiDoctorDiagnosisResponse;
@@ -169,6 +170,12 @@ class AiDoctorDiagnosisServiceTest {
         return response;
     }
 
+    /** Ket qua Gemini describeImage() gia lap cho anh THAT LA TOM (isShrimp=true) — truong hop mac dinh
+     * cua da so test hien co, chi quan tam noi dung mo ta chu khong quan tam co la tom hay khong. */
+    private AiImageNarrativeResult narrative(String description) {
+        return AiImageNarrativeResult.builder().isShrimp(true).description(description).build();
+    }
+
     // =========================================================
     // 1) Response DISEASE co ca aiDescription lan cac truong cau truc cu
     // =========================================================
@@ -178,7 +185,7 @@ class AiDoctorDiagnosisServiceTest {
         seedDiseaseWithProtocol("DIS_E2E", "Benh e2e test", "e2ekeyword", 0.4D, 0.65D);
         AiPredictionItem finalPrediction = prediction("DIS_E2E", "Benh e2e test", "E2E test", 90.0D);
         when(aiDiagnosisClient.predict(any())).thenReturn(predictResponse("DISEASE", finalPrediction));
-        when(geminiClarifyClient.describeImage(any(), any(), any())).thenReturn("Gemini mo ta anh e2e.");
+        when(geminiClarifyClient.describeImage(any(), any(), any())).thenReturn(narrative("Gemini mo ta anh e2e."));
 
         AiDoctorDiagnosisResponse response = aiDoctorDiagnosisService.diagnose(fakeImage(), "", 1L, "sess-1");
 
@@ -223,7 +230,7 @@ class AiDoctorDiagnosisServiceTest {
         when(aiDiagnosisClient.predict(any())).thenReturn(predictResponse("DISEASE", finalPrediction));
         when(geminiClarifyClient.describeImage(any(), any(), any())).thenAnswer(invocation -> {
             Thread.sleep(3000);
-            return "Cau tra loi qua cham, khong duoc dung.";
+            return narrative("Cau tra loi qua cham, khong duoc dung.");
         });
 
         long start = System.currentTimeMillis();
@@ -250,7 +257,9 @@ class AiDoctorDiagnosisServiceTest {
     @Test
     void nonShrimpStatus_returnsGeminiNarrative_insteadOfGenericBadRequest() {
         when(aiDiagnosisClient.predict(any())).thenReturn(predictResponse("NON_SHRIMP", null));
-        when(geminiClarifyClient.describeImage(any(), any(), any())).thenReturn("Day la anh mot chiec la, khong phai tom.");
+        when(geminiClarifyClient.describeImage(any(), any(), any()))
+                .thenReturn(AiImageNarrativeResult.builder().isShrimp(false)
+                        .description("Day la anh mot chiec la, khong phai tom.").build());
 
         AiDoctorDiagnosisResponse response = aiDoctorDiagnosisService.diagnose(fakeImage(), "", 1L, "sess-5");
 
@@ -284,6 +293,38 @@ class AiDoctorDiagnosisServiceTest {
     }
 
     // =========================================================
+    // 4c. YOLO nham anh KHONG PHAI TOM thanh HEALTHY (vd cho/meo/do vat) — Gemini xac nhan
+    // isShrimp=false phai chan lai, khong duoc tra HEALTHY sai cho nguoi dung. Day la regression
+    // test cho dung bug thuc te: anh 1 con cho duoc YOLO gan nham vao lop Healthy.
+    // =========================================================
+
+    @Test
+    void healthyStatus_geminiConfirmsNotShrimp_overriddenToUnrecognized_insteadOfFalseHealthy() {
+        when(aiDiagnosisClient.predict(any())).thenReturn(predictResponse("HEALTHY", null));
+        when(geminiClarifyClient.describeImage(any(), any(), any()))
+                .thenReturn(AiImageNarrativeResult.builder().isShrimp(false)
+                        .description("Day la anh mot chu cho, khong phai tom.").build());
+
+        AiDoctorDiagnosisResponse response = aiDoctorDiagnosisService.diagnose(fakeImage(), "", 1L, "sess-6b");
+
+        assertThat(response.getStatus()).isEqualTo("UNRECOGNIZED");
+        assertThat(response.getAiDescription()).contains("Day la anh mot chu cho, khong phai tom.");
+    }
+
+    // Gemini fail/timeout khi YOLO tra HEALTHY -> fail-open, GIU NGUYEN HEALTHY (khong regress hanh
+    // vi cu chi vi luoi an toan khong hoat dong duoc luc do).
+    @Test
+    void healthyStatus_geminiFails_failsOpen_stillReturnsHealthy() {
+        when(aiDiagnosisClient.predict(any())).thenReturn(predictResponse("HEALTHY", null));
+        when(geminiClarifyClient.describeImage(any(), any(), any()))
+                .thenThrow(new RuntimeException("simulated Gemini outage"));
+
+        AiDoctorDiagnosisResponse response = aiDoctorDiagnosisService.diagnose(fakeImage(), "", 1L, "sess-6c");
+
+        assertThat(response.getStatus()).isEqualTo("HEALTHY");
+    }
+
+    // =========================================================
     // 4b. finalPrediction null (YOLO khong nhan ra benh cu the tu anh) -> goi Gemini goi y tu do
     // (nhu free-consult) + luon kem lien he ky su, thay vi throw BadRequestException nhu truoc.
     // =========================================================
@@ -291,7 +332,7 @@ class AiDoctorDiagnosisServiceTest {
     @Test
     void finalPredictionNull_callsGeminiFreeSuggestion_returnsUnrecognizedStatus_insteadOfThrowing() {
         when(aiDiagnosisClient.predict(any())).thenReturn(predictResponse("DISEASE", null));
-        when(geminiClarifyClient.describeImage(any(), any(), any())).thenReturn("Anh mo, kho nhan dinh ro.");
+        when(geminiClarifyClient.describeImage(any(), any(), any())).thenReturn(narrative("Anh mo, kho nhan dinh ro."));
         when(geminiClarifyClient.freeConsult(any(), any(), any()))
                 .thenReturn("Co the do moi truong bien dong, ban theo doi them vai ngay nhe.");
 
@@ -331,7 +372,7 @@ class AiDoctorDiagnosisServiceTest {
         seedDiseaseWithProtocol("DIS_HIST", "Benh history test", "histkeyword", 0.4D, 0.65D);
         AiPredictionItem finalPrediction = prediction("DIS_HIST", "Benh history test", "History test", 90.0D);
         when(aiDiagnosisClient.predict(any())).thenReturn(predictResponse("DISEASE", finalPrediction));
-        when(geminiClarifyClient.describeImage(any(), any(), any())).thenReturn("Mo ta luu history.");
+        when(geminiClarifyClient.describeImage(any(), any(), any())).thenReturn(narrative("Mo ta luu history."));
 
         AiDoctorDiagnosisResponse response = aiDoctorDiagnosisService.diagnose(fakeImage(), "", 42L, "sess-7");
 
@@ -362,7 +403,7 @@ class AiDoctorDiagnosisServiceTest {
         seedDraftDiseaseWithProtocol("DIS_DRAFT_IMG", "Benh nhap chua duyet qua anh", "draftimgkeyword", 0.4D, 0.65D);
         AiPredictionItem finalPrediction = prediction("DIS_DRAFT_IMG", "Benh nhap chua duyet qua anh", "Draft img", 90.0D);
         when(aiDiagnosisClient.predict(any())).thenReturn(predictResponse("DISEASE", finalPrediction));
-        when(geminiClarifyClient.describeImage(any(), any(), any())).thenReturn("Mo ta anh.");
+        when(geminiClarifyClient.describeImage(any(), any(), any())).thenReturn(narrative("Mo ta anh."));
 
         AiDoctorDiagnosisResponse response = aiDoctorDiagnosisService.diagnose(fakeImage(), "", 1L, "sess-draft-1");
 
@@ -374,7 +415,7 @@ class AiDoctorDiagnosisServiceTest {
         seedDraftDiseaseWithProtocol("DIS_DRAFT_PREVIEW", "Benh nhap xem truoc qua anh", "previewimgkeyword", 0.4D, 0.65D);
         AiPredictionItem finalPrediction = prediction("DIS_DRAFT_PREVIEW", "Benh nhap xem truoc qua anh", "Preview img", 90.0D);
         when(aiDiagnosisClient.predict(any())).thenReturn(predictResponse("DISEASE", finalPrediction));
-        when(geminiClarifyClient.describeImage(any(), any(), any())).thenReturn("Mo ta anh preview.");
+        when(geminiClarifyClient.describeImage(any(), any(), any())).thenReturn(narrative("Mo ta anh preview."));
 
         AiDoctorDiagnosisResponse response = aiDoctorDiagnosisService.diagnoseForTest(fakeImage(), "", "DIS_DRAFT_PREVIEW");
 
@@ -387,7 +428,7 @@ class AiDoctorDiagnosisServiceTest {
         seedDraftDiseaseWithProtocol("DIS_DRAFT_NOHIST", "Benh nhap khong luu history", "nohistkeyword", 0.4D, 0.65D);
         AiPredictionItem finalPrediction = prediction("DIS_DRAFT_NOHIST", "Benh nhap khong luu history", "No hist", 90.0D);
         when(aiDiagnosisClient.predict(any())).thenReturn(predictResponse("DISEASE", finalPrediction));
-        when(geminiClarifyClient.describeImage(any(), any(), any())).thenReturn("Mo ta anh.");
+        when(geminiClarifyClient.describeImage(any(), any(), any())).thenReturn(narrative("Mo ta anh."));
 
         AiDoctorDiagnosisResponse response = aiDoctorDiagnosisService.diagnoseForTest(fakeImage(), "", "DIS_DRAFT_NOHIST");
 
@@ -400,7 +441,7 @@ class AiDoctorDiagnosisServiceTest {
         seedDraftDiseaseWithProtocol("DIS_DRAFT_LOWCONF", "Benh nhap do tin cay thap", "lowconfkeyword", 0.99D, 0.99D);
         AiPredictionItem finalPrediction = prediction("DIS_DRAFT_LOWCONF", "Benh nhap do tin cay thap", "Low conf", 10.0D);
         when(aiDiagnosisClient.predict(any())).thenReturn(predictResponse("DISEASE", finalPrediction));
-        when(geminiClarifyClient.describeImage(any(), any(), any())).thenReturn("Mo ta anh.");
+        when(geminiClarifyClient.describeImage(any(), any(), any())).thenReturn(narrative("Mo ta anh."));
         long reviewCaseCountBefore = reviewCaseRepository.count();
 
         aiDoctorDiagnosisService.diagnoseForTest(fakeImage(), "", "DIS_DRAFT_LOWCONF");
