@@ -12,12 +12,7 @@ public class BlogPostRequest {
     private String content;
     private String thumbnailUrl;
     private String thumbnailPublicId;
-    private String seoTitle;
-    private String metaDescription;
-    private String canonicalUrl;
-    private String focusKeyword;
-    private String coverImageAlt;
-    private String status;       // DRAFT | IN_REVIEW | PUBLISHED
+    private String status;       // DRAFT | PUBLISHED
     private Long categoryId;
     private List<Long> tagIds;
     private List<Long> productIds;

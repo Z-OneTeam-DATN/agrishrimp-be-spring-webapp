@@ -265,11 +265,6 @@ public class BlogService {
                 .slug(slug)
                 .excerpt(req.getExcerpt())
                 .content(req.getContent())
-                .seoTitle(trimToNull(req.getSeoTitle()))
-                .metaDescription(trimToNull(req.getMetaDescription()))
-                .canonicalUrl(trimToNull(req.getCanonicalUrl()))
-                .focusKeyword(trimToNull(req.getFocusKeyword()))
-                .coverImageAlt(trimToNull(req.getCoverImageAlt()))
                 .status(resolveRequestedStatus(req.getStatus()))
                 .build();
 
@@ -293,11 +288,6 @@ public class BlogService {
         if (req.getTitle() != null) post.setTitle(req.getTitle());
         if (req.getExcerpt() != null) post.setExcerpt(req.getExcerpt());
         if (req.getContent() != null) post.setContent(req.getContent());
-        if (req.getSeoTitle() != null) post.setSeoTitle(trimToNull(req.getSeoTitle()));
-        if (req.getMetaDescription() != null) post.setMetaDescription(trimToNull(req.getMetaDescription()));
-        if (req.getCanonicalUrl() != null) post.setCanonicalUrl(trimToNull(req.getCanonicalUrl()));
-        if (req.getFocusKeyword() != null) post.setFocusKeyword(trimToNull(req.getFocusKeyword()));
-        if (req.getCoverImageAlt() != null) post.setCoverImageAlt(trimToNull(req.getCoverImageAlt()));
 
         // Slug: chỉ đổi khi FE gửi slug mới khác slug cũ
         if (req.getSlug() != null && !req.getSlug().equals(post.getSlug())) {
@@ -579,10 +569,6 @@ public class BlogService {
         return normalized.isBlank() ? null : normalized;
     }
 
-    private String trimToNull(String value) {
-        return normalizeNullableText(value);
-    }
-
     private String toSlug(String text) {
         if (text == null) return "bai-viet-" + System.currentTimeMillis();
         return text.toLowerCase()
@@ -644,11 +630,6 @@ public class BlogService {
                 .excerpt(p.getExcerpt())
                 .content(includeContent ? p.getContent() : null)
                 .thumbnailUrl(p.getThumbnailUrl())
-                .seoTitle(p.getSeoTitle())
-                .metaDescription(p.getMetaDescription())
-                .canonicalUrl(p.getCanonicalUrl())
-                .focusKeyword(p.getFocusKeyword())
-                .coverImageAlt(p.getCoverImageAlt())
                 .status(p.getStatus() != null ? p.getStatus().name() : null)
                 .reviewNote(p.getReviewNote())
                 .viewCount(p.getViewCount())

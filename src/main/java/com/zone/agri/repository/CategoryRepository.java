@@ -7,7 +7,6 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.stereotype.Repository;
 import java.util.List;
-import java.util.Optional;
 
 @Repository
 public interface CategoryRepository extends JpaRepository<Category, Long> {
@@ -17,12 +16,6 @@ public interface CategoryRepository extends JpaRepository<Category, Long> {
 
     // Kiểm tra trùng tên khi cập nhật (Trừ chính nó)
     boolean existsByNameIgnoreCaseAndIdNot(String name, Long id);
-
-    Optional<Category> findBySlugIgnoreCase(String slug);
-
-    boolean existsBySlugIgnoreCase(String slug);
-
-    boolean existsBySlugIgnoreCaseAndIdNot(String slug, Long id);
 
     // Tìm tất cả danh mục cha (parent = null)
     List<Category> findByParentIsNull();

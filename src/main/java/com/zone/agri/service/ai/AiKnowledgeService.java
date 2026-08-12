@@ -32,8 +32,6 @@ import com.zone.agri.dto.response.ai.AiKnowledgeImportPreviewRowResponse;
 import com.zone.agri.dto.response.ai.AiKnowledgeReviewCaseResponse;
 import com.zone.agri.dto.response.ai.AiKnowledgeTreatmentStageResponse;
 import com.zone.agri.dto.response.ai.AiKeywordAnswerSetResponse;
-import com.zone.agri.dto.response.ai.PublicAiDiseaseResponse;
-import com.zone.agri.dto.response.ai.PublicAiDiseaseTreatmentStageResponse;
 import com.zone.agri.entity.AiChatClarifySession;
 import com.zone.agri.entity.AiDiseaseKnowledge;
 import com.zone.agri.entity.AiKeywordAnswerSet;
@@ -233,28 +231,6 @@ public class AiKnowledgeService {
                 .stream()
                 .map(this::toDiseaseKnowledgeResponse)
                 .toList();
-    }
-
-    @Transactional(readOnly = true)
-    public List<PublicAiDiseaseResponse> getPublicDiseaseKnowledgeEntries() {
-        return diseaseKnowledgeRepository
-                .findAllByStatusAndEnabledTrueOrderByPriorityDescNameViAsc(AiKnowledgeStatus.APPROVED)
-                .stream()
-                .map(this::toPublicDiseaseResponse)
-                .toList();
-    }
-
-    @Transactional(readOnly = true)
-    public PublicAiDiseaseResponse getPublicDiseaseKnowledgeBySlug(String slug) {
-        String normalizedSlug = AiKnowledgeTextUtils.normalize(slug).replace(' ', '-');
-        return diseaseKnowledgeRepository
-                .findAllByStatusAndEnabledTrueOrderByPriorityDescNameViAsc(AiKnowledgeStatus.APPROVED)
-                .stream()
-                .filter(entity -> publicDiseaseSlug(entity).equalsIgnoreCase(normalizedSlug)
-                        || (entity.getCode() != null && entity.getCode().equalsIgnoreCase(slug)))
-                .findFirst()
-                .map(this::toPublicDiseaseResponse)
-                .orElseThrow(() -> new NotFoundException("Không tìm thấy bệnh tôm công khai với slug: " + slug));
     }
 
     @Transactional
@@ -2573,31 +2549,6 @@ public class AiKnowledgeService {
                 .build();
     }
 
-    private PublicAiDiseaseResponse toPublicDiseaseResponse(AiDiseaseKnowledge entity) {
-        AiKnowledgeCategory category = entity.getCategory();
-        return PublicAiDiseaseResponse.builder()
-                .slug(publicDiseaseSlug(entity))
-                .code(entity.getCode())
-                .nameVi(entity.getNameVi())
-                .nameEn(entity.getNameEn())
-                .categoryName(category != null ? category.getName() : null)
-                .categorySlug(category != null ? category.getSlug() : null)
-                .signsSummary(entity.getSignsSummary())
-                .causes(defaultList(readJsonList(entity.getCausesJson(), new TypeReference<List<String>>() {
-                })))
-                .treatmentStages(toPublicTreatmentStageResponses(entity.getTreatmentStagesJson()))
-                .imageUrls(readImageUrls(entity.getImageUrlsJson()))
-                .createdAt(entity.getCreatedAt())
-                .updatedAt(entity.getUpdatedAt())
-                .build();
-    }
-
-    private String publicDiseaseSlug(AiDiseaseKnowledge entity) {
-        String code = entity.getCode() == null ? "benh-tom" : entity.getCode();
-        String name = entity.getNameVi() == null || entity.getNameVi().isBlank() ? code : entity.getNameVi();
-        return AiKnowledgeTextUtils.buildSlug(name + " " + code, code.toLowerCase(Locale.ROOT));
-    }
-
     private AiKnowledgeReviewCaseResponse toReviewCaseResponse(AiKnowledgeReviewCase entity) {
         return AiKnowledgeReviewCaseResponse.builder()
                 .id(entity.getId())
@@ -2647,18 +2598,6 @@ public class AiKnowledgeService {
                         .stageTitle(stage.getStageTitle())
                         .instructions(defaultList(stage.getInstructions()))
                         .productIds(defaultList(stage.getProductIds()))
-                        .products(resolveSuggestedProducts(stage.getProductIds()))
-                        .extraProductNames(defaultList(stage.getExtraProductNames()))
-                        .build())
-                .toList();
-    }
-
-    private List<PublicAiDiseaseTreatmentStageResponse> toPublicTreatmentStageResponses(String treatmentStagesJson) {
-        return defaultList(readJsonList(treatmentStagesJson, new TypeReference<List<KnowledgeStage>>() {
-        })).stream()
-                .map(stage -> PublicAiDiseaseTreatmentStageResponse.builder()
-                        .stageTitle(stage.getStageTitle())
-                        .instructions(defaultList(stage.getInstructions()))
                         .products(resolveSuggestedProducts(stage.getProductIds()))
                         .extraProductNames(defaultList(stage.getExtraProductNames()))
                         .build())

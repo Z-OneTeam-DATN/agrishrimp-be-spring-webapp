@@ -734,7 +734,6 @@ public class ProductService {
             categoryDTO = new CategoryDTO();
             categoryDTO.setId(product.getCategory().getId());
             categoryDTO.setName(product.getCategory().getName());
-            categoryDTO.setSlug(product.getCategory().getSlug());
             categoryDTO.setStatus(product.getCategory().getStatus());
         }
 
