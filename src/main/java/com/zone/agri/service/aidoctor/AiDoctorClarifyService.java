@@ -308,6 +308,7 @@ public class AiDoctorClarifyService {
                         .code(candidate.getDiseaseCode())
                         .nameVi(candidate.getNameVi())
                         .nameEn(candidate.getNameEn())
+                        .imageUrls(prescription.getDisease() != null ? prescription.getDisease().getImageUrls() : null)
                         .build())
                 .causes(prescription.getCauses())
                 .signsSummary(prescription.getSignsSummary())

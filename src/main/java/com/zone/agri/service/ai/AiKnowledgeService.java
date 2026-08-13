@@ -1238,8 +1238,8 @@ public class AiKnowledgeService {
     }
 
     /**
-     * geminiText la van ban tu do (khong phai HTML admin duyet) — escape roi tu dung <br> cho xuong
-     * dong, KHONG dua thang vao dangerouslySetInnerHTML o FE. Dong khuyen cao lien he ky su luon do
+     * geminiText la van ban tu do (khong phai HTML admin duyet) — escape roi format thanh p/ul,
+     * KHONG dua thang vao dangerouslySetInnerHTML o FE. Dong khuyen cao lien he ky su luon do
      * code tu them (khong phu thuoc Gemini co nho nhac hay khong) — day la guardrail chinh cua che
      * do tu van mo: khong bao gio de nong dan hieu day la phac do da duyet.
      */
@@ -1259,30 +1259,101 @@ public class AiKnowledgeService {
     }
 
     private String buildFreeConsultAnswerHtml(String geminiText, AiKnowledgeChatConfig config, boolean isGreetingOnly) {
+        return buildFreeConsultAnswerHtml(geminiText, config, isGreetingOnly, false);
+    }
+
+    private String buildFreeConsultAnswerHtml(
+            String geminiText,
+            AiKnowledgeChatConfig config,
+            boolean isGreetingOnly,
+            boolean suppressImageObservationIntro) {
         StringBuilder builder = new StringBuilder();
-        builder.append("<p>").append(formatPlainTextAsHtml(geminiText)).append("</p>");
+        String cleanedGeminiText = cleanFreeConsultText(geminiText, !isGreetingOnly, suppressImageObservationIntro);
+        builder.append(formatFreeConsultTextAsHtml(cleanedGeminiText));
 
         if (isGreetingOnly) {
             return builder.toString();
         }
 
+        builder.append(buildEngineerContactFooterHtml(config));
+        return builder.toString();
+    }
+
+    private String buildEngineerContactFooterHtml(AiKnowledgeChatConfig config) {
         String contactName = trimToNull(config.getFallbackContactName());
         String contactPhone = trimToNull(config.getFallbackContactPhone());
-        builder.append("<p><em>Đây là gợi ý sơ bộ dựa trên dấu hiệu bạn mô tả, chưa được kỹ sư xác nhận.");
+        StringBuilder builder = new StringBuilder("<p><em>Vui lòng liên hệ ngay kỹ sư thủy sản");
         if (contactName != null || contactPhone != null) {
-            builder.append(" Vui lòng liên hệ ngay ");
+            builder.append(": ").append(buildEngineerAvatarHtml());
             if (contactName != null) {
-                builder.append(escapeHtml(contactName));
+                builder.append(" <strong>").append(escapeHtml(contactName)).append("</strong>");
             }
             if (contactPhone != null) {
                 builder.append(contactName != null ? ": " : "").append(escapeHtml(contactPhone));
             }
-            builder.append(" để được kiểm tra chính xác.");
-        } else {
-            builder.append(" Vui lòng liên hệ kỹ sư nông nghiệp để được kiểm tra chính xác.");
         }
-        builder.append("</em></p>");
+        builder.append(" để được hỗ trợ chính xác nhất.</em></p>");
         return builder.toString();
+    }
+
+    private String buildEngineerAvatarHtml() {
+        return "<span style=\"display:inline-flex;align-items:center;justify-content:center;"
+                + "width:22px;height:22px;border-radius:999px;background:#e8f1ff;color:#1965a2;"
+                + "font-weight:700;font-size:10px;margin:0 6px;vertical-align:middle;\">KS</span>";
+    }
+
+    private String cleanFreeConsultText(String text, boolean stripGreeting, boolean stripImageObservationIntro) {
+        String normalizedText = trimToNull(text);
+        if (normalizedText == null) {
+            return "";
+        }
+
+        List<String> paragraphs = new ArrayList<>(Arrays.stream(normalizedText
+                        .replace("\r\n", "\n")
+                        .replace("\r", "\n")
+                        .split("\n\\s*\n"))
+                .map(String::trim)
+                .filter(paragraph -> !paragraph.isBlank())
+                .toList());
+
+        while (!paragraphs.isEmpty()) {
+            String first = paragraphs.get(0);
+            if (stripGreeting && looksLikeFreeConsultGreeting(first)) {
+                paragraphs.remove(0);
+                stripGreeting = false;
+                continue;
+            }
+            if (stripImageObservationIntro && looksLikeRepeatedImageObservationIntro(first)) {
+                paragraphs.remove(0);
+                stripImageObservationIntro = false;
+                continue;
+            }
+            break;
+        }
+
+        return String.join("\n\n", paragraphs);
+    }
+
+    private boolean looksLikeFreeConsultGreeting(String paragraph) {
+        String normalized = AiKnowledgeTextUtils.normalize(paragraph);
+        return normalized != null
+                && normalized.length() <= 140
+                && normalized.contains("bac si tom")
+                && (normalized.startsWith("chao") || normalized.startsWith("xin chao"));
+    }
+
+    private boolean looksLikeRepeatedImageObservationIntro(String paragraph) {
+        String normalized = AiKnowledgeTextUtils.normalize(paragraph);
+        if (normalized == null) {
+            return false;
+        }
+        return normalized.startsWith("dua tren hinh anh")
+                || normalized.startsWith("dua tren anh")
+                || normalized.startsWith("minh quan sat thay")
+                || normalized.startsWith("quan sat thay")
+                || normalized.startsWith("anh ban gui")
+                || normalized.startsWith("nhin vao anh")
+                || normalized.startsWith("nhin vao hinh");
     }
 
     private String formatPlainTextAsHtml(String text) {
@@ -1290,6 +1361,11 @@ public class AiKnowledgeService {
                 .replace("\r\n", "\n")
                 .replace("\r", "\n")
                 .replace("\n", "<br>");
+    }
+
+    private String formatFreeConsultTextAsHtml(String text) {
+        String html = AiTextFormatUtils.plainTextToHtml(text);
+        return trimToNull(html) != null ? html : "";
     }
 
     private boolean isRepeatOfLastAssistantQuestion(AiChatClarifySession session, String newQuestion) {
@@ -1401,7 +1477,8 @@ public class AiKnowledgeService {
                         AiReviewCaseReason.LOW_CONFIDENCE);
             }
 
-            return buildLowConfidenceDiagnosisResponse(predictResponse, finalPrediction, diagnosisImageUrl, geminiImageDescription);
+            return buildLowConfidenceDiagnosisResponse(
+                    predictResponse, finalPrediction, diagnosisImageUrl, geminiImageDescription, resolvedDisease);
         }
 
         return buildUnrecognizedDiagnosisResponse(
@@ -1415,6 +1492,7 @@ public class AiKnowledgeService {
 
         return AiDoctorDiagnosisResponse.builder()
                 .diagnosisId(diagnosisId != null ? String.valueOf(diagnosisId) : null)
+                .disease(toDiseaseResponse(disease, null))
                 .causes(defaultList(readJsonList(disease.entity().getCausesJson(), new TypeReference<List<String>>() {
                 })))
                 .signsSummary(trimToNull(disease.entity().getSignsSummary()))
@@ -1949,6 +2027,11 @@ public class AiKnowledgeService {
                     return disease;
                 }
             }
+
+            MatchScore fuzzyNameMatch = matchDiseaseFromText(normalizedCandidate, snapshot.diseaseEntries);
+            if (fuzzyNameMatch.disease() != null && fuzzyNameMatch.score() >= 0.55D) {
+                return fuzzyNameMatch.disease();
+            }
         }
 
         return null;
@@ -1978,12 +2061,7 @@ public class AiKnowledgeService {
                 .diagnosisId("diag_" + UUID.randomUUID().toString().replace("-", "").substring(0, 12))
                 .status(status)
                 .imageUrl(diagnosisImageUrl)
-                .disease(DiseaseResponse.builder()
-                        .code(disease.entity().getCode())
-                        .nameVi(disease.entity().getNameVi())
-                        .nameEn(disease.entity().getNameEn())
-                        .confidencePercent(finalPrediction.getConfidencePercent())
-                        .build())
+                .disease(toDiseaseResponse(disease, finalPrediction.getConfidencePercent()))
                 .topPredictions(toTopPredictions(predictResponse))
                 .causes(defaultList(readJsonList(disease.entity().getCausesJson(), new TypeReference<List<String>>() {
                 })))
@@ -2010,17 +2088,20 @@ public class AiKnowledgeService {
             AiPredictResponse predictResponse,
             AiPredictionItem finalPrediction,
             String diagnosisImageUrl,
-            String geminiImageDescription) {
+            String geminiImageDescription,
+            PreparedDisease disease) {
         return AiDoctorDiagnosisResponse.builder()
                 .diagnosisId("diag_" + UUID.randomUUID().toString().replace("-", "").substring(0, 12))
                 .status("DISEASE")
                 .imageUrl(diagnosisImageUrl)
-                .disease(DiseaseResponse.builder()
-                        .code(finalPrediction.getDiseaseCode())
-                        .nameVi(finalPrediction.getVietnameseName())
-                        .nameEn(finalPrediction.getEnglishName())
-                        .confidencePercent(finalPrediction.getConfidencePercent())
-                        .build())
+                .disease(disease != null
+                        ? toDiseaseResponse(disease, finalPrediction.getConfidencePercent())
+                        : DiseaseResponse.builder()
+                                .code(finalPrediction.getDiseaseCode())
+                                .nameVi(finalPrediction.getVietnameseName())
+                                .nameEn(finalPrediction.getEnglishName())
+                                .confidencePercent(finalPrediction.getConfidencePercent())
+                                .build())
                 .topPredictions(toTopPredictions(predictResponse))
                 .signsSummary("Tôi cần thêm dấu hiệu từ người nuôi để kết luận an toàn hơn. "
                         + "Vui lòng mô tả rõ các biểu hiện như giảm ăn, đường ruột, màu gan tụy hoặc tình trạng bơi lờ đờ.")
@@ -2083,7 +2164,7 @@ public class AiKnowledgeService {
         StringBuilder html = new StringBuilder(
                 buildImageObservationPrefixHtml(geminiImageDescription, finalPrediction, null));
         html.append(trimToNull(geminiText) != null
-                ? buildFreeConsultAnswerHtml(geminiText, config, false)
+                ? buildFreeConsultAnswerHtml(geminiText, config, false, trimToNull(geminiImageDescription) != null)
                 : "<p>" + escapeHtml(config.getFallbackMessage()) + "</p>");
 
         if (allowReviewCase) {
@@ -2284,7 +2365,7 @@ public class AiKnowledgeService {
 
     /**
      * Ghep 1 doan HTML tu nhien cho luong chan doan qua anh (YOLO): mo ta cua Gemini (neu goi thanh
-     * cong) + 1 cau trich dan % tin cay/ten benh do CODE tu dung (khong bao gio giao cho LLM), roi
+     * cong) + 1 cau nhan dien ten benh do CODE tu dung (khong bao gio giao cho LLM), roi
      * moi toi thong tin nhan dien an toan da co san. Phac do chi tra sau khi nguoi dung mo ket qua va
      * chon dung giai doan neu benh co nhieu stage.
      */
@@ -2306,7 +2387,7 @@ public class AiKnowledgeService {
     }
 
     /**
-     * Mo ta cua Gemini (neu goi thanh cong) + 1 cau trich dan % tin cay/ten benh do CODE tu dung
+     * Mo ta cua Gemini (neu goi thanh cong) + 1 cau nhan dien ten benh do CODE tu dung
      * (khong bao gio giao cho LLM) — dung chung cho buildDiagnosisNarrativeHtml va
      * buildUnrecognizedDiagnosisResponse.
      */
@@ -2321,11 +2402,10 @@ public class AiKnowledgeService {
         String citedName = resolvedDisease != null
                 ? resolvedDisease.entity().getNameVi()
                 : (finalPrediction != null ? finalPrediction.getVietnameseName() : null);
-        Double confidencePercent = finalPrediction != null ? finalPrediction.getConfidencePercent() : null;
-        if (trimToNull(citedName) != null && confidencePercent != null) {
-            builder.append("<p>Dựa trên mô hình nhận diện, mình nghi ngờ khoảng ")
-                    .append(String.format("%.0f", confidencePercent))
-                    .append("% khả năng đây là <strong>").append(escapeHtml(citedName)).append("</strong>.</p>");
+        if (trimToNull(citedName) != null) {
+            builder.append("<p>Dựa trên mô hình nhận diện, mình nghi ngờ đây là <strong>")
+                    .append(escapeHtml(citedName))
+                    .append("</strong>.</p>");
         }
 
         return builder.toString();
@@ -2685,6 +2765,20 @@ public class AiKnowledgeService {
                 .products(resolveSuggestedProducts(stage.getProductIds()))
                 .extraProductNames(defaultList(stage.getExtraProductNames()))
                 .subStages(toTreatmentSubStageResponses(stage))
+                .build();
+    }
+
+    private DiseaseResponse toDiseaseResponse(PreparedDisease disease, Double confidencePercent) {
+        if (disease == null) {
+            return null;
+        }
+        List<String> imageUrls = readImageUrls(disease.entity().getImageUrlsJson());
+        return DiseaseResponse.builder()
+                .code(disease.entity().getCode())
+                .nameVi(disease.entity().getNameVi())
+                .nameEn(disease.entity().getNameEn())
+                .confidencePercent(confidencePercent)
+                .imageUrls(imageUrls.isEmpty() ? null : imageUrls)
                 .build();
     }
 

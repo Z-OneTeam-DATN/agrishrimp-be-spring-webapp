@@ -36,6 +36,6 @@ public class AiDoctorConversationTurnResponse {
     /** DISEASE | HEALTHY | UNRECOGNIZED — null (bản ghi cũ trước patch) được BE coi là DISEASE. */
     private String status;
 
-    /** Narrative HTML — chỉ có giá trị khi status HEALTHY/UNRECOGNIZED (DISEASE dùng signsSummary). */
+    /** Narrative HTML đã lưu để FE replay đúng bubble tư vấn/chẩn đoán. */
     private String aiDescription;
 }

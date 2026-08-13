@@ -103,6 +103,7 @@ class AiDoctorDiagnosisServiceTest {
     private void seedDiseaseWithProtocol(String code, String nameVi, String symptomKeyword,
             double matchThreshold, double confidenceThreshold) throws Exception {
         String causesJson = objectMapper.writeValueAsString(List.of("Moi truong bien dong", "Mat do nuoi qua cao"));
+        String imageUrlsJson = objectMapper.writeValueAsString(List.of("http://img/" + code + ".jpg"));
         String stagesJson = objectMapper.writeValueAsString(List.of(Map.of(
                 "stageTitle", "Giai doan 1: On dinh moi truong",
                 "instructions", List.of("Giam soc cho tom", "Tang cuong oxy hoa tan"),
@@ -115,6 +116,7 @@ class AiDoctorDiagnosisServiceTest {
                 .signsSummary("Dau hieu dac trung cua " + nameVi)
                 .causesJson(causesJson)
                 .treatmentStagesJson(stagesJson)
+                .imageUrlsJson(imageUrlsJson)
                 .confidenceThreshold(confidenceThreshold)
                 .matchThreshold(matchThreshold)
                 .enabled(true)
@@ -191,9 +193,13 @@ class AiDoctorDiagnosisServiceTest {
 
         assertThat(response.getStatus()).isEqualTo("DISEASE");
         assertThat(response.getAiDescription()).contains("Gemini mo ta anh e2e.");
-        assertThat(response.getAiDescription()).contains("90%");
-        assertThat(response.getAiDescription()).contains("Giai doan 1: On dinh moi truong");
+        assertThat(response.getAiDescription()).doesNotContain("90%");
+        assertThat(response.getAiDescription()).doesNotContain("% khả năng");
+        assertThat(response.getAiDescription()).doesNotContain("Giai doan 1: On dinh moi truong");
+        assertThat(response.getTreatmentStages()).isNotEmpty();
+        assertThat(response.getTreatmentStages().get(0).getStageTitle()).contains("Giai doan 1: On dinh moi truong");
         assertThat(response.getDisease().getCode()).isEqualTo("DIS_E2E");
+        assertThat(response.getDisease().getImageUrls()).containsExactly("http://img/DIS_E2E.jpg");
     }
 
     // =========================================================
@@ -213,9 +219,10 @@ class AiDoctorDiagnosisServiceTest {
         assertThat(response.getStatus()).isEqualTo("DISEASE");
         assertThat(response.getDisease().getCode()).isEqualTo("DIS_GRACE");
         assertThat(response.getTreatmentStages()).isNotEmpty();
-        // Khong co mo ta Gemini nhung van con cau trich dan + phac do -> aiDescription khong rong.
+        // Khong co mo ta Gemini nhung van con cau nhan dien + phac do -> aiDescription khong rong.
         assertThat(response.getAiDescription()).isNotBlank();
-        assertThat(response.getAiDescription()).contains("Giai doan 1: On dinh moi truong");
+        assertThat(response.getAiDescription()).doesNotContain("Giai doan 1: On dinh moi truong");
+        assertThat(response.getTreatmentStages().get(0).getStageTitle()).contains("Giai doan 1: On dinh moi truong");
     }
 
     // =========================================================
@@ -340,7 +347,8 @@ class AiDoctorDiagnosisServiceTest {
 
         assertThat(response.getStatus()).isEqualTo("UNRECOGNIZED");
         assertThat(response.getAiDescription()).contains("Co the do moi truong bien dong, ban theo doi them vai ngay nhe.");
-        assertThat(response.getAiDescription()).contains("chưa được kỹ sư xác nhận");
+        assertThat(response.getAiDescription()).contains("Vui lòng liên hệ ngay kỹ sư thủy sản");
+        assertThat(response.getAiDescription()).contains("để được hỗ trợ chính xác nhất");
 
         AiDoctorDiagnosisHistory saved = historyRepository.findByIdAndUserId(Long.valueOf(response.getDiagnosisId()), 1L)
                 .orElseThrow();

@@ -9,8 +9,11 @@ import com.zone.agri.dto.response.ai.DiseaseResponse;
 import com.zone.agri.dto.response.ai.TopPredictionResponse;
 import com.zone.agri.dto.response.ai.TreatmentStageResponse;
 import com.zone.agri.entity.AiDoctorDiagnosisHistory;
+import com.zone.agri.entity.AiDiseaseKnowledge;
+import com.zone.agri.entity.enums.AiKnowledgeStatus;
 import com.zone.agri.exception.NotFoundException;
 import com.zone.agri.repository.AiDoctorDiagnosisHistoryRepository;
+import com.zone.agri.repository.AiDiseaseKnowledgeRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
@@ -37,6 +40,7 @@ import java.util.stream.Collectors;
 public class AiDoctorDiagnosisHistoryService {
 
     private final AiDoctorDiagnosisHistoryRepository historyRepository;
+    private final AiDiseaseKnowledgeRepository diseaseKnowledgeRepository;
     private final ObjectMapper objectMapper;
 
     // =========================================================
@@ -178,6 +182,7 @@ public class AiDoctorDiagnosisHistoryService {
                 .nameVi(h.getFinalDiseaseNameVi())
                 .nameEn(h.getFinalDiseaseNameEn())
                 .confidencePercent(h.getFinalConfidencePercent())
+                .imageUrls(resolveDiseaseImageUrls(h.getFinalDiseaseCode()))
                 .build();
 
         return AiDoctorHistoryItemResponse.builder()
@@ -195,6 +200,7 @@ public class AiDoctorDiagnosisHistoryService {
                 .nameVi(h.getFinalDiseaseNameVi())
                 .nameEn(h.getFinalDiseaseNameEn())
                 .confidencePercent(h.getFinalConfidencePercent())
+                .imageUrls(resolveDiseaseImageUrls(h.getFinalDiseaseCode()))
                 .build();
 
         List<TopPredictionResponse> topPredictions = fromJsonList(
@@ -255,5 +261,18 @@ public class AiDoctorDiagnosisHistoryService {
                     typeRef.getType().getTypeName(), e.getMessage());
             return Collections.emptyList();
         }
+    }
+
+    private List<String> resolveDiseaseImageUrls(String diseaseCode) {
+        if (diseaseCode == null || diseaseCode.isBlank()) {
+            return null;
+        }
+        return diseaseKnowledgeRepository.findByCode(diseaseCode)
+                .filter(disease -> disease.getStatus() == AiKnowledgeStatus.APPROVED)
+                .filter(disease -> !Boolean.FALSE.equals(disease.getEnabled()))
+                .map(AiDiseaseKnowledge::getImageUrlsJson)
+                .map(json -> fromJsonList(json, new TypeReference<List<String>>() {}))
+                .filter(imageUrls -> !imageUrls.isEmpty())
+                .orElse(null);
     }
 }

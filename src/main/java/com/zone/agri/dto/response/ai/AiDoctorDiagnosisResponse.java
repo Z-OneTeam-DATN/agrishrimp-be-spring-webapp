@@ -43,10 +43,9 @@ public class AiDoctorDiagnosisResponse {
     private String purchaseUrl;
 
     /**
-     * Narrative HTML: mô tả ảnh của Gemini + câu trích dẫn độ tin cậy/tên bệnh từ YOLO
-     * do code ghép sẵn ở BE. Chỉ set ở response của POST /diagnosis — EPHEMERAL, không
-     * lưu vào AiDoctorDiagnosisHistory nên luôn absent khi đọc lại qua GET /diagnosis/{id}
-     * hoặc GET /history. An toàn cho dangerouslySetInnerHTML, cùng hợp đồng với AiChatResponse.reply.
+     * Narrative HTML: mô tả ảnh của Gemini + câu nhận diện tên bệnh từ YOLO/knowledge
+     * do code ghép sẵn ở BE. Lưu vào history để FE replay lại đúng bubble đã trả.
+     * An toàn cho dangerouslySetInnerHTML, cùng hợp đồng với AiChatResponse.reply.
      */
     private String aiDescription;
 

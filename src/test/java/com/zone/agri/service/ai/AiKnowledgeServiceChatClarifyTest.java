@@ -654,7 +654,8 @@ class AiKnowledgeServiceChatClarifyTest {
         AiChatResponse response = chat("tom bi dau do", sessionId, null);
 
         assertThat(response.getReply()).contains("Co the do soc moi truong hoac nhiem khuan");
-        assertThat(response.getReply()).contains("chưa được kỹ sư xác nhận");
+        assertThat(response.getReply()).contains("Vui lòng liên hệ ngay kỹ sư thủy sản");
+        assertThat(response.getReply()).contains("để được hỗ trợ chính xác nhất");
         assertThat(response.getReply()).contains("Ky su Nam");
         assertThat(response.getReply()).contains("0909123456");
 
@@ -672,7 +673,7 @@ class AiKnowledgeServiceChatClarifyTest {
         AiChatResponse response = chat("Xin chào", "sess-" + UUID.randomUUID(), null);
 
         assertThat(response.getReply()).contains("Bac si Tom day");
-        assertThat(response.getReply()).doesNotContain("chưa được kỹ sư xác nhận");
+        assertThat(response.getReply()).doesNotContain("Vui lòng liên hệ ngay kỹ sư thủy sản");
     }
 
     @Test
