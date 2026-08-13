@@ -15,6 +15,7 @@ import com.zone.agri.exception.BadRequestException;
 import com.zone.agri.exception.NotFoundException;
 import com.zone.agri.repository.AiDoctorDiagnosisHistoryRepository;
 import com.zone.agri.service.ai.AiKnowledgeService;
+import com.zone.agri.utils.AiTextFormatUtils;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -50,6 +51,8 @@ public class AiDoctorDiagnosisService {
 
     private static final long MAX_IMAGE_SIZE_BYTES = 5_000_000L;
     private static final int MAX_SYMPTOMS_LENGTH = 500;
+    private static final String REQUIRED_SYMPTOMS_MESSAGE =
+            "Vui lòng mô tả thêm dấu hiệu đi kèm ảnh để bác sĩ đưa ra kết quả cuối cùng.";
 
     // Nam duoi read-timeout rieng cua Gemini (45s) de con du gio cho YOLO + Cloudinary trong tran
     // 90s timeout /diagnosis phia FE — khong de mot cuoc goi Gemini cham lam FE tu bo request du
@@ -96,6 +99,14 @@ public class AiDoctorDiagnosisService {
 
         log.info("[AiDoctor] traceId={} start: userId={}, file={}, symptomsLen={}",
                 traceId, userId, image.getOriginalFilename(), normalizedSymptoms.length());
+
+        if (normalizedSymptoms.isBlank()) {
+            CompletableFuture<AiImageNarrativeResult> narrativeFuture =
+                    kickOffNarrativeDescription(image, normalizedSymptoms, traceId);
+            AiImageNarrativeResult narrative = resolveNarrativeGracefully(narrativeFuture, traceId);
+            log.info("[AiDoctor] traceId={} image observation only, waiting symptoms", traceId);
+            return buildImageObservationOnlyResponse(narrative, traceId);
+        }
 
         // 1a. Bat song song mo ta anh tu Gemini ngay tu dau (doc bytes 1 lan tren thread hien tai
         // roi truyen byte[] thuan vao task async — khong doc MultipartFile tu thread khac, vi
@@ -311,6 +322,37 @@ public class AiDoctorDiagnosisService {
             return stage.getSubStages();
         }
         return List.of(stage);
+    }
+
+    private AiDoctorDiagnosisResponse buildImageObservationOnlyResponse(
+            AiImageNarrativeResult narrative, String traceId) {
+        StringBuilder html = new StringBuilder();
+        String description = narrative != null ? narrative.getDescription() : null;
+        if (description != null && !description.isBlank()) {
+            html.append(AiTextFormatUtils.plainTextToHtml(description));
+        } else {
+            html.append("<p>Mình đã nhận ảnh tôm của bà con, nhưng hiện chưa mô tả rõ được ảnh này.</p>");
+        }
+
+        if (narrative != null && !narrative.isShrimp()) {
+            html.append("<p><strong>Mình chưa thấy rõ con tôm trong ảnh này.</strong> Bà con gửi lại ảnh tôm rõ hơn kèm dấu hiệu thực tế trong ao để bác sĩ chẩn đoán chính xác nhé.</p>");
+        } else {
+            html.append("<p><strong>Mình chưa đưa ra kết luận bệnh ở bước này.</strong> ")
+                    .append(REQUIRED_SYMPTOMS_MESSAGE)
+                    .append("</p>");
+            html.append("<ul>");
+            html.append("<li>Tôm ăn bình thường hay giảm ăn, ruột có rỗng/đứt khúc không?</li>");
+            html.append("<li>Tôm có tấp mé, nổi đầu, bơi lờ đờ hoặc rớt đáy không?</li>");
+            html.append("<li>Tỷ lệ tôm có dấu hiệu bất thường khoảng bao nhiêu phần trăm?</li>");
+            html.append("<li>Ao gần đây có mưa lớn, sụp tảo, khí độc NH3/NO2/H2S hoặc đáy ao hôi đen không?</li>");
+            html.append("</ul>");
+        }
+
+        return AiDoctorDiagnosisResponse.builder()
+                .diagnosisId("obs_" + traceId)
+                .status("IMAGE_OBSERVATION")
+                .aiDescription(html.toString())
+                .build();
     }
 
     private CompletableFuture<AiImageNarrativeResult> kickOffNarrativeDescription(MultipartFile image, String userSymptoms, String traceId) {
