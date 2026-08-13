@@ -21,6 +21,7 @@ import org.jsoup.select.Elements;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.io.IOException;
 import java.text.NumberFormat;
@@ -101,6 +102,7 @@ public class ShrimpPriceBlogAutomationService {
     private String webBaseUrl;
 
     @Scheduled(cron = "${app.shrimp-price-blog.cron:0 10 6 * * *}", zone = "Asia/Ho_Chi_Minh")
+    @Transactional
     public void createDailyShrimpPriceBlogDraftOnSchedule() {
         if (!enabled) {
             return;
@@ -115,10 +117,12 @@ public class ShrimpPriceBlogAutomationService {
         }
     }
 
+    @Transactional
     public BlogPost createDailyShrimpPriceBlogDraftNow() {
         return createDailyShrimpPriceBlogDraft(LocalDate.now(VIETNAM_ZONE));
     }
 
+    @Transactional
     public BlogPost createDailyShrimpPriceBlogDraft(LocalDate reportDate) {
         LocalDate safeReportDate = reportDate != null ? reportDate : LocalDate.now(VIETNAM_ZONE);
         ScrapedShrimpPriceData priceData = fetchShrimpPriceData();
@@ -148,12 +152,20 @@ public class ShrimpPriceBlogAutomationService {
                     .get();
 
             String sourceDateLabel = extractSourceDateLabel(doc);
-            List<ShrimpPriceRow> rows = parsePriceRows(doc).stream()
+            List<ShrimpPriceRow> parsedRows = parsePriceRows(doc);
+            List<ShrimpPriceRow> rows = parsedRows.stream()
                     .filter(this::isCommercialMekongShrimpPrice)
                     .sorted(Comparator
                             .comparing(ShrimpPriceRow::groupLabel, String.CASE_INSENSITIVE_ORDER)
                             .thenComparing(ShrimpPriceRow::priceValue, Comparator.nullsLast(Comparator.reverseOrder())))
                     .toList();
+
+            log.info("Shrimp price source parsed: sourceDateLabel={}, parsedRows={}, filteredRows={}",
+                    sourceDateLabel, parsedRows.size(), rows.size());
+            if (rows.isEmpty()) {
+                log.warn("Shrimp price source produced no filtered rows: title={}, tables={}",
+                        doc.title(), doc.select("table").size());
+            }
 
             return new ScrapedShrimpPriceData(sourceDateLabel, rows);
         } catch (IOException ex) {
@@ -175,10 +187,11 @@ public class ShrimpPriceBlogAutomationService {
                 continue;
             }
 
-            if (!"table".equals(tag) || currentGroup.isBlank()) {
+            if (!"table".equals(tag)) {
                 continue;
             }
 
+            String groupForRows = currentGroup.isBlank() ? "Tôm" : currentGroup;
             for (Element row : element.select("tr")) {
                 Elements cells = row.select("td");
                 if (cells.size() < 2) {
@@ -186,14 +199,14 @@ public class ShrimpPriceBlogAutomationService {
                 }
 
                 String rawName = cells.get(0).text().trim();
-                String priceText = cells.get(1).text().trim();
-                String changeText = cells.size() >= 3 ? cells.get(2).text().trim() : "";
+                String priceText = resolvePriceText(cells);
+                String changeText = resolveChangeText(cells);
                 Long priceValue = parsePriceValue(priceText);
                 String itemName = stripLeadingCode(rawName);
 
                 if (!rawName.isBlank() && !priceText.isBlank()) {
                     rows.add(new ShrimpPriceRow(
-                            normalizeGroupLabel(currentGroup, itemName),
+                            normalizeGroupLabel(groupForRows, itemName),
                             rawName,
                             itemName,
                             priceText,
@@ -206,6 +219,37 @@ public class ShrimpPriceBlogAutomationService {
         }
 
         return rows;
+    }
+
+    private String resolvePriceText(Elements cells) {
+        if (cells.size() >= 3 && looksLikeKgPrice(cells.get(2).text())) {
+            return cells.get(2).text().trim();
+        }
+        if (cells.size() >= 2 && looksLikeKgPrice(cells.get(1).text())) {
+            return cells.get(1).text().trim();
+        }
+        for (Element cell : cells) {
+            String text = cell.text();
+            if (looksLikeKgPrice(text)) {
+                return text.trim();
+            }
+        }
+        return cells.size() >= 2 ? cells.get(1).text().trim() : "";
+    }
+
+    private String resolveChangeText(Elements cells) {
+        if (cells.size() >= 4) {
+            return cells.get(3).text().trim();
+        }
+        if (cells.size() >= 3 && !looksLikeKgPrice(cells.get(2).text())) {
+            return cells.get(2).text().trim();
+        }
+        return "";
+    }
+
+    private boolean looksLikeKgPrice(String value) {
+        String normalized = normalizeVietnamese(value);
+        return normalized.contains("/kg") || normalized.contains("d/kg") || normalized.contains("dong/kg");
     }
 
     private boolean isCommercialMekongShrimpPrice(ShrimpPriceRow row) {

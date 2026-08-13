@@ -8,6 +8,8 @@ import com.zone.agri.dto.request.blog.BlogTagRequest;
 import com.zone.agri.dto.response.blog.BlogCategoryResponse;
 import com.zone.agri.dto.response.blog.BlogPostResponse;
 import com.zone.agri.dto.response.common.ApiResponse;
+import com.zone.agri.entity.BlogPost;
+import com.zone.agri.exception.BadRequestException;
 import com.zone.agri.security.annotation.RequirePermission;
 import com.zone.agri.service.BlogService;
 import com.zone.agri.service.ShrimpPriceBlogAutomationService;
@@ -160,15 +162,28 @@ public class AdminBlogController {
     @PostMapping("/automations/shrimp-price/run")
     @RequirePermission("BLOG_APPROVE")
     public ResponseEntity<ApiResponse<Map<String, Object>>> runShrimpPriceBlogAutomation() {
-        BlogPostResponse post = blogService.getById(
-                shrimpPriceBlogAutomationService.createDailyShrimpPriceBlogDraftNow().getId());
+        BlogPost post;
+        try {
+            post = shrimpPriceBlogAutomationService.createDailyShrimpPriceBlogDraftNow();
+        } catch (Exception ex) {
+            throw new BadRequestException("Không tạo được bài giá tôm miền Tây: " + rootErrorMessage(ex));
+        }
         return ResponseEntity.ok(ApiResponse.success(
                 Map.of(
                         "id", post.getId(),
                         "slug", post.getSlug(),
-                        "status", post.getStatus(),
+                        "status", post.getStatus() != null ? post.getStatus().name() : "",
                         "title", post.getTitle()
                 ),
                 "Đã tạo bài giá tôm miền Tây và gửi admin duyệt"));
+    }
+
+    private String rootErrorMessage(Throwable throwable) {
+        Throwable cursor = throwable;
+        while (cursor.getCause() != null) {
+            cursor = cursor.getCause();
+        }
+        String message = cursor.getMessage();
+        return message == null || message.isBlank() ? throwable.getClass().getSimpleName() : message;
     }
 }
