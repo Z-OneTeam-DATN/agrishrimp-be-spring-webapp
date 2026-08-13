@@ -450,14 +450,14 @@ public class ShrimpPriceBlogAutomationService {
             html.append("<h3>").append(escapeHtml(entry.getKey()))
                     .append(" (").append(entry.getValue().size()).append(" loại)")
                     .append("</h3>\n");
-            html.append("<table><thead><tr>")
-                    .append("<th scope=\"col\">Mã</th>")
-                    .append("<th scope=\"col\">Loài / quy cách</th>")
-                    .append("<th scope=\"col\">Size</th>")
-                    .append("<th scope=\"col\">Giá</th>")
-                    .append("<th scope=\"col\">Thay đổi</th>")
-                    .append("<th scope=\"col\">Cập nhật</th>")
-                    .append("</tr></thead><tbody>\n");
+            html.append("<table><tbody><tr>")
+                    .append("<td><strong>Mã</strong></td>")
+                    .append("<td><strong>Loài / quy cách</strong></td>")
+                    .append("<td><strong>Size</strong></td>")
+                    .append("<td><strong>Giá</strong></td>")
+                    .append("<td><strong>Thay đổi</strong></td>")
+                    .append("<td><strong>Cập nhật</strong></td>")
+                    .append("</tr>\n");
             for (ShrimpPriceRow row : entry.getValue()) {
                 html.append("<tr>")
                         .append("<td><strong>").append(escapeHtml(blankToDefault(row.code(), "—"))).append("</strong></td>")
