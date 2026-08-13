@@ -16,7 +16,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 @Component
-@ConditionalOnProperty(name = "app.startup.seed-data.stickers.enabled", havingValue = "true", matchIfMissing = true)
+@ConditionalOnProperty(name = "app.startup.seed-data.stickers.enabled", havingValue = "true")
 @Order(2)
 @RequiredArgsConstructor
 @Slf4j
@@ -35,6 +35,7 @@ public class StickerDataSeeder implements CommandLineRunner {
 
         log.info(">>> SEEDING RICH STICKER LIBRARY...");
 
+        // 1. Noto Emoji
         StickerPack notoPack = stickerPackRepository.save(StickerPack.builder()
                 .name("Noto Emoji")
                 .iconUrl("https://fonts.gstatic.com/s/e/notoemoji/latest/1f60d/512.gif")
@@ -55,6 +56,7 @@ public class StickerDataSeeder implements CommandLineRunner {
         notoStickers.add(Sticker.builder().pack(notoPack).label("Buồn ngủ").url("https://fonts.gstatic.com/s/e/notoemoji/latest/1f62a/512.gif").build());
         stickerRepository.saveAll(notoStickers);
 
+        // 2. Dino
         StickerPack dinoPack = stickerPackRepository.save(StickerPack.builder()
                 .name("Dinosaur")
                 .iconUrl("https://i.giphy.com/media/v1.Y2lkPTc5MGI3NjExM3hxdWZ6cTNuOW5udWZndXp4OGc0czdud3I4ZmpkcHRoc2p1cWc3NiZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9cw/jI2mzYZtwqF1KKQA2d/giphy.gif")
@@ -69,6 +71,7 @@ public class StickerDataSeeder implements CommandLineRunner {
         dinoStickers.add(Sticker.builder().pack(dinoPack).label("Khủng long buồn").url("https://i.giphy.com/media/v1.Y2lkPTc5MGI3NjExaTJmaG5ubHZsNmF2MGdtam4xaHNhdXRmdWJ6czJ2eHhhc2szZWlyMSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9cw/7SF5scGB2AFrCJJasI/giphy.gif").build());
         stickerRepository.saveAll(dinoStickers);
 
+        // 3. Cute Cat
         StickerPack catPack = stickerPackRepository.save(StickerPack.builder()
                 .name("Cute Cat")
                 .iconUrl("https://i.giphy.com/media/v1.Y2lkPTc5MGI3NjExN3JpNGtxZWsybmk0ZGlhdDFvNXdkaHBkZGRrZHptamg2am1vZW5rdyZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9cw/mlvseq9yvZhba/giphy.gif")
@@ -83,6 +86,7 @@ public class StickerDataSeeder implements CommandLineRunner {
         catStickers.add(Sticker.builder().pack(catPack).label("Mèo nổi giận").url("https://i.giphy.com/media/v1.Y2lkPTc5MGI3NjExN3lzdzgwcTkwZzBsczR4dmFqMHppZThqenUweXo2Y2Y2dmVnd2g1YiZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9cw/AC1m4EBK7YURy/giphy.gif").build());
         stickerRepository.saveAll(catStickers);
 
+        // 4. Quby / Pentol
         StickerPack qubyPack = stickerPackRepository.save(StickerPack.builder()
                 .name("Quby Pentol")
                 .iconUrl("https://media.tenor.com/t335r-F6F6YAAAAM/quby-pentol.gif")
@@ -98,6 +102,7 @@ public class StickerDataSeeder implements CommandLineRunner {
         qubyStickers.add(Sticker.builder().pack(qubyPack).label("Đấm nè").url("https://media.tenor.com/Qj0479g0W6YAAAAM/quby-pentol.gif").build());
         stickerRepository.saveAll(qubyStickers);
 
+        // 5. Pusheen Cat
         StickerPack pusheenPack = stickerPackRepository.save(StickerPack.builder()
                 .name("Pusheen Cat")
                 .iconUrl("https://media.tenor.com/s6_6F3B1tH4AAAAM/pusheen-hi.gif")
@@ -115,4 +120,3 @@ public class StickerDataSeeder implements CommandLineRunner {
         log.info(">>> Rich sticker library seeded successfully with 5 packs.");
     }
 }
-

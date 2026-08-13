@@ -1,8 +1,5 @@
 package com.zone.agri.config;
 
-import com.zone.agri.entity.Banner;
-import com.zone.agri.entity.BlogCategory;
-import com.zone.agri.entity.BlogPost;
 import com.zone.agri.entity.Branch;
 import com.zone.agri.entity.Brand;
 import com.zone.agri.entity.Category;
@@ -15,15 +12,11 @@ import com.zone.agri.entity.Order;
 import com.zone.agri.entity.OrderItem;
 import com.zone.agri.entity.Permission;
 import com.zone.agri.entity.Product;
-import com.zone.agri.entity.ProductImage;
 import com.zone.agri.entity.ProductVariant;
 import com.zone.agri.entity.Role;
 import com.zone.agri.entity.Supplier;
 import com.zone.agri.entity.User;
-import com.zone.agri.entity.Voucher;
 import com.zone.agri.entity.enums.AuthProvider;
-import com.zone.agri.entity.enums.BlogCategoryStatus;
-import com.zone.agri.entity.enums.BlogPostStatus;
 import com.zone.agri.entity.enums.BranchStatus;
 import com.zone.agri.entity.enums.BrandStatus;
 import com.zone.agri.entity.enums.CategoryStatus;
@@ -43,11 +36,6 @@ import com.zone.agri.entity.enums.SupplierStatus;
 import com.zone.agri.entity.enums.TransactionType;
 import com.zone.agri.entity.enums.UserStatus;
 import com.zone.agri.entity.enums.VariantStatus;
-import com.zone.agri.entity.enums.VoucherDiscountType;
-import com.zone.agri.entity.enums.VoucherStatus;
-import com.zone.agri.repository.BannerRepository;
-import com.zone.agri.repository.BlogCategoryRepository;
-import com.zone.agri.repository.BlogPostRepository;
 import com.zone.agri.repository.BranchRepository;
 import com.zone.agri.repository.BrandRepository;
 import com.zone.agri.repository.CategoryRepository;
@@ -59,17 +47,14 @@ import com.zone.agri.repository.InventoryTransactionRepository;
 import com.zone.agri.repository.OrderItemRepository;
 import com.zone.agri.repository.OrderRepository;
 import com.zone.agri.repository.PermissionRepository;
-import com.zone.agri.repository.ProductImageRepository;
 import com.zone.agri.repository.ProductRepository;
 import com.zone.agri.repository.ProductVariantRepository;
 import com.zone.agri.repository.RoleRepository;
 import com.zone.agri.repository.SupplierRepository;
 import com.zone.agri.repository.UserRepository;
-import com.zone.agri.repository.VoucherRepository;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDateTime;
-import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -111,7 +96,6 @@ public class DataSeeder implements CommandLineRunner {
     private final BrandRepository brandRepository;
     private final ProductRepository productRepository;
     private final ProductVariantRepository productVariantRepository;
-    private final ProductImageRepository productImageRepository;
     private final InventoryRepository inventoryRepository;
     private final CustomerRepository customerRepository;
     private final InventoryNoteRepository inventoryNoteRepository;
@@ -119,10 +103,6 @@ public class DataSeeder implements CommandLineRunner {
     private final InventoryTransactionRepository inventoryTransactionRepository;
     private final OrderRepository orderRepository;
     private final OrderItemRepository orderItemRepository;
-    private final VoucherRepository voucherRepository;
-    private final BannerRepository bannerRepository;
-    private final BlogCategoryRepository blogCategoryRepository;
-    private final BlogPostRepository blogPostRepository;
     private final Environment environment;
 
     @Override
@@ -131,7 +111,7 @@ public class DataSeeder implements CommandLineRunner {
         boolean hasExistingRoles = roleRepository.count() > 0;
 
         log.info(">>> ĐỒNG BỘ ROLE HỆ THỐNG VÀ MAPPING PERMISSION HIỆN CÓ...");
-        Map<String, Role> seededRoles = seedSystemRolesAndBootstrapSuperAdmin();
+        seedSystemRolesAndBootstrapSuperAdmin();
 
         if (hasExistingRoles) {
             log.info(">>> ĐỒNG BỘ DỮ LIỆU NỀN TẢNG HOÀN TẤT.");
@@ -139,116 +119,45 @@ public class DataSeeder implements CommandLineRunner {
             log.info(">>> KHỞI TẠO DỮ LIỆU NỀN TẢNG HOÀN TẤT.");
         }
 
-        seedMasterDataAndOperations(seededRoles);
+        if (Boolean.parseBoolean(environment.getProperty(
+                "app.startup.seed-data.financial-sample.enabled",
+                "false"))) {
+            seedFinancialDataIfEmpty();
+        } else {
+            log.info(">>> SEED DỮ LIỆU TÀI CHÍNH MẪU ĐANG TẮT.");
+        }
     }
 
-    private void seedMasterDataAndOperations(Map<String, Role> seededRoles) {
+    private void seedFinancialDataIfEmpty() {
+        if (orderRepository.count() > 0 && inventoryReceiptPaymentRepository.count() > 0) {
+            log.info(">>> DỮ LIỆU BÁO CÁO TÀI CHÍNH ĐÃ TỒN TẠI, BỎ QUA SEED TÀI CHÍNH.");
+            return;
+        }
 
+        log.info(">>> ĐANG TẠO DỮ LIỆU MẪU CHUẨN CHO BÁO CÁO TÀI CHÍNH (8 THÁNG GẦN NHẤT)...");
+        User admin = userRepository.findByEmail("admin@agrishrimp.vn").orElse(null);
+
+        // 1. Chi nhánh (Branches)
         Branch cmBranch = ensureBranch("CN-CM01", "Chi nhánh Cà Mau", "STORE", "02903838388", "camau@agrishrimp.vn", "123 Trần Hưng Đạo, Phường 5, TP. Cà Mau", "Tỉnh Cà Mau", 87);
         Branch stBranch = ensureBranch("CN-ST01", "Chi nhánh Sóc Trăng", "STORE", "02993828288", "soctrang@agrishrimp.vn", "45 Lê Hồng Phong, Phường 3, TP. Sóc Trăng", "Tỉnh Sóc Trăng", 94);
         Branch btBranch = ensureBranch("CN-BT01", "Chi nhánh Bến Tre", "STORE", "02753818188", "bentre@agrishrimp.vn", "88 Nguyễn Đình Chiểu, Phường 2, TP. Bến Tre", "Tỉnh Bến Tre", 83);
-        Branch blBranch = ensureBranch("CN-BL01", "Chi nhánh Bạc Liêu", "STORE", "02913828288", "baclieu@agrishrimp.vn", "26 Hai Bà Trưng, Phường 3, TP. Bạc Liêu", "Tỉnh Bạc Liêu", 95);
-        List<Branch> branches = List.of(cmBranch, stBranch, btBranch, blBranch);
+        List<Branch> branches = List.of(cmBranch, stBranch, btBranch);
 
-        seedDefaultSystemUsers(seededRoles, cmBranch);
-        User admin = userRepository.findByEmail("admin@agrishrimp.vn").orElse(null);
+        // 2. Danh mục (Categories)
+        Category catFeed = ensureCategory("Thức ăn thủy sản");
+        Category catProbiotic = ensureCategory("Men vi sinh & Chế phẩm sinh học");
+        Category catMineral = ensureCategory("Khoáng chất & Dinh dưỡng");
+        Category catChemical = ensureCategory("Thuốc & Xử lý môi trường nước");
+        Category catEquipment = ensureCategory("Thiết bị & Vật tư đầm tôm");
 
-        if (productRepository.count() == 0 || orderRepository.count() == 0) {
-            log.info(">>> ĐANG KHỞI TẠO DANH MỤC SẢN PHẨM, TỒN KHO VÀ LỊCH SỬ GIAO DỊCH...");
-            seedCatalogAndFinancialData(branches, admin);
-        }
+        // 3. Thương hiệu (Brands)
+        Brand brandCP = ensureBrand("Tập đoàn C.P. Việt Nam");
+        Brand brandGrobest = ensureBrand("Grobest Việt Nam");
+        Brand brandTrucAnh = ensureBrand("Trúc Anh Biotech");
+        Brand brandBioMar = ensureBrand("BioMar Việt Nam");
+        Brand brandShengLong = ensureBrand("Sheng Long Biotech");
 
-        seedVouchersIfEmpty();
-
-        seedBannersIfEmpty();
-
-        seedBlogIfEmpty(admin);
-    }
-
-    private void seedDefaultSystemUsers(Map<String, Role> seededRoles, Branch defaultBranch) {
-
-        userRepository.findByEmail("staff@agrishrimp.vn").orElseGet(() -> userRepository.save(User.builder()
-                .email("staff@agrishrimp.vn")
-                .fullName("Nguyễn Thị Mai (Nhân viên Tư vấn)")
-                .phoneNumber("0909000002")
-                .passwordHash(passwordEncoder.encode("123456zoneteam"))
-                .status(UserStatus.ACTIVE)
-                .role(seededRoles.get("STAFF"))
-                .branch(defaultBranch)
-                .gender(Gender.FEMALE)
-                .provider(AuthProvider.LOCAL)
-                .addressDetail("123 Trần Hưng Đạo, P.5, TP. Cà Mau")
-                .build()));
-
-        userRepository.findByEmail("warehouse@agrishrimp.vn").orElseGet(() -> userRepository.save(User.builder()
-                .email("warehouse@agrishrimp.vn")
-                .fullName("Trần Văn Kho (Quản lý kho)")
-                .phoneNumber("0909000003")
-                .passwordHash(passwordEncoder.encode("123456zoneteam"))
-                .status(UserStatus.ACTIVE)
-                .role(seededRoles.get("WAREHOUSE_MANAGER"))
-                .branch(defaultBranch)
-                .gender(Gender.MALE)
-                .provider(AuthProvider.LOCAL)
-                .addressDetail("123 Trần Hưng Đạo, P.5, TP. Cà Mau")
-                .build()));
-
-        userRepository.findByEmail("agronomist@agrishrimp.vn").orElseGet(() -> userRepository.save(User.builder()
-                .email("agronomist@agrishrimp.vn")
-                .fullName("Kỹ Sư Lê Hoàng Thủy Sản")
-                .phoneNumber("0909000004")
-                .passwordHash(passwordEncoder.encode("123456zoneteam"))
-                .status(UserStatus.ACTIVE)
-                .role(seededRoles.get("AGRONOMIST"))
-                .branch(defaultBranch)
-                .gender(Gender.MALE)
-                .provider(AuthProvider.LOCAL)
-                .addressDetail("TP. Cà Mau")
-                .build()));
-
-        userRepository.findByEmail("customer@gmail.com").orElseGet(() -> {
-            Role customerRole = seededRoles.get(CUSTOMER_ROLE_SLUG);
-            User custUser = userRepository.save(User.builder()
-                    .email("customer@gmail.com")
-                    .fullName("Phạm Văn Khách (Demo)")
-                    .phoneNumber("0909000005")
-                    .passwordHash(passwordEncoder.encode("123456zoneteam"))
-                    .status(UserStatus.ACTIVE)
-                    .role(customerRole)
-                    .branch(defaultBranch)
-                    .gender(Gender.MALE)
-                    .provider(AuthProvider.LOCAL)
-                    .addressDetail("Đầm tôm Năm Căn, Cà Mau")
-                    .build());
-
-            customerRepository.save(Customer.builder()
-                    .name("Phạm Văn Khách (Demo)")
-                    .phone("0909000005")
-                    .email("customer@gmail.com")
-                    .gender(CustomerGender.MALE)
-                    .status(CustomerStatus.ACTIVE)
-                    .addressDetail("Đầm tôm Năm Căn, Cà Mau")
-                    .assignedBranch(defaultBranch)
-                    .user(custUser)
-                    .build());
-            return custUser;
-        });
-    }
-
-    private void seedCatalogAndFinancialData(List<Branch> branches, User admin) {
-
-        Category catFeed = ensureCategory("Thức ăn thủy sản", "thuc-an-thuy-san", "https://images.unsplash.com/photo-1544551763-46a013bb70d5?auto=format&fit=crop&w=600&q=80");
-        Category catProbiotic = ensureCategory("Men vi sinh & Chế phẩm sinh học", "men-vi-sinh-che-pham-sinh-hoc", "https://images.unsplash.com/photo-1576086213369-97a306d36557?auto=format&fit=crop&w=600&q=80");
-        Category catMineral = ensureCategory("Khoáng chất & Dinh dưỡng", "khoang-chat-dinh-duong", "https://images.unsplash.com/photo-1584308666744-24d5c474f2ae?auto=format&fit=crop&w=600&q=80");
-        Category catChemical = ensureCategory("Thuốc & Xử lý môi trường nước", "thuoc-xu-ly-moi-truong-nuoc", "https://images.unsplash.com/photo-1559884743-74a57598c6c7?auto=format&fit=crop&w=600&q=80");
-        Category catEquipment = ensureCategory("Thiết bị & Vật tư đầm tôm", "thiet-bi-vat-tu-dam-tom", "https://images.unsplash.com/photo-1581092160607-ee22621dd758?auto=format&fit=crop&w=600&q=80");
-
-        Brand brandCP = ensureBrand("Tập đoàn C.P. Việt Nam", "https://images.unsplash.com/photo-1599305445671-ac291c95aaa9?auto=format&fit=crop&w=200&q=80");
-        Brand brandGrobest = ensureBrand("Grobest Việt Nam", "https://images.unsplash.com/photo-1599305445671-ac291c95aaa9?auto=format&fit=crop&w=200&q=80");
-        Brand brandTrucAnh = ensureBrand("Trúc Anh Biotech", "https://images.unsplash.com/photo-1599305445671-ac291c95aaa9?auto=format&fit=crop&w=200&q=80");
-        Brand brandBioMar = ensureBrand("BioMar Việt Nam", "https://images.unsplash.com/photo-1599305445671-ac291c95aaa9?auto=format&fit=crop&w=200&q=80");
-        Brand brandShengLong = ensureBrand("Sheng Long Biotech", "https://images.unsplash.com/photo-1599305445671-ac291c95aaa9?auto=format&fit=crop&w=200&q=80");
-
+        // 4. Nhà cung cấp chuẩn ngành nuôi tôm (Suppliers)
         Supplier supCP = ensureSupplier("NCC-CP", "Công ty TNHH Thức Ăn Thủy Sản C.P. Việt Nam", "0300801234", "Nguyễn Văn Tâm", "0908111222", "sales@cp.com.vn", "KCN Sông Đốc, Cà Mau");
         Supplier supGrobest = ensureSupplier("NCC-GROBEST", "Công ty Cổ phần Grobest Việt Nam", "0301987654", "Lê Thanh Bình", "0908222333", "support@grobest.vn", "KCN An Nghiệp, Sóc Trăng");
         Supplier supTrucAnh = ensureSupplier("NCC-TRUCANH", "Công ty TNHH Sản Xuất & Thương Mại Trúc Anh Biotech", "1900654321", "Đỗ Thị Mai", "0908333444", "trucanh@biotech.vn", "Hiệp Thành, Bạc Liêu");
@@ -256,29 +165,30 @@ public class DataSeeder implements CommandLineRunner {
         Supplier supShengLong = ensureSupplier("NCC-SHENGLONG", "Công ty TNHH Khoa Kỹ Sinh Học Thăng Long", "0303456789", "Hoàng Văn Long", "0908555666", "shenglong@shenglong.vn", "KCN Đức Hòa, Long An");
         List<Supplier> suppliers = List.of(supCP, supGrobest, supTrucAnh, supBioMar, supShengLong);
 
-        Product pGrobest = ensureProduct("Thức ăn tôm thẻ Grobest Super Premium 1.5mm", "gb-feed-15mm", "Thức ăn tăng trưởng cao cấp cho tôm thẻ chân trắng bao 25kg", catFeed, brandGrobest, supGrobest, "https://images.unsplash.com/photo-1544551763-46a013bb70d5?auto=format&fit=crop&w=600&q=80");
-        ProductVariant pvGrobest = ensureVariant(pGrobest, "GB-FEED-15MM", "https://images.unsplash.com/photo-1544551763-46a013bb70d5?auto=format&fit=crop&w=600&q=80");
+        // 5. Sản phẩm & Biến thể (Products & ProductVariants)
+        Product pGrobest = ensureProduct("Thức ăn tôm thẻ Grobest Super Premium 1.5mm", "gb-feed-15mm", "Thức ăn tăng trưởng cao cấp cho tôm thẻ chân trắng bao 25kg", catFeed, brandGrobest, supGrobest);
+        ProductVariant pvGrobest = ensureVariant(pGrobest, "GB-FEED-15MM");
 
-        Product pCP = ensureProduct("Thức ăn tôm thẻ C.P. 9920 - Bao 25kg", "cp-feed-9920", "Thức ăn đạm cao 40% cho tôm giai đoạn 30-60 ngày", catFeed, brandCP, supCP, "https://images.unsplash.com/photo-1544551763-46a013bb70d5?auto=format&fit=crop&w=600&q=80");
-        ProductVariant pvCP = ensureVariant(pCP, "CP-FEED-9920", "https://images.unsplash.com/photo-1544551763-46a013bb70d5?auto=format&fit=crop&w=600&q=80");
+        Product pCP = ensureProduct("Thức ăn tôm thẻ C.P. 9920 - Bao 25kg", "cp-feed-9920", "Thức ăn đạm cao 40% cho tôm giai đoạn 30-60 ngày", catFeed, brandCP, supCP);
+        ProductVariant pvCP = ensureVariant(pCP, "CP-FEED-9920");
 
-        Product pMicro = ensureProduct("Men vi sinh xử lý đáy & nước Trúc Anh Micro-Pro 500g", "ta-micro-500g", "Chế phẩm vi sinh xử lý khí độc NO2/NH3 trong ao tôm", catProbiotic, brandTrucAnh, supTrucAnh, "https://images.unsplash.com/photo-1576086213369-97a306d36557?auto=format&fit=crop&w=600&q=80");
-        ProductVariant pvMicro = ensureVariant(pMicro, "TA-MICRO-500G", "https://images.unsplash.com/photo-1576086213369-97a306d36557?auto=format&fit=crop&w=600&q=80");
+        Product pMicro = ensureProduct("Men vi sinh xử lý đáy & nước Trúc Anh Micro-Pro 500g", "ta-micro-500g", "Chế phẩm vi sinh xử lý khí độc NO2/NH3 trong ao tôm", catProbiotic, brandTrucAnh, supTrucAnh);
+        ProductVariant pvMicro = ensureVariant(pMicro, "TA-MICRO-500G");
 
-        Product pStomi = ensureProduct("Khoáng tạt tôm thâm canh Stomi K-Mag 5kg", "min-stomi-5kg", "Tăng cường khoáng đa vi lượng, chống cong thân đục cơ", catMineral, brandBioMar, supBioMar, "https://images.unsplash.com/photo-1584308666744-24d5c474f2ae?auto=format&fit=crop&w=600&q=80");
-        ProductVariant pvStomi = ensureVariant(pStomi, "MIN-STOMI-5KG", "https://images.unsplash.com/photo-1584308666744-24d5c474f2ae?auto=format&fit=crop&w=600&q=80");
+        Product pStomi = ensureProduct("Khoáng tạt tôm thâm canh Stomi K-Mag 5kg", "min-stomi-5kg", "Tăng cường khoáng đa vi lượng, chống cong thân đục cơ", catMineral, brandBioMar, supBioMar);
+        ProductVariant pvStomi = ensureVariant(pStomi, "MIN-STOMI-5KG");
 
-        Product pBioBac = ensureProduct("Chế phẩm sinh học xử lý đáy ao BioBac 1kg", "bio-bac-1kg", "Phân hủy mùn bã hữu cơ và bùn đáy ao tôm", catProbiotic, brandShengLong, supShengLong, "https://images.unsplash.com/photo-1576086213369-97a306d36557?auto=format&fit=crop&w=600&q=80");
-        ProductVariant pvBioBac = ensureVariant(pBioBac, "BIO-BAC-1KG", "https://images.unsplash.com/photo-1576086213369-97a306d36557?auto=format&fit=crop&w=600&q=80");
+        Product pBioBac = ensureProduct("Chế phẩm sinh học xử lý đáy ao BioBac 1kg", "bio-bac-1kg", "Phân hủy mùn bã hữu cơ và bùn đáy ao tôm", catProbiotic, brandShengLong, supShengLong);
+        ProductVariant pvBioBac = ensureVariant(pBioBac, "BIO-BAC-1KG");
 
-        Product pBKC = ensureProduct("Dung dịch diệt khuẩn BKC 80% Super 1 Lít", "chem-bkc-1l", "Diệt khuẩn, nấm, protozoa trong nước ao nuôi tôm", catChemical, brandTrucAnh, supTrucAnh, "https://images.unsplash.com/photo-1559884743-74a57598c6c7?auto=format&fit=crop&w=600&q=80");
-        ProductVariant pvBKC = ensureVariant(pBKC, "CHEM-BKC-1L", "https://images.unsplash.com/photo-1559884743-74a57598c6c7?auto=format&fit=crop&w=600&q=80");
+        Product pBKC = ensureProduct("Dung dịch diệt khuẩn BKC 80% Super 1 Lít", "chem-bkc-1l", "Diệt khuẩn, nấm, protozoa trong nước ao nuôi tôm", catChemical, brandTrucAnh, supTrucAnh);
+        ProductVariant pvBKC = ensureVariant(pBKC, "CHEM-BKC-1L");
 
-        Product pFan = ensureProduct("Quạt nước 4 cánh nuôi tôm công suất 2HP", "eq-fan-4b", "Bộ quạt tạo oxy đáy và dòng chảy cho ao tôm thâm canh", catEquipment, brandBioMar, supBioMar, "https://images.unsplash.com/photo-1581092160607-ee22621dd758?auto=format&fit=crop&w=600&q=80");
-        ProductVariant pvFan = ensureVariant(pFan, "EQ-FAN-4B", "https://images.unsplash.com/photo-1581092160607-ee22621dd758?auto=format&fit=crop&w=600&q=80");
+        Product pFan = ensureProduct("Quạt nước 4 cánh nuôi tôm công suất 2HP", "eq-fan-4b", "Bộ quạt tạo oxy đáy và dòng chảy cho ao tôm thâm canh", catEquipment, brandBioMar, supBioMar);
+        ProductVariant pvFan = ensureVariant(pFan, "EQ-FAN-4B");
 
-        Product pFeeder = ensureProduct("Máy cho tôm ăn tự động dung tích 50kg", "eq-feeder-50kg", "Máy phun thức ăn tự động định giờ cho ao tôm", catEquipment, brandBioMar, supBioMar, "https://images.unsplash.com/photo-1581092160607-ee22621dd758?auto=format&fit=crop&w=600&q=80");
-        ProductVariant pvFeeder = ensureVariant(pFeeder, "EQ-FEEDER-50KG", "https://images.unsplash.com/photo-1581092160607-ee22621dd758?auto=format&fit=crop&w=600&q=80");
+        Product pFeeder = ensureProduct("Máy cho tôm ăn tự động dung tích 50kg", "eq-feeder-50kg", "Máy phun thức ăn tự động định giờ cho ao tôm", catEquipment, brandBioMar, supBioMar);
+        ProductVariant pvFeeder = ensureVariant(pFeeder, "EQ-FEEDER-50KG");
 
         List<ProductVariant> variants = List.of(pvGrobest, pvCP, pvMicro, pvStomi, pvBioBac, pvBKC, pvFan, pvFeeder);
         Map<ProductVariant, BigDecimal> importPrices = Map.of(
@@ -302,6 +212,7 @@ public class DataSeeder implements CommandLineRunner {
                 pvFeeder, new BigDecimal("5100000")
         );
 
+        // 6. Tồn kho các chi nhánh (Inventories)
         Map<String, Inventory> inventoryMap = new HashMap<>();
         for (Branch b : branches) {
             for (ProductVariant v : variants) {
@@ -323,15 +234,17 @@ public class DataSeeder implements CommandLineRunner {
             }
         }
 
+        // 7. Khách hàng thực tế (Customers & User accounts)
         List<User> customerUsers = List.of(
-                ensureCustomerUser("Nguyễn Văn Hùng", "hung.damdoi@gmail.com", "0918111001", "Trại tôm Đầm Dỗi, Phường 5, TP. Cà Mau", branches.get(0)),
-                ensureCustomerUser("Trần Thị Mỹ Linh", "mylinh.myxuyen@gmail.com", "0918111002", "HTX Thủy sản Mỹ Xuyên, TP. Sóc Trăng", branches.get(1)),
-                ensureCustomerUser("Lê Hoàng Nam", "hoangnam.bentre@gmail.com", "0918111003", "Nông hộ nuôi tôm Bến Tre, TP. Bến Tre", branches.get(2)),
-                ensureCustomerUser("Phạm Quốc Việt", "viet.batri@gmail.com", "0918111004", "Trại tôm giống Ba Tri, Bến Tre", branches.get(2)),
-                ensureCustomerUser("Võ Minh Trí", "tri.triphat@gmail.com", "0918111005", "Đại lý vật tư Trí Phát, Sóc Trăng", branches.get(1)),
-                ensureCustomerUser("Đặng Văn Thành", "thanh.duyenhai@gmail.com", "0918111006", "Trại tôm thâm canh Duyên Hải, Cà Mau", branches.get(0))
+                ensureCustomerUser("Nguyễn Văn Hùng", "hung.damdoi@gmail.com", "0918111001", "Trại tôm Đầm Dỗi, Phường 5, TP. Cà Mau", cmBranch),
+                ensureCustomerUser("Trần Thị Mỹ Linh", "mylinh.myxuyen@gmail.com", "0918111002", "HTX Thủy sản Mỹ Xuyên, TP. Sóc Trăng", stBranch),
+                ensureCustomerUser("Lê Hoàng Nam", "hoangnam.bentre@gmail.com", "0918111003", "Nông hộ nuôi tôm Bến Tre, TP. Bến Tre", btBranch),
+                ensureCustomerUser("Phạm Quốc Việt", "viet.batri@gmail.com", "0918111004", "Trại tôm giống Ba Tri, Bến Tre", btBranch),
+                ensureCustomerUser("Võ Minh Trí", "tri.triphat@gmail.com", "0918111005", "Đại lý vật tư Trí Phát, Sóc Trăng", stBranch),
+                ensureCustomerUser("Đặng Văn Thành", "thanh.duyenhai@gmail.com", "0918111006", "Trại tôm thâm canh Duyên Hải, Cà Mau", cmBranch)
         );
 
+        // 8. Tạo dữ liệu tài chính lịch sử trong 8 tháng liên tục (từ tháng T-8 đến hiện tại)
         LocalDateTime now = LocalDateTime.now();
         int noteSeq = 100;
         int paySeq = 100;
@@ -341,6 +254,7 @@ public class DataSeeder implements CommandLineRunner {
             LocalDateTime monthBase = now.minusMonths(m);
             int daysInMonth = 28;
 
+            // --- A. Phiếu nhập kho từ Nhà cung cấp & Thanh toán công nợ (Sổ quỹ OUT & Công nợ NCC) ---
             for (int i = 0; i < 3; i++) {
                 Supplier sup = suppliers.get((m + i) % suppliers.size());
                 Branch branch = branches.get((m + i) % branches.size());
@@ -352,11 +266,11 @@ public class DataSeeder implements CommandLineRunner {
 
                 BigDecimal paidAmt;
                 if (i == 0) {
-                    paidAmt = totalAmt;
+                    paidAmt = totalAmt; // Thanh toán đủ
                 } else if (i == 1) {
-                    paidAmt = totalAmt.multiply(new BigDecimal("0.65")).setScale(2, RoundingMode.HALF_UP);
+                    paidAmt = totalAmt.multiply(new BigDecimal("0.65")).setScale(2, RoundingMode.HALF_UP); // Trả một phần, còn nợ
                 } else {
-                    paidAmt = (m == 0) ? BigDecimal.ZERO : totalAmt;
+                    paidAmt = (m == 0) ? BigDecimal.ZERO : totalAmt; // Phiếu gần nhất chưa trả để test công nợ
                 }
                 BigDecimal debtAmt = totalAmt.subtract(paidAmt);
 
@@ -375,6 +289,7 @@ public class DataSeeder implements CommandLineRunner {
                         .reason("Nhập kho thức ăn & vật tư thủy sản tháng " + importDate.getMonthValue() + "/" + importDate.getYear())
                         .build());
 
+                // Nếu có thanh toán -> tạo bản ghi InventoryReceiptPayment (thanh toán NCC - dòng tiền OUT sổ quỹ)
                 if (paidAmt.compareTo(BigDecimal.ZERO) > 0) {
                     paySeq++;
                     inventoryReceiptPaymentRepository.save(InventoryReceiptPayment.builder()
@@ -393,6 +308,7 @@ public class DataSeeder implements CommandLineRunner {
                 }
             }
 
+            // --- B. Đơn bán hàng & Giao dịch xuất kho (Sổ quỹ IN, Doanh thu & Giá vốn bán hàng COGS) ---
             int ordersThisMonth = 11 + (m % 4);
             for (int o = 0; o < ordersThisMonth; o++) {
                 orderSeq++;
@@ -419,6 +335,7 @@ public class DataSeeder implements CommandLineRunner {
                 LocalDateTime receivedAt = orderDate.plusHours(5);
                 LocalDateTime returnedAt = null;
 
+                // Mỗi tháng tạo 1 đơn bị hàng trả (RETURNED) để test mục Hàng bán bị trả lại trong báo cáo Lãi/Lỗ
                 if (o == 2 && m > 0) {
                     status = OrderStatus.RETURNED;
                     returnedAt = orderDate.plusDays(2);
@@ -450,10 +367,12 @@ public class DataSeeder implements CommandLineRunner {
                         .shippingAddress(cust.getAddressDetail())
                         .build());
 
+                // Chi tiết sản phẩm đơn hàng
                 OrderItem item1 = OrderItem.builder().order(order).productVariant(v1).quantity(q1).price(sellPrices.get(v1)).build();
                 OrderItem item2 = OrderItem.builder().order(order).productVariant(v2).quantity(q2).price(sellPrices.get(v2)).build();
                 orderItemRepository.saveAll(List.of(item1, item2));
 
+                // Ghi nhận Giao dịch xuất kho (SALE) liên kết referenceCode = orderCode để tính chính xác Giá vốn hàng bán COGS
                 Inventory inv1 = inventoryMap.get(branch.getId() + "_" + v1.getId());
                 Inventory inv2 = inventoryMap.get(branch.getId() + "_" + v2.getId());
 
@@ -488,135 +407,6 @@ public class DataSeeder implements CommandLineRunner {
         log.info(">>> KHỞI TẠO DỮ LIỆU MẪU BÁO CÁO TÀI CHÍNH (8 THÁNG) HOÀN TẤT THÀNH CÔNG!");
     }
 
-    private void seedBannersIfEmpty() {
-        if (bannerRepository.count() > 0) return;
-        log.info(">>> ĐANG SEED BANNER TRANG CHỦ...");
-        bannerRepository.save(Banner.builder()
-                .title("AgriShrimp - Đồng Hành Cùng Người Nuôi Tôm Việt")
-                .imageUrl("https://images.unsplash.com/photo-1544551763-46a013bb70d5?auto=format&fit=crop&w=1600&q=80")
-                .mobileImageUrl("https://images.unsplash.com/photo-1544551763-46a013bb70d5?auto=format&fit=crop&w=800&q=80")
-                .linkUrl("/san-pham")
-                .displayOrder(1)
-                .isActive(true)
-                .startDate(LocalDateTime.now().minusMonths(1))
-                .endDate(LocalDateTime.now().plusYears(1))
-                .build());
-
-        bannerRepository.save(Banner.builder()
-                .title("Bác Sĩ AI - Chẩn Đoán Bệnh Tôm Tức Thì Bằng Hình Ảnh")
-                .imageUrl("https://images.unsplash.com/photo-1559884743-74a57598c6c7?auto=format&fit=crop&w=1600&q=80")
-                .mobileImageUrl("https://images.unsplash.com/photo-1559884743-74a57598c6c7?auto=format&fit=crop&w=800&q=80")
-                .linkUrl("/chan-doan-benh-tom-bang-ai")
-                .displayOrder(2)
-                .isActive(true)
-                .startDate(LocalDateTime.now().minusMonths(1))
-                .endDate(LocalDateTime.now().plusYears(1))
-                .build());
-
-        bannerRepository.save(Banner.builder()
-                .title("Thức Ăn Thủy Sản & Men Vi Sinh Cao Cấp - Giao Tận Đầm")
-                .imageUrl("https://images.unsplash.com/photo-1507525428034-b723cf961d3e?auto=format&fit=crop&w=1600&q=80")
-                .mobileImageUrl("https://images.unsplash.com/photo-1507525428034-b723cf961d3e?auto=format&fit=crop&w=800&q=80")
-                .linkUrl("/san-pham")
-                .displayOrder(3)
-                .isActive(true)
-                .startDate(LocalDateTime.now().minusMonths(1))
-                .endDate(LocalDateTime.now().plusYears(1))
-                .build());
-    }
-
-    private void seedVouchersIfEmpty() {
-        if (voucherRepository.count() > 0) return;
-        log.info(">>> ĐANG SEED VOUCHER KHUYẾN MÃI...");
-        voucherRepository.save(Voucher.builder()
-                .code("CHAOBANMOI")
-                .title("Giảm 10% cho khách hàng mới")
-                .discountType(VoucherDiscountType.PERCENT)
-                .value(new BigDecimal("10"))
-                .maxDiscount(new BigDecimal("50000"))
-                .minOrderValue(new BigDecimal("200000"))
-                .quantity(500)
-                .maxUsagePerUser(1)
-                .startDate(LocalDateTime.now().minusDays(30))
-                .endDate(LocalDateTime.now().plusMonths(6))
-                .status(VoucherStatus.ACTIVE)
-                .build());
-
-        voucherRepository.save(Voucher.builder()
-                .code("AGRISHRIMP50K")
-                .title("Giảm trực tiếp 50.000đ")
-                .discountType(VoucherDiscountType.FIXED)
-                .value(new BigDecimal("50000"))
-                .maxDiscount(new BigDecimal("50000"))
-                .minOrderValue(new BigDecimal("500000"))
-                .quantity(200)
-                .maxUsagePerUser(2)
-                .startDate(LocalDateTime.now().minusDays(30))
-                .endDate(LocalDateTime.now().plusMonths(6))
-                .status(VoucherStatus.ACTIVE)
-                .build());
-
-        voucherRepository.save(Voucher.builder()
-                .code("FREESHIP")
-                .title("Miễn phí vận chuyển 30.000đ")
-                .discountType(VoucherDiscountType.FIXED)
-                .value(new BigDecimal("30000"))
-                .maxDiscount(new BigDecimal("30000"))
-                .minOrderValue(new BigDecimal("300000"))
-                .quantity(1000)
-                .maxUsagePerUser(5)
-                .startDate(LocalDateTime.now().minusDays(30))
-                .endDate(LocalDateTime.now().plusMonths(6))
-                .status(VoucherStatus.ACTIVE)
-                .build());
-    }
-
-    private void seedBlogIfEmpty(User author) {
-        if (blogPostRepository.count() > 0) return;
-        log.info(">>> ĐANG SEED BÀI VIẾT KỸ THUẬT VÀ BLOG...");
-        BlogCategory catKyThuat = blogCategoryRepository.findBySlug("ky-thuat-nuoi-tom")
-                .orElseGet(() -> blogCategoryRepository.save(BlogCategory.builder()
-                        .name("Kỹ thuật nuôi tôm")
-                        .slug("ky-thuat-nuoi-tom")
-                        .description("Các bài viết chia sẻ kinh nghiệm và kỹ thuật nuôi tôm công nghệ cao")
-                        .status(BlogCategoryStatus.ACTIVE)
-                        .build()));
-
-        BlogCategory catBenh = blogCategoryRepository.findBySlug("phong-ngua-dich-benh")
-                .orElseGet(() -> blogCategoryRepository.save(BlogCategory.builder()
-                        .name("Phòng ngừa dịch bệnh")
-                        .slug("phong-ngua-dich-benh")
-                        .description("Nhận diện, phòng ngừa và phác đồ điều trị các bệnh thường gặp trên tôm")
-                        .status(BlogCategoryStatus.ACTIVE)
-                        .build()));
-
-        blogPostRepository.save(BlogPost.builder()
-                .title("Hướng dẫn kỹ thuật quản lý màu nước ao nuôi tôm thẻ chân trắng hiệu quả")
-                .slug("huong-dan-ky-thuat-quan-ly-mau-nuoc-ao-nuoi-tom")
-                .excerpt("Màu nước phản ánh trực tiếp sức khỏe môi trường ao nuôi và hệ vi sinh. Bài viết hướng dẫn cách tạo và duy trì màu nước đọt chuối non ổn định suốt vụ nuôi.")
-                .content("<p>Màu nước ao nuôi tôm lý tưởng nhất là màu trà hoặc xanh đọt chuối non do tảo khuê (diatom) và tảo lục phát triển ổn định. Định kỳ bổ sung men vi sinh và khoáng chất giúp giữ môi trường ao nuôi luôn trong lành.</p>")
-                .thumbnailUrl("https://images.unsplash.com/photo-1544551763-46a013bb70d5?auto=format&fit=crop&w=800&q=80")
-                .status(BlogPostStatus.PUBLISHED)
-                .author(author)
-                .category(catKyThuat)
-                .viewCount(128L)
-                .publishedAt(LocalDateTime.now().minusDays(15))
-                .build());
-
-        blogPostRepository.save(BlogPost.builder()
-                .title("Nhận biết sớm và phác đồ xử lý bệnh phân trắng trên tôm thẻ")
-                .slug("nhan-biet-som-va-phac-do-xu-ly-benh-phan-trang")
-                .excerpt("Bệnh phân trắng là một trong những nỗi lo lớn nhất của bà con nuôi tôm. Cùng tìm hiểu nguyên nhân từ thức ăn, khuẩn Vibrio và phác đồ điều trị dứt điểm.")
-                .content("<p>Bệnh phân trắng xuất phát từ nhiều nguyên nhân: nhiễm khuẩn Vibrio, ký sinh trùng Gregarine hoặc độc tố nấm mốc trong thức ăn. Khi phát hiện tôm có sợi phân trắng nổi trên mặt nước, cần giảm 30-50% lượng thức ăn, tăng cường quạt nước và xử lý men vi sinh đậm đặc.</p>")
-                .thumbnailUrl("https://images.unsplash.com/photo-1559884743-74a57598c6c7?auto=format&fit=crop&w=800&q=80")
-                .status(BlogPostStatus.PUBLISHED)
-                .author(author)
-                .category(catBenh)
-                .viewCount(256L)
-                .publishedAt(LocalDateTime.now().minusDays(7))
-                .build());
-    }
-
     private Branch ensureBranch(String code, String name, String type, String phone, String email, String address, String provinceName, Integer provinceId) {
         return branchRepository.findByBranchCode(code)
                 .orElseGet(() -> branchRepository.save(Branch.builder()
@@ -633,20 +423,18 @@ public class DataSeeder implements CommandLineRunner {
                         .build()));
     }
 
-    private Category ensureCategory(String name, String slug, String imageUrl) {
+    private Category ensureCategory(String name) {
         return categoryRepository.searchCategories(name, null).stream().findFirst()
                 .orElseGet(() -> categoryRepository.save(Category.builder()
                         .name(name)
-                        .imageUrl(imageUrl)
                         .status(CategoryStatus.ACTIVE)
                         .build()));
     }
 
-    private Brand ensureBrand(String name, String logoUrl) {
+    private Brand ensureBrand(String name) {
         return brandRepository.findByName(name)
                 .orElseGet(() -> brandRepository.save(Brand.builder()
                         .name(name)
-                        .logoUrl(logoUrl)
                         .status(BrandStatus.ACTIVE)
                         .build()));
     }
@@ -665,43 +453,25 @@ public class DataSeeder implements CommandLineRunner {
                         .build()));
     }
 
-    private Product ensureProduct(String name, String slug, String shortDesc, Category category, Brand brand, Supplier supplier, String imageUrl) {
+    private Product ensureProduct(String name, String slug, String shortDesc, Category category, Brand brand, Supplier supplier) {
         return productRepository.findBySlug(slug)
-                .orElseGet(() -> {
-                    Product p = productRepository.save(Product.builder()
-                            .name(name)
-                            .slug(slug)
-                            .shortDesc(shortDesc)
-                            .description("<p>" + shortDesc + ". Sản phẩm chính hãng chất lượng cao, an toàn cho đầm tôm và môi trường nước.</p>")
-                            .category(category)
-                            .brand(brand)
-                            .suppliers(new HashSet<>(Set.of(supplier)))
-                            .status(ProductStatus.ACTIVE)
-                            .ratingAverage(4.8f)
-                            .reviewCount(15)
-                            .createdAt(LocalDateTime.now().minusMonths(9))
-                            .build());
-
-                    if (imageUrl != null && !imageUrl.isBlank()) {
-                        String imgName = name.length() > 200 ? name.substring(0, 200) : name;
-                        String imgText = imgName.length() > 90 ? imgName.substring(0, 90) : imgName;
-                        productImageRepository.save(ProductImage.builder()
-                                .product(p)
-                                .imageUrl(imageUrl)
-                                .name(imgName)
-                                .text(imgText)
-                                .build());
-                    }
-                    return p;
-                });
+                .orElseGet(() -> productRepository.save(Product.builder()
+                        .name(name)
+                        .slug(slug)
+                        .shortDesc(shortDesc)
+                        .category(category)
+                        .brand(brand)
+                        .suppliers(new HashSet<>(Set.of(supplier)))
+                        .status(ProductStatus.ACTIVE)
+                        .createdAt(LocalDateTime.now().minusMonths(9))
+                        .build()));
     }
 
-    private ProductVariant ensureVariant(Product product, String sku, String imageUrl) {
+    private ProductVariant ensureVariant(Product product, String sku) {
         return productVariantRepository.findBySku(sku)
                 .orElseGet(() -> productVariantRepository.save(ProductVariant.builder()
                         .product(product)
                         .sku(sku)
-                        .imageUrl(imageUrl)
                         .status(VariantStatus.ACTIVE)
                         .build()));
     }
@@ -723,7 +493,7 @@ public class DataSeeder implements CommandLineRunner {
                             .fullName(fullName)
                             .email(email)
                             .phoneNumber(phone)
-                            .passwordHash(passwordEncoder.encode("123456zoneteam"))
+                            .passwordHash(passwordEncoder.encode("123456"))
                             .status(UserStatus.ACTIVE)
                             .role(customerRole)
                             .branch(branch)
@@ -750,7 +520,7 @@ public class DataSeeder implements CommandLineRunner {
                 });
     }
 
-    private Map<String, Role> seedSystemRolesAndBootstrapSuperAdmin() {
+    private void seedSystemRolesAndBootstrapSuperAdmin() {
         Set<String> roleSlugsBeforeSeed = roleRepository.findAll().stream()
                 .map(Role::getSlug)
                 .filter(slug -> slug != null && !slug.isBlank())
@@ -824,8 +594,6 @@ public class DataSeeder implements CommandLineRunner {
 
         migrateLegacyUserRoleToCustomer(seededRoles.get(CUSTOMER_ROLE_SLUG));
         bootstrapSuperAdmin(superAdminRole);
-
-        return seededRoles;
     }
 
     private List<RoleSeedSpec> buildRoleSeedSpecs() {
@@ -898,8 +666,7 @@ public class DataSeeder implements CommandLineRunner {
                         codes(
                                 "DASHBOARD", "DASHBOARD_VIEW",
                                 "WORKSPACE", "WORKSPACE_VIEW",
-                                "REPORT", "REPORT_REVENUE_VIEW", "REPORT_REVENUE_VIEW_ALL_BRANCHES",
-                                "REPORT_INVENTORY_VIEW",
+                                "REPORT", "REPORT_REVENUE_VIEW", "REPORT_INVENTORY_VIEW",
                                 "REPORT_INVENTORY_VIEW_ALL_BRANCHES", "REPORT_FINANCE_VIEW",
                                 "REPORT_FINANCE_VIEW_ALL_BRANCHES",
                                 "STAFF", "STAFF_VIEW", "STAFF_CREATE", "STAFF_UPDATE", "STAFF_DELETE",
@@ -931,300 +698,355 @@ public class DataSeeder implements CommandLineRunner {
         int createdModules = 0;
         int createdActions = 0;
 
-        for (PermissionModuleSeedSpec moduleSpec : buildPermissionModuleSpecs()) {
-            Optional<Permission> existingOpt = permissionRepository.findByCode(moduleSpec.code());
-            Permission module;
-            if (existingOpt.isPresent()) {
-                module = existingOpt.get();
-                boolean changed = false;
-                if (!moduleSpec.name().equals(module.getName())) {
-                    module.setName(moduleSpec.name());
-                    changed = true;
-                }
-                if (module.getType() != PermissionType.MODULE) {
-                    module.setType(PermissionType.MODULE);
-                    changed = true;
-                }
-                if (module.getGroupName() != moduleSpec.groupName()) {
-                    module.setGroupName(moduleSpec.groupName());
-                    changed = true;
-                }
-                if (module.getParentId() != null) {
-                    module.setParentId(null);
-                    changed = true;
-                }
-                if (changed) {
-                    module = permissionRepository.save(module);
-                }
-            } else {
-                module = permissionRepository.save(Permission.builder()
-                        .name(moduleSpec.name())
-                        .code(moduleSpec.code())
-                        .type(PermissionType.MODULE)
-                        .groupName(moduleSpec.groupName())
-                        .parentId(null)
-                        .build());
+        for (PermissionModuleSeedSpec spec : systemPermissionModules()) {
+            Optional<Permission> existingModule = permissionRepository.findByCode(spec.code());
+            Permission module = existingModule
+                    .map(permission -> alignPermissionMetadata(
+                            permission,
+                            spec.name(),
+                            spec.groupName(),
+                            PermissionType.MODULE,
+                            null))
+                    .orElseGet(() -> permissionRepository.save(Permission.builder()
+                            .name(spec.name())
+                            .code(spec.code())
+                            .groupName(spec.groupName())
+                            .type(PermissionType.MODULE)
+                            .build()));
+            if (existingModule.isEmpty()) {
                 createdModules++;
             }
-            modulesByCode.put(module.getCode(), module);
+            modulesByCode.put(spec.code(), module);
         }
 
-        for (PermissionActionSeedSpec actionSpec : buildPermissionActionSpecs()) {
-            Permission parentModule = modulesByCode.get(actionSpec.parentCode());
-            if (parentModule == null) {
-                log.warn("Bỏ qua seed action {} do không tìm thấy module cha {}",
-                        actionSpec.code(),
-                        actionSpec.parentCode());
-                continue;
-            }
+        for (PermissionActionSeedSpec spec : systemPermissionActions()) {
+            Permission parent = modulesByCode.get(spec.parentCode());
+            Long parentId = parent == null ? null : parent.getId();
 
-            Optional<Permission> existingOpt = permissionRepository.findByCode(actionSpec.code());
-            if (existingOpt.isPresent()) {
-                Permission action = existingOpt.get();
-                boolean changed = false;
-                if (!actionSpec.name().equals(action.getName())) {
-                    action.setName(actionSpec.name());
-                    changed = true;
-                }
-                if (action.getType() != PermissionType.ACTION) {
-                    action.setType(PermissionType.ACTION);
-                    changed = true;
-                }
-                if (action.getGroupName() != actionSpec.groupName()) {
-                    action.setGroupName(actionSpec.groupName());
-                    changed = true;
-                }
-                Long existingParentId = action.getParentId();
-                if (existingParentId == null || !existingParentId.equals(parentModule.getId())) {
-                    action.setParentId(parentModule.getId());
-                    changed = true;
-                }
-                if (changed) {
-                    permissionRepository.save(action);
-                }
+            Optional<Permission> existingAction = permissionRepository.findByCode(spec.code());
+            if (existingAction.isPresent()) {
+                alignPermissionMetadata(
+                        existingAction.get(),
+                        spec.name(),
+                        spec.groupName(),
+                        PermissionType.ACTION,
+                        parentId);
             } else {
                 permissionRepository.save(Permission.builder()
-                        .name(actionSpec.name())
-                        .code(actionSpec.code())
+                        .name(spec.name())
+                        .code(spec.code())
+                        .groupName(spec.groupName())
                         .type(PermissionType.ACTION)
-                        .groupName(actionSpec.groupName())
-                        .parentId(parentModule.getId())
+                        .parentId(parentId)
                         .build());
                 createdActions++;
             }
         }
 
-        if (createdModules > 0 || createdActions > 0) {
-            log.info("Đã seed thêm {} module permission và {} action permission còn thiếu.",
-                    createdModules,
-                    createdActions);
+        log.info("System permissions synchronized: created {} modules, {} actions",
+                createdModules,
+                createdActions);
+    }
+
+    private Permission alignPermissionMetadata(
+            Permission permission,
+            String name,
+            PermissionGroup groupName,
+            PermissionType type,
+            Long parentId) {
+        boolean changed = false;
+        if (!name.equals(permission.getName())) {
+            permission.setName(name);
+            changed = true;
         }
+        if (permission.getGroupName() != groupName) {
+            permission.setGroupName(groupName);
+            changed = true;
+        }
+        if (permission.getType() != type) {
+            permission.setType(type);
+            changed = true;
+        }
+        if (parentId == null ? permission.getParentId() != null : !parentId.equals(permission.getParentId())) {
+            permission.setParentId(parentId);
+            changed = true;
+        }
+        return changed ? permissionRepository.save(permission) : permission;
     }
 
-    private List<PermissionModuleSeedSpec> buildPermissionModuleSpecs() {
+    private List<PermissionModuleSeedSpec> systemPermissionModules() {
         return List.of(
-                new PermissionModuleSeedSpec("Tổng quan", "DASHBOARD", PermissionGroup.SYSTEM),
-                new PermissionModuleSeedSpec("Không gian làm việc", "WORKSPACE", PermissionGroup.SYSTEM),
-                new PermissionModuleSeedSpec("Quản lý Đơn hàng", "ORDER", PermissionGroup.SALES),
-                new PermissionModuleSeedSpec("Quản lý Sản phẩm", "PRODUCT", PermissionGroup.PRODUCT_CATALOG),
-                new PermissionModuleSeedSpec("Quản lý Danh mục", "CATEGORY", PermissionGroup.PRODUCT_CATALOG),
-                new PermissionModuleSeedSpec("Quản lý Thuộc tính", "ATTRIBUTE", PermissionGroup.PRODUCT_CATALOG),
-                new PermissionModuleSeedSpec("Quản lý Khách hàng", "CUSTOMER", PermissionGroup.SALES),
-                new PermissionModuleSeedSpec("Quản lý Voucher", "VOUCHER", PermissionGroup.SALES),
-                new PermissionModuleSeedSpec("Quản lý Banner", "BANNER", PermissionGroup.SALES),
-                new PermissionModuleSeedSpec("Quản lý Bài viết", "BLOG", PermissionGroup.SALES),
-                new PermissionModuleSeedSpec("Quản lý Chi nhánh", "BRANCH", PermissionGroup.SYSTEM),
-                new PermissionModuleSeedSpec("Quản lý Nhà cung cấp", "SUPPLIER", PermissionGroup.INVENTORY),
-                new PermissionModuleSeedSpec("Quản lý Tài xế", "DRIVER", PermissionGroup.INVENTORY),
-                new PermissionModuleSeedSpec("Quản lý Nhập kho", "IMPORT", PermissionGroup.INVENTORY),
-                new PermissionModuleSeedSpec("Quản lý Xuất kho", "EXPORT", PermissionGroup.INVENTORY),
-                new PermissionModuleSeedSpec("Quản lý Điều chuyển kho", "TRANSFER", PermissionGroup.INVENTORY),
-                new PermissionModuleSeedSpec("Quản lý Kiểm kê kho", "INVENTORY_CHECK", PermissionGroup.INVENTORY),
-                new PermissionModuleSeedSpec("Yêu cầu nhập hàng", "PURCHASE_REQUEST", PermissionGroup.INVENTORY),
-                new PermissionModuleSeedSpec("Báo cáo & Thống kê", "REPORT", PermissionGroup.REPORT),
-                new PermissionModuleSeedSpec("Quản lý Nhân viên", "STAFF", PermissionGroup.SYSTEM),
-                new PermissionModuleSeedSpec("Quản lý Vai trò", "ROLE", PermissionGroup.SYSTEM),
-                new PermissionModuleSeedSpec("Cài đặt hệ thống", "SETTING", PermissionGroup.SYSTEM),
-                new PermissionModuleSeedSpec("Tin nhắn & Chat", "CHAT", PermissionGroup.SYSTEM),
-                new PermissionModuleSeedSpec("Nhật ký hoạt động", ACTIVITY_LOG_MODULE_CODE, PermissionGroup.SYSTEM),
-                new PermissionModuleSeedSpec("AI Doctor Knowledge", "AI_KNOWLEDGE", PermissionGroup.AI_KNOWLEDGE),
-                new PermissionModuleSeedSpec("Trợ lý tư vấn khách hàng", "CUSTOMER_ADVISOR", PermissionGroup.AI_KNOWLEDGE),
-                new PermissionModuleSeedSpec("Không gian kỹ sư", "AGRONOMIST_WORKSPACE", PermissionGroup.AI_KNOWLEDGE));
+                module("Tổng quan", "DASHBOARD", PermissionGroup.SYSTEM),
+                module("Workspace", "WORKSPACE", PermissionGroup.SYSTEM),
+                module("Nhật ký hoạt động", ACTIVITY_LOG_MODULE_CODE, PermissionGroup.SYSTEM),
+                module("Báo cáo", "REPORT", PermissionGroup.REPORT),
+                module("Nhân viên", "STAFF", PermissionGroup.ADMINISTRATION),
+                module("Chi nhánh", "BRANCH", PermissionGroup.ADMINISTRATION),
+                module("Vai trò", "ROLE", PermissionGroup.ADMINISTRATION),
+                module("Đơn hàng", "ORDER", PermissionGroup.SALES),
+                module("Khách hàng", "CUSTOMER", PermissionGroup.SALES),
+                module("Voucher", "VOUCHER", PermissionGroup.SALES),
+                module("Sản phẩm", "PRODUCT", PermissionGroup.PRODUCT_CATALOG),
+                module("Danh mục", "CATEGORY", PermissionGroup.PRODUCT_CATALOG),
+                module("Thuộc tính", "ATTRIBUTE", PermissionGroup.PRODUCT_CATALOG),
+                module("Nhà cung cấp", "SUPPLIER", PermissionGroup.INVENTORY),
+                module("Tài xế", "DRIVER", PermissionGroup.INVENTORY),
+                module("Nhập hàng", "IMPORT", PermissionGroup.INVENTORY),
+                module("Xuất hàng", "EXPORT", PermissionGroup.INVENTORY),
+                module("Điều chuyển", "TRANSFER", PermissionGroup.INVENTORY),
+                module("Kiểm kê kho", "INVENTORY_CHECK", PermissionGroup.INVENTORY),
+                module("Yêu cầu mua NCC", "PURCHASE_REQUEST", PermissionGroup.INVENTORY),
+                module("Banner", "BANNER", PermissionGroup.SETTING),
+                module("Blog", "BLOG", PermissionGroup.SETTING),
+                module("Cài đặt", "SETTING", PermissionGroup.SETTING),
+                module("Chat", "CHAT", PermissionGroup.COMMUNICATION),
+                module("Tư vấn khách hàng", "CUSTOMER_ADVISOR", PermissionGroup.COMMUNICATION),
+                module("Workspace kỹ sư", "AGRONOMIST_WORKSPACE", PermissionGroup.AI_KNOWLEDGE),
+                module("Tri thức AI", "AI_KNOWLEDGE", PermissionGroup.AI_KNOWLEDGE));
     }
 
-    private List<PermissionActionSeedSpec> buildPermissionActionSpecs() {
+    private List<PermissionActionSeedSpec> systemPermissionActions() {
         return List.of(
-                new PermissionActionSeedSpec("Xem Tổng quan", "DASHBOARD_VIEW", PermissionGroup.SYSTEM, "DASHBOARD"),
-                new PermissionActionSeedSpec("Xem Không gian làm việc", "WORKSPACE_VIEW", PermissionGroup.SYSTEM, "WORKSPACE"),
-                new PermissionActionSeedSpec("Xem Đơn hàng", "ORDER_VIEW", PermissionGroup.SALES, "ORDER"),
-                new PermissionActionSeedSpec("Tạo Đơn hàng", "ORDER_CREATE", PermissionGroup.SALES, "ORDER"),
-                new PermissionActionSeedSpec("Sửa Đơn hàng", "ORDER_UPDATE", PermissionGroup.SALES, "ORDER"),
-                new PermissionActionSeedSpec("Xác nhận Đơn hàng", "ORDER_CONFIRM", PermissionGroup.SALES, "ORDER"),
-                new PermissionActionSeedSpec("Giao Đơn hàng", "ORDER_SHIP", PermissionGroup.SALES, "ORDER"),
-                new PermissionActionSeedSpec("Hủy Đơn hàng", "ORDER_CANCEL", PermissionGroup.SALES, "ORDER"),
-                new PermissionActionSeedSpec("Hoàn thành Đơn hàng", "ORDER_COMPLETE", PermissionGroup.SALES, "ORDER"),
-                new PermissionActionSeedSpec("Xuất danh sách Đơn hàng", "ORDER_EXPORT", PermissionGroup.SALES, "ORDER"),
-                new PermissionActionSeedSpec("Hoàn tiền Đơn hàng", "ORDER_REFUND", PermissionGroup.SALES, "ORDER"),
-                new PermissionActionSeedSpec("Xóa Đơn hàng", "ORDER_DELETE", PermissionGroup.SALES, "ORDER"),
-                new PermissionActionSeedSpec("Xem Sản phẩm", "PRODUCT_VIEW", PermissionGroup.PRODUCT_CATALOG, "PRODUCT"),
-                new PermissionActionSeedSpec("Tạo Sản phẩm", "PRODUCT_CREATE", PermissionGroup.PRODUCT_CATALOG, "PRODUCT"),
-                new PermissionActionSeedSpec("Sửa Sản phẩm", "PRODUCT_UPDATE", PermissionGroup.PRODUCT_CATALOG, "PRODUCT"),
-                new PermissionActionSeedSpec("Xóa Sản phẩm", "PRODUCT_DELETE", PermissionGroup.PRODUCT_CATALOG, "PRODUCT"),
-                new PermissionActionSeedSpec("Xem Danh mục", "CATEGORY_VIEW", PermissionGroup.PRODUCT_CATALOG, "CATEGORY"),
-                new PermissionActionSeedSpec("Tạo Danh mục", "CATEGORY_CREATE", PermissionGroup.PRODUCT_CATALOG, "CATEGORY"),
-                new PermissionActionSeedSpec("Sửa Danh mục", "CATEGORY_UPDATE", PermissionGroup.PRODUCT_CATALOG, "CATEGORY"),
-                new PermissionActionSeedSpec("Xóa Danh mục", "CATEGORY_DELETE", PermissionGroup.PRODUCT_CATALOG, "CATEGORY"),
-                new PermissionActionSeedSpec("Xem Thuộc tính", "ATTRIBUTE_VIEW", PermissionGroup.PRODUCT_CATALOG, "ATTRIBUTE"),
-                new PermissionActionSeedSpec("Tạo Thuộc tính", "ATTRIBUTE_CREATE", PermissionGroup.PRODUCT_CATALOG, "ATTRIBUTE"),
-                new PermissionActionSeedSpec("Sửa Thuộc tính", "ATTRIBUTE_UPDATE", PermissionGroup.PRODUCT_CATALOG, "ATTRIBUTE"),
-                new PermissionActionSeedSpec("Xóa Thuộc tính", "ATTRIBUTE_DELETE", PermissionGroup.PRODUCT_CATALOG, "ATTRIBUTE"),
-                new PermissionActionSeedSpec("Xem Khách hàng", "CUSTOMER_VIEW", PermissionGroup.SALES, "CUSTOMER"),
-                new PermissionActionSeedSpec("Tạo Khách hàng", "CUSTOMER_CREATE", PermissionGroup.SALES, "CUSTOMER"),
-                new PermissionActionSeedSpec("Sửa Khách hàng", "CUSTOMER_UPDATE", PermissionGroup.SALES, "CUSTOMER"),
-                new PermissionActionSeedSpec("Xóa Khách hàng", "CUSTOMER_DELETE", PermissionGroup.SALES, "CUSTOMER"),
-                new PermissionActionSeedSpec("Xem Voucher", "VOUCHER_VIEW", PermissionGroup.SALES, "VOUCHER"),
-                new PermissionActionSeedSpec("Tạo Voucher", "VOUCHER_CREATE", PermissionGroup.SALES, "VOUCHER"),
-                new PermissionActionSeedSpec("Sửa Voucher", "VOUCHER_UPDATE", PermissionGroup.SALES, "VOUCHER"),
-                new PermissionActionSeedSpec("Xóa Voucher", "VOUCHER_DELETE", PermissionGroup.SALES, "VOUCHER"),
-                new PermissionActionSeedSpec("Xem Banner", "BANNER_VIEW", PermissionGroup.SALES, "BANNER"),
-                new PermissionActionSeedSpec("Tạo Banner", "BANNER_CREATE", PermissionGroup.SALES, "BANNER"),
-                new PermissionActionSeedSpec("Sửa Banner", "BANNER_EDIT", PermissionGroup.SALES, "BANNER"),
-                new PermissionActionSeedSpec("Xóa Banner", "BANNER_DELETE", PermissionGroup.SALES, "BANNER"),
-                new PermissionActionSeedSpec("Xem Bài viết", "BLOG_VIEW", PermissionGroup.SALES, "BLOG"),
-                new PermissionActionSeedSpec("Tạo Bài viết", "BLOG_CREATE", PermissionGroup.SALES, "BLOG"),
-                new PermissionActionSeedSpec("Sửa Bài viết", "BLOG_EDIT", PermissionGroup.SALES, "BLOG"),
-                new PermissionActionSeedSpec("Xóa Bài viết", "BLOG_DELETE", PermissionGroup.SALES, "BLOG"),
-                new PermissionActionSeedSpec("Duyệt Bài viết", "BLOG_APPROVE", PermissionGroup.SALES, "BLOG"),
-                new PermissionActionSeedSpec("Xem Chi nhánh", "BRANCH_VIEW", PermissionGroup.SYSTEM, "BRANCH"),
-                new PermissionActionSeedSpec("Tạo Chi nhánh", "BRANCH_CREATE", PermissionGroup.SYSTEM, "BRANCH"),
-                new PermissionActionSeedSpec("Sửa Chi nhánh", "BRANCH_UPDATE", PermissionGroup.SYSTEM, "BRANCH"),
-                new PermissionActionSeedSpec("Xóa Chi nhánh", "BRANCH_DELETE", PermissionGroup.SYSTEM, "BRANCH"),
-                new PermissionActionSeedSpec("Xem Nhà cung cấp", "SUPPLIER_VIEW", PermissionGroup.INVENTORY, "SUPPLIER"),
-                new PermissionActionSeedSpec("Tạo Nhà cung cấp", "SUPPLIER_CREATE", PermissionGroup.INVENTORY, "SUPPLIER"),
-                new PermissionActionSeedSpec("Sửa Nhà cung cấp", "SUPPLIER_UPDATE", PermissionGroup.INVENTORY, "SUPPLIER"),
-                new PermissionActionSeedSpec("Xóa Nhà cung cấp", "SUPPLIER_DELETE", PermissionGroup.INVENTORY, "SUPPLIER"),
-                new PermissionActionSeedSpec("Xem Tài xế", "DRIVER_VIEW", PermissionGroup.INVENTORY, "DRIVER"),
-                new PermissionActionSeedSpec("Tạo Tài xế", "DRIVER_CREATE", PermissionGroup.INVENTORY, "DRIVER"),
-                new PermissionActionSeedSpec("Sửa Tài xế", "DRIVER_UPDATE", PermissionGroup.INVENTORY, "DRIVER"),
-                new PermissionActionSeedSpec("Xóa Tài xế", "DRIVER_DELETE", PermissionGroup.INVENTORY, "DRIVER"),
-                new PermissionActionSeedSpec("Xem Nhập kho", "IMPORT_VIEW", PermissionGroup.INVENTORY, "IMPORT"),
-                new PermissionActionSeedSpec("Tạo Nhập kho", "IMPORT_CREATE", PermissionGroup.INVENTORY, "IMPORT"),
-                new PermissionActionSeedSpec("Sửa Nhập kho", "IMPORT_UPDATE", PermissionGroup.INVENTORY, "IMPORT"),
-                new PermissionActionSeedSpec("Duyệt Nhập kho", "IMPORT_APPROVE", PermissionGroup.INVENTORY, "IMPORT"),
-                new PermissionActionSeedSpec("Hủy Nhập kho", "IMPORT_CANCEL", PermissionGroup.INVENTORY, "IMPORT"),
-                new PermissionActionSeedSpec("Xóa Nhập kho", "IMPORT_DELETE", PermissionGroup.INVENTORY, "IMPORT"),
-                new PermissionActionSeedSpec("Xem Xuất kho", "EXPORT_VIEW", PermissionGroup.INVENTORY, "EXPORT"),
-                new PermissionActionSeedSpec("Tạo Xuất kho", "EXPORT_CREATE", PermissionGroup.INVENTORY, "EXPORT"),
-                new PermissionActionSeedSpec("Sửa Xuất kho", "EXPORT_UPDATE", PermissionGroup.INVENTORY, "EXPORT"),
-                new PermissionActionSeedSpec("Duyệt Xuất kho", "EXPORT_APPROVE", PermissionGroup.INVENTORY, "EXPORT"),
-                new PermissionActionSeedSpec("Hủy Xuất kho", "EXPORT_CANCEL", PermissionGroup.INVENTORY, "EXPORT"),
-                new PermissionActionSeedSpec("Xóa Xuất kho", "EXPORT_DELETE", PermissionGroup.INVENTORY, "EXPORT"),
-                new PermissionActionSeedSpec("Xem Điều chuyển", "TRANSFER_VIEW", PermissionGroup.INVENTORY, "TRANSFER"),
-                new PermissionActionSeedSpec("Tạo Điều chuyển", "TRANSFER_CREATE", PermissionGroup.INVENTORY, "TRANSFER"),
-                new PermissionActionSeedSpec("Sửa Điều chuyển", "TRANSFER_UPDATE", PermissionGroup.INVENTORY, "TRANSFER"),
-                new PermissionActionSeedSpec("Duyệt Điều chuyển", "TRANSFER_APPROVE", PermissionGroup.INVENTORY, "TRANSFER"),
-                new PermissionActionSeedSpec("Hủy Điều chuyển", "TRANSFER_CANCEL", PermissionGroup.INVENTORY, "TRANSFER"),
-                new PermissionActionSeedSpec("Xóa Điều chuyển", "TRANSFER_DELETE", PermissionGroup.INVENTORY, "TRANSFER"),
-                new PermissionActionSeedSpec("Xem Kiểm kê", "INVENTORY_CHECK_VIEW", PermissionGroup.INVENTORY, "INVENTORY_CHECK"),
-                new PermissionActionSeedSpec("Tạo Kiểm kê", "INVENTORY_CHECK_CREATE", PermissionGroup.INVENTORY, "INVENTORY_CHECK"),
-                new PermissionActionSeedSpec("Sửa Kiểm kê", "INVENTORY_CHECK_UPDATE", PermissionGroup.INVENTORY, "INVENTORY_CHECK"),
-                new PermissionActionSeedSpec("Duyệt Kiểm kê", "INVENTORY_CHECK_APPROVE", PermissionGroup.INVENTORY, "INVENTORY_CHECK"),
-                new PermissionActionSeedSpec("Hủy Kiểm kê", "INVENTORY_CHECK_CANCEL", PermissionGroup.INVENTORY, "INVENTORY_CHECK"),
-                new PermissionActionSeedSpec("Xóa Kiểm kê", "INVENTORY_CHECK_DELETE", PermissionGroup.INVENTORY, "INVENTORY_CHECK"),
-                new PermissionActionSeedSpec("Xem Yêu cầu nhập hàng", "PURCHASE_REQUEST_VIEW", PermissionGroup.INVENTORY, "PURCHASE_REQUEST"),
-                new PermissionActionSeedSpec("Tạo Yêu cầu nhập hàng", "PURCHASE_REQUEST_CREATE", PermissionGroup.INVENTORY, "PURCHASE_REQUEST"),
-                new PermissionActionSeedSpec("Sửa Yêu cầu nhập hàng", "PURCHASE_REQUEST_UPDATE", PermissionGroup.INVENTORY, "PURCHASE_REQUEST"),
-                new PermissionActionSeedSpec("Duyệt Yêu cầu nhập hàng", "PURCHASE_REQUEST_APPROVE", PermissionGroup.INVENTORY, "PURCHASE_REQUEST"),
-                new PermissionActionSeedSpec("Xóa Yêu cầu nhập hàng", "PURCHASE_REQUEST_DELETE", PermissionGroup.INVENTORY, "PURCHASE_REQUEST"),
-                new PermissionActionSeedSpec("Xem Báo cáo doanh thu", "REPORT_REVENUE_VIEW", PermissionGroup.REPORT, "REPORT"),
-                new PermissionActionSeedSpec("Xem Báo cáo doanh thu toàn chi nhánh", "REPORT_REVENUE_VIEW_ALL_BRANCHES", PermissionGroup.REPORT, "REPORT"),
-                new PermissionActionSeedSpec("Xem Báo cáo tồn kho", "REPORT_INVENTORY_VIEW", PermissionGroup.REPORT, "REPORT"),
-                new PermissionActionSeedSpec("Xem Báo cáo tồn kho toàn chi nhánh", "REPORT_INVENTORY_VIEW_ALL_BRANCHES", PermissionGroup.REPORT, "REPORT"),
-                new PermissionActionSeedSpec("Xem Báo cáo tài chính", "REPORT_FINANCE_VIEW", PermissionGroup.REPORT, "REPORT"),
-                new PermissionActionSeedSpec("Xem Báo cáo tài chính toàn chi nhánh", "REPORT_FINANCE_VIEW_ALL_BRANCHES", PermissionGroup.REPORT, "REPORT"),
-                new PermissionActionSeedSpec("Xem Nhân viên", "STAFF_VIEW", PermissionGroup.SYSTEM, "STAFF"),
-                new PermissionActionSeedSpec("Tạo Nhân viên", "STAFF_CREATE", PermissionGroup.SYSTEM, "STAFF"),
-                new PermissionActionSeedSpec("Sửa Nhân viên", "STAFF_UPDATE", PermissionGroup.SYSTEM, "STAFF"),
-                new PermissionActionSeedSpec("Xóa Nhân viên", "STAFF_DELETE", PermissionGroup.SYSTEM, "STAFF"),
-                new PermissionActionSeedSpec("Xem Vai trò", "ROLE_VIEW", PermissionGroup.SYSTEM, "ROLE"),
-                new PermissionActionSeedSpec("Tạo Vai trò", "ROLE_CREATE", PermissionGroup.SYSTEM, "ROLE"),
-                new PermissionActionSeedSpec("Sửa Vai trò", "ROLE_UPDATE", PermissionGroup.SYSTEM, "ROLE"),
-                new PermissionActionSeedSpec("Xóa Vai trò", "ROLE_DELETE", PermissionGroup.SYSTEM, "ROLE"),
-                new PermissionActionSeedSpec("Xem Cài đặt", "SETTING_VIEW", PermissionGroup.SYSTEM, "SETTING"),
-                new PermissionActionSeedSpec("Sửa Cài đặt", "SETTING_UPDATE", PermissionGroup.SYSTEM, "SETTING"),
-                new PermissionActionSeedSpec("Xem Tin nhắn", "CHAT_VIEW", PermissionGroup.SYSTEM, "CHAT"),
-                new PermissionActionSeedSpec("Quản lý Tin nhắn", "CHAT_MANAGE", PermissionGroup.SYSTEM, "CHAT"),
-                new PermissionActionSeedSpec("Xem Nhật ký hoạt động", ACTIVITY_LOG_VIEW_PERMISSION_CODE, PermissionGroup.SYSTEM, ACTIVITY_LOG_MODULE_CODE),
-                new PermissionActionSeedSpec("Xem Tri thức AI Doctor", "AI_KNOWLEDGE_VIEW", PermissionGroup.AI_KNOWLEDGE, "AI_KNOWLEDGE"),
-                new PermissionActionSeedSpec("Tạo Tri thức AI Doctor", "AI_KNOWLEDGE_CREATE", PermissionGroup.AI_KNOWLEDGE, "AI_KNOWLEDGE"),
-                new PermissionActionSeedSpec("Sửa Tri thức AI Doctor", "AI_KNOWLEDGE_UPDATE", PermissionGroup.AI_KNOWLEDGE, "AI_KNOWLEDGE"),
-                new PermissionActionSeedSpec("Duyệt Tri thức AI Doctor", "AI_KNOWLEDGE_APPROVE", PermissionGroup.AI_KNOWLEDGE, "AI_KNOWLEDGE"),
-                new PermissionActionSeedSpec("Import Tri thức AI Doctor", "AI_IMPORT_KNOWLEDGE", PermissionGroup.AI_KNOWLEDGE, "AI_KNOWLEDGE"),
-                new PermissionActionSeedSpec("Duyệt ca bệnh AI", "AI_CASE_REVIEW", PermissionGroup.AI_KNOWLEDGE, "AI_KNOWLEDGE"),
-                new PermissionActionSeedSpec("Sử dụng Trợ lý tư vấn", "CUSTOMER_ADVISOR_USE", PermissionGroup.AI_KNOWLEDGE, "CUSTOMER_ADVISOR"),
-                new PermissionActionSeedSpec("Sử dụng Không gian kỹ sư", "AGRONOMIST_WORKSPACE_USE", PermissionGroup.AI_KNOWLEDGE, "AGRONOMIST_WORKSPACE"));
+                action("Xem tổng quan", "DASHBOARD_VIEW", PermissionGroup.SYSTEM, "DASHBOARD"),
+                action("Xem workspace", "WORKSPACE_VIEW", PermissionGroup.SYSTEM, "WORKSPACE"),
+                action("Xem nhật ký", ACTIVITY_LOG_VIEW_PERMISSION_CODE, PermissionGroup.SYSTEM, ACTIVITY_LOG_MODULE_CODE),
+
+                action("Báo cáo doanh thu", "REPORT_REVENUE_VIEW", PermissionGroup.REPORT, "REPORT"),
+                action("Báo cáo tồn kho", "REPORT_INVENTORY_VIEW", PermissionGroup.REPORT, "REPORT"),
+                action("Tồn kho mọi chi nhánh", "REPORT_INVENTORY_VIEW_ALL_BRANCHES", PermissionGroup.REPORT, "REPORT"),
+                action("Báo cáo tài chính", "REPORT_FINANCE_VIEW", PermissionGroup.REPORT, "REPORT"),
+                action("Tài chính mọi chi nhánh", "REPORT_FINANCE_VIEW_ALL_BRANCHES", PermissionGroup.REPORT, "REPORT"),
+
+                action("Xem nhân viên", "STAFF_VIEW", PermissionGroup.ADMINISTRATION, "STAFF"),
+                action("Thêm nhân viên", "STAFF_CREATE", PermissionGroup.ADMINISTRATION, "STAFF"),
+                action("Sửa nhân viên", "STAFF_UPDATE", PermissionGroup.ADMINISTRATION, "STAFF"),
+                action("Xóa nhân viên", "STAFF_DELETE", PermissionGroup.ADMINISTRATION, "STAFF"),
+                action("Xem chi nhánh", "BRANCH_VIEW", PermissionGroup.ADMINISTRATION, "BRANCH"),
+                action("Thêm chi nhánh", "BRANCH_CREATE", PermissionGroup.ADMINISTRATION, "BRANCH"),
+                action("Sửa chi nhánh", "BRANCH_UPDATE", PermissionGroup.ADMINISTRATION, "BRANCH"),
+                action("Xóa chi nhánh", "BRANCH_DELETE", PermissionGroup.ADMINISTRATION, "BRANCH"),
+                action("Xem vai trò", "ROLE_VIEW", PermissionGroup.ADMINISTRATION, "ROLE"),
+                action("Tạo vai trò", "ROLE_CREATE", PermissionGroup.ADMINISTRATION, "ROLE"),
+                action("Sửa vai trò", "ROLE_UPDATE", PermissionGroup.ADMINISTRATION, "ROLE"),
+                action("Xóa vai trò", "ROLE_DELETE", PermissionGroup.ADMINISTRATION, "ROLE"),
+
+                action("Xem đơn hàng", "ORDER_VIEW", PermissionGroup.SALES, "ORDER"),
+                action("Tạo đơn hàng", "ORDER_CREATE", PermissionGroup.SALES, "ORDER"),
+                action("Cập nhật đơn hàng", "ORDER_UPDATE", PermissionGroup.SALES, "ORDER"),
+                action("Xác nhận đơn hàng", "ORDER_CONFIRM", PermissionGroup.SALES, "ORDER"),
+                action("Giao hàng", "ORDER_SHIP", PermissionGroup.SALES, "ORDER"),
+                action("Hủy đơn hàng", "ORDER_CANCEL", PermissionGroup.SALES, "ORDER"),
+                action("Hoàn tất đơn hàng", "ORDER_COMPLETE", PermissionGroup.SALES, "ORDER"),
+                action("Xuất DS đơn hàng", "ORDER_EXPORT", PermissionGroup.SALES, "ORDER"),
+                action("Hoàn tiền", "ORDER_REFUND", PermissionGroup.SALES, "ORDER"),
+                action("Xóa đơn hàng", "ORDER_DELETE", PermissionGroup.SALES, "ORDER"),
+                action("Xem khách hàng", "CUSTOMER_VIEW", PermissionGroup.SALES, "CUSTOMER"),
+                action("Thêm khách hàng", "CUSTOMER_CREATE", PermissionGroup.SALES, "CUSTOMER"),
+                action("Sửa khách hàng", "CUSTOMER_UPDATE", PermissionGroup.SALES, "CUSTOMER"),
+                action("Xóa khách hàng", "CUSTOMER_DELETE", PermissionGroup.SALES, "CUSTOMER"),
+                action("Xem voucher", "VOUCHER_VIEW", PermissionGroup.SALES, "VOUCHER"),
+                action("Thêm voucher", "VOUCHER_CREATE", PermissionGroup.SALES, "VOUCHER"),
+                action("Sửa voucher", "VOUCHER_UPDATE", PermissionGroup.SALES, "VOUCHER"),
+                action("Xóa voucher", "VOUCHER_DELETE", PermissionGroup.SALES, "VOUCHER"),
+
+                action("Xem sản phẩm", "PRODUCT_VIEW", PermissionGroup.PRODUCT_CATALOG, "PRODUCT"),
+                action("Thêm sản phẩm", "PRODUCT_CREATE", PermissionGroup.PRODUCT_CATALOG, "PRODUCT"),
+                action("Sửa sản phẩm", "PRODUCT_UPDATE", PermissionGroup.PRODUCT_CATALOG, "PRODUCT"),
+                action("Xóa sản phẩm", "PRODUCT_DELETE", PermissionGroup.PRODUCT_CATALOG, "PRODUCT"),
+                action("Xem danh mục", "CATEGORY_VIEW", PermissionGroup.PRODUCT_CATALOG, "CATEGORY"),
+                action("Thêm danh mục", "CATEGORY_CREATE", PermissionGroup.PRODUCT_CATALOG, "CATEGORY"),
+                action("Sửa danh mục", "CATEGORY_UPDATE", PermissionGroup.PRODUCT_CATALOG, "CATEGORY"),
+                action("Xóa danh mục", "CATEGORY_DELETE", PermissionGroup.PRODUCT_CATALOG, "CATEGORY"),
+                action("Xem thuộc tính", "ATTRIBUTE_VIEW", PermissionGroup.PRODUCT_CATALOG, "ATTRIBUTE"),
+                action("Thêm thuộc tính", "ATTRIBUTE_CREATE", PermissionGroup.PRODUCT_CATALOG, "ATTRIBUTE"),
+                action("Sửa thuộc tính", "ATTRIBUTE_UPDATE", PermissionGroup.PRODUCT_CATALOG, "ATTRIBUTE"),
+                action("Xóa thuộc tính", "ATTRIBUTE_DELETE", PermissionGroup.PRODUCT_CATALOG, "ATTRIBUTE"),
+
+                action("Xem nhà cung cấp", "SUPPLIER_VIEW", PermissionGroup.INVENTORY, "SUPPLIER"),
+                action("Thêm nhà cung cấp", "SUPPLIER_CREATE", PermissionGroup.INVENTORY, "SUPPLIER"),
+                action("Sửa nhà cung cấp", "SUPPLIER_UPDATE", PermissionGroup.INVENTORY, "SUPPLIER"),
+                action("Xóa nhà cung cấp", "SUPPLIER_DELETE", PermissionGroup.INVENTORY, "SUPPLIER"),
+                action("Xem tài xế", "DRIVER_VIEW", PermissionGroup.INVENTORY, "DRIVER"),
+                action("Thêm tài xế", "DRIVER_CREATE", PermissionGroup.INVENTORY, "DRIVER"),
+                action("Sửa tài xế", "DRIVER_UPDATE", PermissionGroup.INVENTORY, "DRIVER"),
+                action("Xóa tài xế", "DRIVER_DELETE", PermissionGroup.INVENTORY, "DRIVER"),
+                action("Xem phiếu nhập", "IMPORT_VIEW", PermissionGroup.INVENTORY, "IMPORT"),
+                action("Tạo phiếu nhập", "IMPORT_CREATE", PermissionGroup.INVENTORY, "IMPORT"),
+                action("Sửa phiếu nhập", "IMPORT_UPDATE", PermissionGroup.INVENTORY, "IMPORT"),
+                action("Duyệt phiếu nhập", "IMPORT_APPROVE", PermissionGroup.INVENTORY, "IMPORT"),
+                action("Hủy phiếu nhập", "IMPORT_CANCEL", PermissionGroup.INVENTORY, "IMPORT"),
+                action("Xóa phiếu nhập", "IMPORT_DELETE", PermissionGroup.INVENTORY, "IMPORT"),
+                action("Xem phiếu xuất", "EXPORT_VIEW", PermissionGroup.INVENTORY, "EXPORT"),
+                action("Tạo phiếu xuất", "EXPORT_CREATE", PermissionGroup.INVENTORY, "EXPORT"),
+                action("Duyệt phiếu xuất", "EXPORT_APPROVE", PermissionGroup.INVENTORY, "EXPORT"),
+                action("Sửa phiếu xuất", "EXPORT_UPDATE", PermissionGroup.INVENTORY, "EXPORT"),
+                action("Hủy phiếu xuất", "EXPORT_CANCEL", PermissionGroup.INVENTORY, "EXPORT"),
+                action("Xóa phiếu xuất", "EXPORT_DELETE", PermissionGroup.INVENTORY, "EXPORT"),
+                action("Xem điều chuyển", "TRANSFER_VIEW", PermissionGroup.INVENTORY, "TRANSFER"),
+                action("Tạo điều chuyển", "TRANSFER_CREATE", PermissionGroup.INVENTORY, "TRANSFER"),
+                action("Duyệt điều chuyển", "TRANSFER_APPROVE", PermissionGroup.INVENTORY, "TRANSFER"),
+                action("Hủy điều chuyển", "TRANSFER_CANCEL", PermissionGroup.INVENTORY, "TRANSFER"),
+                action("Xóa điều chuyển", "TRANSFER_DELETE", PermissionGroup.INVENTORY, "TRANSFER"),
+                action("Sửa điều chuyển", "TRANSFER_UPDATE", PermissionGroup.INVENTORY, "TRANSFER"),
+                action("Xem kiểm kê", "INVENTORY_CHECK_VIEW", PermissionGroup.INVENTORY, "INVENTORY_CHECK"),
+                action("Tạo kiểm kê", "INVENTORY_CHECK_CREATE", PermissionGroup.INVENTORY, "INVENTORY_CHECK"),
+                action("Duyệt kiểm kê", "INVENTORY_CHECK_APPROVE", PermissionGroup.INVENTORY, "INVENTORY_CHECK"),
+                action("Sửa kiểm kê", "INVENTORY_CHECK_UPDATE", PermissionGroup.INVENTORY, "INVENTORY_CHECK"),
+                action("Hủy kiểm kê", "INVENTORY_CHECK_CANCEL", PermissionGroup.INVENTORY, "INVENTORY_CHECK"),
+                action("Xóa kiểm kê", "INVENTORY_CHECK_DELETE", PermissionGroup.INVENTORY, "INVENTORY_CHECK"),
+                action("Xem yêu cầu mua", "PURCHASE_REQUEST_VIEW", PermissionGroup.INVENTORY, "PURCHASE_REQUEST"),
+                action("Tạo yêu cầu mua", "PURCHASE_REQUEST_CREATE", PermissionGroup.INVENTORY, "PURCHASE_REQUEST"),
+                action("Sửa yêu cầu mua", "PURCHASE_REQUEST_UPDATE", PermissionGroup.INVENTORY, "PURCHASE_REQUEST"),
+                action("Duyệt yêu cầu mua", "PURCHASE_REQUEST_APPROVE", PermissionGroup.INVENTORY, "PURCHASE_REQUEST"),
+                action("Xóa yêu cầu mua", "PURCHASE_REQUEST_DELETE", PermissionGroup.INVENTORY, "PURCHASE_REQUEST"),
+
+                action("Xem banner", "BANNER_VIEW", PermissionGroup.SETTING, "BANNER"),
+                action("Tạo banner", "BANNER_CREATE", PermissionGroup.SETTING, "BANNER"),
+                action("Sửa banner", "BANNER_EDIT", PermissionGroup.SETTING, "BANNER"),
+                action("Xóa banner", "BANNER_DELETE", PermissionGroup.SETTING, "BANNER"),
+                action("Xem blog", "BLOG_VIEW", PermissionGroup.SETTING, "BLOG"),
+                action("Tạo blog", "BLOG_CREATE", PermissionGroup.SETTING, "BLOG"),
+                action("Sửa blog", "BLOG_EDIT", PermissionGroup.SETTING, "BLOG"),
+                action("Xóa blog", "BLOG_DELETE", PermissionGroup.SETTING, "BLOG"),
+                action("Duyệt blog", "BLOG_APPROVE", PermissionGroup.SETTING, "BLOG"),
+                action("Xem cài đặt", "SETTING_VIEW", PermissionGroup.SETTING, "SETTING"),
+                action("Cập nhật cài đặt", "SETTING_UPDATE", PermissionGroup.SETTING, "SETTING"),
+
+                action("Xem chat", "CHAT_VIEW", PermissionGroup.COMMUNICATION, "CHAT"),
+                action("Quản lý chat", "CHAT_MANAGE", PermissionGroup.COMMUNICATION, "CHAT"),
+                action("Dùng tư vấn KH", "CUSTOMER_ADVISOR_USE", PermissionGroup.COMMUNICATION, "CUSTOMER_ADVISOR"),
+                action("Dùng workspace kỹ sư", "AGRONOMIST_WORKSPACE_USE", PermissionGroup.AI_KNOWLEDGE, "AGRONOMIST_WORKSPACE"),
+                action("Xem tri thức AI", "AI_KNOWLEDGE_VIEW", PermissionGroup.AI_KNOWLEDGE, "AI_KNOWLEDGE"),
+                action("Tạo tri thức AI", "AI_KNOWLEDGE_CREATE", PermissionGroup.AI_KNOWLEDGE, "AI_KNOWLEDGE"),
+                action("Sửa tri thức AI", "AI_KNOWLEDGE_UPDATE", PermissionGroup.AI_KNOWLEDGE, "AI_KNOWLEDGE"),
+                action("Duyệt tri thức AI", "AI_KNOWLEDGE_APPROVE", PermissionGroup.AI_KNOWLEDGE, "AI_KNOWLEDGE"),
+                action("Import tri thức AI", "AI_IMPORT_KNOWLEDGE", PermissionGroup.AI_KNOWLEDGE, "AI_KNOWLEDGE"),
+                action("Xử lý case AI", "AI_CASE_REVIEW", PermissionGroup.AI_KNOWLEDGE, "AI_KNOWLEDGE"));
+    }
+
+    private PermissionModuleSeedSpec module(String name, String code, PermissionGroup groupName) {
+        return new PermissionModuleSeedSpec(name, code, groupName);
+    }
+
+    private PermissionActionSeedSpec action(String name, String code, PermissionGroup groupName, String parentCode) {
+        return new PermissionActionSeedSpec(name, code, groupName, parentCode);
     }
 
     private Set<String> superAdminOnlyPermissionCodes() {
-        return Set.of(
-                "ROLE",
-                "ROLE_VIEW",
-                "ROLE_CREATE",
-                "ROLE_UPDATE",
-                "ROLE_DELETE");
+        return codes("ROLE", "ROLE_VIEW", "ROLE_CREATE", "ROLE_UPDATE", "ROLE_DELETE");
+    }
+
+    private Set<String> codes(String... permissionCodes) {
+        Set<String> codes = new LinkedHashSet<>();
+        for (String code : permissionCodes) {
+            codes.add(code);
+        }
+        return codes;
     }
 
     private Set<Permission> resolveExistingPermissions(
             String roleSlug,
-            Set<String> expectedCodes,
+            Set<String> desiredCodes,
             Map<String, Permission> permissionsByCode) {
-        Set<Permission> matched = new LinkedHashSet<>();
-        List<String> missing = new ArrayList<>();
-        for (String code : expectedCodes) {
-            Permission p = permissionsByCode.get(code);
-            if (p != null) {
-                matched.add(p);
+        Set<Permission> permissions = new LinkedHashSet<>();
+        Set<String> missingCodes = new TreeSet<>();
+        for (String code : desiredCodes) {
+            Permission permission = permissionsByCode.get(code);
+            if (permission == null) {
+                missingCodes.add(code);
             } else {
-                missing.add(code);
+                permissions.add(permission);
             }
         }
-        if (!missing.isEmpty()) {
-            log.warn("Role {} có {} permission không tồn tại trong DB: [{}]",
+
+        if (!missingCodes.isEmpty()) {
+            log.warn("Role {} bỏ qua {} permission chưa tồn tại trong DB: {}",
                     roleSlug,
-                    missing.size(),
-                    String.join(", ", missing));
+                    missingCodes.size(),
+                    String.join(", ", missingCodes));
         }
-        return matched;
+        return permissions;
     }
 
     private Role upsertSystemRole(RoleSeedSpec spec, Set<Permission> permissions) {
-        Role role = roleRepository.findBySlug(spec.slug())
-                .orElseGet(() -> Role.builder()
-                        .slug(spec.slug())
-                        .isSystem(true)
-                        .build());
+        return roleRepository.findBySlug(spec.slug())
+                .map(existingRole -> {
+                    existingRole.setDisplayName(spec.displayName());
+                    existingRole.setIsSystem(true);
+                    existingRole.setIsActive(true);
+                    existingRole.setDescription(spec.description());
+                    if (existingRole.getPermissions() == null) {
+                        existingRole.setPermissions(new HashSet<>());
+                    }
 
-        role.setDisplayName(spec.displayName());
-        role.setDescription(spec.description());
-        role.setIsSystem(true);
-        role.setIsActive(true);
-        role.setPermissions(new HashSet<>(permissions));
-        return roleRepository.save(role);
+                    if (!"SUPER_ADMIN".equals(spec.slug()) && !existingRole.getPermissions().isEmpty()) {
+                        Role saved = roleRepository.save(existingRole);
+                        log.info("Role {} already exists, retained {} configured permissions",
+                                spec.slug(),
+                                saved.getPermissions() == null ? 0 : saved.getPermissions().size());
+                        return saved;
+                    }
+
+                    int before = existingRole.getPermissions().size();
+                    existingRole.getPermissions().addAll(permissions);
+                    Role saved = roleRepository.save(existingRole);
+                    int after = saved.getPermissions() == null ? 0 : saved.getPermissions().size();
+                    log.info("Role {} already exists, added {} missing permissions",
+                            spec.slug(),
+                            Math.max(0, after - before));
+                    logRetainedExtraPermissions(spec, permissions, saved);
+                    return saved;
+                })
+                .orElseGet(() -> {
+                    Role role = roleRepository.save(Role.builder()
+                            .slug(spec.slug())
+                            .displayName(spec.displayName())
+                            .isSystem(true)
+                            .isActive(true)
+                            .description(spec.description())
+                            .permissions(new HashSet<>(permissions))
+                            .build());
+                    log.info("Role {} created", spec.slug());
+                    return role;
+                });
+    }
+
+    private void logRetainedExtraPermissions(RoleSeedSpec spec, Set<Permission> mappedPermissions, Role role) {
+        if ("SUPER_ADMIN".equals(spec.slug()) || role.getPermissions() == null) {
+            return;
+        }
+
+        Set<String> mappedCodes = mappedPermissions.stream()
+                .map(Permission::getCode)
+                .collect(Collectors.toCollection(TreeSet::new));
+        Set<String> retainedExtraCodes = role.getPermissions().stream()
+                .map(Permission::getCode)
+                .filter(code -> code != null && !mappedCodes.contains(code))
+                .collect(Collectors.toCollection(TreeSet::new));
+
+        if (!retainedExtraCodes.isEmpty()) {
+            log.warn("Role {} đang có {} permission ngoài mapping chuẩn; seeder giữ nguyên: {}",
+                    spec.slug(),
+                    retainedExtraCodes.size(),
+                    String.join(", ", retainedExtraCodes));
+        }
     }
 
     private void migrateLegacyUserRoleToCustomer(Role customerRole) {
         if (customerRole == null) {
-            log.warn("Không tìm thấy role CUSTOMER; bỏ qua migration role USER.");
+            log.warn("Không thể migrate legacy role USER: role CUSTOMER chưa sẵn sàng.");
             return;
         }
 
-        Optional<Role> legacyRoleOpt = roleRepository.findBySlug(LEGACY_USER_ROLE_SLUG);
-        if (legacyRoleOpt.isEmpty()) {
+        Optional<Role> legacyUserRoleOpt = roleRepository.findBySlug(LEGACY_USER_ROLE_SLUG);
+        if (legacyUserRoleOpt.isEmpty()) {
+            log.info("Legacy role USER không tồn tại trong DB.");
             return;
         }
 
-        Role legacyUserRole = legacyRoleOpt.get();
-        Set<Permission> legacyPermissions = Optional.ofNullable(legacyUserRole.getPermissions()).orElseGet(Set::of);
+        Role legacyUserRole = legacyUserRoleOpt.get();
+        Set<Permission> legacyPermissions = Optional.ofNullable(legacyUserRole.getPermissions())
+                .orElseGet(Set::of);
         if (!legacyPermissions.isEmpty()) {
             if (customerRole.getPermissions() == null) {
                 customerRole.setPermissions(new HashSet<>());
@@ -1244,6 +1066,8 @@ public class DataSeeder implements CommandLineRunner {
             legacyUsers.forEach(user -> user.setRole(customerRole));
             userRepository.saveAll(legacyUsers);
             log.warn("Đã migrate {} tài khoản từ role USER sang CUSTOMER.", legacyUsers.size());
+        } else {
+            log.info("Không có tài khoản nào đang mang legacy role USER.");
         }
 
         long remainingLegacyUsers = legacyUserRole.getId() == null
@@ -1254,43 +1078,49 @@ public class DataSeeder implements CommandLineRunner {
             roleRepository.save(legacyUserRole);
             roleRepository.delete(legacyUserRole);
             log.warn("Đã xóa legacy role USER sau khi xác nhận không còn tài khoản FK; permissions đã được bảo toàn trên CUSTOMER.");
+        } else {
+            log.warn("Legacy role USER vẫn còn {} tài khoản sau migration; cần kiểm tra thủ công.", remainingLegacyUsers);
         }
     }
 
     private void bootstrapSuperAdmin(Role superAdminRole) {
-        String email = environment.getProperty("BOOTSTRAP_ADMIN_EMAIL", "admin@agrishrimp.vn");
-        String password = environment.getProperty("BOOTSTRAP_ADMIN_PASSWORD", "123456zoneteam");
-
-        String normalizedEmail = email.trim();
-        Optional<User> existingUser = userRepository.findByEmail(normalizedEmail);
-        if (existingUser.isPresent()) {
-            User u = existingUser.get();
-            if (u.getRole() == null || !"SUPER_ADMIN".equals(u.getRole().getSlug())) {
-                u.setRole(superAdminRole);
-                userRepository.save(u);
-            }
-            log.info("Bootstrap SUPER_ADMIN ready: id={}, email={}", u.getId(), normalizedEmail);
+        Optional<User> existingSuperAdmin = userRepository.findFirstByRole_SlugOrderByIdAsc("SUPER_ADMIN");
+        if (existingSuperAdmin.isPresent()) {
+            log.info("Bootstrap SUPER_ADMIN skipped: existing user id={} already has SUPER_ADMIN role",
+                    existingSuperAdmin.get().getId());
             return;
         }
 
-        User bootstrapUser = User.builder()
-                .email(normalizedEmail)
-                .fullName("Quản trị viên hệ thống (Super Admin)")
-                .phoneNumber("0909000001")
-                .passwordHash(passwordEncoder.encode(password))
-                .status(UserStatus.ACTIVE)
-                .role(superAdminRole)
-                .gender(Gender.MALE)
-                .provider(AuthProvider.LOCAL)
-                .addressDetail("Trụ sở chính AgriShrimp")
-                .build();
+        String email = environment.getProperty("BOOTSTRAP_ADMIN_EMAIL");
+        String password = environment.getProperty("BOOTSTRAP_ADMIN_PASSWORD");
+        if (email == null || email.isBlank() || password == null || password.isBlank()) {
+            log.warn("Bootstrap SUPER_ADMIN skipped: BOOTSTRAP_ADMIN_EMAIL/BOOTSTRAP_ADMIN_PASSWORD not configured");
+            return;
+        }
+
+        String normalizedEmail = email.trim();
+        User bootstrapUser = userRepository.findByEmail(normalizedEmail)
+                .orElseGet(() -> User.builder()
+                        .email(normalizedEmail)
+                        .fullName("Bootstrap Super Admin")
+                        .gender(Gender.MALE)
+                        .provider(AuthProvider.LOCAL)
+                        .build());
+
+        if (bootstrapUser.getFullName() == null || bootstrapUser.getFullName().isBlank()) {
+            bootstrapUser.setFullName("Bootstrap Super Admin");
+        }
+        bootstrapUser.setEmail(normalizedEmail);
+        bootstrapUser.setPasswordHash(passwordEncoder.encode(password));
+        bootstrapUser.setStatus(UserStatus.ACTIVE);
+        bootstrapUser.setRole(superAdminRole);
+        bootstrapUser.setProvider(AuthProvider.LOCAL);
+        if (bootstrapUser.getGender() == null) {
+            bootstrapUser.setGender(Gender.MALE);
+        }
 
         User savedUser = userRepository.save(bootstrapUser);
-        log.info("Bootstrap SUPER_ADMIN user created: id={}, email={}", savedUser.getId(), normalizedEmail);
-    }
-
-    private Set<String> codes(String... items) {
-        return Set.of(items);
+        log.info("Bootstrap SUPER_ADMIN user ready: id={}, email={}", savedUser.getId(), normalizedEmail);
     }
 
     private record RoleSeedSpec(
