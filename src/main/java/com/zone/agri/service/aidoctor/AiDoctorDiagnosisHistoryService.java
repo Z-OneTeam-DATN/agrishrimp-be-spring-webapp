@@ -8,6 +8,7 @@ import com.zone.agri.dto.response.ai.AiDoctorHistoryListResponse;
 import com.zone.agri.dto.response.ai.DiseaseResponse;
 import com.zone.agri.dto.response.ai.TopPredictionResponse;
 import com.zone.agri.dto.response.ai.TreatmentStageResponse;
+import com.zone.agri.dto.response.ai.TreatmentStageSelectionResponse;
 import com.zone.agri.entity.AiDoctorDiagnosisHistory;
 import com.zone.agri.entity.AiDiseaseKnowledge;
 import com.zone.agri.entity.enums.AiKnowledgeStatus;
@@ -23,6 +24,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 /**
@@ -223,10 +225,42 @@ public class AiDoctorDiagnosisHistoryService {
                 .causes(causes.isEmpty() ? null : causes)
                 .signsSummary(h.getSignsSummary())
                 .treatmentStages(treatmentStages.isEmpty() ? null : treatmentStages)
+                .stageSelection(resolveStageSelection(h))
                 .purchaseUrl(h.getPurchaseUrl())
                 .needsClarification(h.getNeedsClarification())
+                .status(h.getStatus() != null ? h.getStatus() : "DISEASE")
                 .createdAt(h.getCreatedAt())
                 .build();
+    }
+
+    private TreatmentStageSelectionResponse resolveStageSelection(AiDoctorDiagnosisHistory history) {
+        if (history.getFinalDiseaseCode() == null || Boolean.TRUE.equals(history.getNeedsClarification())) {
+            return null;
+        }
+        return diseaseKnowledgeRepository.findByCode(history.getFinalDiseaseCode())
+                .filter(disease -> disease.getStatus() == AiKnowledgeStatus.APPROVED)
+                .filter(disease -> !Boolean.FALSE.equals(disease.getEnabled()))
+                .map(AiDiseaseKnowledge::getTreatmentStagesJson)
+                .map(this::readStageSelection)
+                .orElse(null);
+    }
+
+    private TreatmentStageSelectionResponse readStageSelection(String json) {
+        if (json == null || json.isBlank()) {
+            return null;
+        }
+        try {
+            List<Map<String, Object>> rawStages = objectMapper.readValue(json, new TypeReference<List<Map<String, Object>>>() {});
+            List<TreatmentStageResponse> stages = rawStages.stream()
+                    .map(row -> TreatmentStageResponse.builder()
+                            .stageTitle(row.get("stageTitle") instanceof String title ? title : null)
+                            .build())
+                    .toList();
+            return stages.size() > 1 ? TreatmentStageSelectionResponse.fromStages(stages) : null;
+        } catch (Exception ex) {
+            log.warn("[AiDoctor-History] treatment stage json parse fail: {}", ex.getMessage());
+            return null;
+        }
     }
 
     // =========================================================

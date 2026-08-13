@@ -2072,10 +2072,8 @@ public class AiKnowledgeService {
             responseBuilder.stageSelection(TreatmentStageSelectionResponse.fromStages(treatmentStages));
         } else if (treatmentStages.size() == 1) {
             List<TreatmentStageResponse> subStages = defaultList(treatmentStages.get(0).getSubStages());
-            if (subStages.size() > 1) {
-                responseBuilder.stageSelection(TreatmentStageSelectionResponse.fromSubStages(treatmentStages, 0));
-            } else if (subStages.size() == 1) {
-                responseBuilder.treatmentStages(subStages);
+            if (!subStages.isEmpty()) {
+                responseBuilder.treatmentStages(numberedSubStages(subStages, 0));
             } else {
                 responseBuilder.treatmentStages(treatmentStages);
             }
@@ -2954,6 +2952,29 @@ public class AiKnowledgeService {
                         priceMap))
                 .flatMap(List::stream)
                 .toList();
+    }
+
+    private List<TreatmentStageResponse> numberedSubStages(List<TreatmentStageResponse> subStages, int stageIndex) {
+        return java.util.stream.IntStream.range(0, defaultList(subStages).size())
+                .mapToObj(subStageIndex -> numberedSubStage(defaultList(subStages).get(subStageIndex), stageIndex, subStageIndex))
+                .toList();
+    }
+
+    private TreatmentStageResponse numberedSubStage(TreatmentStageResponse subStage, int stageIndex, int subStageIndex) {
+        String number = (stageIndex + 1) + "." + (subStageIndex + 1);
+        String title = subStage.getStageTitle();
+        String numberedTitle = title != null && title.trim().matches("^\\d+(\\.\\d+)?\\s*[-–—].*")
+                ? title.trim()
+                : number + " — " + (title != null && !title.isBlank() ? title.trim() : "Giai đoạn " + number);
+        return TreatmentStageResponse.builder()
+                .stageTitle(numberedTitle)
+                .stageSigns(subStage.getStageSigns())
+                .treatmentGoal(subStage.getTreatmentGoal())
+                .instructions(subStage.getInstructions())
+                .products(subStage.getProducts())
+                .extraProductNames(subStage.getExtraProductNames())
+                .subStages(subStage.getSubStages())
+                .build();
     }
 
     private AiKnowledgeChatConfig ensureChatConfig() {

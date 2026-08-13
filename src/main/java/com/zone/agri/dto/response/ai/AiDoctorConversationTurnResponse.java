@@ -32,6 +32,7 @@ public class AiDoctorConversationTurnResponse {
     private DiseaseResponse disease;
     private String signsSummary;
     private Boolean needsClarification;
+    private TreatmentStageSelectionResponse stageSelection;
 
     /** DISEASE | HEALTHY | UNRECOGNIZED — null (bản ghi cũ trước patch) được BE coi là DISEASE. */
     private String status;

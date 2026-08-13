@@ -16,12 +16,16 @@ import com.zone.agri.dto.ai.AiPredictionItem;
 import com.zone.agri.dto.response.ai.AiDoctorDiagnosisResponse;
 import com.zone.agri.entity.AiDiseaseKnowledge;
 import com.zone.agri.entity.AiDoctorDiagnosisHistory;
+import com.zone.agri.entity.Product;
 import com.zone.agri.entity.enums.AiKnowledgeStatus;
+import com.zone.agri.entity.enums.ProductStatus;
 import com.zone.agri.exception.BadRequestException;
 import com.zone.agri.repository.AiDiseaseKnowledgeRepository;
 import com.zone.agri.repository.AiDoctorDiagnosisHistoryRepository;
 import com.zone.agri.repository.AiKnowledgeReviewCaseRepository;
+import com.zone.agri.repository.ProductRepository;
 import com.zone.agri.service.ai.AiKnowledgeService;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
@@ -86,6 +90,9 @@ class AiDoctorDiagnosisServiceTest {
 
     @Autowired
     private AiKnowledgeReviewCaseRepository reviewCaseRepository;
+
+    @Autowired
+    private ProductRepository productRepository;
 
     @Autowired
     private ObjectMapper objectMapper;
@@ -216,6 +223,90 @@ class AiDoctorDiagnosisServiceTest {
         assertThat(response.getTreatmentStages().get(0).getStageTitle()).contains("Giai doan 1: On dinh moi truong");
         assertThat(response.getDisease().getCode()).isEqualTo("DIS_E2E");
         assertThat(response.getDisease().getImageUrls()).containsExactly("http://img/DIS_E2E.jpg");
+    }
+
+    @Test
+    void selectedParentStage_returnsAllChildStepsAndAssignedCatalogProducts() throws Exception {
+        Product productOne = productRepository.save(Product.builder()
+                .name("San pham gan buoc 1.1")
+                .slug("san-pham-gan-buoc-11")
+                .status(ProductStatus.ACTIVE)
+                .createdAt(LocalDateTime.now())
+                .build());
+        Product productTwo = productRepository.save(Product.builder()
+                .name("San pham gan buoc 1.2")
+                .slug("san-pham-gan-buoc-12")
+                .status(ProductStatus.ACTIVE)
+                .createdAt(LocalDateTime.now())
+                .build());
+        String stagesJson = objectMapper.writeValueAsString(List.of(
+                Map.of(
+                        "stageTitle", "Giai doan cha 1",
+                        "stageSigns", "Dau hieu cha 1",
+                        "treatmentGoal", "Xu ly cha 1",
+                        "instructions", List.of(),
+                        "productIds", List.of(),
+                        "extraProductNames", List.of(),
+                        "subStages", List.of(
+                                Map.of(
+                                        "subStageTitle", "Buoc con mot",
+                                        "instructions", List.of("Huong dan buoc con mot"),
+                                        "productIds", List.of(productOne.getId()),
+                                        "extraProductNames", List.of("San pham text 1")),
+                                Map.of(
+                                        "subStageTitle", "Buoc con hai",
+                                        "instructions", List.of("Huong dan buoc con hai"),
+                                        "productIds", List.of(productTwo.getId()),
+                                        "extraProductNames", List.of()))),
+                Map.of(
+                        "stageTitle", "Giai doan cha 2",
+                        "stageSigns", "Dau hieu cha 2",
+                        "treatmentGoal", "Xu ly cha 2",
+                        "instructions", List.of(),
+                        "productIds", List.of(),
+                        "extraProductNames", List.of(),
+                        "subStages", List.of(
+                                Map.of(
+                                        "subStageTitle", "Buoc con stage 2",
+                                        "instructions", List.of("Huong dan stage 2"),
+                                        "productIds", List.of(),
+                                        "extraProductNames", List.of())))));
+        diseaseKnowledgeRepository.save(AiDiseaseKnowledge.builder()
+                .code("DIS_PARENT_STAGE")
+                .nameVi("Benh co giai doan cha con")
+                .nameEn("Parent child disease")
+                .symptomKeywordsRaw("parentstagekeyword")
+                .signsSummary("Dau hieu parent stage")
+                .causesJson(objectMapper.writeValueAsString(List.of("Nguyen nhan test")))
+                .treatmentStagesJson(stagesJson)
+                .confidenceThreshold(0.65D)
+                .matchThreshold(0.4D)
+                .enabled(true)
+                .priority(0)
+                .canonical(false)
+                .status(AiKnowledgeStatus.APPROVED)
+                .build());
+        AiPredictionItem finalPrediction =
+                prediction("DIS_PARENT_STAGE", "Benh co giai doan cha con", "Parent child disease", 90.0D);
+        when(aiDiagnosisClient.predict(any())).thenReturn(predictResponse("DISEASE", finalPrediction));
+        when(geminiClarifyClient.describeImage(any(), any(), any())).thenReturn(narrative("Mo ta anh."));
+
+        AiDoctorDiagnosisResponse diagnosis =
+                aiDoctorDiagnosisService.diagnose(fakeImage(), DEFAULT_SYMPTOMS, 7L, "sess-parent-stage");
+        AiDoctorDiagnosisResponse prescription =
+                aiDoctorDiagnosisService.generatePrescriptionForStage(Long.valueOf(diagnosis.getDiagnosisId()), 7L, 0);
+
+        assertThat(diagnosis.getStageSelection().getOptions()).hasSize(2);
+        assertThat(prescription.getStageSelection()).isNull();
+        assertThat(prescription.getTreatmentStages()).hasSize(2);
+        assertThat(prescription.getTreatmentStages().get(0).getStageTitle()).startsWith("1.1");
+        assertThat(prescription.getTreatmentStages().get(1).getStageTitle()).startsWith("1.2");
+        assertThat(prescription.getTreatmentStages().get(0).getProducts())
+                .extracting("id")
+                .containsExactly(productOne.getId());
+        assertThat(prescription.getTreatmentStages().get(1).getProducts())
+                .extracting("id")
+                .containsExactly(productTwo.getId());
     }
 
     // =========================================================

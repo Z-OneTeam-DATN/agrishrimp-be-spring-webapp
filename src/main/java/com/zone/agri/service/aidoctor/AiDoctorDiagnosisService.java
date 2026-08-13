@@ -269,17 +269,8 @@ public class AiDoctorDiagnosisService {
                 return response;
             }
             if (treatmentStages.size() == 1) {
-                List<TreatmentStageResponse> subStages = resolveSubStages(treatmentStages.get(0));
-                if (subStages.size() > 1) {
-                    response.setTreatmentStages(null);
-                    response.setStageSelection(TreatmentStageSelectionResponse.fromSubStages(treatmentStages, 0));
-                    log.info("[AiDoctor-Prescription] diagnosisId={}, diseaseCode={}, waitingSubStageSelection={}, stageIndex={}, subStages={}",
-                            diagnosisId, diseaseCode, true, 0, subStages.size());
-                    return response;
-                }
-                if (subStages.size() == 1) {
-                    response.setTreatmentStages(subStages);
-                }
+                response.setTreatmentStages(resolveStagesForSelectedParent(treatmentStages.get(0), 0));
+                response.setStageSelection(null);
             }
         }
 
@@ -289,17 +280,16 @@ public class AiDoctorDiagnosisService {
             }
             List<TreatmentStageResponse> subStages = resolveSubStages(treatmentStages.get(stageIndex));
             if (subStageIndex == null) {
-                response.setTreatmentStages(null);
-                response.setStageSelection(TreatmentStageSelectionResponse.fromSubStages(treatmentStages, stageIndex));
-                log.info("[AiDoctor-Prescription] diagnosisId={}, diseaseCode={}, waitingSubStageSelection={}, stageIndex={}, subStages={}",
-                        diagnosisId, diseaseCode, true, stageIndex, subStages.size());
-                return response;
-            }
-            if (subStageIndex < 0 || subStageIndex >= subStages.size()) {
+                response.setTreatmentStages(resolveStagesForSelectedParent(treatmentStages.get(stageIndex), stageIndex));
+                response.setStageSelection(null);
+                log.info("[AiDoctor-Prescription] diagnosisId={}, diseaseCode={}, selectedStageIndex={}, treatmentSteps={}",
+                        diagnosisId, diseaseCode, stageIndex, response.getTreatmentStages().size());
+            } else if (subStageIndex < 0 || subStageIndex >= subStages.size()) {
                 throw new BadRequestException("Giai đoạn con không hợp lệ hoặc chưa có phác đồ tương ứng.");
+            } else {
+                response.setTreatmentStages(List.of(numberedSubStage(subStages.get(subStageIndex), stageIndex, subStageIndex)));
+                response.setStageSelection(null);
             }
-            response.setTreatmentStages(List.of(subStages.get(subStageIndex)));
-            response.setStageSelection(null);
         }
 
         diagnosisHistoryService.updateWithPrescription(
@@ -322,6 +312,36 @@ public class AiDoctorDiagnosisService {
             return stage.getSubStages();
         }
         return List.of(stage);
+    }
+
+    private List<TreatmentStageResponse> resolveStagesForSelectedParent(TreatmentStageResponse stage, int stageIndex) {
+        if (stage == null) {
+            return Collections.emptyList();
+        }
+        if (stage.getSubStages() == null || stage.getSubStages().isEmpty()) {
+            return List.of(stage);
+        }
+        List<TreatmentStageResponse> subStages = stage.getSubStages();
+        return java.util.stream.IntStream.range(0, subStages.size())
+                .mapToObj(subStageIndex -> numberedSubStage(subStages.get(subStageIndex), stageIndex, subStageIndex))
+                .toList();
+    }
+
+    private TreatmentStageResponse numberedSubStage(TreatmentStageResponse subStage, int stageIndex, int subStageIndex) {
+        String number = (stageIndex + 1) + "." + (subStageIndex + 1);
+        String title = subStage.getStageTitle();
+        String numberedTitle = title != null && title.trim().matches("^\\d+(\\.\\d+)?\\s*[-–—].*")
+                ? title.trim()
+                : number + " — " + (title != null && !title.isBlank() ? title.trim() : "Giai đoạn " + number);
+        return TreatmentStageResponse.builder()
+                .stageTitle(numberedTitle)
+                .stageSigns(subStage.getStageSigns())
+                .treatmentGoal(subStage.getTreatmentGoal())
+                .instructions(subStage.getInstructions())
+                .products(subStage.getProducts())
+                .extraProductNames(subStage.getExtraProductNames())
+                .subStages(subStage.getSubStages())
+                .build();
     }
 
     private AiDoctorDiagnosisResponse buildImageObservationOnlyResponse(
