@@ -7,6 +7,8 @@ import com.zone.agri.dto.ai.AiImageNarrativeResult;
 import com.zone.agri.dto.ai.AiPredictResponse;
 import com.zone.agri.dto.ai.AiPredictionItem;
 import com.zone.agri.dto.response.ai.AiDoctorDiagnosisResponse;
+import com.zone.agri.dto.response.ai.TreatmentStageResponse;
+import com.zone.agri.dto.response.ai.TreatmentStageSelectionResponse;
 import com.zone.agri.entity.AiDoctorDiagnosisHistory;
 import com.zone.agri.entity.Product;
 import com.zone.agri.exception.BadRequestException;
@@ -209,6 +211,17 @@ public class AiDoctorDiagnosisService {
     // =========================================================
 
     public AiDoctorDiagnosisResponse generatePrescription(Long diagnosisId, Long userId) {
+        return generatePrescription(diagnosisId, userId, null);
+    }
+
+    public AiDoctorDiagnosisResponse generatePrescriptionForStage(Long diagnosisId, Long userId, Integer stageIndex) {
+        if (stageIndex == null) {
+            throw new BadRequestException("Vui lòng chọn giai đoạn bệnh cần xem phác đồ.");
+        }
+        return generatePrescription(diagnosisId, userId, stageIndex);
+    }
+
+    private AiDoctorDiagnosisResponse generatePrescription(Long diagnosisId, Long userId, Integer stageIndex) {
         AiDoctorDiagnosisHistory history = historyRepository.findByIdAndUserId(diagnosisId, userId)
                 .orElseThrow(() -> new NotFoundException("AI_DOCTOR_DIAGNOSIS_NOT_FOUND"));
 
@@ -224,14 +237,33 @@ public class AiDoctorDiagnosisService {
             throw new BadRequestException("Không thể tạo phác đồ cho ca chẩn đoán này");
         }
         AiDoctorDiagnosisResponse response = aiKnowledgeService.buildPrescriptionFromApprovedKnowledge(diseaseCode, diagnosisId);
+        List<TreatmentStageResponse> treatmentStages =
+                response.getTreatmentStages() != null ? response.getTreatmentStages() : Collections.emptyList();
+
+        if (stageIndex == null && treatmentStages.size() > 1) {
+            response.setTreatmentStages(null);
+            response.setStageSelection(TreatmentStageSelectionResponse.fromStages(treatmentStages));
+            log.info("[AiDoctor-Prescription] diagnosisId={}, diseaseCode={}, waitingStageSelection={}, stages={}",
+                    diagnosisId, diseaseCode, true, treatmentStages.size());
+            return response;
+        }
+
+        if (stageIndex != null) {
+            if (stageIndex < 0 || stageIndex >= treatmentStages.size()) {
+                throw new BadRequestException("Giai đoạn bệnh không hợp lệ hoặc chưa có phác đồ tương ứng.");
+            }
+            response.setTreatmentStages(List.of(treatmentStages.get(stageIndex)));
+            response.setStageSelection(null);
+        }
+
         diagnosisHistoryService.updateWithPrescription(
                 diagnosisId,
                 response.getCauses() != null ? response.getCauses() : Collections.emptyList(),
                 response.getSignsSummary(),
                 response.getTreatmentStages() != null ? response.getTreatmentStages() : Collections.emptyList());
 
-        log.info("[AiDoctor-Prescription] diagnosisId={}, diseaseCode={}, stages={}",
-                diagnosisId, diseaseCode, response.getTreatmentStages() != null ? response.getTreatmentStages().size() : 0);
+        log.info("[AiDoctor-Prescription] diagnosisId={}, diseaseCode={}, stageIndex={}, stages={}",
+                diagnosisId, diseaseCode, stageIndex, response.getTreatmentStages() != null ? response.getTreatmentStages().size() : 0);
         return response;
     }
 

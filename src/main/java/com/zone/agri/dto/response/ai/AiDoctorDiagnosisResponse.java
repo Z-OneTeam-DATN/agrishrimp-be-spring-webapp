@@ -30,6 +30,7 @@ public class AiDoctorDiagnosisResponse {
     private List<String> causes;
     private String signsSummary;
     private List<TreatmentStageResponse> treatmentStages;
+    private TreatmentStageSelectionResponse stageSelection;
 
     /**
      * true khi độ tin cậy quá thấp để kết luận ngay — FE cần chủ động gọi

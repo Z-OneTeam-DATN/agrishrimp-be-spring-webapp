@@ -18,6 +18,8 @@ import com.zone.agri.dto.response.ai.AiClarifyCandidateSummary;
 import com.zone.agri.dto.response.ai.AiDoctorClarifyResponse;
 import com.zone.agri.dto.response.ai.AiDoctorDiagnosisResponse;
 import com.zone.agri.dto.response.ai.DiseaseResponse;
+import com.zone.agri.dto.response.ai.TreatmentStageResponse;
+import com.zone.agri.dto.response.ai.TreatmentStageSelectionResponse;
 import com.zone.agri.entity.AiDoctorClarifySession;
 import com.zone.agri.entity.AiDoctorDiagnosisHistory;
 import com.zone.agri.entity.AiKnowledgeReviewCase;
@@ -295,8 +297,10 @@ public class AiDoctorClarifyService {
     private AiDoctorDiagnosisResponse buildFinalDiagnosis(AiDoctorClarifySession session, AiClarifyCandidateSummary candidate) {
         AiDoctorDiagnosisResponse prescription = aiKnowledgeService.buildPrescriptionFromApprovedKnowledge(
                 candidate.getDiseaseCode(), session.getDiagnosisHistoryId());
+        List<TreatmentStageResponse> treatmentStages =
+                prescription.getTreatmentStages() != null ? prescription.getTreatmentStages() : Collections.emptyList();
 
-        return AiDoctorDiagnosisResponse.builder()
+        AiDoctorDiagnosisResponse.AiDoctorDiagnosisResponseBuilder responseBuilder = AiDoctorDiagnosisResponse.builder()
                 .diagnosisId(session.getDiagnosisId())
                 .status("DISEASE")
                 .imageUrl(session.getImageUrl())
@@ -307,11 +311,17 @@ public class AiDoctorClarifyService {
                         .build())
                 .causes(prescription.getCauses())
                 .signsSummary(prescription.getSignsSummary())
-                .treatmentStages(prescription.getTreatmentStages())
                 // Đã chốt bệnh qua hỏi-đáp — không còn "đang chờ xác nhận" nữa, khai báo tường
                 // minh (không chỉ dựa vào việc bỏ trống field) để mọi client đều hiểu đúng.
-                .needsClarification(false)
-                .build();
+                .needsClarification(false);
+
+        if (treatmentStages.size() > 1) {
+            responseBuilder.stageSelection(TreatmentStageSelectionResponse.fromStages(treatmentStages));
+        } else if (!treatmentStages.isEmpty()) {
+            responseBuilder.treatmentStages(treatmentStages);
+        }
+
+        return responseBuilder.build();
     }
 
     private void escalate(AiDoctorClarifySession session) {

@@ -13,6 +13,7 @@ import com.zone.agri.dto.response.ai.DiseaseResponse;
 import com.zone.agri.dto.response.ai.SuggestedProductResponse;
 import com.zone.agri.dto.response.ai.TopPredictionResponse;
 import com.zone.agri.dto.response.ai.TreatmentStageResponse;
+import com.zone.agri.dto.response.ai.TreatmentStageSelectionResponse;
 import com.zone.agri.dto.request.ai.AiDiseaseKnowledgeRequest;
 import com.zone.agri.dto.request.ai.AiDoctorChatRequest;
 import com.zone.agri.dto.request.ai.AiKeywordAnswerSetRequest;
@@ -1958,7 +1959,9 @@ public class AiKnowledgeService {
             String userSymptoms,
             String status,
             String geminiImageDescription) {
-        return AiDoctorDiagnosisResponse.builder()
+        List<TreatmentStageResponse> treatmentStages = toTreatmentStageResponses(disease.entity().getTreatmentStagesJson());
+
+        AiDoctorDiagnosisResponse.AiDoctorDiagnosisResponseBuilder responseBuilder = AiDoctorDiagnosisResponse.builder()
                 .diagnosisId("diag_" + UUID.randomUUID().toString().replace("-", "").substring(0, 12))
                 .status(status)
                 .imageUrl(diagnosisImageUrl)
@@ -1972,9 +1975,15 @@ public class AiKnowledgeService {
                 .causes(defaultList(readJsonList(disease.entity().getCausesJson(), new TypeReference<List<String>>() {
                 })))
                 .signsSummary(disease.entity().getSignsSummary())
-                .treatmentStages(toTreatmentStageResponses(disease.entity().getTreatmentStagesJson()))
-                .aiDescription(buildDiagnosisNarrativeHtml(geminiImageDescription, finalPrediction, disease, false))
-                .build();
+                .aiDescription(buildDiagnosisNarrativeHtml(geminiImageDescription, finalPrediction, disease, false));
+
+        if (treatmentStages.size() > 1) {
+            responseBuilder.stageSelection(TreatmentStageSelectionResponse.fromStages(treatmentStages));
+        } else if (!treatmentStages.isEmpty()) {
+            responseBuilder.treatmentStages(treatmentStages);
+        }
+
+        return responseBuilder.build();
     }
 
     private AiDoctorDiagnosisResponse buildLowConfidenceDiagnosisResponse(
@@ -2256,9 +2265,8 @@ public class AiKnowledgeService {
     /**
      * Ghep 1 doan HTML tu nhien cho luong chan doan qua anh (YOLO): mo ta cua Gemini (neu goi thanh
      * cong) + 1 cau trich dan % tin cay/ten benh do CODE tu dung (khong bao gio giao cho LLM), roi
-     * moi toi noi dung an toan da co san — hoac phac do da duyet nguyen ven (khong needsClarification)
-     * hoac cau chuyen tiep tinh (needsClarification) khong kem dieu tri. Day la lop trinh bay them,
-     * khong thay doi bat ky logic nguong/quyet dinh nao cua enrichDiagnosis.
+     * moi toi thong tin nhan dien an toan da co san. Phac do chi tra sau khi nguoi dung mo ket qua va
+     * chon dung giai doan neu benh co nhieu stage.
      */
     private String buildDiagnosisNarrativeHtml(
             String geminiImageDescription,
@@ -2271,7 +2279,7 @@ public class AiKnowledgeService {
         if (needsClarification) {
             builder.append("<p>Để chắc chắn hơn, bạn mô tả kỹ thêm dấu hiệu giúp mình nhé.</p>");
         } else if (resolvedDisease != null) {
-            builder.append(buildDiseaseAnswerHtml(resolvedDisease));
+            builder.append(buildDiseaseIdentityHtml(resolvedDisease));
         }
 
         return builder.toString();

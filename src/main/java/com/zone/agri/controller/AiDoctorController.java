@@ -75,6 +75,14 @@ public class AiDoctorController {
         return ResponseEntity.ok(diagnosisService.generatePrescription(id, user.getId()));
     }
 
+    @PostMapping("/diagnosis/{id}/prescription/stages/{stageIndex}")
+    public ResponseEntity<AiDoctorDiagnosisResponse> generatePrescriptionForStage(
+            @PathVariable Long id,
+            @PathVariable Integer stageIndex) {
+        UserDetail user = requireUser();
+        return ResponseEntity.ok(diagnosisService.generatePrescriptionForStage(id, user.getId(), stageIndex));
+    }
+
     @PostMapping("/chat")
     public ResponseEntity<AiChatResponse> chat(@RequestBody AiDoctorChatRequest request) {
         UserDetail user = requireUser();
