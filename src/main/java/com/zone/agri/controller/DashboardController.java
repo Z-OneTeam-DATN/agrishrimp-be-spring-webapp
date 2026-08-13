@@ -81,7 +81,7 @@ public class DashboardController {
         return ResponseEntity.ok(dashboardService.getInventoryInfo(branchId));
     }
 
-    @Operation(summary = "Top sản phẩm bán chạy (30 ngày)")
+    @Operation(summary = "Top sản phẩm bán chạy (toàn bộ lịch sử, gộp đơn cũ và đơn đã tách chi nhánh)")
     @GetMapping("/top-products")
     public ResponseEntity<List<TopProductResponse>> getTopProducts(
             @RequestParam(required = false) Long branchId,
@@ -94,6 +94,18 @@ public class DashboardController {
     public ResponseEntity<SalesPerformanceResponse> getSalesPerformance(
             @RequestParam(required = false) Long branchId) {
         return ResponseEntity.ok(dashboardService.getSalesPerformance(branchId));
+    }
+
+    @Operation(summary = "Chuỗi doanh thu/giá vốn/lợi nhuận theo ngày hoặc theo tháng (biểu đồ cột)")
+    @GetMapping("/business-trend")
+    public ResponseEntity<BusinessTrendResponse> getBusinessTrend(
+            @RequestParam(required = false) Long branchId,
+            @RequestParam(required = false, defaultValue = "MONTH") String granularity,
+            @RequestParam(required = false)
+            @org.springframework.format.annotation.DateTimeFormat(iso = org.springframework.format.annotation.DateTimeFormat.ISO.DATE) LocalDate startDate,
+            @RequestParam(required = false)
+            @org.springframework.format.annotation.DateTimeFormat(iso = org.springframework.format.annotation.DateTimeFormat.ISO.DATE) LocalDate endDate) {
+        return ResponseEntity.ok(dashboardService.getBusinessTrend(branchId, granularity, startDate, endDate));
     }
 
     @Operation(summary = "Danh sách đơn hàng chờ duyệt")
@@ -118,3 +130,4 @@ public class DashboardController {
         return ResponseEntity.ok(dashboardService.getCategoryDistribution(branchId));
     }
 }
+

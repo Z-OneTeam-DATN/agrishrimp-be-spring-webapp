@@ -75,9 +75,6 @@ public interface OrderRepository extends JpaRepository<Order, Long>, JpaSpecific
        boolean existsCompletedOrderWithProduct(@Param("orderId") Long orderId, @Param("userId") Long userId,
                      @Param("productId") Long productId);
 
-       // "Completed" duoc dinh nghia giong het ProductRecommendationBatchService.fetchCompletedBasketRows
-       // (UNION order_items + sub_order_items, ca 2 deu yeu cau status COMPLETED) — de nhat quan voi chinh
-       // du lieu product_recommendations dang doc, tranh lech dinh nghia "da mua" giua 2 noi.
        @Query(value = """
                      SELECT DISTINCT basket.product_id
                      FROM (
@@ -144,6 +141,7 @@ public interface OrderRepository extends JpaRepository<Order, Long>, JpaSpecific
                      Pageable pageable);
 
        @Query("SELECT COUNT(o) FROM Order o WHERE o.status = :status " +
+                     "AND o.subOrders IS EMPTY " +
                      "AND (:branchId IS NULL OR o.branch.id = :branchId)")
        long countByStatus(@Param("status") OrderStatus status, @Param("branchId") Long branchId);
 
@@ -154,11 +152,12 @@ public interface OrderRepository extends JpaRepository<Order, Long>, JpaSpecific
        List<Order> findAllByOrderByCreatedAtDesc();
 
        @Query("SELECT COUNT(o) FROM Order o WHERE o.status <> com.zone.agri.entity.enums.OrderStatus.CANCELLED " +
+                     "AND o.subOrders IS EMPTY " +
                      "AND (:branchId IS NULL OR o.branch.id = :branchId)")
        long countAllOrdersExceptCancelled(@Param("branchId") Long branchId);
 
-       // Đếm luỹ kế tính đến 1 thời điểm — dùng để so sánh "Tổng đơn hàng" hôm nay với hôm qua.
        @Query("SELECT COUNT(o) FROM Order o WHERE o.status <> com.zone.agri.entity.enums.OrderStatus.CANCELLED " +
+                     "AND o.subOrders IS EMPTY " +
                      "AND o.createdAt <= :endDate " +
                      "AND (:branchId IS NULL OR o.branch.id = :branchId)")
        long countAllOrdersExceptCancelledBefore(@Param("endDate") LocalDateTime endDate,
@@ -166,9 +165,35 @@ public interface OrderRepository extends JpaRepository<Order, Long>, JpaSpecific
 
        @Query("SELECT COUNT(o) FROM Order o WHERE o.status IN (com.zone.agri.entity.enums.OrderStatus.COMPLETED, com.zone.agri.entity.enums.OrderStatus.RECEIVED, com.zone.agri.entity.enums.OrderStatus.SHIPPING) "
                      +
+                     "AND o.subOrders IS EMPTY " +
                      "AND o.createdAt BETWEEN :startDate AND :endDate " +
                      "AND (:branchId IS NULL OR o.branch.id = :branchId)")
        long countSuccessOrders(@Param("startDate") LocalDateTime startDate,
+                     @Param("endDate") LocalDateTime endDate,
+                     @Param("branchId") Long branchId);
+
+       @Query("SELECT COUNT(o) FROM Order o WHERE o.status IN (com.zone.agri.entity.enums.OrderStatus.RECEIVED, com.zone.agri.entity.enums.OrderStatus.COMPLETED) "
+                     +
+                     "AND o.subOrders IS EMPTY " +
+                     "AND o.receivedAt BETWEEN :startDate AND :endDate " +
+                     "AND (:branchId IS NULL OR o.branch.id = :branchId)")
+       long countDeliveredOrders(@Param("startDate") LocalDateTime startDate,
+                     @Param("endDate") LocalDateTime endDate,
+                     @Param("branchId") Long branchId);
+
+       @Query("SELECT COUNT(o) FROM Order o WHERE o.status = com.zone.agri.entity.enums.OrderStatus.RETURNED " +
+                     "AND o.subOrders IS EMPTY " +
+                     "AND o.returnedAt BETWEEN :startDate AND :endDate " +
+                     "AND (:branchId IS NULL OR o.branch.id = :branchId)")
+       long countReturnedOrders(@Param("startDate") LocalDateTime startDate,
+                     @Param("endDate") LocalDateTime endDate,
+                     @Param("branchId") Long branchId);
+
+       @Query("SELECT COUNT(o) FROM Order o WHERE o.status = com.zone.agri.entity.enums.OrderStatus.CANCELLED " +
+                     "AND o.subOrders IS EMPTY " +
+                     "AND o.cancelledAt BETWEEN :startDate AND :endDate " +
+                     "AND (:branchId IS NULL OR o.branch.id = :branchId)")
+       long countCancelledOrders(@Param("startDate") LocalDateTime startDate,
                      @Param("endDate") LocalDateTime endDate,
                      @Param("branchId") Long branchId);
 
@@ -192,8 +217,6 @@ public interface OrderRepository extends JpaRepository<Order, Long>, JpaSpecific
               return sumRecognizedFinalAmount(startDate, endDate, branchId);
        }
 
-       // Đơn hàng cũ (trước khi có luồng tách đơn theo chi nhánh) không có SubOrder nào —
-       // finalAmount của Order đã là số cuối cùng đúng (đã trừ giảm giá, đã gồm ship) nên dùng trực tiếp.
        @Query("SELECT SUM(o.finalAmount) FROM Order o WHERE o.status IN (com.zone.agri.entity.enums.OrderStatus.COMPLETED, com.zone.agri.entity.enums.OrderStatus.RECEIVED, com.zone.agri.entity.enums.OrderStatus.SHIPPING) "
                      +
                      "AND o.subOrders IS EMPTY " +
@@ -209,9 +232,6 @@ public interface OrderRepository extends JpaRepository<Order, Long>, JpaSpecific
               BigDecimal getFinalAmount();
        }
 
-       // Trả về từng dòng thay vì 1 số tổng — cho phép tính "tổng đến hôm nay" và "tổng đến hôm qua"
-       // từ CÙNG 1 lần fetch (lọc theo createdAt trong Java), thay vì phải quét lại toàn bộ lịch sử
-       // 2 lần trên DB. Quan trọng vì DB chạy qua SSH tunnel từ xa, mỗi round-trip đều tốn độ trễ.
        @Query("SELECT o.createdAt AS createdAt, COALESCE(o.finalAmount, 0) AS finalAmount " +
                      "FROM Order o WHERE o.status IN (com.zone.agri.entity.enums.OrderStatus.COMPLETED, com.zone.agri.entity.enums.OrderStatus.RECEIVED, com.zone.agri.entity.enums.OrderStatus.SHIPPING) "
                      +
@@ -335,13 +355,27 @@ public interface OrderRepository extends JpaRepository<Order, Long>, JpaSpecific
                       @Param("endDate") LocalDateTime endDate,
                       @Param("branchId") Long branchId);
 
-       // Chỉ tính đơn COD chưa đối soát — đúng như nhãn UI "Dòng tiền thu dự kiến (COD chưa đối
-       // soát)". Trước đây cộng mọi đơn UNPAID bất kể phương thức thanh toán, kể cả chuyển khoản
-       // chưa trả (không phải "sắp thu được tiền"), khiến ước tính dòng tiền vào bị thổi phồng.
+       @Query("""
+                     SELECT DISTINCT o
+                     FROM Order o
+                     LEFT JOIN FETCH o.user u
+                     LEFT JOIN FETCH o.branch b
+                     LEFT JOIN FETCH o.orderItems oi
+                     LEFT JOIN FETCH oi.productVariant pv
+                     LEFT JOIN FETCH pv.product p
+                     WHERE o.subOrders IS EMPTY
+                       AND o.createdAt BETWEEN :startDate AND :endDate
+                       AND (:branchId IS NULL OR o.branch.id = :branchId)
+                     """)
+       List<Order> findLegacySalesReportData(@Param("startDate") LocalDateTime startDate,
+                     @Param("endDate") LocalDateTime endDate,
+                     @Param("branchId") Long branchId);
+
        @Query("SELECT COALESCE(SUM(o.finalAmount), 0) FROM Order o " +
               "WHERE o.paymentStatus = com.zone.agri.entity.enums.PaymentStatus.UNPAID " +
               "AND o.paymentMethod = com.zone.agri.entity.enums.PaymentMethod.COD " +
               "AND o.status NOT IN (com.zone.agri.entity.enums.OrderStatus.CANCELLED, com.zone.agri.entity.enums.OrderStatus.RETURNED) " +
+              "AND o.subOrders IS EMPTY " +
               "AND (:branchId IS NULL OR o.branch.id = :branchId)")
        BigDecimal sumUnpaidOrdersAmount(@Param("branchId") Long branchId);
 
@@ -363,8 +397,6 @@ public interface OrderRepository extends JpaRepository<Order, Long>, JpaSpecific
             @Param("startDate") LocalDateTime startDate,
             @Param("branchId") Long branchId);
 
-    // JOIN FETCH user/branch — mapOrderToCashbookEntry() đọc order.getUser()/getBranch() cho
-    // mỗi dòng; thiếu fetch join gây N+1 lazy-load (1 query phụ mỗi đơn) khi sinh sổ quỹ.
     @Query("""
         SELECT o
         FROM Order o
@@ -406,3 +438,4 @@ public interface OrderRepository extends JpaRepository<Order, Long>, JpaSpecific
             @Param("endDate") LocalDateTime endDate,
             @Param("branchId") Long branchId);
 }
+

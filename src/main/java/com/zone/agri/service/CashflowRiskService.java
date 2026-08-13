@@ -14,6 +14,7 @@ import com.zone.agri.dto.response.financial.*;
 import com.zone.agri.entity.enums.InventoryNoteType;
 import com.zone.agri.repository.InventoryNoteRepository;
 import com.zone.agri.repository.OrderRepository;
+import com.zone.agri.repository.SubOrderRepository;
 import com.zone.agri.repository.SupplierRepository;
 
 import lombok.RequiredArgsConstructor;
@@ -27,6 +28,7 @@ public class CashflowRiskService {
     private final SettingService settingService;
     private final FinancialService financialService;
     private final OrderRepository orderRepository;
+    private final SubOrderRepository subOrderRepository;
     private final SupplierRepository supplierRepository;
     private final InventoryNoteRepository inventoryNoteRepository;
 
@@ -37,9 +39,6 @@ public class CashflowRiskService {
         log.info("Evicted Cashflow risk analysis cache");
     }
 
-    // Cache key gồm ngày hiện tại nên entry của ngày cũ không bao giờ được đọc lại — nhưng cũng
-    // không tự mất đi, tích luỹ dần theo thời gian chạy (không TTL/eviction thật). Dọn định kỳ mỗi
-    // đêm để tránh phình bộ nhớ dần qua nhiều ngày chạy liên tục.
     @Scheduled(cron = "0 0 0 * * ?")
     public void evictStaleCacheDaily() {
         clearCache();
@@ -56,14 +55,12 @@ public class CashflowRiskService {
 
         log.info("Analyzing cashflow risk for branchId: {}, customWindowDays: {}", branchId, customWindowDays);
 
-        // 1. Load configuration parameters
         BigDecimal criticalThresholdPercent = settingService.getCashflowCriticalThresholdPercent();
         double weightTime = settingService.getCashflowWeightTime().doubleValue();
         double weightFrequency = settingService.getCashflowWeightFrequency().doubleValue();
         double weightValue = settingService.getCashflowWeightValue().doubleValue();
         int defaultTermDays = settingService.getSupplierDebtDefaultTermDays();
 
-        // 2. Calculate currentBalance using the exact official Cashbook summary closingBalance logic
         BigDecimal currentBalance = BigDecimal.ZERO;
         boolean insufficientData = false;
         try {
@@ -87,15 +84,27 @@ public class CashflowRiskService {
                     .build();
         }
 
-        // 3. Calculate expectedInflow (unpaid order amounts, including completed and received COD orders)
         BigDecimal expectedInflow = BigDecimal.ZERO;
         try {
             expectedInflow = orderRepository.sumUnpaidOrdersAmount(branchId);
+            for (com.zone.agri.repository.SubOrderRepository.SubOrderAmountProjection proj
+                    : subOrderRepository.findUnpaidCodSubOrderAmounts(branchId)) {
+                BigDecimal subtotal = proj.getSubtotal() != null ? proj.getSubtotal() : BigDecimal.ZERO;
+                BigDecimal shippingFee = proj.getShippingFee() != null ? proj.getShippingFee() : BigDecimal.ZERO;
+                BigDecimal orderSubtotal = proj.getOrderSubtotal() != null ? proj.getOrderSubtotal() : BigDecimal.ZERO;
+                BigDecimal orderDiscount = proj.getOrderDiscountAmount() != null ? proj.getOrderDiscountAmount() : BigDecimal.ZERO;
+                BigDecimal allocatedDiscount = BigDecimal.ZERO;
+                if (subtotal.compareTo(BigDecimal.ZERO) > 0
+                        && orderSubtotal.compareTo(BigDecimal.ZERO) > 0
+                        && orderDiscount.compareTo(BigDecimal.ZERO) > 0) {
+                    allocatedDiscount = orderDiscount.multiply(subtotal).divide(orderSubtotal, 2, RoundingMode.HALF_UP);
+                }
+                expectedInflow = expectedInflow.add(subtotal).add(shippingFee).subtract(allocatedDiscount);
+            }
         } catch (Exception e) {
             log.error("Error retrieving expected inflow", e);
         }
 
-        // 4. Fetch supplier debt ledger to find due/overdue invoices
         List<SupplierRepository.SupplierDebtLedgerProjection> ledger = new ArrayList<>();
         try {
             ledger = supplierRepository.findSupplierDebtLedger(null, LocalDateTime.now(), branchId, null);
@@ -106,7 +115,6 @@ public class CashflowRiskService {
         LocalDate now = LocalDate.now();
         LocalDate windowEnd = now.plusDays(windowDays);
 
-        // Temporary helper structure for aggregating debts by supplier
         class TempDebtDetails {
             final List<LocalDate> dueDates = new ArrayList<>();
             BigDecimal outstandingAmount = BigDecimal.ZERO;
@@ -120,7 +128,7 @@ public class CashflowRiskService {
         int overdueSupplierCount = 0;
 
         for (SupplierRepository.SupplierDebtLedgerProjection row : ledger) {
-            // Only care about completed IMPORT notes that have outstanding debt
+
             if (row.getNoteType() == InventoryNoteType.IMPORT && row.getCreatedAt() != null) {
                 BigDecimal totalAmt = row.getTotalAmount() != null ? row.getTotalAmount() : BigDecimal.ZERO;
                 BigDecimal paidAmt = row.getPaidAmount() != null ? row.getPaidAmount() : BigDecimal.ZERO;
@@ -129,7 +137,6 @@ public class CashflowRiskService {
                 if (outstanding.compareTo(BigDecimal.ZERO) > 0) {
                     LocalDate dueDate = row.getCreatedAt().plusDays(defaultTermDays).toLocalDate();
 
-                    // Include if due within the window or already past due
                     if (dueDate.isBefore(windowEnd) || dueDate.isEqual(windowEnd)) {
                         Long supId = row.getSupplierId();
                         supplierNameMap.put(supId, row.getSupplierName());
@@ -152,7 +159,6 @@ public class CashflowRiskService {
             warnings.add(String.format("Có %d khoản công nợ của nhà cung cấp đã quá hạn thanh toán.", overdueSupplierCount));
         }
 
-        // Calculate transaction frequency in the last 90 days for each supplier
         LocalDateTime ninetyDaysAgo = LocalDateTime.now().minusDays(90);
         for (Long supId : supplierDebtMap.keySet()) {
             TempDebtDetails details = supplierDebtMap.get(supId);
@@ -163,27 +169,23 @@ public class CashflowRiskService {
             }
         }
 
-        // 5. Rank and prioritize supplier debts
         List<PrioritizedDebtDto> prioritizedDebts = new ArrayList<>();
         for (Long supId : supplierDebtMap.keySet()) {
             TempDebtDetails details = supplierDebtMap.get(supId);
             LocalDate earliestDueDate = details.dueDates.stream().min(LocalDate::compareTo).orElse(now);
 
-            // Time urgency component
             double timeScore;
             if (earliestDueDate.isBefore(now)) {
                 long daysOverdue = java.time.temporal.ChronoUnit.DAYS.between(earliestDueDate, now);
-                // Conscious design limitation: any invoice overdue by 25+ days gets the maximum timeScore of 100
+
                 timeScore = 50.0 + Math.min(50.0, daysOverdue * 2.0);
             } else {
                 long daysToDue = java.time.temporal.ChronoUnit.DAYS.between(now, earliestDueDate);
                 timeScore = Math.max(0.0, 50.0 - (daysToDue * (50.0 / windowDays)));
             }
 
-            // Frequency of relationship component (Max score 100)
             double frequencyScore = Math.min(10.0, (double) details.countOfImportsInLast90Days) * 10.0;
 
-            // Invoice amount value component (Max score 100)
             double valueScore = 0.0;
             if (totalDebtDueInWindow.compareTo(BigDecimal.ZERO) > 0) {
                 valueScore = details.outstandingAmount.divide(totalDebtDueInWindow, 4, RoundingMode.HALF_UP)
@@ -201,15 +203,12 @@ public class CashflowRiskService {
                     .build());
         }
 
-        // Sort descending by priorityScore
         prioritizedDebts.sort((a, b) -> Double.compare(b.getPriorityScore(), a.getPriorityScore()));
 
-        // Assign ranks
         for (int i = 0; i < prioritizedDebts.size(); i++) {
             prioritizedDebts.get(i).setPriorityRank(i + 1);
         }
 
-        // 6. Calculate projected balance and risk level
         BigDecimal projectedBalance = currentBalance.add(expectedInflow);
         BigDecimal shortfallAmount = totalDebtDueInWindow.subtract(projectedBalance).max(BigDecimal.ZERO);
 
@@ -219,7 +218,7 @@ public class CashflowRiskService {
         } else if (shortfallAmount.compareTo(BigDecimal.ZERO) > 0) {
             riskLevel = "CRITICAL";
         } else if (totalDebtDueInWindow.compareTo(BigDecimal.ZERO) > 0) {
-            // Calculate ratio to determine WARNING level
+
             BigDecimal ratio = projectedBalance.multiply(BigDecimal.valueOf(100))
                     .divide(totalDebtDueInWindow, 2, RoundingMode.HALF_UP);
             if (ratio.compareTo(criticalThresholdPercent) < 0) {
@@ -229,7 +228,6 @@ public class CashflowRiskService {
             riskLevel = "SAFE";
         }
 
-        // Add warnings for negative cash balances
         java.text.DecimalFormat df = new java.text.DecimalFormat("#,###");
         df.setDecimalFormatSymbols(new java.text.DecimalFormatSymbols(new Locale("vi", "VN")));
 
@@ -257,3 +255,4 @@ public class CashflowRiskService {
         return response;
     }
 }
+

@@ -22,4 +22,9 @@ public class DashboardStatsResponse {
     private boolean ordersIsNew;
     private double customersChangePercent;
     private boolean customersIsNew;
+
+    private MetricChangeResponse revenueChange;
+    private MetricChangeResponse ordersChange;
+    private MetricChangeResponse customersChange;
 }
+

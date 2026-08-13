@@ -22,9 +22,6 @@ import java.util.stream.Collectors;
 @Repository
 public interface InventoryRepository extends JpaRepository<Inventory, Long> {
 
-        // ==============================================================
-        // 1. CÁC HÀM MỚI DÀNH CHO QUẢN LÝ THEO LÔ VÀ GIÁ
-        // ==============================================================
         @Query("SELECT i FROM Inventory i WHERE i.branch = :branch AND i.productVariant = :variant " +
                         "AND (i.batchNumber = :batchNumber OR (i.batchNumber IS NULL AND :batchNumber IS NULL)) " +
                         "AND (i.importPrice = :importPrice OR (i.importPrice IS NULL AND :importPrice IS NULL))")
@@ -77,7 +74,6 @@ public interface InventoryRepository extends JpaRepository<Inventory, Long> {
 
         List<Inventory> findByProductVariantId(Long variantId);
 
-        // Lấy danh sách tồn kho với eager load branch (dùng cho hiển thị sản phẩm)
         @Query("SELECT i FROM Inventory i " +
                         "JOIN FETCH i.branch b " +
                         "WHERE i.productVariant.id = :variantId")
@@ -264,9 +260,6 @@ public interface InventoryRepository extends JpaRepository<Inventory, Long> {
                 return result;
         }
 
-        // ==============================================================
-        // BÁO CÁO TỒN KHO (Stock summary) — dùng cho /admin/reports/inventory/summary
-        // ==============================================================
         interface StockSummaryProjection {
                 Long getVariantId();
 
@@ -302,9 +295,6 @@ public interface InventoryRepository extends JpaRepository<Inventory, Long> {
                         """)
         List<StockSummaryProjection> findStockSummary(@Param("branchId") Long branchId);
 
-        // Tồn hiện tại (số lượng + giá trị) theo từng biến thể tại 1 chi nhánh cụ thể — dùng để
-        // tính "Tồn cuối kỳ" trong báo cáo xuất nhập tồn (luôn lấy đúng tồn thực tế hiện tại thay
-        // vì dò lại lịch sử giao dịch, vốn có thể thiếu với dữ liệu cũ trước khi bật ghi log).
         interface VariantStockProjection {
                 Long getVariantId();
 
@@ -326,8 +316,9 @@ public interface InventoryRepository extends JpaRepository<Inventory, Long> {
                         FROM Inventory i
                         JOIN i.productVariant pv
                         JOIN pv.product p
-                        WHERE i.branch.id = :branchId
+                        WHERE (:branchId IS NULL OR i.branch.id = :branchId)
                         GROUP BY pv.id, pv.sku, p.name
                         """)
         List<VariantStockProjection> findCurrentStockByBranch(@Param("branchId") Long branchId);
 }
+

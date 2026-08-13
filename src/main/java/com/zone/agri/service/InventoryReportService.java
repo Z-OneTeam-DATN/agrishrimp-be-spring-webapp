@@ -4,6 +4,7 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.HashMap;
@@ -31,9 +32,6 @@ public class InventoryReportService {
     private final InventoryRepository inventoryRepository;
     private final InventoryTransactionRepository inventoryTransactionRepository;
 
-    // Chỉ các loại giao dịch làm thay đổi tồn kho vật lý thật sự — xem giải thích ở
-    // InventoryTransactionRepository. ORDER_RESERVE/ORDER_RELEASE/CANCEL_RELEASE bị loại vì chỉ
-    // tác động đến số lượng "tạm giữ" (reservedQuantity), không phải tồn kho thực tế.
     private static final Set<TransactionType> PHYSICAL_TRANSACTION_TYPES = EnumSet.of(
             TransactionType.IMPORT,
             TransactionType.SALE,
@@ -56,7 +54,7 @@ public class InventoryReportService {
         for (InventoryRepository.StockSummaryProjection row : rows) {
             long systemQty = safeLong(row.getSystemQuantity());
             if (systemQty <= 0) {
-                continue; // Biến thể chưa từng có tồn kho thực tế — không đưa vào báo cáo.
+                continue;
             }
 
             BigDecimal branchValue = safeDecimal(row.getBranchValue());
@@ -93,7 +91,7 @@ public class InventoryReportService {
     public List<InventoryLedgerEntryResponse> getLedger(
             Long branchId, LocalDate startDate, LocalDate endDate, String direction) {
         LocalDateTime start = startDate != null ? startDate.atStartOfDay() : null;
-        LocalDateTime end = endDate != null ? endDate.atTime(23, 59, 59) : null;
+        LocalDateTime end = endDate != null ? endDate.atTime(LocalTime.MAX) : null;
 
         List<InventoryTransaction> rows = inventoryTransactionRepository
                 .findLedger(PHYSICAL_TRANSACTION_TYPES, branchId, start, end);
@@ -108,12 +106,11 @@ public class InventoryReportService {
         if (direction == null || direction.isBlank() || "all".equalsIgnoreCase(direction)) {
             return true;
         }
-        int change = tx.getQuantityChange() != null ? tx.getQuantityChange() : 0;
         if ("import".equalsIgnoreCase(direction)) {
-            return change > 0;
+            return tx.getType() == TransactionType.IMPORT;
         }
         if ("export".equalsIgnoreCase(direction)) {
-            return change < 0;
+            return tx.getType() == TransactionType.SALE || tx.getType() == TransactionType.DAMAGED;
         }
         if ("transfer".equalsIgnoreCase(direction)) {
             return tx.getType() == TransactionType.TRANSFER_IN || tx.getType() == TransactionType.TRANSFER_OUT;
@@ -164,16 +161,23 @@ public class InventoryReportService {
     @Transactional(readOnly = true)
     public List<InventoryIOSummaryResponse> getIOSummary(Long branchId, LocalDate startDate, LocalDate endDate) {
         LocalDateTime start = startDate.atStartOfDay();
-        LocalDateTime end = endDate.atTime(23, 59, 59);
+        LocalDateTime end = endDate.atTime(LocalTime.MAX);
 
         List<InventoryTransactionRepository.MovementProjection> movements = inventoryTransactionRepository
                 .findMovementSummary(PHYSICAL_TRANSACTION_TYPES, branchId, start, end);
+
+        List<InventoryTransactionRepository.MovementProjection> movementsAfterEnd = inventoryTransactionRepository
+                .findMovementAfterDate(PHYSICAL_TRANSACTION_TYPES, branchId, end);
         List<InventoryRepository.VariantStockProjection> currentStock = inventoryRepository
                 .findCurrentStockByBranch(branchId);
 
         Map<Long, InventoryTransactionRepository.MovementProjection> movementByVariant = new HashMap<>();
         for (InventoryTransactionRepository.MovementProjection m : movements) {
             movementByVariant.put(m.getVariantId(), m);
+        }
+        Map<Long, InventoryTransactionRepository.MovementProjection> movementAfterEndByVariant = new HashMap<>();
+        for (InventoryTransactionRepository.MovementProjection m : movementsAfterEnd) {
+            movementAfterEndByVariant.put(m.getVariantId(), m);
         }
         Map<Long, InventoryRepository.VariantStockProjection> stockByVariant = new HashMap<>();
         for (InventoryRepository.VariantStockProjection s : currentStock) {
@@ -182,6 +186,7 @@ public class InventoryReportService {
 
         Set<Long> variantIds = new java.util.LinkedHashSet<>();
         variantIds.addAll(movementByVariant.keySet());
+        variantIds.addAll(movementAfterEndByVariant.keySet());
         variantIds.addAll(stockByVariant.keySet());
 
         if (variantIds.isEmpty()) {
@@ -191,6 +196,7 @@ public class InventoryReportService {
         List<InventoryIOSummaryResponse> result = new ArrayList<>();
         for (Long variantId : variantIds) {
             InventoryTransactionRepository.MovementProjection movement = movementByVariant.get(variantId);
+            InventoryTransactionRepository.MovementProjection movementAfterEnd = movementAfterEndByVariant.get(variantId);
             InventoryRepository.VariantStockProjection stock = stockByVariant.get(variantId);
 
             long importedQty = movement != null ? safeLong(movement.getImportedQuantity()) : 0;
@@ -198,15 +204,27 @@ public class InventoryReportService {
             BigDecimal importedValue = movement != null ? safeDecimal(movement.getImportedValue()) : BigDecimal.ZERO;
             BigDecimal exportedValue = movement != null ? safeDecimal(movement.getExportedValue()) : BigDecimal.ZERO;
 
-            long closingQty = stock != null ? safeLong(stock.getQuantity()) : 0;
-            BigDecimal closingValue = stock != null ? safeDecimal(stock.getValue()) : BigDecimal.ZERO;
+            long currentQty = stock != null ? safeLong(stock.getQuantity()) : 0;
+            BigDecimal currentValue = stock != null ? safeDecimal(stock.getValue()) : BigDecimal.ZERO;
+
+            long importedAfterEndQty = movementAfterEnd != null ? safeLong(movementAfterEnd.getImportedQuantity()) : 0;
+            long exportedAfterEndQty = movementAfterEnd != null ? safeLong(movementAfterEnd.getExportedQuantity()) : 0;
+            BigDecimal importedAfterEndValue = movementAfterEnd != null
+                    ? safeDecimal(movementAfterEnd.getImportedValue()) : BigDecimal.ZERO;
+            BigDecimal exportedAfterEndValue = movementAfterEnd != null
+                    ? safeDecimal(movementAfterEnd.getExportedValue()) : BigDecimal.ZERO;
+
+            long closingQty = currentQty - importedAfterEndQty + exportedAfterEndQty;
+            BigDecimal closingValue = currentValue.subtract(importedAfterEndValue).add(exportedAfterEndValue);
 
             long openingQty = closingQty - importedQty + exportedQty;
             BigDecimal openingValue = closingValue.subtract(importedValue).add(exportedValue);
 
-            String sku = stock != null ? stock.getSku() : (movement != null ? movement.getSku() : "");
+            String sku = stock != null ? stock.getSku()
+                    : (movement != null ? movement.getSku() : (movementAfterEnd != null ? movementAfterEnd.getSku() : ""));
             String productName = stock != null ? stock.getProductName()
-                    : (movement != null ? movement.getProductName() : "");
+                    : (movement != null ? movement.getProductName()
+                            : (movementAfterEnd != null ? movementAfterEnd.getProductName() : ""));
 
             result.add(InventoryIOSummaryResponse.builder()
                     .variantId(variantId)
@@ -239,3 +257,4 @@ public class InventoryReportService {
         return value == null ? BigDecimal.ZERO : value;
     }
 }
+

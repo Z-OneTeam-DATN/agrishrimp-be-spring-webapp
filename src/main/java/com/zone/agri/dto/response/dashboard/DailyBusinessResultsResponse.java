@@ -25,4 +25,16 @@ public class DailyBusinessResultsResponse {
     private long yesterdayOrders;
     private double orderChangePercent;
     private boolean orderIsNew;
+
+    private MetricChangeResponse revenueChange;
+    private MetricChangeResponse profitChange;
+    private MetricChangeResponse orderChange;
+
+    private long deliveredOrders;
+    private long returnedOrders;
+    private long cancelledOrders;
+    private MetricChangeResponse deliveredChange;
+    private MetricChangeResponse returnedChange;
+    private MetricChangeResponse cancelledChange;
 }
+

@@ -32,7 +32,7 @@ import java.util.stream.Collectors;
 public class DashboardService {
 
     private final OrderRepository orderRepository;
-    private final SubOrderRepository subOrderRepository; // Thêm SubOrderRepository
+    private final SubOrderRepository subOrderRepository;
     private final UserRepository userRepository;
     private final ProductRepository productRepository;
     private final InventoryRepository inventoryRepository;
@@ -51,9 +51,6 @@ public class DashboardService {
         return AuthUtils.resolveRequestedOrUserBranch(requestBranchId, "DASHBOARD_VIEW");
     }
 
-    // Phân bổ giảm giá (voucher) của Order cha xuống từng SubOrder theo tỉ lệ subtotal,
-    // vì discountAmount chỉ được lưu ở cấp Order chứ không tách theo chi nhánh.
-    // Giống hệt logic allocateDiscount trong FinancialService để số liệu khớp giữa các báo cáo.
     private BigDecimal allocateDiscount(BigDecimal subtotal, BigDecimal orderSubtotal, BigDecimal orderDiscount) {
         if (subtotal.compareTo(BigDecimal.ZERO) <= 0
                 || orderSubtotal.compareTo(BigDecimal.ZERO) <= 0
@@ -72,9 +69,6 @@ public class DashboardService {
         return subtotal.add(shippingFee).subtract(allocatedDiscount);
     }
 
-    // Doanh thu thật (đã trừ giảm giá, đã gồm ship) = đơn hàng cũ không tách chi nhánh (Order.finalAmount)
-    // + đơn đã tách chi nhánh (SubOrder, giảm giá phân bổ theo tỉ lệ). Dùng chung cho cả xem theo
-    // 1 chi nhánh lẫn xem toàn hệ thống để 2 số liệu luôn khớp nhau (branchId = null nghĩa là không lọc).
     private BigDecimal sumNetRevenue(LocalDateTime start, LocalDateTime end, Long branchId) {
         BigDecimal legacyRevenue = getSafeBigDecimal(orderRepository.sumLegacyRevenue(start, end, branchId));
         BigDecimal subOrderRevenue = subOrderRepository.findRevenueRows(start, end, branchId).stream()
@@ -83,10 +77,6 @@ public class DashboardService {
         return legacyRevenue.add(subOrderRevenue);
     }
 
-    // Lấy doanh thu toàn bộ lịch sử [start, now] CHỈ 1 LẦN rồi suy ra "tính đến now" và "tính đến
-    // 1 mốc trước đó" (asOf) từ cùng 1 tập dữ liệu — tránh quét lại lịch sử đầy đủ lần thứ 2 trên
-    // DB. Quan trọng vì DB chạy qua SSH tunnel từ xa, sumNetRevenue(start=năm 2000) gọi 2 lần liền
-    // (hôm nay + hôm qua) từng làm getStats() chậm hẳn do nhân đôi round-trip cho phần nặng nhất.
     private BigDecimal[] sumNetRevenueNowAndAsOf(
             LocalDateTime start, LocalDateTime now, LocalDateTime asOf, Long branchId) {
         BigDecimal totalNow = BigDecimal.ZERO;
@@ -111,28 +101,17 @@ public class DashboardService {
         return new BigDecimal[] { totalNow, totalAsOf };
     }
 
-    // 2.1 TỔNG QUAN CHỈ SỐ
     public DashboardStatsResponse getStats(Long branchId) {
         Long finalBranchId = resolveBranchId(branchId);
 
         LocalDateTime startOfTime = LocalDateTime.of(2000, 1, 1, 0, 0);
         LocalDateTime now = LocalDateTime.now();
-        // Mốc "hôm qua" cho các số luỹ kế (Tổng...) — so cuối hôm qua với hiện tại, khác với dòng
-        // "hôm nay/hôm qua" ở KẾT QUẢ KINH DOANH NGÀY vốn so 2 khoảng phát sinh riêng biệt trong ngày.
+
         LocalDateTime yesterdayEnd = LocalDate.now().minusDays(1).atTime(java.time.LocalTime.MAX);
 
-        long totalOrders;
-        long ordersAsOfYesterday;
-        if (finalBranchId != null) {
-            totalOrders = subOrderRepository.countAllByBranchIdExceptCancelled(finalBranchId);
-            ordersAsOfYesterday = subOrderRepository.countAllByBranchIdExceptCancelledBefore(yesterdayEnd, finalBranchId);
-        } else {
-            totalOrders = orderRepository.countAllOrdersExceptCancelled(null);
-            ordersAsOfYesterday = orderRepository.countAllOrdersExceptCancelledBefore(yesterdayEnd, null);
-        }
-        // Doanh thu dùng chung 1 công thức (đơn cũ + đơn đã tách chi nhánh, giảm giá phân bổ theo tỉ lệ)
-        // cho cả 2 nhánh trên, để "Tổng doanh thu" của 1 chi nhánh cụ thể cộng dồn đúng khớp với
-        // "Tổng doanh thu" khi xem toàn hệ thống. Chỉ fetch dữ liệu lịch sử 1 lần (xem hàm dưới).
+        long totalOrders = countTotalOrders(finalBranchId);
+        long ordersAsOfYesterday = countTotalOrdersBefore(yesterdayEnd, finalBranchId);
+
         BigDecimal[] revenueSnapshot = sumNetRevenueNowAndAsOf(startOfTime, now, yesterdayEnd, finalBranchId);
         BigDecimal totalRevenue = revenueSnapshot[0];
         BigDecimal revenueAsOfYesterday = revenueSnapshot[1];
@@ -141,17 +120,24 @@ public class DashboardService {
         long customersAsOfYesterday = userRepository.countCustomersBefore(finalBranchId, yesterdayEnd);
         long totalProducts = productRepository.countActiveProducts();
 
+        MetricChangeResponse revenueChange = buildChange(totalRevenue, revenueAsOfYesterday);
+        MetricChangeResponse ordersChange = buildChange(totalOrders, ordersAsOfYesterday);
+        MetricChangeResponse customersChange = buildChange(totalCustomers, customersAsOfYesterday);
+
         return DashboardStatsResponse.builder()
                 .totalOrders(totalOrders)
                 .totalRevenue(totalRevenue)
                 .totalCustomers(totalCustomers)
                 .totalProducts(totalProducts)
-                .revenueChangePercent(calculateGrowthPercent(totalRevenue, revenueAsOfYesterday))
-                .revenueIsNew(isNewBaseline(totalRevenue, revenueAsOfYesterday))
-                .ordersChangePercent(calculateGrowthPercent(totalOrders, ordersAsOfYesterday))
-                .ordersIsNew(isNewBaseline(totalOrders, ordersAsOfYesterday))
-                .customersChangePercent(calculateGrowthPercent(totalCustomers, customersAsOfYesterday))
-                .customersIsNew(isNewBaseline(totalCustomers, customersAsOfYesterday))
+                .revenueChangePercent(revenueChange.getChangePercent())
+                .revenueIsNew(revenueChange.isNewBaseline())
+                .ordersChangePercent(ordersChange.getChangePercent())
+                .ordersIsNew(ordersChange.isNewBaseline())
+                .customersChangePercent(customersChange.getChangePercent())
+                .customersIsNew(customersChange.isNewBaseline())
+                .revenueChange(revenueChange)
+                .ordersChange(ordersChange)
+                .customersChange(customersChange)
                 .build();
     }
 
@@ -160,8 +146,6 @@ public class DashboardService {
         LocalDateTime startOfMonth = LocalDate.now().withDayOfMonth(1).atStartOfDay();
         LocalDateTime now = LocalDateTime.now();
 
-        // Lượt truy cập là traffic toàn site (tự đo qua middleware, không phải GA4 thật) nên không
-        // lọc theo chi nhánh — mọi chi nhánh cùng nhìn thấy 1 con số traffic storefront chung.
         LocalDateTime todayStart = LocalDate.now().atStartOfDay();
         VisitService.VisitInsights visitInsights = visitService.getInsights(todayStart, now);
 
@@ -174,33 +158,80 @@ public class DashboardService {
                 .build();
     }
 
-    // Khi mốc so sánh (hôm qua) = 0, tăng trưởng thực tế là vô hạn/không xác định — trả về 0%
-    // thay vì bịa ra "+100%", và đánh dấu isNew=true để tầng hiển thị tự quyết cách diễn giải
-    // (ví dụ hiện badge "Mới" thay vì một con số % gây hiểu lầm).
-    private double calculateGrowthPercent(BigDecimal today, BigDecimal yesterday) {
-        if (yesterday == null || yesterday.compareTo(BigDecimal.ZERO) == 0) {
-            return 0.0;
+    private static final double MAX_CHANGE_PERCENT = 999.9;
+
+    private MetricChangeResponse buildChange(BigDecimal current, BigDecimal previous) {
+        BigDecimal safeCurrent = getSafeBigDecimal(current);
+        BigDecimal safePrevious = getSafeBigDecimal(previous);
+        BigDecimal changeAmount = safeCurrent.subtract(safePrevious);
+
+        boolean hasPositiveBaseline = safePrevious.compareTo(BigDecimal.ZERO) > 0;
+        boolean negativeBaseline = safePrevious.compareTo(BigDecimal.ZERO) < 0;
+
+        double percent = 0.0;
+        if (hasPositiveBaseline) {
+            double raw = changeAmount
+                    .divide(safePrevious, 4, java.math.RoundingMode.HALF_UP)
+                    .multiply(BigDecimal.valueOf(100))
+                    .doubleValue();
+            percent = Math.max(-MAX_CHANGE_PERCENT, Math.min(MAX_CHANGE_PERCENT, raw));
         }
-        return today.subtract(yesterday)
-                .divide(yesterday, 4, java.math.RoundingMode.HALF_UP)
-                .multiply(BigDecimal.valueOf(100))
-                .doubleValue();
+
+        return MetricChangeResponse.builder()
+                .current(safeCurrent)
+                .previous(safePrevious)
+                .changeAmount(changeAmount)
+                .changePercent(percent)
+                .comparable(hasPositiveBaseline)
+                .newBaseline(!hasPositiveBaseline && !negativeBaseline
+                        && safeCurrent.compareTo(BigDecimal.ZERO) > 0)
+                .negativeBaseline(negativeBaseline)
+                .direction(resolveDirection(changeAmount.signum()))
+                .build();
     }
 
-    private boolean isNewBaseline(BigDecimal today, BigDecimal yesterday) {
-        boolean noYesterdayBaseline = yesterday == null || yesterday.compareTo(BigDecimal.ZERO) == 0;
-        return noYesterdayBaseline && today != null && today.compareTo(BigDecimal.ZERO) > 0;
+    private MetricChangeResponse buildChange(long current, long previous) {
+        return buildChange(BigDecimal.valueOf(current), BigDecimal.valueOf(previous));
     }
 
-    private double calculateGrowthPercent(long today, long yesterday) {
-        if (yesterday == 0) {
-            return 0.0;
+    private String resolveDirection(int signum) {
+        if (signum > 0) {
+            return "UP";
         }
-        return ((double) (today - yesterday) / yesterday) * 100.0;
+        return signum < 0 ? "DOWN" : "FLAT";
     }
 
-    private boolean isNewBaseline(long today, long yesterday) {
-        return yesterday == 0 && today > 0;
+    private record OrderQualityCounts(long delivered, long returned, long cancelled) {
+    }
+
+    private OrderQualityCounts collectOrderQuality(LocalDateTime start, LocalDateTime end, Long branchId) {
+        return new OrderQualityCounts(
+                orderRepository.countDeliveredOrders(start, end, branchId)
+                        + subOrderRepository.countDeliveredByBranchId(start, end, branchId),
+                orderRepository.countReturnedOrders(start, end, branchId)
+                        + subOrderRepository.countReturnedByBranchId(start, end, branchId),
+                orderRepository.countCancelledOrders(start, end, branchId)
+                        + subOrderRepository.countCancelledByBranchId(start, end, branchId));
+    }
+
+    private long countTotalOrders(Long branchId) {
+        return orderRepository.countAllOrdersExceptCancelled(branchId)
+                + subOrderRepository.countAllByBranchIdExceptCancelled(branchId);
+    }
+
+    private long countTotalOrdersBefore(LocalDateTime endDate, Long branchId) {
+        return orderRepository.countAllOrdersExceptCancelledBefore(endDate, branchId)
+                + subOrderRepository.countAllByBranchIdExceptCancelledBefore(endDate, branchId);
+    }
+
+    private long countSuccessOrdersMerged(LocalDateTime start, LocalDateTime end, Long branchId) {
+        return orderRepository.countSuccessOrders(start, end, branchId)
+                + subOrderRepository.countSuccessByBranchId(start, end, branchId);
+    }
+
+    private long countByStatusMerged(OrderStatus status, Long branchId) {
+        return orderRepository.countByStatus(status, branchId)
+                + subOrderRepository.countByStatusAndBranchId(status, branchId);
     }
 
     private MonthlyBusinessResultsResponse buildBusinessResultsResponse(
@@ -216,37 +247,48 @@ public class DashboardService {
         BigDecimal currentCost = getSafeBigDecimal(orderRepository.sumTotalCost(currentStart, currentEnd, finalBranchId));
         BigDecimal previousCost = getSafeBigDecimal(orderRepository.sumTotalCost(previousStart, previousEnd, finalBranchId));
 
-        long currentOrders;
-        long previousOrders;
-        if (finalBranchId != null) {
-            currentOrders = subOrderRepository.countSuccessByBranchId(currentStart, currentEnd, finalBranchId);
-            previousOrders = subOrderRepository.countSuccessByBranchId(previousStart, previousEnd, finalBranchId);
-        } else {
-            currentOrders = orderRepository.countSuccessOrders(currentStart, currentEnd, null);
-            previousOrders = orderRepository.countSuccessOrders(previousStart, previousEnd, null);
-        }
+        long currentOrders = countSuccessOrdersMerged(currentStart, currentEnd, finalBranchId);
+        long previousOrders = countSuccessOrdersMerged(previousStart, previousEnd, finalBranchId);
 
         BigDecimal currentProfit = currentRevenue.subtract(currentCost);
         BigDecimal previousProfit = previousRevenue.subtract(previousCost);
+
+        MetricChangeResponse revenueChange = buildChange(currentRevenue, previousRevenue);
+        MetricChangeResponse profitChange = buildChange(currentProfit, previousProfit);
+        MetricChangeResponse orderChange = buildChange(currentOrders, previousOrders);
+
+        OrderQualityCounts currentQuality = collectOrderQuality(currentStart, currentEnd, finalBranchId);
+        OrderQualityCounts previousQuality = collectOrderQuality(previousStart, previousEnd, finalBranchId);
+        MetricChangeResponse deliveredChange = buildChange(currentQuality.delivered(), previousQuality.delivered());
+        MetricChangeResponse returnedChange = buildChange(currentQuality.returned(), previousQuality.returned());
+        MetricChangeResponse cancelledChange = buildChange(currentQuality.cancelled(), previousQuality.cancelled());
 
         return MonthlyBusinessResultsResponse.builder()
                 .yearMonth(periodKey)
                 .currentMonthRevenue(currentRevenue)
                 .previousMonthRevenue(previousRevenue)
-                .revenueChangePercent(calculateGrowthPercent(currentRevenue, previousRevenue))
-                .revenueIsNew(isNewBaseline(currentRevenue, previousRevenue))
+                .revenueChangePercent(revenueChange.getChangePercent())
+                .revenueIsNew(revenueChange.isNewBaseline())
                 .currentMonthProfit(currentProfit)
                 .previousMonthProfit(previousProfit)
-                .profitChangePercent(calculateGrowthPercent(currentProfit, previousProfit))
-                .profitIsNew(isNewBaseline(currentProfit, previousProfit))
+                .profitChangePercent(profitChange.getChangePercent())
+                .profitIsNew(profitChange.isNewBaseline())
                 .currentMonthOrders(currentOrders)
                 .previousMonthOrders(previousOrders)
-                .orderChangePercent(calculateGrowthPercent(currentOrders, previousOrders))
-                .orderIsNew(isNewBaseline(currentOrders, previousOrders))
+                .orderChangePercent(orderChange.getChangePercent())
+                .orderIsNew(orderChange.isNewBaseline())
+                .revenueChange(revenueChange)
+                .profitChange(profitChange)
+                .orderChange(orderChange)
+                .deliveredOrders(currentQuality.delivered())
+                .returnedOrders(currentQuality.returned())
+                .cancelledOrders(currentQuality.cancelled())
+                .deliveredChange(deliveredChange)
+                .returnedChange(returnedChange)
+                .cancelledChange(cancelledChange)
                 .build();
     }
 
-    // 2.2 KẾT QUẢ KINH DOANH NGÀY
     public DailyBusinessResultsResponse getDailyResults(Long branchId) {
         Long finalBranchId = resolveBranchId(branchId);
 
@@ -256,47 +298,53 @@ public class DashboardService {
         LocalDateTime yesterdayStart = LocalDate.now().minusDays(1).atStartOfDay();
         LocalDateTime yesterdayEnd = LocalDate.now().minusDays(1).atTime(java.time.LocalTime.MAX);
 
-        // Doanh thu: 1 công thức duy nhất (đơn cũ + SubOrder đã phân bổ giảm giá) cho mọi phạm vi.
         BigDecimal todayRevenue = sumNetRevenue(todayStart, todayEnd, finalBranchId);
         BigDecimal yesterdayRevenue = sumNetRevenue(yesterdayStart, yesterdayEnd, finalBranchId);
 
-        // Giá vốn đã dùng chung công thức branchId-nullable sẵn có, không cần tách nhánh.
         BigDecimal todayCost = getSafeBigDecimal(orderRepository.sumTotalCost(todayStart, todayEnd, finalBranchId));
         BigDecimal yesterdayCost = getSafeBigDecimal(orderRepository.sumTotalCost(yesterdayStart, yesterdayEnd, finalBranchId));
 
-        // Số lượng đơn vẫn tách nhánh: Order.branch chỉ là "chi nhánh chính" lúc tạo đơn nên không
-        // đáng tin cho đơn bị tách nhiều chi nhánh — phải đếm theo SubOrder khi lọc 1 chi nhánh cụ thể.
-        long todayOrders, yesterdayOrders;
-        if (finalBranchId != null) {
-            todayOrders = subOrderRepository.countSuccessByBranchId(todayStart, todayEnd, finalBranchId);
-            yesterdayOrders = subOrderRepository.countSuccessByBranchId(yesterdayStart, yesterdayEnd, finalBranchId);
-        } else {
-            todayOrders = orderRepository.countSuccessOrders(todayStart, todayEnd, null);
-            yesterdayOrders = orderRepository.countSuccessOrders(yesterdayStart, yesterdayEnd, null);
-        }
+        long todayOrders = countSuccessOrdersMerged(todayStart, todayEnd, finalBranchId);
+        long yesterdayOrders = countSuccessOrdersMerged(yesterdayStart, yesterdayEnd, finalBranchId);
 
         BigDecimal todayProfit = todayRevenue.subtract(todayCost);
         BigDecimal yesterdayProfit = yesterdayRevenue.subtract(yesterdayCost);
 
+        MetricChangeResponse revenueChange = buildChange(todayRevenue, yesterdayRevenue);
+        MetricChangeResponse profitChange = buildChange(todayProfit, yesterdayProfit);
+        MetricChangeResponse orderChange = buildChange(todayOrders, yesterdayOrders);
+
+        OrderQualityCounts todayQuality = collectOrderQuality(todayStart, todayEnd, finalBranchId);
+        OrderQualityCounts yesterdayQuality = collectOrderQuality(yesterdayStart, yesterdayEnd, finalBranchId);
+        MetricChangeResponse deliveredChange = buildChange(todayQuality.delivered(), yesterdayQuality.delivered());
+        MetricChangeResponse returnedChange = buildChange(todayQuality.returned(), yesterdayQuality.returned());
+        MetricChangeResponse cancelledChange = buildChange(todayQuality.cancelled(), yesterdayQuality.cancelled());
+
         return DailyBusinessResultsResponse.builder()
                 .todayRevenue(todayRevenue)
                 .yesterdayRevenue(yesterdayRevenue)
-                .revenueChangePercent(calculateGrowthPercent(todayRevenue, yesterdayRevenue))
-                .revenueIsNew(isNewBaseline(todayRevenue, yesterdayRevenue))
+                .revenueChangePercent(revenueChange.getChangePercent())
+                .revenueIsNew(revenueChange.isNewBaseline())
                 .todayProfit(todayProfit)
                 .yesterdayProfit(yesterdayProfit)
-                .profitChangePercent(calculateGrowthPercent(todayProfit, yesterdayProfit))
-                .profitIsNew(isNewBaseline(todayProfit, yesterdayProfit))
+                .profitChangePercent(profitChange.getChangePercent())
+                .profitIsNew(profitChange.isNewBaseline())
                 .todayOrders(todayOrders)
                 .yesterdayOrders(yesterdayOrders)
-                .orderChangePercent(calculateGrowthPercent(todayOrders, yesterdayOrders))
-                .orderIsNew(isNewBaseline(todayOrders, yesterdayOrders))
+                .orderChangePercent(orderChange.getChangePercent())
+                .orderIsNew(orderChange.isNewBaseline())
+                .revenueChange(revenueChange)
+                .profitChange(profitChange)
+                .orderChange(orderChange)
+                .deliveredOrders(todayQuality.delivered())
+                .returnedOrders(todayQuality.returned())
+                .cancelledOrders(todayQuality.cancelled())
+                .deliveredChange(deliveredChange)
+                .returnedChange(returnedChange)
+                .cancelledChange(cancelledChange)
                 .build();
     }
 
-    // Kết quả kinh doanh theo tháng — dùng cho bộ lọc "xem theo tháng" ở trang tổng quan,
-    // so sánh tháng được chọn với tháng liền trước. Nếu tháng được chọn là tháng hiện tại,
-    // chỉ tính đến thời điểm hiện tại (không tính hết cả tháng vì chưa xảy ra).
     public MonthlyBusinessResultsResponse getMonthlyResults(Long branchId, YearMonth yearMonth) {
         Long finalBranchId = resolveBranchId(branchId);
 
@@ -411,12 +459,10 @@ public class DashboardService {
                 finalBranchId);
     }
 
-    // 2.4 HOẠT ĐỘNG GẦN ĐÂY
     public List<RecentActivityResponse> getRecentActivities(Long branchId) {
         Long finalBranchId = resolveBranchId(branchId);
         List<RecentActivityResponse> activities = new ArrayList<>();
 
-        // 1. Lấy đơn hàng mới
         if (finalBranchId != null) {
             List<SubOrder> recentSubs = subOrderRepository.findByBranchIdOrderByCreatedAtDesc(finalBranchId);
             recentSubs.stream().limit(5).forEach(s -> {
@@ -441,7 +487,6 @@ public class DashboardService {
             }
         }
 
-        // 2. Lấy khách hàng mới
         List<User> recentUsers = userRepository.findRecentCustomers(finalBranchId, PageRequest.of(0, 5));
         for (User user : recentUsers) {
             activities.add(RecentActivityResponse.builder()
@@ -453,7 +498,6 @@ public class DashboardService {
                     .build());
         }
 
-        // 3. Lấy phiếu kho mới
         List<InventoryNote> recentNotes = inventoryNoteRepository.findRecentNotes(finalBranchId, PageRequest.of(0, 5));
         for (InventoryNote note : recentNotes) {
             activities.add(RecentActivityResponse.builder()
@@ -471,50 +515,56 @@ public class DashboardService {
                 .collect(Collectors.toList());
     }
 
-    // 2.3 BIỂU ĐỒ HIỆU SUẤT DOANH SỐ
+    private static class DailyAggregate {
+        private BigDecimal revenue = BigDecimal.ZERO;
+        private BigDecimal cost = BigDecimal.ZERO;
+        private long orders = 0L;
+    }
+
+    private Map<LocalDate, DailyAggregate> collectDailyAggregates(
+            LocalDateTime start, LocalDateTime end, Long branchId) {
+        Map<LocalDate, DailyAggregate> byDate = new HashMap<>();
+
+        for (Object[] row : orderRepository.getLegacyDailyStats(start, end, branchId)) {
+            LocalDate date = ((java.sql.Date) row[0]).toLocalDate();
+            DailyAggregate aggregate = byDate.computeIfAbsent(date, key -> new DailyAggregate());
+            aggregate.revenue = aggregate.revenue.add(getSafeBigDecimal((BigDecimal) row[1]));
+            aggregate.orders += row[2] == null ? 0L : (Long) row[2];
+        }
+
+        for (SubOrderRepository.DashboardRevenueRow row : subOrderRepository.findRevenueRows(start, end, branchId)) {
+            LocalDate date = row.getCreatedAt().toLocalDate();
+            DailyAggregate aggregate = byDate.computeIfAbsent(date, key -> new DailyAggregate());
+            aggregate.revenue = aggregate.revenue.add(netSubOrderRevenue(row));
+            aggregate.orders += 1L;
+        }
+
+        for (Object[] row : orderRepository.getDailyCosts(start, end, branchId)) {
+            LocalDate date = ((java.sql.Date) row[0]).toLocalDate();
+            DailyAggregate aggregate = byDate.computeIfAbsent(date, key -> new DailyAggregate());
+            aggregate.cost = aggregate.cost.add(getSafeBigDecimal((BigDecimal) row[1]));
+        }
+
+        return byDate;
+    }
+
     public SalesPerformanceResponse getSalesPerformance(Long branchId) {
         Long finalBranchId = resolveBranchId(branchId);
         LocalDateTime endDate = LocalDateTime.now();
         LocalDateTime startDate = LocalDate.now().minusDays(6).atStartOfDay();
 
-        List<Object[]> costsRaw = orderRepository.getDailyCosts(startDate, endDate, finalBranchId);
-
-        Map<LocalDate, BigDecimal> revenueMap = new HashMap<>();
-        Map<LocalDate, Long> orderCountMap = new HashMap<>();
-        Map<LocalDate, BigDecimal> costMap = new HashMap<>();
-
-        // Đơn cũ (không có SubOrder) gộp theo ngày trực tiếp từ Order.finalAmount.
-        List<Object[]> legacyStats = orderRepository.getLegacyDailyStats(startDate, endDate, finalBranchId);
-        for (Object[] row : legacyStats) {
-            LocalDate date = ((java.sql.Date) row[0]).toLocalDate();
-            revenueMap.merge(date, (BigDecimal) row[1], BigDecimal::add);
-            orderCountMap.merge(date, (Long) row[2], Long::sum);
-        }
-
-        // Đơn đã tách chi nhánh: cộng dồn theo ngày trong Java vì mỗi dòng cần phân bổ giảm giá riêng.
-        for (SubOrderRepository.DashboardRevenueRow row : subOrderRepository.findRevenueRows(startDate, endDate, finalBranchId)) {
-            LocalDate date = row.getCreatedAt().toLocalDate();
-            revenueMap.merge(date, netSubOrderRevenue(row), BigDecimal::add);
-            orderCountMap.merge(date, 1L, Long::sum);
-        }
-
-        for (Object[] row : costsRaw) {
-            LocalDate date = ((java.sql.Date) row[0]).toLocalDate();
-            costMap.put(date, (BigDecimal) row[1]);
-        }
+        Map<LocalDate, DailyAggregate> byDate = collectDailyAggregates(startDate, endDate, finalBranchId);
 
         List<SalesPerformanceResponse.DataPoint> dataPoints = new ArrayList<>();
         for (int i = 6; i >= 0; i--) {
             LocalDate date = LocalDate.now().minusDays(i);
-            BigDecimal revenue = revenueMap.getOrDefault(date, BigDecimal.ZERO);
-            BigDecimal cost = costMap.getOrDefault(date, BigDecimal.ZERO);
-            long orders = orderCountMap.getOrDefault(date, 0L);
+            DailyAggregate aggregate = byDate.getOrDefault(date, new DailyAggregate());
 
             dataPoints.add(SalesPerformanceResponse.DataPoint.builder()
                     .date(date)
-                    .revenue(revenue)
-                    .profit(revenue.subtract(cost))
-                    .orderCount(orders)
+                    .revenue(aggregate.revenue)
+                    .profit(aggregate.revenue.subtract(aggregate.cost))
+                    .orderCount(aggregate.orders)
                     .build());
         }
 
@@ -523,7 +573,109 @@ public class DashboardService {
                 .build();
     }
 
-    // THÔNG TIN KHO (Thống kê nhanh)
+    private static final int MIN_MONTH_BUCKETS = 6;
+    private static final int MIN_DAY_BUCKETS = 7;
+
+    private static final int MAX_MONTH_BUCKETS = 24;
+    private static final int MAX_DAY_BUCKETS = 62;
+
+    public BusinessTrendResponse getBusinessTrend(
+            Long branchId, String granularity, LocalDate startDate, LocalDate endDate) {
+        Long finalBranchId = resolveBranchId(branchId);
+        LocalDate today = LocalDate.now();
+
+        boolean monthly = !"DAY".equalsIgnoreCase(granularity);
+
+        LocalDate rangeEnd = endDate != null && !endDate.isAfter(today) ? endDate : today;
+        LocalDate rangeStart = startDate != null && !startDate.isAfter(rangeEnd)
+                ? startDate
+                : (monthly
+                        ? rangeEnd.withDayOfMonth(1).minusMonths(MIN_MONTH_BUCKETS - 1L)
+                        : rangeEnd.minusDays(MIN_DAY_BUCKETS - 1L));
+
+        if (!monthly && ChronoUnit.DAYS.between(rangeStart, rangeEnd) + 1 > MAX_DAY_BUCKETS) {
+            monthly = true;
+        }
+
+        if (monthly) {
+            YearMonth startMonth = YearMonth.from(rangeStart);
+            YearMonth endMonth = YearMonth.from(rangeEnd);
+            long buckets = ChronoUnit.MONTHS.between(startMonth, endMonth) + 1;
+            if (buckets < MIN_MONTH_BUCKETS) {
+                startMonth = endMonth.minusMonths(MIN_MONTH_BUCKETS - 1L);
+            } else if (buckets > MAX_MONTH_BUCKETS) {
+                startMonth = endMonth.minusMonths(MAX_MONTH_BUCKETS - 1L);
+            }
+            rangeStart = startMonth.atDay(1);
+        } else {
+            long buckets = ChronoUnit.DAYS.between(rangeStart, rangeEnd) + 1;
+            if (buckets < MIN_DAY_BUCKETS) {
+                rangeStart = rangeEnd.minusDays(MIN_DAY_BUCKETS - 1L);
+            }
+        }
+
+        LocalDateTime queryStart = rangeStart.atStartOfDay();
+        LocalDateTime queryEnd = rangeEnd.equals(today)
+                ? LocalDateTime.now()
+                : rangeEnd.atTime(java.time.LocalTime.MAX);
+
+        Map<LocalDate, DailyAggregate> byDate = collectDailyAggregates(queryStart, queryEnd, finalBranchId);
+
+        List<BusinessTrendResponse.Point> points = new ArrayList<>();
+        if (monthly) {
+            Map<YearMonth, DailyAggregate> byMonth = new HashMap<>();
+            for (Map.Entry<LocalDate, DailyAggregate> entry : byDate.entrySet()) {
+                DailyAggregate bucket = byMonth.computeIfAbsent(
+                        YearMonth.from(entry.getKey()), key -> new DailyAggregate());
+                bucket.revenue = bucket.revenue.add(entry.getValue().revenue);
+                bucket.cost = bucket.cost.add(entry.getValue().cost);
+                bucket.orders += entry.getValue().orders;
+            }
+
+            YearMonth cursor = YearMonth.from(rangeStart);
+            YearMonth last = YearMonth.from(rangeEnd);
+            while (!cursor.isAfter(last)) {
+                points.add(toTrendPoint(
+                        cursor.toString(),
+                        "T" + cursor.getMonthValue() + "/" + cursor.getYear(),
+                        byMonth.getOrDefault(cursor, new DailyAggregate())));
+                cursor = cursor.plusMonths(1);
+            }
+        } else {
+            LocalDate cursor = rangeStart;
+            while (!cursor.isAfter(rangeEnd)) {
+                DailyAggregate bucket = byDate.getOrDefault(cursor, new DailyAggregate());
+                points.add(toTrendPoint(
+                        cursor.toString(),
+                        String.format("%02d/%02d", cursor.getDayOfMonth(), cursor.getMonthValue()),
+                        bucket));
+                cursor = cursor.plusDays(1);
+            }
+        }
+
+        String rangeLabel = monthly
+                ? "Từ tháng " + YearMonth.from(rangeStart).getMonthValue() + "/" + rangeStart.getYear()
+                        + " đến tháng " + YearMonth.from(rangeEnd).getMonthValue() + "/" + rangeEnd.getYear()
+                : "Từ ngày " + rangeStart + " đến ngày " + rangeEnd;
+
+        return BusinessTrendResponse.builder()
+                .granularity(monthly ? "MONTH" : "DAY")
+                .rangeLabel(rangeLabel)
+                .points(points)
+                .build();
+    }
+
+    private BusinessTrendResponse.Point toTrendPoint(String period, String label, DailyAggregate bucket) {
+        return BusinessTrendResponse.Point.builder()
+                .period(period)
+                .label(label)
+                .revenue(bucket.revenue)
+                .cost(bucket.cost)
+                .profit(bucket.revenue.subtract(bucket.cost))
+                .orders(bucket.orders)
+                .build();
+    }
+
     public InventoryInfoResponse getInventoryInfo(Long branchId) {
         Long finalBranchId = resolveBranchId(branchId);
 
@@ -532,102 +684,141 @@ public class DashboardService {
         long outOfStockCount = inventoryRepository.countOutOfStockProducts(finalBranchId);
         BigDecimal totalValue = getSafeBigDecimal(inventoryRepository.sumTotalValue(finalBranchId));
 
-        // Tồn kho không có bảng lưu vết lịch sử theo ngày, nên suy ngược "giá trị hôm qua" bằng
-        // cách lấy giá trị hiện tại trừ đi biến động ròng (nhập/bán/điều chuyển...) phát sinh hôm nay.
         LocalDateTime todayStart = LocalDate.now().atStartOfDay();
         LocalDateTime now = LocalDateTime.now();
         BigDecimal netChangeToday = getSafeBigDecimal(
                 inventoryTransactionRepository.sumNetValueChange(todayStart, now, finalBranchId));
         BigDecimal valueAsOfYesterday = totalValue.subtract(netChangeToday);
+        MetricChangeResponse valueChange = buildChange(totalValue, valueAsOfYesterday);
 
         return InventoryInfoResponse.builder()
                 .totalItems(totalItems)
                 .lowStockCount(lowStockCount)
                 .outOfStockCount(outOfStockCount)
                 .totalInventoryValue(totalValue)
-                .valueChangePercent(calculateGrowthPercent(totalValue, valueAsOfYesterday))
-                .valueIsNew(isNewBaseline(totalValue, valueAsOfYesterday))
+                .valueChangePercent(valueChange.getChangePercent())
+                .valueIsNew(valueChange.isNewBaseline())
+                .valueChange(valueChange)
                 .build();
     }
 
-    // TOP SẢN PHẨM BÁN CHẠY
-    public List<TopProductResponse> getTopProducts(Long branchId, int limit) {
-        Long finalBranchId = resolveBranchId(branchId);
-        List<ProductRepository.TopProductProjection> topProducts = productRepository.getTopSellingProducts(finalBranchId, PageRequest.of(0, limit));
-
-        return topProducts.stream().map(p -> TopProductResponse.builder()
-                .productId(p.getProductId())
-                .productName(p.getProductName())
-                .quantitySold(p.getQuantitySold())
-                .revenue(p.getRevenue())
-                .imageUrl(p.getImageUrl())
-                .build()
-        ).collect(Collectors.toList());
+    private static class ProductSalesAggregate {
+        String productName;
+        String imageUrl;
+        long quantitySold;
+        BigDecimal revenue = BigDecimal.ZERO;
     }
 
-    // TÓM TẮT ĐƠN HÀNG THEO TRẠNG THÁI
+    private void mergeProductRow(
+            Map<Long, ProductSalesAggregate> byProduct, ProductRepository.TopProductProjection row) {
+        if (row.getProductId() == null) {
+            return;
+        }
+        ProductSalesAggregate aggregate = byProduct.computeIfAbsent(
+                row.getProductId(), id -> new ProductSalesAggregate());
+        aggregate.productName = row.getProductName();
+        if (aggregate.imageUrl == null && row.getImageUrl() != null) {
+            aggregate.imageUrl = row.getImageUrl();
+        }
+        aggregate.quantitySold += row.getQuantitySold() == null ? 0L : row.getQuantitySold();
+        aggregate.revenue = aggregate.revenue.add(getSafeBigDecimal(row.getRevenue()));
+    }
+
+    public List<TopProductResponse> getTopProducts(Long branchId, int limit) {
+        Long finalBranchId = resolveBranchId(branchId);
+
+        Map<Long, ProductSalesAggregate> byProduct = new HashMap<>();
+        for (ProductRepository.TopProductProjection row : productRepository.getTopSellingProductsLegacy(finalBranchId)) {
+            mergeProductRow(byProduct, row);
+        }
+        for (ProductRepository.TopProductProjection row : productRepository.getTopSellingProducts(finalBranchId)) {
+            mergeProductRow(byProduct, row);
+        }
+
+        return byProduct.entrySet().stream()
+                .sorted((a, b) -> Long.compare(b.getValue().quantitySold, a.getValue().quantitySold))
+                .limit(limit)
+                .map(entry -> TopProductResponse.builder()
+                        .productId(entry.getKey())
+                        .productName(entry.getValue().productName)
+                        .quantitySold(entry.getValue().quantitySold)
+                        .revenue(entry.getValue().revenue)
+                        .imageUrl(entry.getValue().imageUrl)
+                        .build())
+                .collect(Collectors.toList());
+    }
+
     public PendingOrdersSummaryResponse getPendingOrdersSummary(Long branchId) {
         Long finalBranchId = resolveBranchId(branchId);
 
-        if (finalBranchId != null) {
-            return PendingOrdersSummaryResponse.builder()
-                    .pendingApproval(subOrderRepository.countByStatusAndBranchId(OrderStatus.PENDING, finalBranchId))
-                    .pendingPayment(subOrderRepository.countByStatusAndBranchId(OrderStatus.AWAITING_PAYMENT, finalBranchId))
-                    .pendingPacking(subOrderRepository.countByStatusAndBranchId(OrderStatus.PROCESSING, finalBranchId))
-                    .pendingPickup(subOrderRepository.countByStatusAndBranchId(OrderStatus.READY_FOR_PICKUP, finalBranchId))
-                    .shipping(subOrderRepository.countByStatusAndBranchId(OrderStatus.SHIPPING, finalBranchId))
-                    .cancelPending(subOrderRepository.countByStatusAndBranchId(OrderStatus.CANCELLED, finalBranchId))
-                    .build();
-        } else {
-            return PendingOrdersSummaryResponse.builder()
-                    .pendingApproval(orderRepository.countByStatus(OrderStatus.PENDING, null))
-                    .pendingPayment(orderRepository.countByStatus(OrderStatus.AWAITING_PAYMENT, null))
-                    .pendingPacking(orderRepository.countByStatus(OrderStatus.PROCESSING, null))
-                    .pendingPickup(orderRepository.countByStatus(OrderStatus.READY_FOR_PICKUP, null))
-                    .shipping(orderRepository.countByStatus(OrderStatus.SHIPPING, null))
-                    .cancelPending(orderRepository.countByStatus(OrderStatus.CANCELLED, null))
-                    .build();
-        }
+        return PendingOrdersSummaryResponse.builder()
+                .pendingApproval(countByStatusMerged(OrderStatus.PENDING, finalBranchId))
+                .pendingPayment(countByStatusMerged(OrderStatus.AWAITING_PAYMENT, finalBranchId))
+                .pendingPacking(countByStatusMerged(OrderStatus.PROCESSING, finalBranchId))
+                .pendingPickup(countByStatusMerged(OrderStatus.READY_FOR_PICKUP, finalBranchId))
+                .shipping(countByStatusMerged(OrderStatus.SHIPPING, finalBranchId))
+                .cancelPending(countByStatusMerged(OrderStatus.CANCELLED, finalBranchId))
+                .build();
     }
 
-    // TỶ TRỌNG DOANH THU THEO DANH MỤC (Vẽ biểu đồ tròn)
+    private static class CategorySalesAggregate {
+        String categoryName;
+        long totalQuantity;
+        BigDecimal totalRevenue = BigDecimal.ZERO;
+    }
+
+    private void mergeCategoryRow(
+            Map<Long, CategorySalesAggregate> byCategory, ProductRepository.CategorySalesProjection row) {
+        if (row.getCategoryId() == null) {
+            return;
+        }
+        CategorySalesAggregate aggregate = byCategory.computeIfAbsent(
+                row.getCategoryId(), id -> new CategorySalesAggregate());
+        aggregate.categoryName = row.getCategoryName();
+        aggregate.totalQuantity += row.getTotalQuantity() == null ? 0L : row.getTotalQuantity();
+        aggregate.totalRevenue = aggregate.totalRevenue.add(getSafeBigDecimal(row.getTotalRevenue()));
+    }
+
     public List<CategoryDistributionResponse> getCategoryDistribution(Long branchId) {
         Long finalBranchId = resolveBranchId(branchId);
-        List<ProductRepository.CategorySalesProjection> projections;
 
-        if (finalBranchId != null) {
-            projections = subOrderRepository.getCategorySalesByBranch(finalBranchId);
-        } else {
-            projections = productRepository.getCategorySalesSystemWide();
+        Map<Long, CategorySalesAggregate> byCategory = new HashMap<>();
+        for (ProductRepository.CategorySalesProjection row : productRepository.getCategorySalesLegacy(finalBranchId)) {
+            mergeCategoryRow(byCategory, row);
+        }
+        for (ProductRepository.CategorySalesProjection row : subOrderRepository.getCategorySalesByBranch(finalBranchId)) {
+            mergeCategoryRow(byCategory, row);
         }
 
-        BigDecimal totalRevenueAll = projections.stream()
-                .map(p -> p.getTotalRevenue() != null ? p.getTotalRevenue() : BigDecimal.ZERO)
+        BigDecimal totalRevenueAll = byCategory.values().stream()
+                .map(a -> a.totalRevenue)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
 
-        return projections.stream().map(p -> {
-            BigDecimal revenue = p.getTotalRevenue() != null ? p.getTotalRevenue() : BigDecimal.ZERO;
-            double percentage = 0.0;
-            if (totalRevenueAll.compareTo(BigDecimal.ZERO) > 0) {
-                percentage = revenue.multiply(BigDecimal.valueOf(100))
-                        .divide(totalRevenueAll, 2, java.math.RoundingMode.HALF_UP)
-                        .doubleValue();
-            }
+        return byCategory.entrySet().stream()
+                .sorted((a, b) -> b.getValue().totalRevenue.compareTo(a.getValue().totalRevenue))
+                .map(entry -> {
+                    BigDecimal revenue = entry.getValue().totalRevenue;
+                    double percentage = 0.0;
+                    if (totalRevenueAll.compareTo(BigDecimal.ZERO) > 0) {
+                        percentage = revenue.multiply(BigDecimal.valueOf(100))
+                                .divide(totalRevenueAll, 2, java.math.RoundingMode.HALF_UP)
+                                .doubleValue();
+                    }
 
-            return CategoryDistributionResponse.builder()
-                    .categoryId(p.getCategoryId())
-                    .categoryName(p.getCategoryName())
-                    .totalRevenue(revenue)
-                    .totalQuantity(p.getTotalQuantity())
-                    .percentage(percentage)
-                    .build();
-        }).collect(Collectors.toList());
+                    return CategoryDistributionResponse.builder()
+                            .categoryId(entry.getKey())
+                            .categoryName(entry.getValue().categoryName)
+                            .totalRevenue(revenue)
+                            .totalQuantity(entry.getValue().totalQuantity)
+                            .percentage(percentage)
+                            .build();
+                })
+                .collect(Collectors.toList());
     }
 
-    // DANH SÁCH ĐƠN HÀNG CHỜ DUYỆT
     public List<PendingOrderResponse> getPendingOrders(Long branchId, int limit) {
         Long finalBranchId = resolveBranchId(branchId);
-        
+
         if (finalBranchId != null) {
             List<SubOrder> subs = subOrderRepository.findPendingByBranchId(OrderStatus.PENDING, finalBranchId, PageRequest.of(0, limit));
             return subs.stream().map(s -> PendingOrderResponse.builder()
@@ -653,3 +844,4 @@ public class DashboardService {
         }
     }
 }
+

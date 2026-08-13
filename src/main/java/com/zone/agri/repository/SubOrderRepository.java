@@ -42,8 +42,6 @@ public interface SubOrderRepository extends JpaRepository<SubOrder, Long> {
 
     List<SubOrder> findByStatusAndUpdatedAtBefore(OrderStatus status, java.time.LocalDateTime updatedAt);
 
-    // ── Truy vấn theo chi nhánh (dùng cho quản lý kho / chi nhánh) ──
-
     @Query("SELECT s FROM SubOrder s LEFT JOIN FETCH s.order o LEFT JOIN FETCH o.user " +
             "WHERE s.branch.id = :branchId ORDER BY s.createdAt DESC")
     List<SubOrder> findByBranchIdOrderByCreatedAtDesc(@Param("branchId") Long branchId);
@@ -70,25 +68,45 @@ public interface SubOrderRepository extends JpaRepository<SubOrder, Long> {
     Optional<SubOrder> findByIdWithItems(@Param("id") Long id);
 
     @Query("SELECT COUNT(s) FROM SubOrder s WHERE s.status <> com.zone.agri.entity.enums.OrderStatus.CANCELLED " +
-            "AND s.branch.id = :branchId")
+            "AND (:branchId IS NULL OR s.branch.id = :branchId)")
     long countAllByBranchIdExceptCancelled(@Param("branchId") Long branchId);
 
-    // Đếm luỹ kế tính đến 1 thời điểm — dùng để so sánh "Tổng đơn hàng" hôm nay với hôm qua.
     @Query("SELECT COUNT(s) FROM SubOrder s WHERE s.status <> com.zone.agri.entity.enums.OrderStatus.CANCELLED " +
-            "AND s.createdAt <= :endDate AND s.branch.id = :branchId")
+            "AND s.createdAt <= :endDate AND (:branchId IS NULL OR s.branch.id = :branchId)")
     long countAllByBranchIdExceptCancelledBefore(@Param("endDate") java.time.LocalDateTime endDate,
                                                  @Param("branchId") Long branchId);
 
     @Query("SELECT COUNT(s) FROM SubOrder s WHERE s.status IN (com.zone.agri.entity.enums.OrderStatus.COMPLETED, com.zone.agri.entity.enums.OrderStatus.RECEIVED, com.zone.agri.entity.enums.OrderStatus.SHIPPING) " +
             "AND s.createdAt BETWEEN :startDate AND :endDate " +
-            "AND s.branch.id = :branchId")
+            "AND (:branchId IS NULL OR s.branch.id = :branchId)")
     long countSuccessByBranchId(@Param("startDate") java.time.LocalDateTime startDate,
                                 @Param("endDate") java.time.LocalDateTime endDate,
                                 @Param("branchId") Long branchId);
 
+    @Query("SELECT COUNT(s) FROM SubOrder s WHERE s.status IN (com.zone.agri.entity.enums.OrderStatus.RECEIVED, com.zone.agri.entity.enums.OrderStatus.COMPLETED) " +
+            "AND s.receivedAt BETWEEN :startDate AND :endDate " +
+            "AND (:branchId IS NULL OR s.branch.id = :branchId)")
+    long countDeliveredByBranchId(@Param("startDate") java.time.LocalDateTime startDate,
+                                  @Param("endDate") java.time.LocalDateTime endDate,
+                                  @Param("branchId") Long branchId);
+
+    @Query("SELECT COUNT(s) FROM SubOrder s WHERE s.status = com.zone.agri.entity.enums.OrderStatus.RETURNED " +
+            "AND s.returnedAt BETWEEN :startDate AND :endDate " +
+            "AND (:branchId IS NULL OR s.branch.id = :branchId)")
+    long countReturnedByBranchId(@Param("startDate") java.time.LocalDateTime startDate,
+                                 @Param("endDate") java.time.LocalDateTime endDate,
+                                 @Param("branchId") Long branchId);
+
+    @Query("SELECT COUNT(s) FROM SubOrder s WHERE s.status = com.zone.agri.entity.enums.OrderStatus.CANCELLED " +
+            "AND s.cancelledAt BETWEEN :startDate AND :endDate " +
+            "AND (:branchId IS NULL OR s.branch.id = :branchId)")
+    long countCancelledByBranchId(@Param("startDate") java.time.LocalDateTime startDate,
+                                  @Param("endDate") java.time.LocalDateTime endDate,
+                                  @Param("branchId") Long branchId);
+
     @Query("SELECT SUM(s.subtotal + s.shippingFee) FROM SubOrder s WHERE s.status IN (com.zone.agri.entity.enums.OrderStatus.COMPLETED, com.zone.agri.entity.enums.OrderStatus.RECEIVED, com.zone.agri.entity.enums.OrderStatus.SHIPPING) " +
             "AND s.createdAt BETWEEN :startDate AND :endDate " +
-            "AND s.branch.id = :branchId")
+            "AND (:branchId IS NULL OR s.branch.id = :branchId)")
     java.math.BigDecimal sumRevenueByBranchId(@Param("startDate") java.time.LocalDateTime startDate,
                                               @Param("endDate") java.time.LocalDateTime endDate,
                                               @Param("branchId") Long branchId);
@@ -105,9 +123,6 @@ public interface SubOrderRepository extends JpaRepository<SubOrder, Long> {
         java.math.BigDecimal getOrderDiscountAmount();
     }
 
-    // Trả về từng dòng SubOrder kèm subtotal/discount của Order cha để DashboardService
-    // phân bổ giảm giá theo tỉ lệ (giống allocateDiscount trong FinancialService) thay vì
-    // tính doanh thu chi nhánh mà bỏ qua voucher giảm giá.
     @Query("""
             SELECT s.createdAt AS createdAt,
                    COALESCE(s.subtotal, 0) AS subtotal,
@@ -134,7 +149,7 @@ public interface SubOrderRepository extends JpaRepository<SubOrder, Long> {
                                            @Param("endDate") java.time.LocalDateTime endDate,
                                            @Param("branchId") Long branchId);
 
-    @Query("SELECT COUNT(s) FROM SubOrder s WHERE s.status = :status AND s.branch.id = :branchId")
+    @Query("SELECT COUNT(s) FROM SubOrder s WHERE s.status = :status AND (:branchId IS NULL OR s.branch.id = :branchId)")
     long countByStatusAndBranchId(@Param("status") OrderStatus status, @Param("branchId") Long branchId);
 
     @Query("SELECT s FROM SubOrder s WHERE s.status = :status AND s.branch.id = :branchId ORDER BY s.createdAt DESC")
@@ -162,7 +177,7 @@ public interface SubOrderRepository extends JpaRepository<SubOrder, Long> {
             "JOIN si.productVariant pv " +
             "JOIN pv.product p " +
             "JOIN p.category c " +
-            "WHERE s.branch.id = :branchId " +
+            "WHERE (:branchId IS NULL OR s.branch.id = :branchId) " +
             "AND s.status IN (com.zone.agri.entity.enums.OrderStatus.COMPLETED, com.zone.agri.entity.enums.OrderStatus.RECEIVED, com.zone.agri.entity.enums.OrderStatus.SHIPPING) " +
             "GROUP BY c.id, c.name " +
             "ORDER BY totalRevenue DESC")
@@ -244,8 +259,20 @@ public interface SubOrderRepository extends JpaRepository<SubOrder, Long> {
             @Param("startDate") LocalDateTime startDate,
             @Param("branchId") Long branchId);
 
-    // JOIN FETCH order.user/s.branch — mapSubOrderToCashbookEntry() đọc parentOrder.getUser() và
-    // subOrder.getBranch() cho mỗi dòng; thiếu fetch join gây N+1 lazy-load khi sinh sổ quỹ.
+    @Query("""
+        SELECT COALESCE(s.subtotal, 0) AS subtotal,
+               COALESCE(s.shippingFee, 0) AS shippingFee,
+               COALESCE(o.totalAmount, 0) AS orderSubtotal,
+               COALESCE(o.discountAmount, 0) AS orderDiscountAmount
+        FROM SubOrder s
+        JOIN s.order o
+        WHERE o.paymentStatus = com.zone.agri.entity.enums.PaymentStatus.UNPAID
+          AND o.paymentMethod = com.zone.agri.entity.enums.PaymentMethod.COD
+          AND s.status NOT IN (com.zone.agri.entity.enums.OrderStatus.CANCELLED, com.zone.agri.entity.enums.OrderStatus.RETURNED)
+          AND (:branchId IS NULL OR s.branch.id = :branchId)
+    """)
+    List<SubOrderAmountProjection> findUnpaidCodSubOrderAmounts(@Param("branchId") Long branchId);
+
     @Query("""
         SELECT s
         FROM SubOrder s
@@ -289,3 +316,4 @@ public interface SubOrderRepository extends JpaRepository<SubOrder, Long> {
             @Param("endDate") LocalDateTime endDate,
             @Param("branchId") Long branchId);
 }
+
