@@ -57,6 +57,7 @@ import com.zone.agri.repository.AiKnowledgeReviewCaseRepository;
 import com.zone.agri.repository.ProductRepository;
 import com.zone.agri.service.NotificationService;
 import com.zone.agri.service.aidoctor.AiDoctorProductSuggestionService;
+import com.zone.agri.utils.AiTextFormatUtils;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.util.ArrayList;
@@ -2373,11 +2374,7 @@ public class AiKnowledgeService {
                         .append(escapeHtml(stage.getStageTitle()))
                         .append("</strong>");
                 if (!defaultList(stage.getInstructions()).isEmpty()) {
-                    builder.append("<ul>");
-                    for (String instruction : stage.getInstructions()) {
-                        builder.append("<li>").append(escapeHtml(instruction)).append("</li>");
-                    }
-                    builder.append("</ul>");
+                    builder.append(buildTreatmentInstructionsHtml(stage.getInstructions()));
                 }
                 List<String> productLabels = new ArrayList<>();
                 defaultList(stage.getProducts()).forEach(product -> productLabels.add(product.getName()));
@@ -2408,6 +2405,44 @@ public class AiKnowledgeService {
         }
 
         return builder.toString();
+    }
+
+    private String buildTreatmentInstructionsHtml(List<String> instructions) {
+        StringBuilder html = new StringBuilder();
+        List<String> plainInstructions = new ArrayList<>();
+
+        for (String instruction : defaultList(instructions)) {
+            String trimmed = trimToNull(instruction);
+            if (trimmed == null) {
+                continue;
+            }
+
+            if (AiTextFormatUtils.looksLikeHtml(trimmed)) {
+                appendPlainTreatmentInstructions(html, plainInstructions);
+                String safeHtml = trimToNull(AiTextFormatUtils.sanitizeRichHtml(trimmed));
+                if (safeHtml != null) {
+                    html.append("<div>").append(safeHtml).append("</div>");
+                }
+            } else {
+                plainInstructions.add(trimmed);
+            }
+        }
+
+        appendPlainTreatmentInstructions(html, plainInstructions);
+        return html.toString();
+    }
+
+    private void appendPlainTreatmentInstructions(StringBuilder html, List<String> plainInstructions) {
+        if (plainInstructions.isEmpty()) {
+            return;
+        }
+
+        html.append("<ul>");
+        for (String instruction : plainInstructions) {
+            html.append("<li>").append(escapeHtml(instruction)).append("</li>");
+        }
+        html.append("</ul>");
+        plainInstructions.clear();
     }
 
 
@@ -2584,7 +2619,7 @@ public class AiKnowledgeService {
         })).stream()
                 .map(stage -> TreatmentStageResponse.builder()
                         .stageTitle(stage.getStageTitle())
-                        .instructions(defaultList(stage.getInstructions()))
+                        .instructions(sanitizeStageInstructions(stage.getInstructions()))
                         .products(resolveSuggestedProducts(stage.getProductIds()))
                         .extraProductNames(defaultList(stage.getExtraProductNames()))
                         .build())
@@ -2596,7 +2631,7 @@ public class AiKnowledgeService {
         })).stream()
                 .map(stage -> AiKnowledgeTreatmentStageResponse.builder()
                         .stageTitle(stage.getStageTitle())
-                        .instructions(defaultList(stage.getInstructions()))
+                        .instructions(sanitizeStageInstructions(stage.getInstructions()))
                         .productIds(defaultList(stage.getProductIds()))
                         .products(resolveSuggestedProducts(stage.getProductIds()))
                         .extraProductNames(defaultList(stage.getExtraProductNames()))
@@ -2608,7 +2643,7 @@ public class AiKnowledgeService {
         return defaultList(stages).stream()
                 .map(stage -> AiKnowledgeTreatmentStageResponse.builder()
                         .stageTitle(stage.getStageTitle())
-                        .instructions(defaultList(stage.getInstructions()))
+                        .instructions(sanitizeStageInstructions(stage.getInstructions()))
                         .productIds(defaultList(stage.getProductIds()))
                         .products(resolveSuggestedProducts(stage.getProductIds()))
                         .extraProductNames(defaultList(stage.getExtraProductNames()))
@@ -2620,7 +2655,7 @@ public class AiKnowledgeService {
         return defaultList(stages).stream()
                 .map(stage -> KnowledgeStage.builder()
                         .stageTitle(trimToNull(stage.getStageTitle()))
-                        .instructions(defaultList(stage.getInstructions()))
+                        .instructions(sanitizeStageInstructions(stage.getInstructions()))
                         .productIds(defaultList(stage.getProductIds()))
                         .extraProductNames(defaultList(stage.getExtraProductNames()).stream()
                                 .map(this::trimToNull)
@@ -2628,6 +2663,24 @@ public class AiKnowledgeService {
                                 .toList())
                         .build())
                 .toList();
+    }
+
+    private List<String> sanitizeStageInstructions(List<String> instructions) {
+        return defaultList(instructions).stream()
+                .map(this::sanitizeStageInstruction)
+                .filter(Objects::nonNull)
+                .toList();
+    }
+
+    private String sanitizeStageInstruction(String instruction) {
+        String trimmed = trimToNull(instruction);
+        if (trimmed == null) {
+            return null;
+        }
+        if (AiTextFormatUtils.looksLikeHtml(trimmed)) {
+            return trimToNull(AiTextFormatUtils.sanitizeRichHtml(trimmed));
+        }
+        return trimmed;
     }
 
     private List<SuggestedProductResponse> resolveSuggestedProducts(List<Long> productIds) {

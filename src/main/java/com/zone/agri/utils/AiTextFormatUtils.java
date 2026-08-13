@@ -1,11 +1,24 @@
 package com.zone.agri.utils;
 
+import java.util.regex.Pattern;
+import org.jsoup.Jsoup;
+import org.jsoup.nodes.Document;
+import org.jsoup.safety.Safelist;
+
 /**
  * Chuyen van ban thuan (co the co dong bat dau bang "- ") tu Gemini thanh HTML an toan de render
  * trong bong bong chat (dangerouslySetInnerHTML phia FE) — thay the viec chi xuong dong bang \n
  * kho doc khi noi dung dai/nhieu y.
  */
 public final class AiTextFormatUtils {
+
+    private static final Pattern HTML_TAG_PATTERN = Pattern.compile("</?[a-zA-Z][^>]*>");
+    private static final Document.OutputSettings COMPACT_HTML_OUTPUT =
+            new Document.OutputSettings().prettyPrint(false);
+    private static final Safelist SAFE_RICH_TEXT = Safelist.basic()
+            .addTags("h1", "h2", "h3", "h4", "s")
+            .addAttributes("a", "target", "rel")
+            .addProtocols("a", "href", "http", "https", "mailto", "tel");
 
     private AiTextFormatUtils() {
     }
@@ -18,6 +31,17 @@ public final class AiTextFormatUtils {
                 .replace("&", "&amp;")
                 .replace("<", "&lt;")
                 .replace(">", "&gt;");
+    }
+
+    public static boolean looksLikeHtml(String value) {
+        return value != null && HTML_TAG_PATTERN.matcher(value).find();
+    }
+
+    public static String sanitizeRichHtml(String html) {
+        if (html == null || html.isBlank()) {
+            return "";
+        }
+        return Jsoup.clean(html, "", SAFE_RICH_TEXT, COMPACT_HTML_OUTPUT).trim();
     }
 
     /**
