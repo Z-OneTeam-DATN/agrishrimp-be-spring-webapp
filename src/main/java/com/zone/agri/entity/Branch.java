@@ -54,6 +54,12 @@ public class Branch extends BaseEntity {
     @Column(name = "province_name", length = 100)
     String provinceName;
 
+    @Column(name = "district_id")
+    Integer districtId;
+
+    @Column(name = "district_name", length = 100)
+    String districtName;
+
     @Column(name = "ward_id")
     Integer wardId;
 

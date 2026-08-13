@@ -17,4 +17,5 @@ public class ShippingFeeResult {
     private String carrier;
     /** true nếu lấy từ fallback/ước tính do API lỗi */
     private boolean isEstimate;
+    private String estimateReason;
 }

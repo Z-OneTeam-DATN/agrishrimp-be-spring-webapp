@@ -23,8 +23,10 @@ public class SubOrderDraftDto {
     private List<OrderItemDto> items;
     private BigDecimal subtotal;
     private BigDecimal shippingFee;
+    private int shippingWeightGram;
     private String estimatedDays;
     private String carrier;
     /** true nếu phí ship là ước tính (API lỗi) */
     private boolean shippingEstimate;
+    private String shippingEstimateReason;
 }

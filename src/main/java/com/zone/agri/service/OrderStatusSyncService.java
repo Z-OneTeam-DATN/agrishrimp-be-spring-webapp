@@ -2,10 +2,13 @@ package com.zone.agri.service;
 
 import com.zone.agri.entity.Order;
 import com.zone.agri.entity.SubOrder;
+import com.zone.agri.entity.SubOrderItem;
+import com.zone.agri.entity.enums.FulfillmentStatus;
 import com.zone.agri.entity.enums.OrderCancelReasonCode;
 import com.zone.agri.entity.enums.OrderStatus;
 import com.zone.agri.entity.enums.PaymentMethod;
 import com.zone.agri.entity.enums.PaymentStatus;
+import com.zone.agri.entity.enums.StockStatus;
 import com.zone.agri.exception.NotFoundException;
 import com.zone.agri.repository.OrderRepository;
 import com.zone.agri.repository.SubOrderRepository;
@@ -84,6 +87,7 @@ public class OrderStatusSyncService {
         }
 
         applyOrderStatus(order, nextStatus, LocalDateTime.now());
+        order.setStockStatus(resolveStockStatus(order, activeSubs));
         orderRepository.saveAndFlush(order);
 
         if ((nextStatus == OrderStatus.COMPLETED
@@ -97,6 +101,14 @@ public class OrderStatusSyncService {
 
     private void applyOrderStatus(Order order, OrderStatus status, LocalDateTime changedAt) {
         order.setStatus(status);
+        switch (status) {
+            case PROCESSING -> order.setFulfillmentStatus(FulfillmentStatus.PREPARING);
+            case READY_FOR_PICKUP -> order.setFulfillmentStatus(FulfillmentStatus.READY_TO_SHIP);
+            case SHIPPING -> order.setFulfillmentStatus(FulfillmentStatus.SHIPPING);
+            case RECEIVED, COMPLETED -> order.setFulfillmentStatus(FulfillmentStatus.DELIVERED);
+            case RETURNED -> order.setFulfillmentStatus(FulfillmentStatus.RETURNED);
+            default -> order.setFulfillmentStatus(FulfillmentStatus.NOT_STARTED);
+        }
         if (status == OrderStatus.RECEIVED && order.getReceivedAt() == null) {
             order.setReceivedAt(changedAt);
         }
@@ -114,6 +126,31 @@ public class OrderStatusSyncService {
         if (status == OrderStatus.CANCELLED && order.getCancelledAt() == null) {
             order.setCancelledAt(changedAt);
         }
+    }
+
+    private StockStatus resolveStockStatus(Order order, List<SubOrder> activeSubs) {
+        boolean hasMissingItems = activeSubs.stream()
+                .filter(Objects::nonNull)
+                .flatMap(subOrder -> subOrder.getItems() == null ? java.util.stream.Stream.empty() : subOrder.getItems().stream())
+                .anyMatch(this::hasMissingQuantity);
+
+        if (!hasMissingItems) {
+            return StockStatus.FULLY_AVAILABLE;
+        }
+
+        if (order.getStockStatus() == StockStatus.OUT_OF_STOCK) {
+            return StockStatus.OUT_OF_STOCK;
+        }
+
+        if (order.getStockStatus() == StockStatus.AVAILABLE_AFTER_TRANSFER) {
+            return StockStatus.AVAILABLE_AFTER_TRANSFER;
+        }
+
+        return StockStatus.PARTIALLY_AVAILABLE;
+    }
+
+    private boolean hasMissingQuantity(SubOrderItem item) {
+        return item != null && Objects.requireNonNullElse(item.getMissingQuantity(), 0) > 0;
     }
 
     private int statusWeight(OrderStatus status) {

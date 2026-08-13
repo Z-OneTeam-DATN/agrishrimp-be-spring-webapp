@@ -14,4 +14,6 @@ public class ReplenishmentRequestResponse {
     private String message;
     private List<String> transferCodes;
     private List<String> purchaseRequestCodes;
+    private List<ReplenishmentPlanItem> planItems;
+    private List<String> blockedItems;
 }

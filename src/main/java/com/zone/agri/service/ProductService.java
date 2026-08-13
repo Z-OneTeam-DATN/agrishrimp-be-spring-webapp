@@ -325,6 +325,9 @@ public class ProductService {
             if (variant != null) {
                 // NẾU ĐÃ TỒN TẠI -> Cập nhật thông tin đè lên, KHÔNG TẠO MỚI
                 variant.setBarcode(vDto.getBarcode());
+                if (vDto.getShippingWeight() != null) {
+                    variant.setShippingWeight(normalizeShippingWeight(vDto.getShippingWeight()));
+                }
                 if (finalImageUrl != null) {
                     variant.setImageUrl(finalImageUrl);
                 }
@@ -340,6 +343,7 @@ public class ProductService {
                         .sku(vDto.getSku())
                         .barcode(vDto.getBarcode())
                         .imageUrl(finalImageUrl)
+                        .shippingWeight(normalizeShippingWeight(vDto.getShippingWeight()))
                         .status(VariantStatus.ACTIVE)
                         .build();
                 variant = variantRepository.save(variant);
@@ -673,9 +677,174 @@ public class ProductService {
             return Collections.emptyList();
         }
 
+        User currentUser = getCurrentUser();
+        BigDecimal profitMultiplier = settingService.getProfitMultiplier();
+        String roundingRule = settingService.getProfitRoundingRuleRaw();
+        Map<Long, List<ProductVariant>> activeVariantsByProductId = buildActiveVariantsByProductId(products);
+        Map<Long, List<Inventory>> inventoryMap = loadInventoryMapForVariants(
+                activeVariantsByProductId.values().stream()
+                        .flatMap(List::stream)
+                        .collect(Collectors.toList()));
+
         return products.stream()
-                .map(product -> convertToResponse(product, soldCountMap))
+                .map(product -> convertToResponse(
+                        product,
+                        soldCountMap,
+                        currentUser,
+                        profitMultiplier,
+                        roundingRule,
+                        activeVariantsByProductId,
+                        inventoryMap))
                 .collect(Collectors.toList());
+    }
+
+    private List<ProductResponse> convertToPublicListResponseList(List<Product> products, Map<Long, Long> soldCountMap) {
+        if (products == null || products.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        BigDecimal profitMultiplier = settingService.getProfitMultiplier();
+        String roundingRule = settingService.getProfitRoundingRuleRaw();
+        boolean multiTierPricingEnabled = settingService.isMultiTierPricingEnabled();
+        Map<Long, List<ProductVariant>> activeVariantsByProductId = buildActiveVariantsByProductId(products);
+        Map<Long, List<Inventory>> inventoryMap = loadInventoryMapForVariants(
+                activeVariantsByProductId.values().stream()
+                        .flatMap(List::stream)
+                        .collect(Collectors.toList()));
+
+        return products.stream()
+                .map(product -> convertToPublicListResponse(
+                        product,
+                        soldCountMap,
+                        profitMultiplier,
+                        roundingRule,
+                        multiTierPricingEnabled,
+                        activeVariantsByProductId,
+                        inventoryMap))
+                .collect(Collectors.toList());
+    }
+
+    private ProductResponse convertToPublicListResponse(Product product,
+            Map<Long, Long> soldCountMap,
+            BigDecimal profitMultiplier,
+            String roundingRule,
+            boolean multiTierPricingEnabled,
+            Map<Long, List<ProductVariant>> activeVariantsByProductId,
+            Map<Long, List<Inventory>> inventoryMap) {
+
+        List<String> imageUrls = product.getProductImages() != null
+                ? product.getProductImages().stream().map(ProductImage::getImageUrl).collect(Collectors.toList())
+                : Collections.emptyList();
+
+        List<ProductVariant> activeVariants = activeVariantsByProductId != null
+                ? activeVariantsByProductId.getOrDefault(product.getId(), Collections.emptyList())
+                : getActiveDisplayVariants(product);
+
+        Map<Long, List<Inventory>> safeInventoryMap = inventoryMap != null
+                ? inventoryMap
+                : Collections.emptyMap();
+        List<ProductVariantResponse> variantResponses = activeVariants.stream()
+                .map(variant -> mapPublicListVariantToResponse(
+                        product,
+                        variant,
+                        profitMultiplier,
+                        roundingRule,
+                        multiTierPricingEnabled,
+                        safeInventoryMap.getOrDefault(variant.getId(), List.of())))
+                .filter(variant -> variant.getQuantity() != null && variant.getQuantity() > 0)
+                .collect(Collectors.toList());
+
+        int totalInventory = variantResponses.stream()
+                .map(ProductVariantResponse::getQuantity)
+                .filter(Objects::nonNull)
+                .mapToInt(Integer::intValue)
+                .sum();
+
+        CategoryDTO categoryDTO = null;
+        if (product.getCategory() != null) {
+            categoryDTO = new CategoryDTO();
+            categoryDTO.setId(product.getCategory().getId());
+            categoryDTO.setName(product.getCategory().getName());
+            categoryDTO.setStatus(product.getCategory().getStatus());
+        }
+
+        return ProductResponse.builder()
+                .id(product.getId())
+                .name(product.getName())
+                .slug(product.getSlug())
+                .shortDesc(product.getShortDesc())
+                .description(product.getDescription())
+                .status(product.getStatus() != null ? product.getStatus().name() : null)
+                .brandId(product.getBrand() != null ? product.getBrand().getId() : null)
+                .brandName(product.getBrand() != null ? product.getBrand().getName() : null)
+                .baseSku(product.getBaseSku())
+                .categoryName(product.getCategory() != null ? product.getCategory().getName() : null)
+                .soldCount(soldCountMap.getOrDefault(product.getId(), 0L))
+                .ratingAverage(product.getRatingAverage())
+                .reviewCount(product.getReviewCount())
+                .category(categoryDTO)
+                .inventory(totalInventory)
+                .imageUrls(imageUrls)
+                .variants(variantResponses)
+                .build();
+    }
+
+    private ProductVariantResponse mapPublicListVariantToResponse(Product product,
+            ProductVariant variant,
+            BigDecimal profitMultiplier,
+            String roundingRule,
+            boolean multiTierPricingEnabled,
+            List<Inventory> allInventories) {
+
+        List<Inventory> validBatches = allInventories.stream()
+                .filter(inv -> inv.getQuantity() != null && inv.getQuantity() > 0)
+                .filter(inv -> inv.getBranch() != null && inv.getBranch().getStatus() == BranchStatus.ACTIVE)
+                .collect(Collectors.toList());
+
+        int displayQuantity = validBatches.stream()
+                .map(Inventory::getQuantity)
+                .filter(Objects::nonNull)
+                .mapToInt(Integer::intValue)
+                .sum();
+
+        Map<Long, BigDecimal> transferImportPriceCache = new HashMap<>();
+        BigDecimal averageImportPrice = validBatches.isEmpty() ? null
+                : validBatches.stream()
+                        .map(inv -> resolveDisplayImportPrice(inv, variant.getId(), transferImportPriceCache))
+                        .reduce(BigDecimal.ZERO, BigDecimal::add)
+                        .divide(BigDecimal.valueOf(validBatches.size()), 4, RoundingMode.HALF_UP);
+
+        Long categoryId = product.getCategory() != null ? product.getCategory().getId() : null;
+        BigDecimal sellingPrice = averageImportPrice == null
+                ? null
+                : (multiTierPricingEnabled && categoryId != null
+                        ? settingService.calculateSellingPrice(averageImportPrice, categoryId, null)
+                        : settingService.calculateSellingPrice(averageImportPrice, profitMultiplier, roundingRule));
+
+        List<AttributeValueResponse> attributeValues = variant.getAttributeValues() != null
+                ? variant.getAttributeValues().stream().map(sav -> AttributeValueResponse.builder()
+                        .attributeId(sav.getAttribute().getId())
+                        .attributeName(sav.getAttribute().getName())
+                        .attributeCode(sav.getAttribute().getCode())
+                        .valueId(sav.getAttributeValue().getId())
+                        .value(sav.getAttributeValue().getValue())
+                        .build()).collect(Collectors.toList())
+                : Collections.emptyList();
+
+        return ProductVariantResponse.builder()
+                .id(variant.getId())
+                .sku(variant.getSku())
+                .barcode(variant.getBarcode())
+                .productName(product.getName())
+                .quantity(displayQuantity)
+                .price(sellingPrice)
+                .importPrice(null)
+                .shippingWeight(variant.getShippingWeight())
+                .imageUrl(variant.getImageUrl())
+                .status(variant.getStatus())
+                .attributeValues(attributeValues)
+                .batches(Collections.emptyList())
+                .build();
     }
 
     private List<ProductVariant> getActiveDisplayVariants(Product product) {
@@ -687,6 +856,36 @@ public class ProductService {
                 .filter(variant -> variant.getStatus() == VariantStatus.ACTIVE)
                 .filter(this::hasOnlyActiveAttributes)
                 .collect(Collectors.toList());
+    }
+
+    private Map<Long, List<ProductVariant>> buildActiveVariantsByProductId(List<Product> products) {
+        Map<Long, List<ProductVariant>> result = new LinkedHashMap<>();
+        for (Product product : products) {
+            if (product != null) {
+                result.put(product.getId(), getActiveDisplayVariants(product));
+            }
+        }
+        return result;
+    }
+
+    private Map<Long, List<Inventory>> loadInventoryMapForVariants(List<ProductVariant> variants) {
+        if (variants == null || variants.isEmpty()) {
+            return Collections.emptyMap();
+        }
+
+        List<Long> variantIds = variants.stream()
+                .map(ProductVariant::getId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .collect(Collectors.toList());
+
+        if (variantIds.isEmpty()) {
+            return Collections.emptyMap();
+        }
+
+        return inventoryRepository.findByProductVariantIdInWithBranch(variantIds).stream()
+                .filter(inv -> inv.getProductVariant() != null && inv.getProductVariant().getId() != null)
+                .collect(Collectors.groupingBy(inv -> inv.getProductVariant().getId()));
     }
 
     private ProductResponse convertToResponse(Product product, Map<Long, Long> soldCountMap) {
@@ -729,6 +928,67 @@ public class ProductService {
                 .sum();
 
         // ... (Phần map Category và Brand giữ nguyên như code cũ của Huy)
+        CategoryDTO categoryDTO = null;
+        if (product.getCategory() != null) {
+            categoryDTO = new CategoryDTO();
+            categoryDTO.setId(product.getCategory().getId());
+            categoryDTO.setName(product.getCategory().getName());
+            categoryDTO.setStatus(product.getCategory().getStatus());
+        }
+
+        return ProductResponse.builder()
+                .id(product.getId())
+                .name(product.getName())
+                .slug(product.getSlug())
+                .shortDesc(product.getShortDesc())
+                .description(product.getDescription())
+                .status(product.getStatus() != null ? product.getStatus().name() : null)
+                .brandId(product.getBrand() != null ? product.getBrand().getId() : null)
+                .brandName(product.getBrand() != null ? product.getBrand().getName() : null)
+                .baseSku(product.getBaseSku())
+                .categoryName(product.getCategory() != null ? product.getCategory().getName() : null)
+                .soldCount(soldCountMap.getOrDefault(product.getId(), 0L))
+                .ratingAverage(product.getRatingAverage())
+                .reviewCount(product.getReviewCount())
+                .category(categoryDTO)
+                .inventory(totalInventory)
+                .imageUrls(imageUrls)
+                .variants(variantResponses)
+                .build();
+    }
+
+    private ProductResponse convertToResponse(Product product,
+            Map<Long, Long> soldCountMap,
+            User currentUser,
+            BigDecimal profitMultiplier,
+            String roundingRule,
+            Map<Long, List<ProductVariant>> activeVariantsByProductId,
+            Map<Long, List<Inventory>> inventoryMap) {
+
+        List<String> imageUrls = product.getProductImages() != null
+                ? product.getProductImages().stream().map(ProductImage::getImageUrl).collect(Collectors.toList())
+                : Collections.emptyList();
+
+        List<ProductVariant> activeVariants = activeVariantsByProductId != null
+                ? activeVariantsByProductId.getOrDefault(product.getId(), Collections.emptyList())
+                : getActiveDisplayVariants(product);
+
+        Map<Long, List<Inventory>> safeInventoryMap = inventoryMap != null
+                ? inventoryMap
+                : Collections.emptyMap();
+        List<ProductVariantResponse> variantResponses = activeVariants.stream()
+                .map(variant -> {
+                    List<Inventory> variantInventories = safeInventoryMap.getOrDefault(variant.getId(), List.of());
+                    return mapVariantToResponse(variant, currentUser, profitMultiplier, roundingRule, variantInventories);
+                })
+                .collect(Collectors.toList());
+
+        int totalInventory = variantResponses.stream()
+                .map(ProductVariantResponse::getQuantity)
+                .filter(Objects::nonNull)
+                .mapToInt(Integer::intValue)
+                .sum();
+
         CategoryDTO categoryDTO = null;
         if (product.getCategory() != null) {
             categoryDTO = new CategoryDTO();
@@ -866,11 +1126,16 @@ public class ProductService {
                 .quantity(displayQuantity)
                 .price(sellingPriceByAverageImport)
                 .importPrice(averageImportPrice)
+                .shippingWeight(variant.getShippingWeight())
                 .imageUrl(variant.getImageUrl())
                 .status(variant.getStatus())
                 .attributeValues(attributeValues)
                 .batches(batchDtos)
                 .build();
+    }
+
+    private BigDecimal normalizeShippingWeight(BigDecimal value) {
+        return value != null && value.compareTo(BigDecimal.ZERO) > 0 ? value : null;
     }
 
     private BigDecimal resolveDisplayImportPrice(Inventory inventory, Long variantId, Map<Long, BigDecimal> transferImportPriceCache) {
@@ -990,6 +1255,7 @@ public class ProductService {
                     .barcode(vReq.getBarcode())
                     .imageUrl(imageUrl)
                     .imagePublicId(imagePublicId)
+                    .shippingWeight(normalizeShippingWeight(vReq.getShippingWeight()))
                     .status(VariantStatus.ACTIVE)
                     .build();
 
@@ -1043,7 +1309,7 @@ public class ProductService {
         Map<Long, Long> soldCountMap = buildSoldCountMap(
                 products.stream().map(Product::getId).toList());
 
-        return convertToResponseList(products, soldCountMap).stream()
+        return convertToPublicListResponseList(products, soldCountMap).stream()
                 .filter(p -> p.getInventory() != null && p.getInventory() > 0)
                 .collect(Collectors.toList());
     }
@@ -1095,7 +1361,7 @@ public class ProductService {
         List<Product> products = productRepository.findPublicByIds(productIds);
         Map<Long, Long> soldCountMap = buildSoldCountMap(productIds);
 
-        return convertToResponseList(products, soldCountMap).stream()
+        return convertToPublicListResponseList(products, soldCountMap).stream()
                 .filter(p -> p.getInventory() != null && p.getInventory() > 0)
                 .collect(Collectors.toList());
     }
@@ -1144,6 +1410,8 @@ public class ProductService {
         PublicProductSort sortOption = parsePublicProductSort(sort);
         boolean hasPackagingValueIdFilter = !packagingValueIdList.isEmpty();
         boolean hasPackagingFilter = hasPackagingValueIdFilter || !packagingValues.isEmpty();
+        boolean hasPriceFilter = minPrice != null || maxPrice != null;
+        boolean needsPostMappingPagination = hasPriceFilter || hasPackagingFilter;
         List<Long> categoryIds = resolveCategoryFilterIds(categoryId);
         boolean hasCategoryFilter = !categoryIds.isEmpty();
         String normalizedKeyword = blankToNull(keyword);
@@ -1151,7 +1419,9 @@ public class ProductService {
         List<Long> keywordBrandIds = resolveKeywordBrandFilterIds(normalizedKeyword);
         boolean hasKeywordCategoryFilter = !keywordCategoryIds.isEmpty();
         boolean hasKeywordBrandFilter = !keywordBrandIds.isEmpty();
-        Pageable lookupPageable = PageRequest.of(0, PRICE_FILTER_SCAN_LIMIT);
+        Pageable lookupPageable = needsPostMappingPagination
+                ? PageRequest.of(0, PRICE_FILTER_SCAN_LIMIT)
+                : pageable;
 
         Page<Long> productIdsPage = productRepository.findPublicProductIdsFiltered(
                 normalizedKeyword,
@@ -1182,12 +1452,16 @@ public class ProductService {
                 .filter(Objects::nonNull)
                 .collect(Collectors.toList());
 
-        List<ProductResponse> productResponses = convertToResponseList(orderedProducts, soldCountMap).stream()
+        List<ProductResponse> productResponses = convertToPublicListResponseList(orderedProducts, soldCountMap).stream()
                 .map(p -> applyPublicListVariantFilters(p, minPrice, maxPrice, packagingValueIdList, packagingValues))
                 .filter(p -> p.getVariants() != null && !p.getVariants().isEmpty())
                 .collect(Collectors.toList());
 
         productResponses.sort(buildPublicProductComparator(sortOption, productsById));
+
+        if (!needsPostMappingPagination) {
+            return new PageImpl<>(productResponses, pageable, productIdsPage.getTotalElements());
+        }
 
         int fromIndex = (int) Math.min(pageable.getOffset(), productResponses.size());
         int toIndex = Math.min(fromIndex + pageable.getPageSize(), productResponses.size());

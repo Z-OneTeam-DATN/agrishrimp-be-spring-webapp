@@ -118,7 +118,11 @@ public class BranchSearchService {
                             .thenComparing(candidate -> candidate.branch().getId(), Comparator.nullsLast(Long::compareTo)))
                     .toList();
 
-            return enrichWithRealDistance(userLat, userLng, rankedByDistance);
+            return applyAdministrativeFallbackOrdering(
+                    enrichWithRealDistance(userLat, userLng, rankedByDistance),
+                    provinceId,
+                    districtId,
+                    normalizedWardCode);
         }
 
         List<Branch> rankedWithoutCoordinates = allActive.stream()
@@ -236,17 +240,52 @@ public class BranchSearchService {
         for (int index = 0; index < branches.size(); index++) {
             Branch branch = branches.get(index);
             int score = administrativeMatchScore(branch, provinceId, districtId, wardCode);
-            double distanceKm = switch (score) {
-                case 0 -> 1.0;
-                case 1 -> 4.0;
-                case 2 -> 12.0;
-                default -> 30.0;
-            } + (index * 0.1);
+            double distanceKm = administrativeDistanceForScore(score) + (index * 0.1);
             double durationSec = estimateDuration(distanceKm);
             ranked.add(new BranchWithRealDistance(branch, distanceKm, durationSec, durationSec / 60.0));
         }
 
         return ranked;
+    }
+
+    private List<BranchWithRealDistance> applyAdministrativeFallbackOrdering(
+            List<BranchWithRealDistance> branches,
+            Integer provinceId,
+            Integer districtId,
+            String wardCode) {
+        return branches.stream()
+                .map(candidate -> withAdministrativeFallbackDistance(candidate, provinceId, districtId, wardCode))
+                .sorted(Comparator
+                        .comparingInt((BranchWithRealDistance candidate) ->
+                                administrativeMatchScore(candidate.branch(), provinceId, districtId, wardCode))
+                        .thenComparingDouble(BranchWithRealDistance::durationSeconds)
+                        .thenComparingDouble(BranchWithRealDistance::distanceKm)
+                        .thenComparing(candidate -> candidate.branch().getId(), Comparator.nullsLast(Long::compareTo)))
+                .toList();
+    }
+
+    private BranchWithRealDistance withAdministrativeFallbackDistance(
+            BranchWithRealDistance candidate,
+            Integer provinceId,
+            Integer districtId,
+            String wardCode) {
+        if (candidate == null || candidate.branch() == null || candidate.branch().getDistrictId() != null) {
+            return candidate;
+        }
+
+        int score = administrativeMatchScore(candidate.branch(), provinceId, districtId, wardCode);
+        double distanceKm = administrativeDistanceForScore(score);
+        double durationSec = estimateDuration(distanceKm);
+        return new BranchWithRealDistance(candidate.branch(), distanceKm, durationSec, durationSec / 60.0);
+    }
+
+    private double administrativeDistanceForScore(int score) {
+        return switch (score) {
+            case 0 -> 1.0;
+            case 1 -> 4.0;
+            case 2 -> 12.0;
+            default -> 30.0;
+        };
     }
 
     private int administrativeMatchScore(Branch branch, Integer provinceId, Integer districtId, String wardCode) {
@@ -258,10 +297,13 @@ public class BranchSearchService {
         if (wardCode != null && wardCode.equals(branchWardCode)) {
             return 0;
         }
-        if (provinceId != null && provinceId.equals(branch.getProvinceId())) {
+        if (districtId != null && districtId.equals(branch.getDistrictId())) {
             return 1;
         }
-        return 2;
+        if (provinceId != null && provinceId.equals(branch.getProvinceId())) {
+            return 2;
+        }
+        return 3;
     }
 
     private String normalizeWardCode(String wardCode) {

@@ -95,9 +95,9 @@ public class BackorderService {
                 SubOrder subOrder = subOrderRepository.findById(subOrderId)
                         .orElseThrow(() -> new NotFoundException("Khong tim thay sub-order ID: " + subOrderId));
                 if (subOrder.getStatus() == OrderStatus.AWAITING_REPLENISHMENT) {
-                    subOrder.setStatus(OrderStatus.PENDING);
+                    subOrder.setStatus(OrderStatus.PROCESSING);
                     subOrderRepository.save(subOrder);
-                    log.info("Backorder fulfilled for sub-order {}", subOrderId);
+                    log.info("Backorder fulfilled for sub-order {} and resumed to PROCESSING", subOrderId);
                 }
             }
         }

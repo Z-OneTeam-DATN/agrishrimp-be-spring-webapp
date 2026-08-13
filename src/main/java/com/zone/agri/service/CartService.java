@@ -43,6 +43,7 @@ public class CartService {
     private final InventoryTransactionRepository inventoryTransactionRepository;
     private final SKUAttributeValueRepository skuAttributeValueRepo;
     private final SettingService settingService;
+    private final PublicSellingPriceService publicSellingPriceService;
 
     @Transactional(readOnly = true)
     public List<CartItemResponse> getMyCart(Long userId) {
@@ -96,7 +97,7 @@ public class CartService {
             Long categoryId = (product != null && product.getCategory() != null) ? product.getCategory().getId() : null;
             java.time.LocalDateTime expiryDate = fifoBatch != null ? fifoBatch.getExpiryDate() : null;
 
-            BigDecimal sellingPrice = settingService.calculateSellingPrice(fifoImportPrice, categoryId, expiryDate);
+            BigDecimal sellingPrice = publicSellingPriceService.resolveDisplayedVariantPrice(variant);
 
             return CartItemResponse.builder()
                     .id(item.getId())

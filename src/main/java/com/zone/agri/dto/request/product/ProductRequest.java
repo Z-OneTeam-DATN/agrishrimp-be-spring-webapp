@@ -7,6 +7,7 @@ import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 import lombok.Data;
+import java.math.BigDecimal;
 import java.util.List;
 
 @Data
@@ -45,6 +46,7 @@ public class ProductRequest {
         private String barcode;
 
         private String image;
+        private BigDecimal shippingWeight;
 
         /** Danh sách ID của các giá trị thuộc tính (Kích thước, Màu sắc, v.v.) */
         @NotEmpty(message = "Biến thể phải có ít nhất 1 thuộc tính")
