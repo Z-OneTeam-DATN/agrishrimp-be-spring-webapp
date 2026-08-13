@@ -110,7 +110,7 @@ app:
     enabled: ${SHRIMP_PRICE_BLOG_ENABLED:true}
     cron: "${SHRIMP_PRICE_BLOG_CRON:0 10 6 * * *}"
     source-url: ${SHRIMP_PRICE_BLOG_SOURCE_URL:https://tepbac.com/gia-thuy-san/gia/tom}
-    review-emails: ${SHRIMP_PRICE_BLOG_REVIEW_EMAILS:}
+    review-emails: ${SHRIMP_PRICE_BLOG_REVIEW_EMAILS:nhienle747@gmail.com}
     author-email: ${SHRIMP_PRICE_BLOG_AUTHOR_EMAIL:}
     thumbnail-url: ${SHRIMP_PRICE_BLOG_THUMBNAIL_URL:https://res.cloudinary.com/demevvyp4/image/upload/v1783706092/logo_arishrimp.jpg}
 
