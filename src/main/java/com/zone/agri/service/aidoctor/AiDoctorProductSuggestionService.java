@@ -2,7 +2,6 @@ package com.zone.agri.service.aidoctor;
 
 import com.zone.agri.dto.response.ai.SuggestedProductResponse;
 import com.zone.agri.entity.Product;
-import com.zone.agri.entity.ProductImage;
 import com.zone.agri.entity.enums.ProductStatus;
 import com.zone.agri.repository.InventoryRepository;
 import com.zone.agri.repository.ProductRepository;
@@ -174,12 +173,7 @@ public class AiDoctorProductSuggestionService {
     }
 
     private SuggestedProductResponse toSuggestedProductResponse(Product p, Map<Long, Long> priceMap) {
-        String imageUrl = (p.getProductImages() != null)
-                ? p.getProductImages().stream()
-                        .findFirst()
-                        .map(ProductImage::getImageUrl)
-                        .orElse(null)
-                : null;
+        String imageUrl = resolveProductImageUrl(p);
 
         String webUrl = (p.getSlug() != null && !p.getSlug().isBlank())
                 ? webBaseUrl + "/san-pham/" + p.getSlug()
@@ -192,5 +186,42 @@ public class AiDoctorProductSuggestionService {
                 .price(resolveProductPrice(p, priceMap))
                 .webUrl(webUrl)
                 .build();
+    }
+
+    private String resolveProductImageUrl(Product product) {
+        if (product == null) {
+            return null;
+        }
+
+        if (product.getProductImages() != null) {
+            String productImage = product.getProductImages().stream()
+                    .map(image -> firstImageUrl(image != null ? image.getImageUrl() : null))
+                    .filter(imageUrl -> imageUrl != null && !imageUrl.isBlank())
+                    .findFirst()
+                    .orElse(null);
+            if (productImage != null) {
+                return productImage;
+            }
+        }
+
+        if (product.getVariants() == null) {
+            return null;
+        }
+        return product.getVariants().stream()
+                .map(variant -> firstImageUrl(variant != null ? variant.getImageUrl() : null))
+                .filter(imageUrl -> imageUrl != null && !imageUrl.isBlank())
+                .findFirst()
+                .orElse(null);
+    }
+
+    private String firstImageUrl(String imageUrl) {
+        if (imageUrl == null || imageUrl.isBlank()) {
+            return null;
+        }
+        return Arrays.stream(imageUrl.split(","))
+                .map(String::trim)
+                .filter(url -> !url.isBlank())
+                .findFirst()
+                .orElse(null);
     }
 }
