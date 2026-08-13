@@ -150,4 +150,13 @@ public interface UserRepository extends JpaRepository<User, Long> {
                         "((:branchId IS NULL AND u.branch IS NULL) OR (:branchId IS NOT NULL AND u.branch.id = :branchId))")
         List<User> findUsersByPermissionCodeAndBranch(@Param("permissionCode") String permissionCode,
                         @Param("branchId") Long branchId);
+
+        @Query("SELECT DISTINCT u FROM User u LEFT JOIN u.role r LEFT JOIN r.permissions p WHERE " +
+                        "u.email IS NOT NULL AND u.email <> '' AND " +
+                        "u.status = com.zone.agri.entity.enums.UserStatus.ACTIVE AND " +
+                        "(r.slug = :roleSlug OR p.code = :permissionCode) " +
+                        "ORDER BY u.id ASC")
+        List<User> findActiveUsersByRoleSlugOrPermissionCode(
+                        @Param("roleSlug") String roleSlug,
+                        @Param("permissionCode") String permissionCode);
 }

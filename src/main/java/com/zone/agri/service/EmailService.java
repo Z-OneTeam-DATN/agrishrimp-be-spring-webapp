@@ -4,6 +4,7 @@ import com.resend.Resend;
 import com.resend.core.exception.ResendException;
 import com.resend.services.emails.model.CreateEmailOptions;
 import com.resend.services.emails.model.CreateEmailResponse;
+import com.zone.agri.entity.BlogPost;
 import com.zone.agri.entity.Order;
 import com.zone.agri.entity.PurchaseRequest;
 import com.zone.agri.entity.Voucher;
@@ -398,6 +399,53 @@ public class EmailService {
         sendEmail(toEmail, subject, htmlContent);
     }
 
+    public void sendShrimpPriceBlogReadyEmail(
+            String toEmail,
+            String recipientName,
+            BlogPost post,
+            String reviewUrl,
+            int priceRowCount,
+            String priceRangeLabel,
+            String sourceDateLabel) {
+        String safeName = recipientName == null || recipientName.isBlank()
+                ? "Admin"
+                : escapeEmailText(recipientName.trim());
+        String safeTitle = escapeEmailText(post != null ? post.getTitle() : "Bài giá tôm miền Tây hôm nay");
+        String safeRange = escapeEmailText(priceRangeLabel);
+        String safeSourceDate = escapeEmailText(sourceDateLabel);
+        String safeUrl = reviewUrl == null || reviewUrl.isBlank() ? LOGIN_URL : reviewUrl.trim();
+
+        String subject = "[AgriShrimp] Bài giá tôm miền Tây hôm nay đang chờ duyệt";
+        String body = """
+                <p style="font-size:16px;color:#374151;line-height:1.8;">
+                    Xin chào <strong>%s</strong>,
+                </p>
+                <p style="font-size:15px;color:#374151;line-height:1.8;">
+                    AI đã tạo xong bài viết giá tôm hằng ngày và chuyển vào trạng thái
+                    <strong>chờ duyệt</strong> trong admin.
+                </p>
+
+                <div style="background:#f0f9ff;border-left:4px solid #1e40af;border-radius:8px;padding:14px 18px;margin:16px 0;">
+                    <p style="margin:0 0 8px;font-size:14px;color:#1e40af;line-height:1.7;">
+                        <strong>Tiêu đề:</strong> %s
+                    </p>
+                    <p style="margin:0 0 8px;font-size:14px;color:#1e40af;line-height:1.7;">
+                        <strong>Dữ liệu:</strong> %d dòng giá tôm miền Tây, %s
+                    </p>
+                    <p style="margin:0;font-size:14px;color:#1e40af;line-height:1.7;">
+                        <strong>Nguồn cập nhật:</strong> Tép Bạc ngày %s
+                    </p>
+                </div>
+
+                <p style="font-size:14px;color:#6b7280;line-height:1.7;">
+                    Vui lòng kiểm tra bảng giá, chỉnh sửa nếu cần rồi duyệt/xuất bản bài viết.
+                </p>
+                """.formatted(safeName, safeTitle, priceRowCount, safeRange, safeSourceDate);
+
+        String htmlContent = buildEmailTemplate("Bài Giá Tôm Chờ Duyệt", body, safeUrl, "Mở bài trong admin");
+        sendEmail(toEmail, subject, htmlContent);
+    }
+
     private String orderStatusLabel(OrderStatus status) {
         return switch (status) {
             case CONFIRMED -> "Đã xác nhận";
@@ -572,5 +620,17 @@ public class EmailService {
         formatter.setMaximumFractionDigits(0);
         formatter.setRoundingMode(RoundingMode.HALF_UP);
         return formatter.format(safeAmount) + " VND";
+    }
+
+    private String escapeEmailText(String value) {
+        if (value == null) {
+            return "";
+        }
+        return value
+                .replace("&", "&amp;")
+                .replace("<", "&lt;")
+                .replace(">", "&gt;")
+                .replace("\"", "&quot;")
+                .replace("'", "&#39;");
     }
 }

@@ -10,6 +10,7 @@ import com.zone.agri.dto.response.blog.BlogPostResponse;
 import com.zone.agri.dto.response.common.ApiResponse;
 import com.zone.agri.security.annotation.RequirePermission;
 import com.zone.agri.service.BlogService;
+import com.zone.agri.service.ShrimpPriceBlogAutomationService;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
@@ -22,6 +23,7 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/api/blog")
@@ -31,6 +33,7 @@ import java.util.List;
 public class AdminBlogController {
 
     private final BlogService blogService;
+    private final ShrimpPriceBlogAutomationService shrimpPriceBlogAutomationService;
     private final ObjectMapper objectMapper;
 
     // ─── CATEGORIES ────────────────────────────────────────────────────────────
@@ -152,5 +155,20 @@ public class AdminBlogController {
     public ResponseEntity<ApiResponse<Void>> deletePost(@PathVariable Long id) {
         blogService.delete(id);
         return ResponseEntity.ok(ApiResponse.success(null, "Đã xóa bài viết"));
+    }
+
+    @PostMapping("/automations/shrimp-price/run")
+    @RequirePermission("BLOG_APPROVE")
+    public ResponseEntity<ApiResponse<Map<String, Object>>> runShrimpPriceBlogAutomation() {
+        BlogPostResponse post = blogService.getById(
+                shrimpPriceBlogAutomationService.createDailyShrimpPriceBlogDraftNow().getId());
+        return ResponseEntity.ok(ApiResponse.success(
+                Map.of(
+                        "id", post.getId(),
+                        "slug", post.getSlug(),
+                        "status", post.getStatus(),
+                        "title", post.getTitle()
+                ),
+                "Đã tạo bài giá tôm miền Tây và gửi admin duyệt"));
     }
 }
