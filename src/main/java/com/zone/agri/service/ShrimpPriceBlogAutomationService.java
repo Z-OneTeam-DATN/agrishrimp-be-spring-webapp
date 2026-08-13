@@ -31,7 +31,6 @@ import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -52,29 +51,13 @@ public class ShrimpPriceBlogAutomationService {
     private static final Locale VI_LOCALE = Locale.forLanguageTag("vi-VN");
     private static final DateTimeFormatter DISPLAY_DATE_FORMAT = DateTimeFormatter.ofPattern("dd/MM/yyyy", VI_LOCALE);
     private static final DateTimeFormatter SLUG_DATE_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM-dd");
-    private static final String SOURCE_NAME = "Tép Bạc";
     private static final String DEFAULT_SOURCE_URL = "https://tepbac.com/gia-thuy-san/gia/tom";
-    private static final String CATEGORY_NAME = "Giá tôm miền Tây";
-    private static final String CATEGORY_SLUG = "gia-tom-mien-tay";
+    private static final String CATEGORY_NAME = "Giá tôm hôm nay";
+    private static final String CATEGORY_SLUG = "gia-tom-hom-nay";
     private static final String DEFAULT_THUMBNAIL_URL =
             "https://res.cloudinary.com/demevvyp4/image/upload/v1783706092/logo_arishrimp.jpg";
     private static final Pattern SOURCE_DATE_PATTERN = Pattern.compile("Cập nhật ngày\\s*(\\d{1,2}/\\d{1,2}/\\d{4})");
     private static final Pattern PRICE_DIGIT_PATTERN = Pattern.compile("\\d+");
-    private static final Map<String, String> MEKONG_LOCATION_LABELS = Map.ofEntries(
-            Map.entry("an giang", "An Giang"),
-            Map.entry("bac lieu", "Bạc Liêu"),
-            Map.entry("ben tre", "Bến Tre"),
-            Map.entry("ca mau", "Cà Mau"),
-            Map.entry("can tho", "Cần Thơ"),
-            Map.entry("dong thap", "Đồng Tháp"),
-            Map.entry("hau giang", "Hậu Giang"),
-            Map.entry("kien giang", "Kiên Giang"),
-            Map.entry("long an", "Long An"),
-            Map.entry("soc trang", "Sóc Trăng"),
-            Map.entry("tien giang", "Tiền Giang"),
-            Map.entry("tra vinh", "Trà Vinh"),
-            Map.entry("vinh long", "Vĩnh Long")
-    );
 
     private final BlogPostRepository blogPostRepository;
     private final BlogCategoryRepository blogCategoryRepository;
@@ -128,7 +111,7 @@ public class ShrimpPriceBlogAutomationService {
         ScrapedShrimpPriceData priceData = fetchShrimpPriceData();
 
         if (priceData.rows().isEmpty()) {
-            throw new IllegalStateException("Không tìm thấy dòng giá tôm thương phẩm miền Tây từ nguồn " + sourceUrl);
+            throw new IllegalStateException("Không tìm thấy dòng giá tôm thương phẩm từ nguồn dữ liệu");
         }
 
         String displayDate = priceData.sourceDateLabel() != null && !priceData.sourceDateLabel().isBlank()
@@ -154,10 +137,7 @@ public class ShrimpPriceBlogAutomationService {
             String sourceDateLabel = extractSourceDateLabel(doc);
             List<ShrimpPriceRow> parsedRows = parsePriceRows(doc);
             List<ShrimpPriceRow> rows = parsedRows.stream()
-                    .filter(this::isCommercialMekongShrimpPrice)
-                    .sorted(Comparator
-                            .comparing(ShrimpPriceRow::groupLabel, String.CASE_INSENSITIVE_ORDER)
-                            .thenComparing(ShrimpPriceRow::priceValue, Comparator.nullsLast(Comparator.reverseOrder())))
+                    .filter(this::isCommercialShrimpPrice)
                     .toList();
 
             log.info("Shrimp price source parsed: sourceDateLabel={}, parsedRows={}, filteredRows={}",
@@ -169,7 +149,7 @@ public class ShrimpPriceBlogAutomationService {
 
             return new ScrapedShrimpPriceData(sourceDateLabel, rows);
         } catch (IOException ex) {
-            throw new IllegalStateException("Không đọc được nguồn giá tôm từ " + sourceUrl, ex);
+            throw new IllegalStateException("Không đọc được dữ liệu giá tôm tự động", ex);
         }
     }
 
@@ -199,26 +179,37 @@ public class ShrimpPriceBlogAutomationService {
                 }
 
                 String rawName = cells.get(0).text().trim();
+                String sizeText = resolveSizeText(cells);
                 String priceText = resolvePriceText(cells);
                 String changeText = resolveChangeText(cells);
+                String updatedText = resolveUpdatedText(cells);
                 Long priceValue = parsePriceValue(priceText);
                 String itemName = stripLeadingCode(rawName);
 
                 if (!rawName.isBlank() && !priceText.isBlank()) {
                     rows.add(new ShrimpPriceRow(
                             normalizeGroupLabel(groupForRows, itemName),
+                            extractCode(rawName),
                             rawName,
                             itemName,
+                            sizeText,
                             priceText,
                             priceValue,
                             changeText,
-                            resolveScopeNote(itemName)
+                            updatedText
                     ));
                 }
             }
         }
 
         return rows;
+    }
+
+    private String resolveSizeText(Elements cells) {
+        if (cells.size() >= 2 && !looksLikeKgPrice(cells.get(1).text())) {
+            return cells.get(1).text().trim();
+        }
+        return "";
     }
 
     private String resolvePriceText(Elements cells) {
@@ -247,12 +238,16 @@ public class ShrimpPriceBlogAutomationService {
         return "";
     }
 
+    private String resolveUpdatedText(Elements cells) {
+        return cells.size() >= 5 ? cells.get(4).text().trim() : "";
+    }
+
     private boolean looksLikeKgPrice(String value) {
         String normalized = normalizeVietnamese(value);
         return normalized.contains("/kg") || normalized.contains("d/kg") || normalized.contains("dong/kg");
     }
 
-    private boolean isCommercialMekongShrimpPrice(ShrimpPriceRow row) {
+    private boolean isCommercialShrimpPrice(ShrimpPriceRow row) {
         String normalized = normalizeVietnamese(row.rawName() + " " + row.itemName() + " " + row.groupLabel());
         if (!normalized.contains("tom")) {
             return false;
@@ -266,9 +261,7 @@ public class ShrimpPriceBlogAutomationService {
         if (normalized.contains("tom hum")) {
             return false;
         }
-        return normalized.contains("tai ao")
-                || normalized.contains("(ao)")
-                || MEKONG_LOCATION_LABELS.keySet().stream().anyMatch(normalized::contains);
+        return looksLikeKgPrice(row.priceText());
     }
 
     private ShrimpPriceBlogDraftSuggestion suggestDraft(
@@ -277,11 +270,13 @@ public class ShrimpPriceBlogAutomationService {
             String priceRangeLabel,
             List<ShrimpPriceRow> rows) {
         String rowsText = rows.stream()
-                .map(row -> "- %s | %s | %s | %s".formatted(
+                .map(row -> "- %s | %s | size %s | %s | %s | cập nhật %s".formatted(
                         row.groupLabel(),
                         row.itemName(),
+                        blankToDefault(row.sizeText(), "không ghi rõ"),
                         formatPriceLabel(row),
-                        blankToDefault(row.changeText(), "Không ghi nhận")))
+                        blankToDefault(row.changeText(), "Không ghi nhận"),
+                        blankToDefault(row.updatedText(), "Đang cập nhật")))
                 .collect(Collectors.joining("\n"));
 
         try {
@@ -303,7 +298,7 @@ public class ShrimpPriceBlogAutomationService {
             ScrapedShrimpPriceData priceData,
             ShrimpPriceBlogDraftSuggestion suggestion,
             String priceRangeLabel) {
-        String slug = "gia-tom-mien-tay-hom-nay-" + SLUG_DATE_FORMAT.format(reportDate);
+        String slug = "gia-tom-hom-nay-" + SLUG_DATE_FORMAT.format(reportDate);
         Optional<BlogPost> existingPost = blogPostRepository.findBySlug(slug);
 
         if (existingPost.isPresent() && existingPost.get().getStatus() == BlogPostStatus.PUBLISHED) {
@@ -312,7 +307,7 @@ public class ShrimpPriceBlogAutomationService {
         }
 
         BlogCategory category = resolveCategory();
-        Set<BlogTag> tags = resolveTags(List.of("Giá tôm", "Giá tôm miền Tây", "Thị trường tôm"));
+        Set<BlogTag> tags = resolveTags(List.of("Giá tôm", "Giá tôm hôm nay", "Thị trường tôm"));
         User author = resolveAuthor().orElse(null);
         String content = buildArticleContent(displayDate, priceData, suggestion, priceRangeLabel);
 
@@ -340,7 +335,7 @@ public class ShrimpPriceBlogAutomationService {
                 .orElseGet(() -> blogCategoryRepository.save(BlogCategory.builder()
                         .name(CATEGORY_NAME)
                         .slug(CATEGORY_SLUG)
-                        .description("Bảng giá tôm thương phẩm miền Tây được cập nhật tự động hằng ngày.")
+                        .description("Bảng giá tôm thương phẩm được cập nhật tự động hằng ngày.")
                         .status(BlogCategoryStatus.ACTIVE)
                         .build()));
     }
@@ -438,7 +433,6 @@ public class ShrimpPriceBlogAutomationService {
             ShrimpPriceBlogDraftSuggestion suggestion,
             String priceRangeLabel) {
         List<ShrimpPriceRow> rows = priceData.rows();
-        String sourceDateLabel = blankToDefault(priceData.sourceDateLabel(), displayDate);
         Map<String, List<ShrimpPriceRow>> groupedRows = rows.stream()
                 .collect(Collectors.groupingBy(
                         ShrimpPriceRow::groupLabel,
@@ -446,45 +440,45 @@ public class ShrimpPriceBlogAutomationService {
                         Collectors.toList()));
 
         StringBuilder html = new StringBuilder();
-        html.append("<h2>Giá tôm miền Tây hôm nay ").append(escapeHtml(displayDate)).append("</h2>\n");
+        html.append("<h2>Giá tôm hôm nay ").append(escapeHtml(displayDate)).append("</h2>\n");
         html.append("<p>").append(escapeHtml(suggestion.getMarketSummary())).append("</p>\n");
-        html.append("<p>Bài viết chỉ tổng hợp giá tôm thương phẩm trong phạm vi miền Tây/tại ao từ nguồn ")
-                .append("<a href=\"").append(escapeHtml(sourceUrl)).append("\">").append(SOURCE_NAME).append("</a>")
-                .append(", bỏ các dòng tôm giống/Post và các loại ngoài phạm vi.</p>\n");
+        html.append("<p>Bài viết tổng hợp các dòng giá tôm thương phẩm theo kg, đã loại bỏ tôm giống/Post và các dòng ngoài nhóm tôm thương phẩm.</p>\n");
 
-        html.append("<h2>Bảng giá tôm miền Tây hôm nay</h2>\n");
-        html.append("<table><thead><tr>")
-                .append("<th>Nhóm tôm</th>")
-                .append("<th>Loại/size</th>")
-                .append("<th>Giá hôm nay</th>")
-                .append("<th>Biến động</th>")
-                .append("<th>Ghi chú</th>")
-                .append("</tr></thead><tbody>\n");
+        html.append("<h2>Bảng giá tôm hôm nay</h2>\n");
 
         for (Map.Entry<String, List<ShrimpPriceRow>> entry : groupedRows.entrySet()) {
+            html.append("<h3>").append(escapeHtml(entry.getKey()))
+                    .append(" (").append(entry.getValue().size()).append(" loại)")
+                    .append("</h3>\n");
+            html.append("<table><thead><tr>")
+                    .append("<th>Mã / Loài</th>")
+                    .append("<th>Size</th>")
+                    .append("<th>Giá</th>")
+                    .append("<th>Thay đổi</th>")
+                    .append("<th>Cập nhật</th>")
+                    .append("</tr></thead><tbody>\n");
             for (ShrimpPriceRow row : entry.getValue()) {
                 html.append("<tr>")
-                        .append("<td>").append(escapeHtml(entry.getKey())).append("</td>")
-                        .append("<td>").append(escapeHtml(row.itemName())).append("</td>")
+                        .append("<td>")
+                        .append(renderCodeAndName(row))
+                        .append("</td>")
+                        .append("<td>").append(escapeHtml(blankToDefault(row.sizeText(), "—"))).append("</td>")
                         .append("<td><strong>").append(escapeHtml(formatPriceLabel(row))).append("</strong></td>")
                         .append("<td>").append(escapeHtml(blankToDefault(row.changeText(), "Đang cập nhật"))).append("</td>")
-                        .append("<td>").append(escapeHtml(row.scopeNote())).append("</td>")
+                        .append("<td>").append(escapeHtml(blankToDefault(row.updatedText(), "Đang cập nhật"))).append("</td>")
                         .append("</tr>\n");
             }
+            html.append("</tbody></table>\n");
         }
 
-        html.append("</tbody></table>\n");
         html.append("<h2>Nhận định nhanh</h2>\n");
         html.append("<ul>");
         html.append("<li>Biên độ giá ghi nhận hôm nay: <strong>").append(escapeHtml(priceRangeLabel)).append("</strong>.</li>");
-        html.append("<li>Dữ liệu tập trung vào các dòng tôm thương phẩm, ưu tiên giá tại ao và địa danh miền Tây khi nguồn có hiển thị.</li>");
+        html.append("<li>Dữ liệu tập trung vào các dòng tôm thương phẩm theo kg để người đọc dễ so sánh giữa từng nhóm và size.</li>");
         html.append("<li>Admin nên đối chiếu lại nguồn trước khi duyệt nếu thị trường biến động mạnh trong ngày.</li>");
         html.append("</ul>\n");
         html.append("<p>").append(escapeHtml(suggestion.getSeoClosing())).append("</p>\n");
-        html.append("<p><em>Nguồn dữ liệu: <a href=\"").append(escapeHtml(sourceUrl)).append("\">")
-                .append(SOURCE_NAME).append("</a>, cập nhật ngày ")
-                .append(escapeHtml(sourceDateLabel))
-                .append(". Giá chỉ mang tính tham khảo và có thể thay đổi theo khu vực, size tôm, chất lượng và thời điểm giao dịch.</em></p>");
+        html.append("<p><em>Giá chỉ mang tính tham khảo và có thể thay đổi theo khu vực, size tôm, chất lượng và thời điểm giao dịch.</em></p>");
 
         return html.toString();
     }
@@ -500,7 +494,7 @@ public class ShrimpPriceBlogAutomationService {
         }
 
         String title = blankToDefault(suggestion.getTitle(), fallback.getTitle());
-        if (!normalizeVietnamese(title).contains("gia tom mien tay hom nay")) {
+        if (!normalizeVietnamese(title).contains("gia tom hom nay")) {
             title = fallback.getTitle();
         }
 
@@ -526,13 +520,13 @@ public class ShrimpPriceBlogAutomationService {
         }
 
         return ShrimpPriceBlogDraftSuggestion.builder()
-                .title("Giá tôm miền Tây hôm nay " + displayDate + ": cập nhật tôm thẻ, tôm sú tại ao")
-                .excerpt("Cập nhật giá tôm miền Tây hôm nay " + displayDate
-                        + " với bảng giá tôm thương phẩm tại ao, " + priceRangeLabel + ".")
-                .marketSummary("Giá tôm miền Tây hôm nay " + displayDate + " ghi nhận " + priceRangeLabel
+                .title("Giá tôm hôm nay " + displayDate + ": cập nhật tôm sú, tôm thẻ và tôm khác")
+                .excerpt("Cập nhật giá tôm hôm nay " + displayDate
+                        + " với bảng giá tôm thương phẩm theo kg, " + priceRangeLabel + ".")
+                .marketSummary("Giá tôm hôm nay " + displayDate + " ghi nhận " + priceRangeLabel
                         + ". Các nhóm được tổng hợp gồm " + prominentGroups
                         + ", tập trung vào giá thương phẩm để admin dễ kiểm tra và duyệt bài.")
-                .seoClosing("AgriShrimp sẽ tiếp tục cập nhật giá tôm miền Tây hằng ngày để người nuôi theo dõi biến động thị trường kịp thời.")
+                .seoClosing("AgriShrimp sẽ tiếp tục cập nhật giá tôm hằng ngày để người nuôi theo dõi biến động thị trường kịp thời.")
                 .build();
     }
 
@@ -544,31 +538,29 @@ public class ShrimpPriceBlogAutomationService {
     private String normalizeGroupLabel(String rawGroup, String itemName) {
         String normalized = normalizeVietnamese(rawGroup + " " + itemName);
         if (normalized.contains("tom the")) {
-            return "Tôm thẻ chân trắng tại ao";
+            return "Tôm thẻ";
         }
         if (normalized.contains("tom su")) {
-            return "Tôm sú tại ao";
+            return "Tôm sú";
         }
-        if (normalized.contains("tom cang xanh")) {
-            return "Tôm càng xanh miền Tây";
-        }
-        if (normalized.contains("tom dat")) {
-            return "Tôm đất Cà Mau";
-        }
-        return "Tôm thương phẩm miền Tây";
+        return "Tôm khác";
     }
 
-    private String resolveScopeNote(String itemName) {
-        String normalized = normalizeVietnamese(itemName);
-        for (Map.Entry<String, String> entry : MEKONG_LOCATION_LABELS.entrySet()) {
-            if (normalized.contains(entry.getKey())) {
-                return entry.getValue();
-            }
+    private String renderCodeAndName(ShrimpPriceRow row) {
+        String code = row.code();
+        String itemName = blankToDefault(row.itemName(), row.rawName());
+        if (code == null || code.isBlank()) {
+            return escapeHtml(itemName);
         }
-        if (normalized.contains("tai ao") || normalized.contains("(ao)")) {
-            return "Tại ao";
+        return "<strong>" + escapeHtml(code) + "</strong><br>" + escapeHtml(itemName);
+    }
+
+    private String extractCode(String rawName) {
+        if (rawName == null || rawName.isBlank()) {
+            return "";
         }
-        return "Miền Tây";
+        Matcher matcher = Pattern.compile("^[^A-Za-z0-9]*([A-Z0-9]{2,})\\b").matcher(rawName.trim());
+        return matcher.find() ? matcher.group(1) : "";
     }
 
     private Long parsePriceValue(String priceText) {
@@ -616,7 +608,7 @@ public class ShrimpPriceBlogAutomationService {
         if (rawName == null) {
             return "";
         }
-        return rawName.trim().replaceFirst("^[A-Z0-9]+\\s+", "").trim();
+        return rawName.trim().replaceFirst("^[^A-Za-z0-9]*[A-Z0-9]{2,}\\s+", "").trim();
     }
 
     private String resolveThumbnailUrl() {
@@ -684,12 +676,14 @@ public class ShrimpPriceBlogAutomationService {
 
     private record ShrimpPriceRow(
             String groupLabel,
+            String code,
             String rawName,
             String itemName,
+            String sizeText,
             String priceText,
             Long priceValue,
             String changeText,
-            String scopeNote) {
+            String updatedText) {
     }
 
     private record EmailRecipient(String email, String name) {

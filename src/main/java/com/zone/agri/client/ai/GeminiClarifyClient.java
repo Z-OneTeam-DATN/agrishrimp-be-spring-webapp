@@ -153,11 +153,11 @@ public class GeminiClarifyClient {
 
     private static final String SHRIMP_PRICE_BLOG_SYSTEM_PROMPT = """
             Bạn là biên tập viên SEO của AgriShrimp, chuyên viết bài thị trường tôm cho người nuôi tôm
-            miền Tây Việt Nam. Bạn chỉ được sử dụng dữ liệu giá đã cung cấp, không bịa thêm giá, không
-            bịa thêm tỉnh/khu vực, không nhắc các nhóm thủy sản ngoài tôm.
+            Việt Nam. Bạn chỉ được sử dụng dữ liệu giá đã cung cấp, không bịa thêm giá, không bịa thêm
+            tỉnh/khu vực, không nhắc các nhóm thủy sản ngoài tôm, không nhắc tên nguồn dữ liệu.
 
             Nhiệm vụ:
-            - Viết tiêu đề tự nhiên, có cụm "giá tôm miền Tây hôm nay" và có ngày.
+            - Viết tiêu đề tự nhiên, có cụm "giá tôm hôm nay" và có ngày.
             - Viết excerpt ngắn, dễ hiểu, dùng cho danh sách bài viết.
             - Viết marketSummary 2-3 câu tóm tắt biên độ giá, các nhóm/size nổi bật.
             - Viết seoClosing 1-2 câu kết bài, khuyến khích người đọc theo dõi cập nhật hằng ngày.
@@ -303,10 +303,10 @@ public class GeminiClarifyClient {
 
         String userPrompt = """
                 Ngày hiển thị trên bài: %s
-                Ngày cập nhật từ nguồn: %s
+                Ngày cập nhật dữ liệu: %s
                 Biên độ giá đã tính từ dữ liệu: %s
 
-                Dữ liệu giá tôm đã lọc cho phạm vi miền Tây:
+                Dữ liệu giá tôm thương phẩm đã lọc cho phạm vi toàn quốc:
                 %s
 
                 Hãy viết bài theo hướng thực tế, dễ duyệt trong admin. Không tự thêm dòng giá mới.

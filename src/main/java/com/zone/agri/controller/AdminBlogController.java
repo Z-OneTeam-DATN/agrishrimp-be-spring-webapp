@@ -166,7 +166,7 @@ public class AdminBlogController {
         try {
             post = shrimpPriceBlogAutomationService.createDailyShrimpPriceBlogDraftNow();
         } catch (Exception ex) {
-            throw new BadRequestException("Không tạo được bài giá tôm miền Tây: " + rootErrorMessage(ex));
+            throw new BadRequestException("Không tạo được bài giá tôm hôm nay: " + rootErrorMessage(ex));
         }
         return ResponseEntity.ok(ApiResponse.success(
                 Map.of(
@@ -175,7 +175,7 @@ public class AdminBlogController {
                         "status", post.getStatus() != null ? post.getStatus().name() : "",
                         "title", post.getTitle()
                 ),
-                "Đã tạo bài giá tôm miền Tây và gửi admin duyệt"));
+                "Đã tạo bài giá tôm hôm nay và gửi admin duyệt"));
     }
 
     private String rootErrorMessage(Throwable throwable) {

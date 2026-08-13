@@ -410,12 +410,12 @@ public class EmailService {
         String safeName = recipientName == null || recipientName.isBlank()
                 ? "Admin"
                 : escapeEmailText(recipientName.trim());
-        String safeTitle = escapeEmailText(post != null ? post.getTitle() : "Bài giá tôm miền Tây hôm nay");
+        String safeTitle = escapeEmailText(post != null ? post.getTitle() : "Bài giá tôm hôm nay");
         String safeRange = escapeEmailText(priceRangeLabel);
         String safeSourceDate = escapeEmailText(sourceDateLabel);
         String safeUrl = reviewUrl == null || reviewUrl.isBlank() ? LOGIN_URL : reviewUrl.trim();
 
-        String subject = "[AgriShrimp] Bài giá tôm miền Tây hôm nay đang chờ duyệt";
+        String subject = "[AgriShrimp] Bài giá tôm hôm nay đang chờ duyệt";
         String body = """
                 <p style="font-size:16px;color:#374151;line-height:1.8;">
                     Xin chào <strong>%s</strong>,
@@ -430,10 +430,10 @@ public class EmailService {
                         <strong>Tiêu đề:</strong> %s
                     </p>
                     <p style="margin:0 0 8px;font-size:14px;color:#1e40af;line-height:1.7;">
-                        <strong>Dữ liệu:</strong> %d dòng giá tôm miền Tây, %s
+                        <strong>Dữ liệu:</strong> %d dòng giá tôm thương phẩm, %s
                     </p>
                     <p style="margin:0;font-size:14px;color:#1e40af;line-height:1.7;">
-                        <strong>Nguồn cập nhật:</strong> Tép Bạc ngày %s
+                        <strong>Ngày cập nhật dữ liệu:</strong> %s
                     </p>
                 </div>
 
