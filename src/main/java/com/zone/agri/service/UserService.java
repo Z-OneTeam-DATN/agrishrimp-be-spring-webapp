@@ -139,6 +139,7 @@ public class UserService {
     // QUẢN LÝ NHÂN VIÊN (DÀNH CHO ADMIN)
     // ==============================================================
 
+    @Transactional(readOnly = true)
     public Page<UserResponse> getUsers(String keyword, Long roleId, Long branchId, String permissionCode, String status, Pageable pageable) {
         UserStatus userStatus = null;
         if (status != null && !status.equalsIgnoreCase("all")) {
@@ -153,6 +154,7 @@ public class UserService {
                 .map(this::mapUserToResponse);
     }
 
+    @Transactional(readOnly = true)
     public UserResponse getUserById(Long id) {
         return userRepository.findById(id)
                 .map(this::mapUserToResponse)
