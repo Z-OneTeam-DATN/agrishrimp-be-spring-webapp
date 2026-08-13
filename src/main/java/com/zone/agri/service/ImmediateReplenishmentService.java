@@ -44,13 +44,19 @@ public class ImmediateReplenishmentService {
 
     public void createTransfers(List<Long> awaitingSubOrderIds, String orderCode) {
         int ensuredTransferCount = 0;
+        int uncoveredQuantityCount = 0;
 
         for (Long subOrderId : awaitingSubOrderIds) {
             try {
                 SubOrder subOrder = subOrderRepository.findById(subOrderId)
                         .orElseThrow(() -> new RuntimeException(
                                 "Khong tim thay phan don can tao dieu chuyen bo sung: " + subOrderId));
-                ensuredTransferCount += inventoryTransferService.createReplenishmentTransfersForSubOrder(subOrder).size();
+                InventoryTransferService.ReplenishmentCreationResult result =
+                        inventoryTransferService.createGreedyReplenishmentForSubOrder(subOrder);
+                ensuredTransferCount += result.transfers().size();
+                uncoveredQuantityCount += result.uncoveredQuantitiesByVariantId().values().stream()
+                        .mapToInt(Integer::intValue)
+                        .sum();
             } catch (Exception ex) {
                 log.warn(
                         "Failed to auto-create replenishment transfer for order {} sub-order {}: {}",
@@ -62,6 +68,12 @@ public class ImmediateReplenishmentService {
 
         log.info("Ensured {} replenishment transfer(s) for order {} across {} awaiting sub-order(s)",
                 ensuredTransferCount, orderCode, awaitingSubOrderIds.size());
+        if (uncoveredQuantityCount > 0) {
+            log.warn(
+                    "Order {} still has {} uncovered item(s) after greedy replenishment; admin purchase request is required",
+                    orderCode,
+                    uncoveredQuantityCount);
+        }
     }
 
     public void ensureTransfersForAwaitingSubOrders() {

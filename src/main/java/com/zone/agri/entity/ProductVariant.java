@@ -4,6 +4,7 @@ import com.zone.agri.entity.enums.VariantStatus;
 import jakarta.persistence.*;
 import lombok.*;
 import lombok.experimental.FieldDefaults;
+import java.math.BigDecimal;
 import java.util.List;
 
 @Entity
@@ -36,6 +37,9 @@ public class ProductVariant {
 
     @Column(name = "custom_specs", columnDefinition = "TEXT")
     String customSpecs;
+
+    @Column(name = "shipping_weight", precision = 12, scale = 2)
+    BigDecimal shippingWeight;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "status", length = 20)

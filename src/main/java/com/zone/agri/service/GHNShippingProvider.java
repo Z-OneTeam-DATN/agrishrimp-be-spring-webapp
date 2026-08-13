@@ -18,12 +18,6 @@ import java.time.format.DateTimeFormatter;
 import java.util.HashMap;
 import java.util.Map;
 
-/**
- * GHN (Giao Hàng Nhanh) Shipping Fee Provider.
- * <p>
- * POST {url}/shipping-order/fee
- * Header: Token: {token}, ShopId: {shopId}
- */
 @Component
 @RequiredArgsConstructor
 @Slf4j
@@ -40,38 +34,34 @@ public class GHNShippingProvider implements ShippingProvider {
     @Value("${shipping.ghn.url}")
     private String baseUrl;
 
-    private static final BigDecimal FALLBACK_FEE = new BigDecimal("30000");
     private static final int MAX_RETRY = 2;
 
     @Override
     public ShippingFeeResult calculateFee(ShippingFeeParams params) {
+        RuntimeException lastError = null;
         for (int attempt = 0; attempt < MAX_RETRY; attempt++) {
             try {
                 return doCalculate(params);
             } catch (Exception e) {
+                lastError = e instanceof RuntimeException
+                        ? (RuntimeException) e
+                        : new RuntimeException(e);
                 log.warn("GHN fee attempt {}/{} failed: {}", attempt + 1, MAX_RETRY, e.getMessage());
             }
         }
-        // Fallback sau MAX_RETRY lần thất bại
-        return ShippingFeeResult.builder()
-                .totalFee(FALLBACK_FEE)
-                .estimatedDays("2-3 ngày (ước tính)")
-                .carrier("GHN")
-                .isEstimate(true)
-                .build();
+        throw lastError != null ? lastError : new RuntimeException("GHN fee failed");
     }
 
     @SuppressWarnings("unchecked")
     private ShippingFeeResult doCalculate(ShippingFeeParams params) {
-        // Validate bắt buộc trước khi gọi GHN — tránh lãng phí API call
         if (params.getFromDistrictId() == null) {
-            throw new RuntimeException("fromDistrictId null — chi nhánh chưa cấu hình mã quận GHN");
+            throw new RuntimeException("fromDistrictId null - branch is missing GHN district id");
         }
         if (params.getToDistrictId() == null) {
-            throw new RuntimeException("toDistrictId null — địa chỉ người nhận thiếu mã quận");
+            throw new RuntimeException("toDistrictId null - delivery address is missing district id");
         }
         if (params.getToWardCode() == null || params.getToWardCode().isBlank()) {
-            throw new RuntimeException("toWardCode null — địa chỉ người nhận thiếu mã phường GHN (WardCode)");
+            throw new RuntimeException("toWardCode null - delivery address is missing GHN ward code");
         }
 
         String url = baseUrl + "/shipping-order/fee";
@@ -87,7 +77,7 @@ public class GHNShippingProvider implements ShippingProvider {
         body.put("to_ward_code", params.getToWardCode());
         body.put("weight", params.getWeightGram());
         body.put("cod_value", params.getCodAmount());
-        body.put("service_type_id", 2); // Giao hàng tiêu chuẩn
+        body.put("service_type_id", 2);
 
         log.debug("GHN fee request: from_district={}, to_district={}, to_ward_code={}, weight={}g",
                 params.getFromDistrictId(), params.getToDistrictId(), params.getToWardCode(), params.getWeightGram());
@@ -104,10 +94,9 @@ public class GHNShippingProvider implements ShippingProvider {
         Map<String, Object> data = (Map<String, Object>) response.get("data");
         long totalFee = ((Number) data.get("total")).longValue();
 
-        String estimatedDelivery = "2-3 ngày";
+        String estimatedDelivery = "2-3 ngay";
         if (data.get("expected_delivery_time") != null) {
             try {
-                // Parse ISO datetime to readable string
                 ZonedDateTime dt = ZonedDateTime.parse(data.get("expected_delivery_time").toString());
                 estimatedDelivery = dt.format(DateTimeFormatter.ofPattern("dd/MM/yyyy"));
             } catch (Exception ignored) {

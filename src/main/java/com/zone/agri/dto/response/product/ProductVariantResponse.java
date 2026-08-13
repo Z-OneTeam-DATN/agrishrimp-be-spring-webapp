@@ -21,6 +21,7 @@ public class ProductVariantResponse {
     private String productName;
     private BigDecimal price;
     private BigDecimal importPrice;
+    private BigDecimal shippingWeight;
     private String imageUrl;
     private VariantStatus status;
     private Integer quantity;

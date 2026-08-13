@@ -62,6 +62,7 @@ public class SchemaUpdateConfig implements BeanPostProcessor {
             patchBranches(conn, stmt);
             patchUsers(conn, stmt);
             patchCustomers(conn, stmt);
+            patchProductVariants(conn, stmt);
 
             executeSql(stmt,
                     "Patch inventory_notes adds check_scope_type",
@@ -245,6 +246,92 @@ public class SchemaUpdateConfig implements BeanPostProcessor {
                             """);
 
             executeSql(stmt,
+                    "Create return_requests when missing",
+                    """
+                            CREATE TABLE IF NOT EXISTS return_requests (
+                                id BIGINT PRIMARY KEY AUTO_INCREMENT,
+                                created_at DATETIME NULL,
+                                updated_at DATETIME NULL,
+                                created_by_user_id BIGINT NULL,
+                                updated_by_user_id BIGINT NULL,
+                                code VARCHAR(30) NOT NULL,
+                                status VARCHAR(40) NOT NULL,
+                                issue_type VARCHAR(40) NOT NULL,
+                                refund_method VARCHAR(40) NOT NULL,
+                                requires_physical_return BIT(1) NOT NULL DEFAULT b'1',
+                                customer_name VARCHAR(150) NOT NULL,
+                                customer_phone VARCHAR(20) NOT NULL,
+                                customer_email VARCHAR(150) NULL,
+                                bank_account_name VARCHAR(150) NOT NULL,
+                                bank_account_number VARCHAR(50) NOT NULL,
+                                bank_name VARCHAR(150) NOT NULL,
+                                bank_branch VARCHAR(150) NULL,
+                                reason VARCHAR(255) NOT NULL,
+                                description TEXT NOT NULL,
+                                reject_reason TEXT NULL,
+                                internal_note TEXT NULL,
+                                total_refund_amount DECIMAL(38,2) NOT NULL DEFAULT 0,
+                                approved_at DATETIME NULL,
+                                rejected_at DATETIME NULL,
+                                received_at DATETIME NULL,
+                                refunded_at DATETIME NULL,
+                                user_id BIGINT NOT NULL,
+                                order_id BIGINT NOT NULL,
+                                branch_id BIGINT NULL,
+                                UNIQUE KEY uq_return_requests_code (code),
+                                INDEX idx_return_requests_user (user_id),
+                                INDEX idx_return_requests_order (order_id),
+                                INDEX idx_return_requests_branch (branch_id),
+                                INDEX idx_return_requests_status (status)
+                            )
+                            """);
+
+            executeSql(stmt,
+                    "Create return_request_items when missing",
+                    """
+                            CREATE TABLE IF NOT EXISTS return_request_items (
+                                id BIGINT PRIMARY KEY AUTO_INCREMENT,
+                                created_at DATETIME NULL,
+                                updated_at DATETIME NULL,
+                                created_by_user_id BIGINT NULL,
+                                updated_by_user_id BIGINT NULL,
+                                source_type VARCHAR(40) NOT NULL,
+                                source_item_id BIGINT NOT NULL,
+                                product_variant_id BIGINT NULL,
+                                sub_order_id BIGINT NULL,
+                                product_name VARCHAR(255) NOT NULL,
+                                variant_name VARCHAR(255) NULL,
+                                sku VARCHAR(80) NULL,
+                                image_url TEXT NULL,
+                                quantity INT NOT NULL,
+                                ordered_quantity INT NOT NULL,
+                                unit_price DECIMAL(38,2) NOT NULL DEFAULT 0,
+                                refund_amount DECIMAL(38,2) NOT NULL DEFAULT 0,
+                                return_request_id BIGINT NOT NULL,
+                                INDEX idx_return_request_items_request (return_request_id),
+                                INDEX idx_return_request_items_variant (product_variant_id)
+                            )
+                            """);
+
+            executeSql(stmt,
+                    "Create return_request_evidences when missing",
+                    """
+                            CREATE TABLE IF NOT EXISTS return_request_evidences (
+                                id BIGINT PRIMARY KEY AUTO_INCREMENT,
+                                created_at DATETIME NULL,
+                                updated_at DATETIME NULL,
+                                created_by_user_id BIGINT NULL,
+                                updated_by_user_id BIGINT NULL,
+                                media_type VARCHAR(20) NOT NULL,
+                                file_url TEXT NOT NULL,
+                                public_id VARCHAR(255) NULL,
+                                file_name VARCHAR(255) NULL,
+                                return_request_id BIGINT NOT NULL,
+                                INDEX idx_return_request_evidences_request (return_request_id)
+                            )
+                            """);
+
+            executeSql(stmt,
                     "Create site_visits when missing",
                     """
                             CREATE TABLE IF NOT EXISTS site_visits (
@@ -423,8 +510,8 @@ public class SchemaUpdateConfig implements BeanPostProcessor {
                     "DROP TABLE IF EXISTS images");
 
             executeSql(stmt,
-                    "Drop obsolete columns geocoded_at, district_id, district_name from branches",
-                    "ALTER TABLE branches DROP COLUMN geocoded_at, DROP COLUMN district_id, DROP COLUMN district_name");
+                    "Drop obsolete column geocoded_at from branches",
+                    "ALTER TABLE branches DROP COLUMN geocoded_at");
 
             executeSql(stmt,
                     "Drop obsolete columns internal_notes, note from customers",
@@ -510,6 +597,16 @@ public class SchemaUpdateConfig implements BeanPostProcessor {
         ensureColumnWithLegacyBackfill(conn, stmt, tableName, "branch_id", "BIGINT NULL", List.of("assigned_branch_id"));
         ensureColumnWithLegacyBackfill(conn, stmt, tableName, "staff_assigned_id", "BIGINT NULL", List.of("assigned_staff_id"));
         ensureColumnWithLegacyBackfill(conn, stmt, tableName, "internal_notes", "TEXT NULL", List.of());
+    }
+
+    private void patchProductVariants(Connection conn, Statement stmt) {
+        String tableName = "product_variants";
+        if (!tableExists(conn, tableName)) {
+            log.info("Skip product variant schema patch because table '{}' does not exist yet.", tableName);
+            return;
+        }
+
+        ensureColumnWithLegacyBackfill(conn, stmt, tableName, "shipping_weight", "DECIMAL(12,2) NULL", List.of());
     }
 
     private void patchInventoryTransfers(Connection conn, Statement stmt) {

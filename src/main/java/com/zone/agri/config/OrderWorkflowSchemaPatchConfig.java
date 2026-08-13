@@ -109,6 +109,43 @@ public class OrderWorkflowSchemaPatchConfig implements BeanPostProcessor {
                     "cancel_reason_text",
                     "ALTER TABLE orders ADD COLUMN cancel_reason_text TEXT NULL");
 
+            addColumnIfMissing(conn, stmt,
+                    "branches",
+                    "province_id",
+                    "ALTER TABLE branches ADD COLUMN province_id INT NULL");
+            addColumnIfMissing(conn, stmt,
+                    "branches",
+                    "province_name",
+                    "ALTER TABLE branches ADD COLUMN province_name VARCHAR(100) NULL");
+            addColumnIfMissing(conn, stmt,
+                    "branches",
+                    "district_id",
+                    "ALTER TABLE branches ADD COLUMN district_id INT NULL");
+            addColumnIfMissing(conn, stmt,
+                    "branches",
+                    "district_name",
+                    "ALTER TABLE branches ADD COLUMN district_name VARCHAR(100) NULL");
+            addColumnIfMissing(conn, stmt,
+                    "branches",
+                    "ward_id",
+                    "ALTER TABLE branches ADD COLUMN ward_id INT NULL");
+            addColumnIfMissing(conn, stmt,
+                    "branches",
+                    "ward_name",
+                    "ALTER TABLE branches ADD COLUMN ward_name VARCHAR(100) NULL");
+            addColumnIfMissing(conn, stmt,
+                    "branches",
+                    "ward_code",
+                    "ALTER TABLE branches ADD COLUMN ward_code VARCHAR(20) NULL");
+            addColumnIfMissing(conn, stmt,
+                    "branches",
+                    "lat",
+                    "ALTER TABLE branches ADD COLUMN lat DOUBLE NULL");
+            addColumnIfMissing(conn, stmt,
+                    "branches",
+                    "lng",
+                    "ALTER TABLE branches ADD COLUMN lng DOUBLE NULL");
+
             executeSql(stmt,
                     "Patch sub_orders.status length to 40",
                     "ALTER TABLE sub_orders MODIFY COLUMN status VARCHAR(40)");
@@ -157,6 +194,92 @@ public class OrderWorkflowSchemaPatchConfig implements BeanPostProcessor {
                     "ALTER TABLE purchase_requests ADD COLUMN linked_reference_code VARCHAR(120) NULL");
 
             executeSql(stmt,
+                    "Create return_requests when missing",
+                    """
+                            CREATE TABLE IF NOT EXISTS return_requests (
+                                id BIGINT PRIMARY KEY AUTO_INCREMENT,
+                                created_at DATETIME NULL,
+                                updated_at DATETIME NULL,
+                                created_by_user_id BIGINT NULL,
+                                updated_by_user_id BIGINT NULL,
+                                code VARCHAR(30) NOT NULL,
+                                status VARCHAR(40) NOT NULL,
+                                issue_type VARCHAR(40) NOT NULL,
+                                refund_method VARCHAR(40) NOT NULL,
+                                requires_physical_return BIT(1) NOT NULL DEFAULT b'1',
+                                customer_name VARCHAR(150) NOT NULL,
+                                customer_phone VARCHAR(20) NOT NULL,
+                                customer_email VARCHAR(150) NULL,
+                                bank_account_name VARCHAR(150) NOT NULL,
+                                bank_account_number VARCHAR(50) NOT NULL,
+                                bank_name VARCHAR(150) NOT NULL,
+                                bank_branch VARCHAR(150) NULL,
+                                reason VARCHAR(255) NOT NULL,
+                                description TEXT NOT NULL,
+                                reject_reason TEXT NULL,
+                                internal_note TEXT NULL,
+                                total_refund_amount DECIMAL(38,2) NOT NULL DEFAULT 0,
+                                approved_at DATETIME NULL,
+                                rejected_at DATETIME NULL,
+                                received_at DATETIME NULL,
+                                refunded_at DATETIME NULL,
+                                user_id BIGINT NOT NULL,
+                                order_id BIGINT NOT NULL,
+                                branch_id BIGINT NULL,
+                                UNIQUE KEY uq_return_requests_code (code),
+                                INDEX idx_return_requests_user (user_id),
+                                INDEX idx_return_requests_order (order_id),
+                                INDEX idx_return_requests_branch (branch_id),
+                                INDEX idx_return_requests_status (status)
+                            )
+                            """);
+
+            executeSql(stmt,
+                    "Create return_request_items when missing",
+                    """
+                            CREATE TABLE IF NOT EXISTS return_request_items (
+                                id BIGINT PRIMARY KEY AUTO_INCREMENT,
+                                created_at DATETIME NULL,
+                                updated_at DATETIME NULL,
+                                created_by_user_id BIGINT NULL,
+                                updated_by_user_id BIGINT NULL,
+                                source_type VARCHAR(40) NOT NULL,
+                                source_item_id BIGINT NOT NULL,
+                                product_variant_id BIGINT NULL,
+                                sub_order_id BIGINT NULL,
+                                product_name VARCHAR(255) NOT NULL,
+                                variant_name VARCHAR(255) NULL,
+                                sku VARCHAR(80) NULL,
+                                image_url TEXT NULL,
+                                quantity INT NOT NULL,
+                                ordered_quantity INT NOT NULL,
+                                unit_price DECIMAL(38,2) NOT NULL DEFAULT 0,
+                                refund_amount DECIMAL(38,2) NOT NULL DEFAULT 0,
+                                return_request_id BIGINT NOT NULL,
+                                INDEX idx_return_request_items_request (return_request_id),
+                                INDEX idx_return_request_items_variant (product_variant_id)
+                            )
+                            """);
+
+            executeSql(stmt,
+                    "Create return_request_evidences when missing",
+                    """
+                            CREATE TABLE IF NOT EXISTS return_request_evidences (
+                                id BIGINT PRIMARY KEY AUTO_INCREMENT,
+                                created_at DATETIME NULL,
+                                updated_at DATETIME NULL,
+                                created_by_user_id BIGINT NULL,
+                                updated_by_user_id BIGINT NULL,
+                                media_type VARCHAR(20) NOT NULL,
+                                file_url TEXT NOT NULL,
+                                public_id VARCHAR(255) NULL,
+                                file_name VARCHAR(255) NULL,
+                                return_request_id BIGINT NOT NULL,
+                                INDEX idx_return_request_evidences_request (return_request_id)
+                            )
+                            """);
+
+            executeSql(stmt,
                     "Backfill orders.updated_at from created_at when missing",
                     """
                             UPDATE orders
@@ -203,7 +326,7 @@ public class OrderWorkflowSchemaPatchConfig implements BeanPostProcessor {
             stmt.execute(sql);
             log.info("Schema patch OK - added {}.{}", tableName, columnName);
         } catch (Exception e) {
-            log.debug("Schema patch skipped/warn - add {}.{}: {}", tableName, columnName, e.getMessage());
+            log.warn("Schema patch skipped/warn - add {}.{}: {}", tableName, columnName, e.getMessage());
         }
     }
 

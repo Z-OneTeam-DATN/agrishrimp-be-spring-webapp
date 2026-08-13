@@ -297,6 +297,10 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
       LEFT JOIN FETCH p.brand
       LEFT JOIN FETCH p.category
       LEFT JOIN FETCH p.productImages
+      LEFT JOIN FETCH p.variants v
+      LEFT JOIN FETCH v.attributeValues sav
+      LEFT JOIN FETCH sav.attribute
+      LEFT JOIN FETCH sav.attributeValue
       WHERE p.id IN :ids
       """)
   List<Product> findPublicByIds(@Param("ids") List<Long> ids);

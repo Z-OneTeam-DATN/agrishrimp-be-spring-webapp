@@ -41,6 +41,12 @@ public class PurchaseRequestService {
     private final InventoryTransferService inventoryTransferService;
     private final NotificationService notificationService;
 
+    public record AutomaticReplenishmentRequestResult(
+            List<PurchaseRequest> purchaseRequests,
+            Map<Long, Integer> blockedQuantitiesByVariantId,
+            Map<Long, String> blockedMessagesByVariantId) {
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
     // HELPER
     // ─────────────────────────────────────────────────────────────────────────
@@ -147,17 +153,45 @@ public class PurchaseRequestService {
     public List<PurchaseRequest> findActiveAutoReplenishmentRequestsForSubOrder(Long subOrderId) {
         return purchaseRequestRepository.findAutoReplenishmentRequestsByLinkedSubOrderIdExcludingStatuses(
                 subOrderId,
-                List.of(PurchaseRequestStatus.CANCELLED, PurchaseRequestStatus.CLOSED));
+                List.of(
+                        PurchaseRequestStatus.CANCELLED,
+                        PurchaseRequestStatus.CLOSED,
+                        PurchaseRequestStatus.COMPLETED));
     }
 
     @Transactional
     public List<PurchaseRequest> createAutomaticReplenishmentRequestsForSubOrder(SubOrder subOrder) {
+        return createAutomaticReplenishmentRequestResultForSubOrder(subOrder, Map.of()).purchaseRequests();
+    }
+
+    @Transactional
+    public List<PurchaseRequest> createAutomaticReplenishmentRequestsForSubOrder(
+            SubOrder subOrder,
+            Map<Long, Integer> requestedQuantitiesByVariantId) {
+        return createAutomaticReplenishmentRequestResultForSubOrder(
+                subOrder,
+                requestedQuantitiesByVariantId).purchaseRequests();
+    }
+
+    @Transactional
+    public AutomaticReplenishmentRequestResult createAutomaticReplenishmentRequestResultForSubOrder(
+            SubOrder subOrder,
+            Map<Long, Integer> requestedQuantitiesByVariantId) {
         SubOrder replenishmentSubOrder = subOrderRepository.findByIdWithItems(subOrder.getId())
                 .orElseThrow(() -> new NotFoundException("Khong tim thay phan don can tao yeu cau mua."));
 
         List<PurchaseRequest> existingRequests = findActiveAutoReplenishmentRequestsForSubOrder(replenishmentSubOrder.getId());
-        if (!existingRequests.isEmpty()) {
-            return existingRequests;
+
+        boolean limitRequestedQuantities = requestedQuantitiesByVariantId != null
+                && !requestedQuantitiesByVariantId.isEmpty();
+        Map<Long, Integer> remainingRequestedQuantities = new LinkedHashMap<>();
+        if (limitRequestedQuantities) {
+            requestedQuantitiesByVariantId.forEach((variantId, quantity) -> {
+                int safeQuantity = Objects.requireNonNullElse(quantity, 0);
+                if (variantId != null && safeQuantity > 0) {
+                    remainingRequestedQuantities.put(variantId, safeQuantity);
+                }
+            });
         }
 
         Map<ProductVariant, Integer> missingQuantities = new LinkedHashMap<>();
@@ -168,11 +202,23 @@ public class PurchaseRequestService {
             if (missingQty <= 0 || item.getProductVariant() == null || item.getProductVariant().getId() == null) {
                 continue;
             }
+
+            Long variantId = item.getProductVariant().getId();
+            if (limitRequestedQuantities) {
+                int remainingRequestedQty = remainingRequestedQuantities.getOrDefault(variantId, 0);
+                missingQty = Math.min(missingQty, remainingRequestedQty);
+                remainingRequestedQuantities.put(variantId, Math.max(0, remainingRequestedQty - missingQty));
+            }
+            if (missingQty <= 0) {
+                continue;
+            }
+
             missingQuantities.merge(item.getProductVariant(), missingQty, Integer::sum);
         }
 
+        missingQuantities = reduceMissingQuantitiesByOpenPurchaseRequests(missingQuantities, existingRequests);
         if (missingQuantities.isEmpty()) {
-            throw new BadRequestException("Phan don nay khong con mat hang thieu de tao yeu cau mua.");
+            return new AutomaticReplenishmentRequestResult(existingRequests, Map.of(), Map.of());
         }
 
         Branch mainWarehouse = resolveMainWarehouseBranch();
@@ -192,14 +238,26 @@ public class PurchaseRequestService {
             firstCatalogByVariantId.putIfAbsent(catalog.getProductVariant().getId(), catalog);
         }
 
-        List<String> missingSupplierSkus = missingQuantities.keySet().stream()
-                .filter(variant -> !firstCatalogByVariantId.containsKey(variant.getId()))
-                .map(ProductVariant::getSku)
-                .sorted()
-                .toList();
-        if (!missingSupplierSkus.isEmpty()) {
-            throw new BadRequestException(
-                    "Chua cau hinh nha cung cap dang hoat dong cho cac SKU: " + String.join(", ", missingSupplierSkus));
+        Map<Long, Integer> blockedQuantitiesByVariantId = new LinkedHashMap<>();
+        Map<Long, String> blockedMessagesByVariantId = new LinkedHashMap<>();
+        Iterator<Map.Entry<ProductVariant, Integer>> missingIterator = missingQuantities.entrySet().iterator();
+        while (missingIterator.hasNext()) {
+            Map.Entry<ProductVariant, Integer> missingEntry = missingIterator.next();
+            ProductVariant variant = missingEntry.getKey();
+            if (!firstCatalogByVariantId.containsKey(variant.getId())) {
+                blockedQuantitiesByVariantId.put(variant.getId(), missingEntry.getValue());
+                blockedMessagesByVariantId.put(
+                        variant.getId(),
+                        "Chua cau hinh nha cung cap dang hoat dong cho SKU: " + variant.getSku());
+                missingIterator.remove();
+            }
+        }
+
+        if (missingQuantities.isEmpty()) {
+            return new AutomaticReplenishmentRequestResult(
+                    existingRequests,
+                    blockedQuantitiesByVariantId,
+                    blockedMessagesByVariantId);
         }
 
         Map<Long, Supplier> supplierById = new LinkedHashMap<>();
@@ -227,6 +285,10 @@ public class PurchaseRequestService {
         }
 
         User creator = getCurrentUser();
+        PurchaseRequestStatus initialStatus = canApprovePurchaseRequests()
+                ? PurchaseRequestStatus.APPROVED
+                : PurchaseRequestStatus.PENDING_APPROVAL;
+        LocalDateTime approvedAt = initialStatus == PurchaseRequestStatus.APPROVED ? LocalDateTime.now() : null;
         List<PurchaseRequest> createdRequests = new ArrayList<>();
         for (Map.Entry<Long, List<PurchaseRequestItem>> supplierEntry : itemsBySupplierId.entrySet()) {
             Supplier supplier = supplierById.get(supplierEntry.getKey());
@@ -237,13 +299,13 @@ public class PurchaseRequestService {
 
             PurchaseRequest purchaseRequest = PurchaseRequest.builder()
                     .code(code)
-                    .status(PurchaseRequestStatus.APPROVED)
+                    .status(initialStatus)
                     .supplier(supplier)
                     .branch(mainWarehouse)
                     .note(buildAutomaticReplenishmentNote(replenishmentSubOrder))
                     .createdBy(creator)
-                    .approvedBy(creator)
-                    .approvedAt(LocalDateTime.now())
+                    .approvedBy(initialStatus == PurchaseRequestStatus.APPROVED ? creator : null)
+                    .approvedAt(approvedAt)
                     .autoReplenishment(true)
                     .linkedSubOrderId(replenishmentSubOrder.getId())
                     .linkedDestinationBranchId(replenishmentSubOrder.getBranch().getId())
@@ -258,7 +320,8 @@ public class PurchaseRequestService {
             }
 
             purchaseRequest = purchaseRequestRepository.save(purchaseRequest);
-            if (supplier.getEmail() != null && !supplier.getEmail().isBlank()) {
+            if (purchaseRequest.getStatus() == PurchaseRequestStatus.APPROVED
+                    && supplier.getEmail() != null && !supplier.getEmail().isBlank()) {
                 emailService.sendPurchaseRequestToSupplier(purchaseRequest);
                 purchaseRequest.setStatus(PurchaseRequestStatus.SENT_TO_SUPPLIER);
                 purchaseRequest.setSentToSupplierAt(LocalDateTime.now());
@@ -268,12 +331,71 @@ public class PurchaseRequestService {
             createdRequests.add(purchaseRequest);
         }
 
-        return createdRequests;
+        List<PurchaseRequest> allRequests = new ArrayList<>(existingRequests);
+        allRequests.addAll(createdRequests);
+        return new AutomaticReplenishmentRequestResult(
+                allRequests,
+                blockedQuantitiesByVariantId,
+                blockedMessagesByVariantId);
     }
 
     // ─────────────────────────────────────────────────────────────────────────
     // 1. TẠO PHIẾU YÊU CẦU MUA
     // ─────────────────────────────────────────────────────────────────────────
+
+    private Map<ProductVariant, Integer> reduceMissingQuantitiesByOpenPurchaseRequests(
+            Map<ProductVariant, Integer> missingQuantities,
+            List<PurchaseRequest> existingRequests) {
+        if (missingQuantities == null || missingQuantities.isEmpty()) {
+            return Map.of();
+        }
+
+        Map<Long, Integer> coveredByVariantId = buildOpenPurchaseCoverageByVariantId(existingRequests);
+        if (coveredByVariantId.isEmpty()) {
+            return missingQuantities;
+        }
+
+        Map<ProductVariant, Integer> remainingQuantities = new LinkedHashMap<>();
+        for (Map.Entry<ProductVariant, Integer> missingEntry : missingQuantities.entrySet()) {
+            ProductVariant variant = missingEntry.getKey();
+            Long variantId = variant != null ? variant.getId() : null;
+            int requestedQty = Objects.requireNonNullElse(missingEntry.getValue(), 0);
+            int coveredQty = variantId != null ? Math.max(0, coveredByVariantId.getOrDefault(variantId, 0)) : 0;
+            int remainingQty = requestedQty - Math.min(requestedQty, coveredQty);
+            if (variantId != null) {
+                coveredByVariantId.put(variantId, Math.max(0, coveredQty - requestedQty));
+            }
+            if (remainingQty > 0) {
+                remainingQuantities.put(variant, remainingQty);
+            }
+        }
+        return remainingQuantities;
+    }
+
+    private Map<Long, Integer> buildOpenPurchaseCoverageByVariantId(List<PurchaseRequest> existingRequests) {
+        Map<Long, Integer> coveredByVariantId = new LinkedHashMap<>();
+        for (PurchaseRequest request : existingRequests != null ? existingRequests : List.<PurchaseRequest>of()) {
+            for (PurchaseRequestItem item : request.getItems() != null
+                    ? request.getItems()
+                    : List.<PurchaseRequestItem>of()) {
+                Long variantId = item.getProductVariant() != null ? item.getProductVariant().getId() : null;
+                if (variantId == null) {
+                    continue;
+                }
+
+                int remainingQty = Objects.requireNonNullElse(item.getRemainingQty(), 0);
+                if (remainingQty <= 0) {
+                    int requestedQty = Objects.requireNonNullElse(item.getRequestedQty(), 0);
+                    int acceptedQty = Objects.requireNonNullElse(item.getAcceptedQty(), 0);
+                    remainingQty = Math.max(0, requestedQty - acceptedQty);
+                }
+                if (remainingQty > 0) {
+                    coveredByVariantId.merge(variantId, remainingQty, Integer::sum);
+                }
+            }
+        }
+        return coveredByVariantId;
+    }
 
     @Transactional
     public PurchaseRequestResponse createRequest(PurchaseRequestCreateRequest request) {

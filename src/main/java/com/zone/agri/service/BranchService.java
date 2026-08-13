@@ -161,6 +161,8 @@ public class BranchService {
         entity.setMapDisplayName(dto.getMapDisplayName());
         entity.setProvinceId(dto.getProvinceId() != null ? dto.getProvinceId() : dto.getProvinceCode());
         entity.setProvinceName(dto.getProvinceName());
+        entity.setDistrictId(dto.getDistrictId() != null ? dto.getDistrictId() : dto.getDistrictCode());
+        entity.setDistrictName(dto.getDistrictName());
         entity.setWardId(dto.getWardId());
         entity.setWardName(dto.getWardName());
         entity.setWardCode(dto.getWardCode());
@@ -330,6 +332,9 @@ public class BranchService {
         dto.setProvinceId(entity.getProvinceId());
         dto.setProvinceCode(entity.getProvinceId());
         dto.setProvinceName(entity.getProvinceName());
+        dto.setDistrictId(entity.getDistrictId());
+        dto.setDistrictCode(entity.getDistrictId());
+        dto.setDistrictName(entity.getDistrictName());
         dto.setWardId(entity.getWardId());
         dto.setWardName(entity.getWardName());
         dto.setWardCode(entity.getWardCode());

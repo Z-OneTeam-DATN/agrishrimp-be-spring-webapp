@@ -48,4 +48,6 @@ public class OrderResponse {
     private String checkoutUrl;
     private List<OrderItemResponse> items;
     private List<SubOrderSummaryDto> subOrders;
+    private Boolean replenishmentRequested;
+    private List<ReplenishmentPlanItem> replenishmentDocuments;
 }
