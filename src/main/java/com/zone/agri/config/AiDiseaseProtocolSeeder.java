@@ -346,9 +346,11 @@ public class AiDiseaseProtocolSeeder implements CommandLineRunner {
     }
 
     private boolean isMajorStageHeading(String value) {
+        if (!value.startsWith("# ") || value.startsWith("##")) {
+            return false;
+        }
         String content = stripMarkdown(stripHeadingPrefix(value)).toUpperCase(Locale.ROOT);
-        return value.startsWith("#")
-                && (content.contains("GIAI ĐOẠN LỚN") || content.contains("GIAI ĐOẠN SAU"));
+        return content.contains("GIAI ĐOẠN LỚN") || content.contains("GIAI ĐOẠN SAU");
     }
 
     private boolean isEndSectionHeading(String value) {
