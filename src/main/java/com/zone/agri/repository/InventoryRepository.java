@@ -326,7 +326,7 @@ public interface InventoryRepository extends JpaRepository<Inventory, Long> {
                         FROM Inventory i
                         JOIN i.productVariant pv
                         JOIN pv.product p
-                        WHERE i.branch.id = :branchId
+                        WHERE (:branchId IS NULL OR i.branch.id = :branchId)
                         GROUP BY pv.id, pv.sku, p.name
                         """)
         List<VariantStockProjection> findCurrentStockByBranch(@Param("branchId") Long branchId);

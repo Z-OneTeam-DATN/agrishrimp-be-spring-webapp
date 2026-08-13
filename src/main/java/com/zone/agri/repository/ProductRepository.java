@@ -369,6 +369,10 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
     Long getTotalQuantity();
   }
 
+  // Bản dành cho đơn cũ (Order/OrderItem) — "o.subOrders IS EMPTY" loại trừ đơn đã tách để không
+  // đếm trùng với SubOrderRepository#getCategorySalesByBranch(). DashboardService luôn gộp cả 2
+  // nguồn: thiếu 1 trong 2 sẽ làm biểu đồ "Cơ cấu doanh thu nhóm hàng" rỗng hoặc thiếu số với hệ
+  // thống có trộn cả đơn cũ lẫn đơn đã tách chi nhánh.
   @Query("SELECT c.id AS categoryId, c.name AS categoryName, " +
       "SUM(oi.price * oi.quantity) AS totalRevenue, " +
       "SUM(oi.quantity) AS totalQuantity " +
@@ -379,9 +383,11 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
       "JOIN oi.order o " +
       "WHERE o.status IN (com.zone.agri.entity.enums.OrderStatus.COMPLETED, com.zone.agri.entity.enums.OrderStatus.RECEIVED, com.zone.agri.entity.enums.OrderStatus.SHIPPING) "
       +
+      "AND o.subOrders IS EMPTY " +
+      "AND (:branchId IS NULL OR o.branch.id = :branchId) " +
       "GROUP BY c.id, c.name " +
       "ORDER BY totalRevenue DESC")
-  List<CategorySalesProjection> getCategorySalesSystemWide();
+  List<CategorySalesProjection> getCategorySalesLegacy(@Param("branchId") Long branchId);
 
   // 1. Dùng Interface này để hứng dữ liệu trả về từ câu Query
   interface TopProductProjection {
@@ -396,8 +402,12 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
     String getImageUrl();
   }
 
-  // 2. Câu Query gom nhóm sản phẩm, tính tổng số lượng bán và tổng tiền (Từ
-  // SubOrder để chính xác chi nhánh)
+  // 2. Câu Query gom nhóm sản phẩm, tính tổng số lượng bán và tổng tiền — CHỈ tính đơn đã tách
+  // chi nhánh (SubOrder). Đơn cũ (trước khi có luồng tách đơn) không có SubOrderItem nên phải cộng
+  // thêm getTopSellingProductsLegacy() bên dưới ở tầng service, nếu không sản phẩm bán chạy sẽ bị
+  // thiếu/rỗng hoàn toàn với những hệ thống mà dữ liệu chủ yếu là đơn cũ.
+  // Không giới hạn Pageable ở đây vì DashboardService cần gộp với nguồn legacy rồi mới sắp xếp +
+  // giới hạn số dòng cuối cùng.
   @Query("SELECT p.id AS productId, p.name AS productName, " +
       "SUM(si.quantity) AS quantitySold, " +
       "SUM(si.unitPrice * si.quantity) AS revenue, " +
@@ -411,5 +421,23 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
       "AND (:branchId IS NULL OR s.branch.id = :branchId) " +
       "GROUP BY p.id, p.name " +
       "ORDER BY quantitySold DESC")
-  List<TopProductProjection> getTopSellingProducts(@Param("branchId") Long branchId, Pageable pageable);
+  List<TopProductProjection> getTopSellingProducts(@Param("branchId") Long branchId);
+
+  // Bản dành cho đơn cũ (Order/OrderItem, trước khi có luồng tách đơn theo chi nhánh) — "o.subOrders
+  // IS EMPTY" loại trừ đơn đã tách để không đếm trùng với getTopSellingProducts() ở trên.
+  @Query("SELECT p.id AS productId, p.name AS productName, " +
+      "SUM(oi.quantity) AS quantitySold, " +
+      "SUM(oi.price * oi.quantity) AS revenue, " +
+      "MAX(pv.imageUrl) AS imageUrl " +
+      "FROM OrderItem oi " +
+      "JOIN oi.order o " +
+      "JOIN oi.productVariant pv " +
+      "JOIN pv.product p " +
+      "WHERE o.status IN (com.zone.agri.entity.enums.OrderStatus.COMPLETED, com.zone.agri.entity.enums.OrderStatus.RECEIVED, com.zone.agri.entity.enums.OrderStatus.SHIPPING) "
+      +
+      "AND o.subOrders IS EMPTY " +
+      "AND (:branchId IS NULL OR o.branch.id = :branchId) " +
+      "GROUP BY p.id, p.name " +
+      "ORDER BY quantitySold DESC")
+  List<TopProductProjection> getTopSellingProductsLegacy(@Param("branchId") Long branchId);
 }

@@ -504,6 +504,24 @@ public class InventoryNoteService {
                 .collect(Collectors.toList());
     }
 
+    // Dành RIÊNG cho trang "Báo cáo kiểm kê hàng hóa" — cố tình KHÔNG dùng resolveCheckListBranchId()
+    // (hàm đó gắn với quyền vận hành INVENTORY_CHECK_APPROVE, dùng chung cho cả màn hình thủ kho
+    // quản lý phiếu kiểm kê thật). Trang báo cáo cần theo đúng mô hình phân quyền REPORT_INVENTORY_VIEW
+    // + REPORT_INVENTORY_VIEW_ALL_BRANCHES giống 3 báo cáo tồn kho còn lại — tách hàm riêng để sửa mô
+    // hình phân quyền của báo cáo mà không đụng đến luồng duyệt/xử lý kiểm kê thật của kho.
+    @Transactional(readOnly = true)
+    public List<InventoryNoteResponse> getCheckNotesForReport(Long branchId) {
+        Long finalBranchId = com.zone.agri.common.AuthUtils.resolveRequestedOrUserBranch(
+                branchId, "REPORT_INVENTORY_VIEW", "REPORT_INVENTORY_VIEW_ALL_BRANCHES");
+        List<InventoryNote> notes = (finalBranchId == null)
+                ? inventoryNoteRepository.findAllByTypeWithPartners(InventoryNoteType.CHECK)
+                : inventoryNoteRepository.findAllByTypeAndBranchWithPartners(InventoryNoteType.CHECK, finalBranchId);
+
+        return notes.stream()
+                .map(this::mapToResponse)
+                .collect(Collectors.toList());
+    }
+
     @Transactional(readOnly = true)
     public InventoryNoteResponse getCheckCommandById(Long id) {
         InventoryNote note = inventoryNoteRepository.findByIdWithDetails(id)

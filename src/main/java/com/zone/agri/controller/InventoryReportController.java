@@ -13,8 +13,10 @@ import org.springframework.web.bind.annotation.RestController;
 import com.zone.agri.common.AuthUtils;
 import com.zone.agri.dto.response.inventory.InventoryIOSummaryResponse;
 import com.zone.agri.dto.response.inventory.InventoryLedgerEntryResponse;
+import com.zone.agri.dto.response.inventory.InventoryNoteResponse;
 import com.zone.agri.dto.response.inventory.StockSummaryResponse;
 import com.zone.agri.security.annotation.RequirePermission;
+import com.zone.agri.service.InventoryNoteService;
 import com.zone.agri.service.InventoryReportService;
 
 import lombok.RequiredArgsConstructor;
@@ -26,6 +28,7 @@ import lombok.RequiredArgsConstructor;
 public class InventoryReportController {
 
     private final InventoryReportService inventoryReportService;
+    private final InventoryNoteService inventoryNoteService;
 
     @GetMapping("/stock-summary")
     public ResponseEntity<List<StockSummaryResponse>> getStockSummary(
@@ -46,11 +49,20 @@ public class InventoryReportController {
 
     @GetMapping("/io-summary")
     public ResponseEntity<List<InventoryIOSummaryResponse>> getIOSummary(
-            @RequestParam Long branchId,
+            @RequestParam(required = false) Long branchId,
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate) {
         Long finalBranchId = resolveBranchId(branchId);
         return ResponseEntity.ok(inventoryReportService.getIOSummary(finalBranchId, startDate, endDate));
+    }
+
+    // Endpoint RIÊNG cho trang báo cáo kiểm kê — dùng đúng mô hình REPORT_INVENTORY_VIEW_ALL_BRANCHES
+    // như 3 báo cáo trên, KHÔNG dùng chung đường /api/inventory-checks (đường đó còn phục vụ màn hình
+    // thủ kho quản lý phiếu kiểm kê thật, gắn với quyền vận hành INVENTORY_CHECK_APPROVE khác hẳn).
+    @GetMapping("/check")
+    public ResponseEntity<List<InventoryNoteResponse>> getCheckReport(
+            @RequestParam(required = false) Long branchId) {
+        return ResponseEntity.ok(inventoryNoteService.getCheckNotesForReport(branchId));
     }
 
     private Long resolveBranchId(Long requestedBranchId) {

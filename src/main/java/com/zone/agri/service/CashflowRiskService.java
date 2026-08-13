@@ -14,6 +14,7 @@ import com.zone.agri.dto.response.financial.*;
 import com.zone.agri.entity.enums.InventoryNoteType;
 import com.zone.agri.repository.InventoryNoteRepository;
 import com.zone.agri.repository.OrderRepository;
+import com.zone.agri.repository.SubOrderRepository;
 import com.zone.agri.repository.SupplierRepository;
 
 import lombok.RequiredArgsConstructor;
@@ -27,6 +28,7 @@ public class CashflowRiskService {
     private final SettingService settingService;
     private final FinancialService financialService;
     private final OrderRepository orderRepository;
+    private final SubOrderRepository subOrderRepository;
     private final SupplierRepository supplierRepository;
     private final InventoryNoteRepository inventoryNoteRepository;
 
@@ -87,10 +89,25 @@ public class CashflowRiskService {
                     .build();
         }
 
-        // 3. Calculate expectedInflow (unpaid order amounts, including completed and received COD orders)
+        // 3. Calculate expectedInflow (unpaid COD order amounts) — cộng cả đơn cũ lẫn đơn đã tách
+        // chi nhánh (trước đây chỉ đọc Order, bỏ sót toàn bộ đơn COD chưa thu đã bị tách chi nhánh).
         BigDecimal expectedInflow = BigDecimal.ZERO;
         try {
             expectedInflow = orderRepository.sumUnpaidOrdersAmount(branchId);
+            for (com.zone.agri.repository.SubOrderRepository.SubOrderAmountProjection proj
+                    : subOrderRepository.findUnpaidCodSubOrderAmounts(branchId)) {
+                BigDecimal subtotal = proj.getSubtotal() != null ? proj.getSubtotal() : BigDecimal.ZERO;
+                BigDecimal shippingFee = proj.getShippingFee() != null ? proj.getShippingFee() : BigDecimal.ZERO;
+                BigDecimal orderSubtotal = proj.getOrderSubtotal() != null ? proj.getOrderSubtotal() : BigDecimal.ZERO;
+                BigDecimal orderDiscount = proj.getOrderDiscountAmount() != null ? proj.getOrderDiscountAmount() : BigDecimal.ZERO;
+                BigDecimal allocatedDiscount = BigDecimal.ZERO;
+                if (subtotal.compareTo(BigDecimal.ZERO) > 0
+                        && orderSubtotal.compareTo(BigDecimal.ZERO) > 0
+                        && orderDiscount.compareTo(BigDecimal.ZERO) > 0) {
+                    allocatedDiscount = orderDiscount.multiply(subtotal).divide(orderSubtotal, 2, RoundingMode.HALF_UP);
+                }
+                expectedInflow = expectedInflow.add(subtotal).add(shippingFee).subtract(allocatedDiscount);
+            }
         } catch (Exception e) {
             log.error("Error retrieving expected inflow", e);
         }

@@ -18,4 +18,6 @@ public class InventoryInfoResponse {
 
     private double valueChangePercent;
     private boolean valueIsNew;
+
+    private MetricChangeResponse valueChange;
 }

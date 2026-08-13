@@ -106,6 +106,13 @@ public class AuthUtils {
       return currentUser.getBranchId();
     }
 
-    return requestedBranchId;
+    // Tài khoản không phải Super Admin, không có quyền "xem mọi chi nhánh" (branchOverrideAuthority),
+    // VÀ chưa được gán chi nhánh nào — trước đây rơi xuống đây thì "return requestedBranchId" nghĩa
+    // là TIN THẲNG giá trị client gửi lên, kể cả null (= xem toàn hệ thống) hoặc 1 branchId bất kỳ
+    // (IDOR sang chi nhánh khác). Không có chi nhánh hợp lệ nào để cấp cho tài khoản này — từ chối
+    // thay vì mặc định cấp quyền xem hết, để một tài khoản bị thiếu cấu hình branch không vô tình
+    // trở thành "toàn quyền xem mọi chi nhánh".
+    throw new AccessDeniedException(
+        "Tài khoản chưa được gán chi nhánh và không có quyền xem tất cả chi nhánh. Vui lòng liên hệ quản trị viên.");
   }
 }

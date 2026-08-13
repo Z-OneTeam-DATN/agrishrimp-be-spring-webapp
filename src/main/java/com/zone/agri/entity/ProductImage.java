@@ -25,7 +25,7 @@ public class ProductImage {
     @Column(name = "public_id", length = 255)
     String publicId;
 
-    @Column(name = "name", length = 50)
+    @Column(name = "name", length = 255)
     String name;
 
     @Column(name = "text", length = 100)

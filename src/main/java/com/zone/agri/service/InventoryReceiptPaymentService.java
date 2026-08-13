@@ -144,7 +144,8 @@ public class InventoryReceiptPaymentService {
     }
 
     private Long resolveBranchId(Long requestBranchId) {
-        return AuthUtils.resolveRequestedOrUserBranch(requestBranchId, "REPORT_FINANCE_VIEW");
+        return AuthUtils.resolveRequestedOrUserBranch(
+                requestBranchId, "REPORT_FINANCE_VIEW", "REPORT_FINANCE_VIEW_ALL_BRANCHES");
     }
 
     private ReceiptPaymentResponse mapToResponse(InventoryReceiptPayment payment) {

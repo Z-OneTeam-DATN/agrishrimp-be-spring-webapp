@@ -16,7 +16,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 @Component
-@ConditionalOnProperty(name = "app.startup.seed-data.stickers.enabled", havingValue = "true")
+@ConditionalOnProperty(name = "app.startup.seed-data.stickers.enabled", havingValue = "true", matchIfMissing = true)
 @Order(2)
 @RequiredArgsConstructor
 @Slf4j

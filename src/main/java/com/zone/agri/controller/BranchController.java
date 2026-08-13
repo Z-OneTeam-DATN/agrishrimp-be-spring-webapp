@@ -32,9 +32,17 @@ public class BranchController {
     private final BranchSearchService branchSearchService;
 
     // VIEW
+    // Danh sách chi nhánh chỉ gồm tên/id (không nhạy cảm) nhưng lại là dữ liệu bắt buộc để hiển thị
+    // dropdown "Chọn chi nhánh" trên MỌI trang báo cáo (tồn kho, doanh thu, tài chính...). Trước đây
+    // chỉ BRANCH_VIEW/STAFF_CREATE được gọi — role STAFF/WAREHOUSE_MANAGER có REPORT_INVENTORY_VIEW
+    // nhưng không có 2 quyền trên nên gọi API này bị 403, khiến dropdown chi nhánh trống và tên chi
+    // nhánh hiển thị/xuất file luôn ra "Chi nhánh" chung chung thay vì tên thật.
     @Operation(summary = "Lấy danh sách chi nhánh", description = "Trả về toàn bộ danh sách chi nhánh và kho đang hoạt động.")
     @SecurityRequirement(name = "bearerAuth")
-    @RequirePermission({"BRANCH_VIEW", "STAFF_CREATE"})
+    @RequirePermission({
+            "BRANCH_VIEW", "STAFF_CREATE",
+            "REPORT_INVENTORY_VIEW", "REPORT_FINANCE_VIEW", "REPORT_REVENUE_VIEW"
+    })
     @GetMapping()
     public ResponseEntity<List<BranchDTO>> getAll() {
         return ResponseEntity.ok(branchService.getAll());

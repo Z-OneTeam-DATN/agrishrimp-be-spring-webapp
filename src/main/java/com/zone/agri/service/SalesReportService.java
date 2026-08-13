@@ -5,6 +5,7 @@ import com.zone.agri.dto.response.report.SalesReportDetailResponse;
 import com.zone.agri.dto.response.report.SalesReportSummaryResponse;
 import com.zone.agri.dto.response.user.UserDetail;
 import com.zone.agri.entity.Order;
+import com.zone.agri.entity.OrderItem;
 import com.zone.agri.entity.SubOrder;
 import com.zone.agri.entity.SubOrderItem;
 import com.zone.agri.entity.User;
@@ -53,7 +54,7 @@ public class SalesReportService {
         Long finalBranchId = resolveBranchId(branchId);
         LocalDateTime startDateTime = startDate.atStartOfDay();
         LocalDateTime endDateTime = endDate.atTime(LocalTime.MAX);
-        List<SubOrder> subOrders = subOrderRepository.findReportData(startDateTime, endDateTime, finalBranchId);
+        List<SubOrder> subOrders = findAllReportRows(startDateTime, endDateTime, finalBranchId);
         List<SubOrder> successfulSubOrders = subOrders.stream()
                 .filter(item -> SUCCESS_STATUSES.contains(item.getStatus()))
                 .toList();
@@ -144,7 +145,7 @@ public class SalesReportService {
         Long finalBranchId = resolveBranchId(branchId);
         LocalDateTime startDateTime = startDate.atStartOfDay();
         LocalDateTime endDateTime = endDate.atTime(LocalTime.MAX);
-        List<SubOrder> subOrders = subOrderRepository.findReportData(startDateTime, endDateTime, finalBranchId);
+        List<SubOrder> subOrders = findAllReportRows(startDateTime, endDateTime, finalBranchId);
         List<SalesReportSummaryResponse.TrendPoint> trend = buildTrend(startDate, endDate, finalBranchId);
         Map<Long, String> employeeNames = resolveEmployeeNames(subOrders);
 
@@ -161,6 +162,64 @@ public class SalesReportService {
             case "order_detail" -> buildOrderDetail(subOrders);
             default -> throw new IllegalArgumentException("Unsupported sales report detail type: " + type);
         };
+    }
+
+    // Gộp đơn cũ (Order, chưa từng tách chi nhánh) với đơn đã tách chi nhánh (SubOrder) thành 1
+    // danh sách thống nhất — trước đây chỉ đọc SubOrder nên với dữ liệu thật (gần như 100% đơn cũ)
+    // toàn bộ trang báo cáo doanh thu (thẻ tổng quan, giao hàng, trả hàng, thanh toán, top sản
+    // phẩm...) gần như trống trơn dù hệ thống có hàng trăm đơn đã bán thành công.
+    private List<SubOrder> findAllReportRows(LocalDateTime startDateTime, LocalDateTime endDateTime, Long branchId) {
+        List<SubOrder> rows = new ArrayList<>(subOrderRepository.findReportData(startDateTime, endDateTime, branchId));
+        List<Order> legacyOrders = orderRepository.findLegacySalesReportData(startDateTime, endDateTime, branchId);
+        rows.addAll(wrapLegacyOrdersAsSubOrders(legacyOrders));
+        return rows;
+    }
+
+    // Bọc đơn cũ thành SubOrder tạm (không lưu DB, chỉ dùng để đọc) để tái dùng nguyên các hàm
+    // build bảng chi tiết bên dưới — tránh viết lại 10 bảng chi tiết riêng cho đơn cũ. Dùng vòng
+    // lặp + hàm builder riêng (không map()/toList() trực tiếp trên builder chain) vì kiểu generic
+    // tự tham chiếu của @SuperBuilder gây lỗi suy luận kiểu (capture#-of ?) trên một số trình biên
+    // dịch khi build() nằm ngay trong lambda của stream.
+    private List<SubOrder> wrapLegacyOrdersAsSubOrders(List<Order> legacyOrders) {
+        List<SubOrder> result = new ArrayList<>();
+        for (Order order : legacyOrders) {
+            result.add(wrapLegacyOrder(order));
+        }
+        return result;
+    }
+
+    private SubOrder wrapLegacyOrder(Order order) {
+        SubOrder subOrder = new SubOrder();
+        subOrder.setOrder(order);
+        subOrder.setBranch(order.getBranch());
+        subOrder.setStatus(order.getStatus());
+        subOrder.setSubtotal(order.getTotalAmount());
+        subOrder.setShippingFee(order.getTotalShippingFee());
+        subOrder.setCreatedAt(order.getCreatedAt());
+        subOrder.setReceivedAt(order.getReceivedAt());
+        subOrder.setCompletedAt(order.getCompletedAt());
+        subOrder.setReturnedAt(order.getReturnedAt());
+        subOrder.setItems(wrapLegacyItems(order.getOrderItems()));
+        return subOrder;
+    }
+
+    private List<SubOrderItem> wrapLegacyItems(List<OrderItem> orderItems) {
+        List<SubOrderItem> result = new ArrayList<>();
+        if (orderItems == null) {
+            return result;
+        }
+        for (OrderItem item : orderItems) {
+            result.add(wrapLegacyItem(item));
+        }
+        return result;
+    }
+
+    private SubOrderItem wrapLegacyItem(OrderItem item) {
+        SubOrderItem subOrderItem = new SubOrderItem();
+        subOrderItem.setQuantity(item.getQuantity());
+        subOrderItem.setUnitPrice(item.getPrice());
+        subOrderItem.setProductVariant(item.getProductVariant());
+        return subOrderItem;
     }
 
     private SalesReportDetailResponse buildRevenueTimeDetail(List<SalesReportSummaryResponse.TrendPoint> trend) {
@@ -495,33 +554,32 @@ public class SalesReportService {
         );
     }
 
+    // Trước đây: chi nhánh cụ thể chỉ đọc SubOrder (bỏ sót đơn cũ), còn "Tất cả chi nhánh" chỉ đọc
+    // Order (bỏ sót đơn đã tách chi nhánh) — 2 nhánh if/else không nhánh nào gộp đủ 2 nguồn. Nay
+    // luôn cộng dồn cả 2 nguồn cho mọi chế độ xem chi nhánh, giống cách DashboardService đã làm.
     private List<SalesReportSummaryResponse.TrendPoint> buildTrend(LocalDate startDate, LocalDate endDate, Long branchId) {
         LocalDateTime startDateTime = startDate.atStartOfDay();
         LocalDateTime endDateTime = endDate.atTime(LocalTime.MAX);
-        List<Object[]> revenueRows;
-        List<Object[]> costRows;
-
-        if (branchId != null) {
-            revenueRows = subOrderRepository.getDailyStatsByBranchId(startDateTime, endDateTime, branchId);
-            costRows = subOrderRepository.getDailyCostsByBranchId(startDateTime, endDateTime, branchId);
-        } else {
-            revenueRows = orderRepository.getDailyStats(startDateTime, endDateTime, null);
-            costRows = orderRepository.getDailyCosts(startDateTime, endDateTime, null);
-        }
 
         Map<LocalDate, BigDecimal> revenueMap = new LinkedHashMap<>();
         Map<LocalDate, Long> orderCountMap = new LinkedHashMap<>();
         Map<LocalDate, BigDecimal> costMap = new LinkedHashMap<>();
 
-        for (Object[] row : revenueRows) {
+        for (Object[] row : orderRepository.getLegacyDailyStats(startDateTime, endDateTime, branchId)) {
             LocalDate date = ((java.sql.Date) row[0]).toLocalDate();
-            revenueMap.put(date, row[1] == null ? BigDecimal.ZERO : (BigDecimal) row[1]);
-            orderCountMap.put(date, row[2] == null ? 0L : ((Number) row[2]).longValue());
+            revenueMap.merge(date, row[1] == null ? BigDecimal.ZERO : (BigDecimal) row[1], BigDecimal::add);
+            orderCountMap.merge(date, row[2] == null ? 0L : ((Number) row[2]).longValue(), Long::sum);
         }
 
-        for (Object[] row : costRows) {
+        for (SubOrderRepository.DashboardRevenueRow row : subOrderRepository.findRevenueRows(startDateTime, endDateTime, branchId)) {
+            LocalDate date = row.getCreatedAt().toLocalDate();
+            revenueMap.merge(date, netSubOrderRevenue(row), BigDecimal::add);
+            orderCountMap.merge(date, 1L, Long::sum);
+        }
+
+        for (Object[] row : orderRepository.getDailyCosts(startDateTime, endDateTime, branchId)) {
             LocalDate date = ((java.sql.Date) row[0]).toLocalDate();
-            costMap.put(date, row[1] == null ? BigDecimal.ZERO : (BigDecimal) row[1]);
+            costMap.merge(date, row[1] == null ? BigDecimal.ZERO : (BigDecimal) row[1], BigDecimal::add);
         }
 
         List<SalesReportSummaryResponse.TrendPoint> trend = new ArrayList<>();
@@ -553,7 +611,8 @@ public class SalesReportService {
     }
 
     private Long resolveBranchId(Long requestBranchId) {
-        return AuthUtils.resolveRequestedOrUserBranch(requestBranchId, "REPORT_REVENUE_VIEW");
+        return AuthUtils.resolveRequestedOrUserBranch(
+                requestBranchId, "REPORT_REVENUE_VIEW", "REPORT_REVENUE_VIEW_ALL_BRANCHES");
     }
 
     private String resolveBranchName(Long branchId) {
@@ -565,12 +624,41 @@ public class SalesReportService {
                 .orElse("Chi nhánh");
     }
 
+    // Doanh thu THỰC (đã trừ chiết khấu phân bổ theo tỉ lệ subtotal) — trước đây cộng thẳng
+    // subtotal + shippingFee, bỏ qua voucher/giảm giá nên "Doanh thu" bị thổi phồng so với số tiền
+    // khách thực trả. Với đơn cũ (bọc lại thành SubOrder tạm), order.getTotalAmount() == subtotal
+    // của chính nó nên tỉ lệ phân bổ luôn = 1, tức là trừ đúng 100% chiết khấu của đơn đó.
     private BigDecimal getSubOrderAmount(SubOrder subOrder) {
-        return safeBigDecimal(subOrder.getSubtotal()).add(safeBigDecimal(subOrder.getShippingFee()));
+        BigDecimal subtotal = safeBigDecimal(subOrder.getSubtotal());
+        BigDecimal shippingFee = safeBigDecimal(subOrder.getShippingFee());
+        Order order = subOrder.getOrder();
+        BigDecimal orderSubtotal = order != null ? safeBigDecimal(order.getTotalAmount()) : BigDecimal.ZERO;
+        BigDecimal orderDiscount = order != null ? safeBigDecimal(order.getDiscountAmount()) : BigDecimal.ZERO;
+        BigDecimal allocatedDiscount = allocateDiscount(subtotal, orderSubtotal, orderDiscount);
+        return subtotal.add(shippingFee).subtract(allocatedDiscount);
     }
 
     private BigDecimal safeBigDecimal(BigDecimal value) {
         return value == null ? BigDecimal.ZERO : value;
+    }
+
+    // Phân bổ giảm giá (voucher) của Order cha xuống từng SubOrder theo tỉ lệ subtotal — giống hệt
+    // logic allocateDiscount trong FinancialService/DashboardService để số liệu khớp giữa các báo cáo.
+    private BigDecimal allocateDiscount(BigDecimal subtotal, BigDecimal orderSubtotal, BigDecimal orderDiscount) {
+        if (subtotal.compareTo(BigDecimal.ZERO) <= 0
+                || orderSubtotal.compareTo(BigDecimal.ZERO) <= 0
+                || orderDiscount.compareTo(BigDecimal.ZERO) <= 0) {
+            return BigDecimal.ZERO;
+        }
+        return orderDiscount.multiply(subtotal).divide(orderSubtotal, 2, RoundingMode.HALF_UP);
+    }
+
+    private BigDecimal netSubOrderRevenue(SubOrderRepository.DashboardRevenueRow row) {
+        BigDecimal subtotal = safeBigDecimal(row.getSubtotal());
+        BigDecimal shippingFee = safeBigDecimal(row.getShippingFee());
+        BigDecimal allocatedDiscount = allocateDiscount(
+                subtotal, safeBigDecimal(row.getOrderSubtotal()), safeBigDecimal(row.getOrderDiscountAmount()));
+        return subtotal.add(shippingFee).subtract(allocatedDiscount);
     }
 
     private BigDecimal safeMultiply(BigDecimal price, Integer quantity) {
