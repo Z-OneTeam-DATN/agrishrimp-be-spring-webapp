@@ -130,3 +130,4 @@ public class DashboardController {
         return ResponseEntity.ok(dashboardService.getCategoryDistribution(branchId));
     }
 }
+

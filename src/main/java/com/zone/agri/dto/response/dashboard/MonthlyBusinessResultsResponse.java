@@ -40,3 +40,4 @@ public class MonthlyBusinessResultsResponse {
     private MetricChangeResponse returnedChange;
     private MetricChangeResponse cancelledChange;
 }
+

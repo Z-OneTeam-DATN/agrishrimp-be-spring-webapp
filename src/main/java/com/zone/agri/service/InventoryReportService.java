@@ -32,9 +32,6 @@ public class InventoryReportService {
     private final InventoryRepository inventoryRepository;
     private final InventoryTransactionRepository inventoryTransactionRepository;
 
-    // Chỉ các loại giao dịch làm thay đổi tồn kho vật lý thật sự — xem giải thích ở
-    // InventoryTransactionRepository. ORDER_RESERVE/ORDER_RELEASE/CANCEL_RELEASE bị loại vì chỉ
-    // tác động đến số lượng "tạm giữ" (reservedQuantity), không phải tồn kho thực tế.
     private static final Set<TransactionType> PHYSICAL_TRANSACTION_TYPES = EnumSet.of(
             TransactionType.IMPORT,
             TransactionType.SALE,
@@ -57,7 +54,7 @@ public class InventoryReportService {
         for (InventoryRepository.StockSummaryProjection row : rows) {
             long systemQty = safeLong(row.getSystemQuantity());
             if (systemQty <= 0) {
-                continue; // Biến thể chưa từng có tồn kho thực tế — không đưa vào báo cáo.
+                continue;
             }
 
             BigDecimal branchValue = safeDecimal(row.getBranchValue());
@@ -105,11 +102,6 @@ public class InventoryReportService {
                 .toList();
     }
 
-    // Trước đây lọc theo DẤU của quantityChange (change>0 = "nhập", change<0 = "xuất") thay vì loại
-    // giao dịch thật — hậu quả là 1 dòng TRANSFER_IN vừa hiện ở "Nhập kho" vừa hiện ở "Điều chuyển"
-    // (đếm/xem trùng 2 lần), và RETURN (khách trả hàng) bị gộp nhầm vào "Nhập kho" dù không phải
-    // nhập từ NCC. Nay lọc theo đúng loại giao dịch, mỗi giao dịch chỉ thuộc đúng 1 nhóm cụ thể (hoặc
-    // không nhóm nào — vẫn luôn thấy được qua bộ lọc "Tất cả giao dịch").
     private boolean matchesDirection(InventoryTransaction tx, String direction) {
         if (direction == null || direction.isBlank() || "all".equalsIgnoreCase(direction)) {
             return true;
@@ -173,11 +165,7 @@ public class InventoryReportService {
 
         List<InventoryTransactionRepository.MovementProjection> movements = inventoryTransactionRepository
                 .findMovementSummary(PHYSICAL_TRANSACTION_TYPES, branchId, start, end);
-        // "Tồn cuối kỳ" trước đây lấy thẳng tồn kho HIỆN TẠI (bây giờ), bất kể endDate chọn là ngày
-        // nào — đúng khi endDate = hôm nay, nhưng SAI ngay khi xem 1 kỳ trong quá khứ (mọi giao dịch
-        // phát sinh sau endDate vẫn bị tính vào, làm cả "tồn cuối kỳ" lẫn "tồn đầu kỳ" suy ra từ đó
-        // đều lệch). Cách sửa: lấy tồn hiện tại rồi TRỪ NGƯỢC toàn bộ biến động phát sinh SAU
-        // endDate — ra đúng tồn tại đúng thời điểm endDate mà không cần dựng lại lịch sử theo từng lô.
+
         List<InventoryTransactionRepository.MovementProjection> movementsAfterEnd = inventoryTransactionRepository
                 .findMovementAfterDate(PHYSICAL_TRANSACTION_TYPES, branchId, end);
         List<InventoryRepository.VariantStockProjection> currentStock = inventoryRepository
@@ -269,3 +257,4 @@ public class InventoryReportService {
         return value == null ? BigDecimal.ZERO : value;
     }
 }
+

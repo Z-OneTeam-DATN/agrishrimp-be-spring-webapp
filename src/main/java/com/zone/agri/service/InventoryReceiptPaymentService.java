@@ -125,7 +125,7 @@ public class InventoryReceiptPaymentService {
         try {
             cashflowRiskService.clearCache();
         } catch (Exception e) {
-            // Ignore cache eviction failure
+
         }
         InventoryReceiptPayment refreshedPayment = inventoryReceiptPaymentRepository.findById(savedPayment.getId())
                 .orElse(savedPayment);
@@ -188,3 +188,4 @@ public class InventoryReceiptPaymentService {
         inventoryNoteRepository.save(note);
     }
 }
+

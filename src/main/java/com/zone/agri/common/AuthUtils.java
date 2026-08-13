@@ -60,9 +60,6 @@ public class AuthUtils {
       throw new AccessDeniedException("Người dùng không có quyền truy cập.");
     }
 
-    // Super Admin luôn toàn quyền xem mọi chi nhánh — kể cả khi tài khoản của họ vô tình có sẵn
-    // branchId trong DB (ví dụ dữ liệu cũ/gán nhầm). Không được ép về 1 chi nhánh cụ thể như các
-    // role khác, nếu không "Tất cả chi nhánh" ở frontend sẽ không thực sự lấy dữ liệu toàn hệ thống.
     boolean isSuperAdmin = currentUser.getRole() != null
         && "SUPER_ADMIN".equalsIgnoreCase(currentUser.getRole().getSlug());
     if (isSuperAdmin) {
@@ -76,11 +73,6 @@ public class AuthUtils {
     return requestedBranchId;
   }
 
-  /**
-   * Giống {@link #resolveRequestedOrUserBranch(Long, String...)} nhưng cho phép cấp riêng 1
-   * quyền "xem mọi chi nhánh" (ví dụ REPORT_FINANCE_VIEW_ALL_BRANCHES) — nhân viên không phải
-   * Super Admin nhưng được cấp quyền này thì không bị khoá về chi nhánh của chính họ.
-   */
   public static Long resolveRequestedOrUserBranch(
       Long requestedBranchId, String requiredAuthority, String branchOverrideAuthority) {
     UserDetail currentUser = getUserDetail();
@@ -106,13 +98,8 @@ public class AuthUtils {
       return currentUser.getBranchId();
     }
 
-    // Tài khoản không phải Super Admin, không có quyền "xem mọi chi nhánh" (branchOverrideAuthority),
-    // VÀ chưa được gán chi nhánh nào — trước đây rơi xuống đây thì "return requestedBranchId" nghĩa
-    // là TIN THẲNG giá trị client gửi lên, kể cả null (= xem toàn hệ thống) hoặc 1 branchId bất kỳ
-    // (IDOR sang chi nhánh khác). Không có chi nhánh hợp lệ nào để cấp cho tài khoản này — từ chối
-    // thay vì mặc định cấp quyền xem hết, để một tài khoản bị thiếu cấu hình branch không vô tình
-    // trở thành "toàn quyền xem mọi chi nhánh".
     throw new AccessDeniedException(
         "Tài khoản chưa được gán chi nhánh và không có quyền xem tất cả chi nhánh. Vui lòng liên hệ quản trị viên.");
   }
 }
+

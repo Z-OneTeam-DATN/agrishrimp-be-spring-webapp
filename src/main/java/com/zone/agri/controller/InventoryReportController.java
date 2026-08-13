@@ -56,9 +56,6 @@ public class InventoryReportController {
         return ResponseEntity.ok(inventoryReportService.getIOSummary(finalBranchId, startDate, endDate));
     }
 
-    // Endpoint RIÊNG cho trang báo cáo kiểm kê — dùng đúng mô hình REPORT_INVENTORY_VIEW_ALL_BRANCHES
-    // như 3 báo cáo trên, KHÔNG dùng chung đường /api/inventory-checks (đường đó còn phục vụ màn hình
-    // thủ kho quản lý phiếu kiểm kê thật, gắn với quyền vận hành INVENTORY_CHECK_APPROVE khác hẳn).
     @GetMapping("/check")
     public ResponseEntity<List<InventoryNoteResponse>> getCheckReport(
             @RequestParam(required = false) Long branchId) {
@@ -70,3 +67,4 @@ public class InventoryReportController {
                 requestedBranchId, "REPORT_INVENTORY_VIEW", "REPORT_INVENTORY_VIEW_ALL_BRANCHES");
     }
 }
+

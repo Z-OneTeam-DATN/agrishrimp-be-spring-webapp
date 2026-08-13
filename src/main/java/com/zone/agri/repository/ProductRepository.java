@@ -19,7 +19,6 @@ import com.zone.agri.entity.enums.ProductStatus;
 @Repository
 public interface ProductRepository extends JpaRepository<Product, Long> {
 
-  // Fetch brand + category + productImages trong 1 query, tránh N+1
   @Query("SELECT DISTINCT p FROM Product p " +
       "LEFT JOIN FETCH p.brand " +
       "LEFT JOIN FETCH p.category " +
@@ -43,8 +42,6 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
       @Param("categoryId") Long categoryId,
       @Param("status") ProductStatus status);
 
-  // --- LOGIC XÓA DỮ LIỆU CON TRƯỚC KHI XÓA CHA ---
-
   @Modifying
   @Query("DELETE FROM SKUAttributeValue sav WHERE sav.sku.product = :product")
   void deleteVariantAttributesByProduct(@Param("product") Product product);
@@ -57,15 +54,9 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
   @Query("DELETE FROM ProductImage pi WHERE pi.product = :product")
   void deleteImagesByProduct(@Param("product") Product product);
 
-  // --- LOGIC TÌM KIẾM BẢNG PHỤ ---
-
   @Query("SELECT b FROM Brand b WHERE LOWER(b.name) = LOWER(:name)")
   Optional<Brand> findBrandByName(@Param("name") String name);
 
-  // --- AI DOCTOR: lấy sản phẩm ACTIVE kèm ảnh + category để gợi ý theo phác đồ ---
-  // Phase BE-3: bổ sung LEFT JOIN FETCH p.category để rankCandidateProducts truy
-  // cập category.getName()
-  // an toàn sau khi transaction đóng (proxy đã initialized).
   @Query("SELECT DISTINCT p FROM Product p " +
       "LEFT JOIN FETCH p.productImages " +
       "LEFT JOIN FETCH p.category " +
@@ -73,7 +64,6 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
       "ORDER BY p.name ASC")
   List<Product> findActiveProductsForAiDoctor(@Param("status") ProductStatus status);
 
-  // Lấy danh sách sản phẩm đang kinh doanh và còn hàng tại chi nhánh ACTIVE
   @Query("SELECT p FROM Product p " +
       "JOIN p.category c " +
       "JOIN p.variants v " +
@@ -85,7 +75,6 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
       "HAVING SUM(i.quantity) > 0")
   List<Product> findProductsForSale();
 
-  // Lấy Top bán chạy dựa trên số lượng trong OrderItem, chỉ tính chi nhánh ACTIVE
   @Query("SELECT p FROM Product p " +
       "JOIN p.category c " +
       "JOIN p.variants v " +
@@ -131,7 +120,6 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
       """)
   List<Object[]> sumSubOrderSoldQuantityByProductIds(@Param("productIds") List<Long> productIds);
 
-  // Tìm theo Slug cho trang chi tiết
   Optional<Product> findBySlug(String slug);
 
   @Query("""
@@ -143,20 +131,6 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
       """)
   Optional<Product> findBySlugWithPublicDetails(@Param("slug") String slug);
 
-  // =========================================================================
-  // PUBLIC WEBSITE API — không lộ dữ liệu nội bộ
-  // =========================================================================
-
-  /**
-   * Bước 1 (phân trang): trả về danh sách ID sản phẩm thoả điều kiện hiển thị
-   * công khai.
-   * Dùng query riêng trên ID để tránh Hibernate in-memory pagination
-   * khi fetch collection (variants).
-   * Điều kiện:
-   * - product.status = ACTIVE
-   * - category.status = ACTIVE
-   * - (keyword trùng tên sản phẩm) AND (categoryId khớp nếu có)
-   */
   @Query(value = """
       SELECT p.id FROM Product p
       JOIN p.category c
@@ -206,7 +180,7 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
   Page<Long> findPublicProductIds(
       @Param("keyword") String keyword,
       @Param("categoryId") Long categoryId,
-      @Param("brandId") Long brandId, // Thêm tham số brandId
+      @Param("brandId") Long brandId,
       Pageable pageable);
 
   @Query(value = """
@@ -318,11 +292,6 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
       @Param("packagingValues") List<String> packagingValues,
       Pageable pageable);
 
-  /**
-   * Bước 2 (data loading): fetch đầy đủ quan hệ cho danh sách ID.
-   * JOIN FETCH brand + category + productImages để tránh N+1.
-   * variants được load qua EAGER trên entity.
-   */
   @Query("""
       SELECT DISTINCT p FROM Product p
       LEFT JOIN FETCH p.brand
@@ -332,11 +301,8 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
       """)
   List<Product> findPublicByIds(@Param("ids") List<Long> ids);
 
-  // Đếm số lượng sản phẩm trực tiếp của 1 danh mục
   long countByCategoryId(Long categoryId);
 
-  // Phương thức gây lỗi của bạn đây: Cập nhật trạng thái INACTIVE cho tất cả SP
-  // thuộc Category ID
   @Modifying
   @Query("UPDATE Product p SET p.status = 'INACTIVE' WHERE p.category.id = :categoryId")
   void deactivateByCategoryId(@Param("categoryId") Long categoryId);
@@ -345,10 +311,8 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
   @Query("UPDATE Product p SET p.status = 'ACTIVE' WHERE p.category.id = :categoryId")
   void activateByCategoryId(@Param("categoryId") Long categoryId);
 
-  // Kiểm tra xem danh mục có sản phẩm không (phục vụ logic xóa)
   boolean existsByCategoryId(Long categoryId);
 
-  // Kiểm tra xem thương hiệu có sản phẩm không (phục vụ logic xóa)
   boolean existsByBrandId(Long brandId);
 
   @Query("SELECT COUNT(p) FROM Product p WHERE p.status = 'ACTIVE'")
@@ -358,7 +322,6 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
 
   boolean existsByNameIgnoreCaseAndIdNot(String name, Long id);
 
-  // 3. Tỷ trọng doanh thu theo danh mục (Admin - Toàn hệ thống)
   interface CategorySalesProjection {
     Long getCategoryId();
 
@@ -369,10 +332,6 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
     Long getTotalQuantity();
   }
 
-  // Bản dành cho đơn cũ (Order/OrderItem) — "o.subOrders IS EMPTY" loại trừ đơn đã tách để không
-  // đếm trùng với SubOrderRepository#getCategorySalesByBranch(). DashboardService luôn gộp cả 2
-  // nguồn: thiếu 1 trong 2 sẽ làm biểu đồ "Cơ cấu doanh thu nhóm hàng" rỗng hoặc thiếu số với hệ
-  // thống có trộn cả đơn cũ lẫn đơn đã tách chi nhánh.
   @Query("SELECT c.id AS categoryId, c.name AS categoryName, " +
       "SUM(oi.price * oi.quantity) AS totalRevenue, " +
       "SUM(oi.quantity) AS totalQuantity " +
@@ -389,7 +348,6 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
       "ORDER BY totalRevenue DESC")
   List<CategorySalesProjection> getCategorySalesLegacy(@Param("branchId") Long branchId);
 
-  // 1. Dùng Interface này để hứng dữ liệu trả về từ câu Query
   interface TopProductProjection {
     Long getProductId();
 
@@ -402,12 +360,6 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
     String getImageUrl();
   }
 
-  // 2. Câu Query gom nhóm sản phẩm, tính tổng số lượng bán và tổng tiền — CHỈ tính đơn đã tách
-  // chi nhánh (SubOrder). Đơn cũ (trước khi có luồng tách đơn) không có SubOrderItem nên phải cộng
-  // thêm getTopSellingProductsLegacy() bên dưới ở tầng service, nếu không sản phẩm bán chạy sẽ bị
-  // thiếu/rỗng hoàn toàn với những hệ thống mà dữ liệu chủ yếu là đơn cũ.
-  // Không giới hạn Pageable ở đây vì DashboardService cần gộp với nguồn legacy rồi mới sắp xếp +
-  // giới hạn số dòng cuối cùng.
   @Query("SELECT p.id AS productId, p.name AS productName, " +
       "SUM(si.quantity) AS quantitySold, " +
       "SUM(si.unitPrice * si.quantity) AS revenue, " +
@@ -423,8 +375,6 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
       "ORDER BY quantitySold DESC")
   List<TopProductProjection> getTopSellingProducts(@Param("branchId") Long branchId);
 
-  // Bản dành cho đơn cũ (Order/OrderItem, trước khi có luồng tách đơn theo chi nhánh) — "o.subOrders
-  // IS EMPTY" loại trừ đơn đã tách để không đếm trùng với getTopSellingProducts() ở trên.
   @Query("SELECT p.id AS productId, p.name AS productName, " +
       "SUM(oi.quantity) AS quantitySold, " +
       "SUM(oi.price * oi.quantity) AS revenue, " +
@@ -441,3 +391,4 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
       "ORDER BY quantitySold DESC")
   List<TopProductProjection> getTopSellingProductsLegacy(@Param("branchId") Long branchId);
 }
+

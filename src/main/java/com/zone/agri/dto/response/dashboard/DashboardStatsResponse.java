@@ -16,8 +16,6 @@ public class DashboardStatsResponse {
     private Long totalCustomers;
     private Long totalProducts;
 
-    // Các trường phẳng dưới đây giữ nguyên cho client cũ; client mới nên đọc *Change để biết
-    // thêm giá trị kỳ trước và cờ comparable (xem MetricChangeResponse).
     private double revenueChangePercent;
     private boolean revenueIsNew;
     private double ordersChangePercent;
@@ -29,3 +27,4 @@ public class DashboardStatsResponse {
     private MetricChangeResponse ordersChange;
     private MetricChangeResponse customersChange;
 }
+

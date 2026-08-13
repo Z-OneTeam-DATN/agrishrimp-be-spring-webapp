@@ -19,10 +19,6 @@ import java.math.RoundingMode;
 import java.util.*;
 import java.util.Locale;
 
-/**
- * Thuật toán Greedy kết hợp lô hàng (FIFO).
- * Tự động tính giá bán = giá vốn của lô * % lợi nhuận hệ thống
- */
 @Service
 @RequiredArgsConstructor
 @Slf4j
@@ -40,7 +36,6 @@ public class InventoryAllocationService {
     public Map<Long, Map<Long, List<Inventory>>> buildInventoryMatrix(List<Long> branchIds, List<Long> variantIds) {
         List<Inventory> inventories = inventoryRepository.rawFindInventoryMatrix(branchIds, variantIds);
 
-        // Use detached copies so quote simulation never mutates managed JPA entities.
         Map<Long, Map<Long, List<Inventory>>> matrix = new HashMap<>();
         for (Inventory inventory : inventories) {
             Long branchId = inventory.getBranch().getId();
@@ -86,9 +81,6 @@ public class InventoryAllocationService {
                 .map(candidate -> candidate.branch().getId())
                 .collect(java.util.stream.Collectors.toSet());
 
-        // Rule moi:
-        // 1. Neu co chi nhanh nao du toan bo gio hang thi uu tien chi nhanh gan khach nhat trong nhom do.
-        // 2. Neu khong co chi nhanh nao du tron bo, chon chi nhanh giao hang gan khach nhat de gom bo sung noi bo.
         BranchWithRealDistance selectedBranchWithDistance = sellableBranches.stream()
                 .filter(candidate -> isBranchFullyStocked(candidate.branch().getId(), cart, inventoryMatrix))
                 .findFirst()
@@ -150,8 +142,6 @@ public class InventoryAllocationService {
                         + " chua co gia ban hop le. Vui long kiem tra gia nhap ton kho truoc khi dat hang.");
             }
 
-            // Phan con thieu (chua co lo hang nao dam bao) tam tinh theo don gia lo gan nhat/fallback,
-            // se duoc chot lai gia tri thuc te khi nhap bo sung / chuyen kho ve.
             BigDecimal missingSubtotal = lastUnitPrice.multiply(BigDecimal.valueOf(requested));
             BigDecimal itemSubtotal = allocatedSubtotal.add(missingSubtotal);
             BigDecimal effectiveUnitPrice = totalAllocatedForItem > 0
@@ -340,3 +330,4 @@ public class InventoryAllocationService {
         return Math.max(0, quantity - reserved);
     }
 }
+

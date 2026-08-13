@@ -75,9 +75,6 @@ public interface OrderRepository extends JpaRepository<Order, Long>, JpaSpecific
        boolean existsCompletedOrderWithProduct(@Param("orderId") Long orderId, @Param("userId") Long userId,
                      @Param("productId") Long productId);
 
-       // "Completed" duoc dinh nghia giong het ProductRecommendationBatchService.fetchCompletedBasketRows
-       // (UNION order_items + sub_order_items, ca 2 deu yeu cau status COMPLETED) — de nhat quan voi chinh
-       // du lieu product_recommendations dang doc, tranh lech dinh nghia "da mua" giua 2 noi.
        @Query(value = """
                      SELECT DISTINCT basket.product_id
                      FROM (
@@ -143,8 +140,6 @@ public interface OrderRepository extends JpaRepository<Order, Long>, JpaSpecific
                      @Param("branchId") Long branchId,
                      Pageable pageable);
 
-       // Đơn cũ (chưa từng tách chi nhánh) — luôn cộng thêm phần từ SubOrder ở tầng service (xem
-       // DashboardService#getPendingOrdersSummary) để không thiếu đơn khi lọc theo 1 chi nhánh cụ thể.
        @Query("SELECT COUNT(o) FROM Order o WHERE o.status = :status " +
                      "AND o.subOrders IS EMPTY " +
                      "AND (:branchId IS NULL OR o.branch.id = :branchId)")
@@ -156,15 +151,11 @@ public interface OrderRepository extends JpaRepository<Order, Long>, JpaSpecific
 
        List<Order> findAllByOrderByCreatedAtDesc();
 
-       // Đơn cũ chưa tách chi nhánh — DashboardService cộng thêm phần SubOrder tương ứng ở tầng
-       // service cho cả 2 chế độ (Tất cả chi nhánh / 1 chi nhánh cụ thể), tránh thiếu đếm khi chọn
-       // 1 chi nhánh cụ thể (trước đây chỉ đếm SubOrder cho nhánh đó, bỏ sót toàn bộ đơn cũ).
        @Query("SELECT COUNT(o) FROM Order o WHERE o.status <> com.zone.agri.entity.enums.OrderStatus.CANCELLED " +
                      "AND o.subOrders IS EMPTY " +
                      "AND (:branchId IS NULL OR o.branch.id = :branchId)")
        long countAllOrdersExceptCancelled(@Param("branchId") Long branchId);
 
-       // Đếm luỹ kế tính đến 1 thời điểm — dùng để so sánh "Tổng đơn hàng" hôm nay với hôm qua.
        @Query("SELECT COUNT(o) FROM Order o WHERE o.status <> com.zone.agri.entity.enums.OrderStatus.CANCELLED " +
                      "AND o.subOrders IS EMPTY " +
                      "AND o.createdAt <= :endDate " +
@@ -181,10 +172,6 @@ public interface OrderRepository extends JpaRepository<Order, Long>, JpaSpecific
                      @Param("endDate") LocalDateTime endDate,
                      @Param("branchId") Long branchId);
 
-       // Đơn giao THÀNH CÔNG trong kỳ — đếm theo receivedAt (thời điểm khách xác nhận đã nhận hàng),
-       // không phải createdAt, vì đây là chỉ số chất lượng vận hành: "trong kỳ này giao được bao
-       // nhiêu đơn", bất kể đơn đó được tạo từ khi nào. receivedAt luôn được set ngay khi đơn chuyển
-       // sang RECEIVED hoặc COMPLETED (xem OrderService#applyOrderStatus) nên không lệch với status hiện tại.
        @Query("SELECT COUNT(o) FROM Order o WHERE o.status IN (com.zone.agri.entity.enums.OrderStatus.RECEIVED, com.zone.agri.entity.enums.OrderStatus.COMPLETED) "
                      +
                      "AND o.subOrders IS EMPTY " +
@@ -194,9 +181,6 @@ public interface OrderRepository extends JpaRepository<Order, Long>, JpaSpecific
                      @Param("endDate") LocalDateTime endDate,
                      @Param("branchId") Long branchId);
 
-       // Đơn BỊ HOÀN trong kỳ — theo state machine hiện tại, RETURNED chỉ đạt được từ SHIPPING (xem
-       // OrderService#validateStatusTransition), tức là đơn đã xuất kho giao đi nhưng giao không thành
-       // (khách từ chối nhận / không liên lạc được...) nên phải trả ngược về kho.
        @Query("SELECT COUNT(o) FROM Order o WHERE o.status = com.zone.agri.entity.enums.OrderStatus.RETURNED " +
                      "AND o.subOrders IS EMPTY " +
                      "AND o.returnedAt BETWEEN :startDate AND :endDate " +
@@ -205,8 +189,6 @@ public interface OrderRepository extends JpaRepository<Order, Long>, JpaSpecific
                      @Param("endDate") LocalDateTime endDate,
                      @Param("branchId") Long branchId);
 
-       // Đơn bị HUỶ trong kỳ — đếm theo cancelledAt vì huỷ có thể xảy ra ở bất kỳ bước nào trước khi
-       // giao, không gắn với createdAt của đơn.
        @Query("SELECT COUNT(o) FROM Order o WHERE o.status = com.zone.agri.entity.enums.OrderStatus.CANCELLED " +
                      "AND o.subOrders IS EMPTY " +
                      "AND o.cancelledAt BETWEEN :startDate AND :endDate " +
@@ -235,8 +217,6 @@ public interface OrderRepository extends JpaRepository<Order, Long>, JpaSpecific
               return sumRecognizedFinalAmount(startDate, endDate, branchId);
        }
 
-       // Đơn hàng cũ (trước khi có luồng tách đơn theo chi nhánh) không có SubOrder nào —
-       // finalAmount của Order đã là số cuối cùng đúng (đã trừ giảm giá, đã gồm ship) nên dùng trực tiếp.
        @Query("SELECT SUM(o.finalAmount) FROM Order o WHERE o.status IN (com.zone.agri.entity.enums.OrderStatus.COMPLETED, com.zone.agri.entity.enums.OrderStatus.RECEIVED, com.zone.agri.entity.enums.OrderStatus.SHIPPING) "
                      +
                      "AND o.subOrders IS EMPTY " +
@@ -252,9 +232,6 @@ public interface OrderRepository extends JpaRepository<Order, Long>, JpaSpecific
               BigDecimal getFinalAmount();
        }
 
-       // Trả về từng dòng thay vì 1 số tổng — cho phép tính "tổng đến hôm nay" và "tổng đến hôm qua"
-       // từ CÙNG 1 lần fetch (lọc theo createdAt trong Java), thay vì phải quét lại toàn bộ lịch sử
-       // 2 lần trên DB. Quan trọng vì DB chạy qua SSH tunnel từ xa, mỗi round-trip đều tốn độ trễ.
        @Query("SELECT o.createdAt AS createdAt, COALESCE(o.finalAmount, 0) AS finalAmount " +
                      "FROM Order o WHERE o.status IN (com.zone.agri.entity.enums.OrderStatus.COMPLETED, com.zone.agri.entity.enums.OrderStatus.RECEIVED, com.zone.agri.entity.enums.OrderStatus.SHIPPING) "
                      +
@@ -378,9 +355,6 @@ public interface OrderRepository extends JpaRepository<Order, Long>, JpaSpecific
                       @Param("endDate") LocalDateTime endDate,
                       @Param("branchId") Long branchId);
 
-       // Đơn cũ (chưa từng tách chi nhánh) đủ dữ liệu (item/khách/chi nhánh) cho Báo cáo doanh thu —
-       // SalesReportService trước đây chỉ đọc SubOrder nên bỏ sót toàn bộ đơn cũ, dùng chung cách
-       // bọc lại thành SubOrder tạm (không lưu DB) để tái dùng nguyên logic build bảng chi tiết.
        @Query("""
                      SELECT DISTINCT o
                      FROM Order o
@@ -397,11 +371,6 @@ public interface OrderRepository extends JpaRepository<Order, Long>, JpaSpecific
                      @Param("endDate") LocalDateTime endDate,
                      @Param("branchId") Long branchId);
 
-       // Chỉ tính đơn COD chưa đối soát — đúng như nhãn UI "Dòng tiền thu dự kiến (COD chưa đối
-       // soát)". Trước đây cộng mọi đơn UNPAID bất kể phương thức thanh toán, kể cả chuyển khoản
-       // chưa trả (không phải "sắp thu được tiền"), khiến ước tính dòng tiền vào bị thổi phồng.
-       // Chỉ đơn cũ (chưa tách chi nhánh) — CashflowRiskService cộng thêm phần SubOrder tương ứng
-       // (SubOrderRepository#findUnpaidCodSubOrderAmounts) để không bỏ sót đơn đã tách chi nhánh.
        @Query("SELECT COALESCE(SUM(o.finalAmount), 0) FROM Order o " +
               "WHERE o.paymentStatus = com.zone.agri.entity.enums.PaymentStatus.UNPAID " +
               "AND o.paymentMethod = com.zone.agri.entity.enums.PaymentMethod.COD " +
@@ -428,8 +397,6 @@ public interface OrderRepository extends JpaRepository<Order, Long>, JpaSpecific
             @Param("startDate") LocalDateTime startDate,
             @Param("branchId") Long branchId);
 
-    // JOIN FETCH user/branch — mapOrderToCashbookEntry() đọc order.getUser()/getBranch() cho
-    // mỗi dòng; thiếu fetch join gây N+1 lazy-load (1 query phụ mỗi đơn) khi sinh sổ quỹ.
     @Query("""
         SELECT o
         FROM Order o
@@ -471,3 +438,4 @@ public interface OrderRepository extends JpaRepository<Order, Long>, JpaSpecific
             @Param("endDate") LocalDateTime endDate,
             @Param("branchId") Long branchId);
 }
+

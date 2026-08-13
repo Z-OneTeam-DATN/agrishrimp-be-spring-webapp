@@ -21,7 +21,6 @@ public class ProductImage {
     @Column(name = "image_url", columnDefinition = "TEXT")
     String imageUrl;
 
-    /** Public ID Cloudinary – dùng để xóa / cập nhật ảnh sau này */
     @Column(name = "public_id", length = 255)
     String publicId;
 
@@ -31,7 +30,7 @@ public class ProductImage {
     @Column(name = "text", length = 100)
     String text;
 
-    @JsonIgnore  // phá vòng lặp: Product → productImages → product → productImages → ...
+    @JsonIgnore
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "product_id")
     @ToString.Exclude

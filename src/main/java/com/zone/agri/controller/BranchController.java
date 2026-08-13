@@ -31,12 +31,6 @@ public class BranchController {
     private final BranchService branchService;
     private final BranchSearchService branchSearchService;
 
-    // VIEW
-    // Danh sách chi nhánh chỉ gồm tên/id (không nhạy cảm) nhưng lại là dữ liệu bắt buộc để hiển thị
-    // dropdown "Chọn chi nhánh" trên MỌI trang báo cáo (tồn kho, doanh thu, tài chính...). Trước đây
-    // chỉ BRANCH_VIEW/STAFF_CREATE được gọi — role STAFF/WAREHOUSE_MANAGER có REPORT_INVENTORY_VIEW
-    // nhưng không có 2 quyền trên nên gọi API này bị 403, khiến dropdown chi nhánh trống và tên chi
-    // nhánh hiển thị/xuất file luôn ra "Chi nhánh" chung chung thay vì tên thật.
     @Operation(summary = "Lấy danh sách chi nhánh", description = "Trả về toàn bộ danh sách chi nhánh và kho đang hoạt động.")
     @SecurityRequirement(name = "bearerAuth")
     @RequirePermission({
@@ -48,7 +42,6 @@ public class BranchController {
         return ResponseEntity.ok(branchService.getAll());
     }
 
-    // VIEW
     @Operation(summary = "Chi tiết chi nhánh", description = "Lấy thông tin chi tiết của một chi nhánh dựa trên ID.")
     @SecurityRequirement(name = "bearerAuth")
     @RequirePermission("BRANCH_VIEW")
@@ -63,7 +56,6 @@ public class BranchController {
         return ResponseEntity.ok(branchService.getBranchById(id));
     }
 
-    // CREATE
     @Operation(summary = "Tạo mới chi nhánh", description = "Thêm một chi nhánh hoặc kho mới vào hệ thống.")
     @SecurityRequirement(name = "bearerAuth")
     @RequirePermission("BRANCH_CREATE")
@@ -76,8 +68,6 @@ public class BranchController {
         return ResponseEntity.ok(branchService.create(dto));
     }
 
-
-    // UPDATE
     @Operation(summary = "Cập nhật chi nhánh", description = "Chỉnh sửa thông tin chi nhánh đã tồn tại.")
     @SecurityRequirement(name = "bearerAuth")
     @RequirePermission("BRANCH_UPDATE")
@@ -93,8 +83,6 @@ public class BranchController {
         return ResponseEntity.ok(branchService.update(id, dto));
     }
 
-
-    // DELETE
     @Operation(summary = "Xóa chi nhánh", description = "Xóa mềm (Soft Delete) hoặc vô hiệu hóa một chi nhánh.")
     @SecurityRequirement(name = "bearerAuth")
     @RequirePermission("BRANCH_DELETE")
@@ -110,7 +98,6 @@ public class BranchController {
         return ResponseEntity.noContent().build();
     }
 
-    //VIEW
     @Operation(summary = "Kiểm tra tồn kho", description = "Trả về danh sách các chi nhánh có ĐỦ SỐ LƯỢNG cho TẤT CẢ sản phẩm truyền vào.")
     @SecurityRequirement(name = "bearerAuth")
     @RequirePermission("BRANCH_VIEW")
@@ -119,8 +106,6 @@ public class BranchController {
         return ResponseEntity.ok(branchService.findBranchesWithEnoughStock(items));
     }
 
-
-    //PUBLIC
     @Operation(
             summary = "Tìm chi nhánh gần nhất",
             description = "Tìm danh sách chi nhánh gần nhất với vị trí người dùng theo 3 tầng lọc: "
@@ -152,3 +137,4 @@ public class BranchController {
         return ResponseEntity.ok(response);
     }
 }
+

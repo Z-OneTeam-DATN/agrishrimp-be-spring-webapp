@@ -6,11 +6,9 @@ import com.zone.agri.entity.enums.TransactionType;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
 
-
 import java.util.List;
 
 import java.util.Optional;
-
 
 @Repository
 public interface InventoryTransactionRepository extends JpaRepository<InventoryTransaction, Long> {
@@ -49,10 +47,6 @@ public interface InventoryTransactionRepository extends JpaRepository<InventoryT
 
     Optional<InventoryTransaction> findFirstByInventoryAndTypeOrderByCreatedAtAsc(Inventory inventory, TransactionType type);
 
-    // Biến động ròng (có dấu) của giá trị tồn kho trong 1 khoảng thời gian — quantityChange đã có
-    // dấu sẵn (dương = nhập/hoàn/điều chuyển vào, âm = bán/hỏng/điều chuyển ra), và newBalance
-    // được cập nhật theo từng giao dịch nên quantityChange chính là delta số lượng thực tế.
-    // Dùng để suy ra "giá trị tồn kho hôm qua" = giá trị hôm nay - biến động ròng hôm nay.
     @org.springframework.data.jpa.repository.Query("""
             SELECT COALESCE(SUM(tx.quantityChange * COALESCE(tx.inventory.importPrice, 0)), 0)
             FROM InventoryTransaction tx
@@ -75,13 +69,6 @@ public interface InventoryTransactionRepository extends JpaRepository<InventoryT
     List<ReferenceCostProjection> sumSaleCostByReferenceCodes(
             @org.springframework.data.repository.query.Param("referenceCodes") java.util.Collection<String> referenceCodes,
             @org.springframework.data.repository.query.Param("branchId") Long branchId);
-
-    // ==============================================================
-    // SỔ KHO (Ledger) + BÁO CÁO XUẤT NHẬP TỒN — chỉ tính các loại giao dịch làm thay đổi tồn kho
-    // vật lý thật sự (IMPORT/SALE/TRANSFER_IN/TRANSFER_OUT/ADJUSTMENT/RETURN/DAMAGED). Cố tình bỏ
-    // ORDER_RESERVE/ORDER_RELEASE/CANCEL_RELEASE vì newBalance của các loại đó là số dư "tạm giữ"
-    // (reservedQuantity), không phải tồn kho thực tế — trộn chung sẽ làm sai "tồn trước/tồn sau".
-    // ==============================================================
 
     @org.springframework.data.jpa.repository.Query("""
             SELECT tx FROM InventoryTransaction tx
@@ -141,9 +128,6 @@ public interface InventoryTransactionRepository extends JpaRepository<InventoryT
             @org.springframework.data.repository.query.Param("start") java.time.LocalDateTime start,
             @org.springframework.data.repository.query.Param("end") java.time.LocalDateTime end);
 
-    // Dùng để lùi "tồn hiện tại" về đúng "tồn cuối kỳ tại endDate": tồn hiện tại trừ đi mọi biến
-    // động xảy ra SAU endDate thì ra đúng tồn tại thời điểm endDate — xem giải thích đầy đủ ở
-    // InventoryReportService#getIOSummary.
     @org.springframework.data.jpa.repository.Query("""
             SELECT pv.id AS variantId,
                    pv.sku AS sku,
@@ -167,3 +151,4 @@ public interface InventoryTransactionRepository extends JpaRepository<InventoryT
             @org.springframework.data.repository.query.Param("after") java.time.LocalDateTime after);
 
 }
+

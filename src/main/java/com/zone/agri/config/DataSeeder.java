@@ -143,35 +143,30 @@ public class DataSeeder implements CommandLineRunner {
     }
 
     private void seedMasterDataAndOperations(Map<String, Role> seededRoles) {
-        // 1. Chi nhánh (Branches)
+
         Branch cmBranch = ensureBranch("CN-CM01", "Chi nhánh Cà Mau", "STORE", "02903838388", "camau@agrishrimp.vn", "123 Trần Hưng Đạo, Phường 5, TP. Cà Mau", "Tỉnh Cà Mau", 87);
         Branch stBranch = ensureBranch("CN-ST01", "Chi nhánh Sóc Trăng", "STORE", "02993828288", "soctrang@agrishrimp.vn", "45 Lê Hồng Phong, Phường 3, TP. Sóc Trăng", "Tỉnh Sóc Trăng", 94);
         Branch btBranch = ensureBranch("CN-BT01", "Chi nhánh Bến Tre", "STORE", "02753818188", "bentre@agrishrimp.vn", "88 Nguyễn Đình Chiểu, Phường 2, TP. Bến Tre", "Tỉnh Bến Tre", 83);
         Branch blBranch = ensureBranch("CN-BL01", "Chi nhánh Bạc Liêu", "STORE", "02913828288", "baclieu@agrishrimp.vn", "26 Hai Bà Trưng, Phường 3, TP. Bạc Liêu", "Tỉnh Bạc Liêu", 95);
         List<Branch> branches = List.of(cmBranch, stBranch, btBranch, blBranch);
 
-        // 2. Tài khoản nhân sự & vai trò hệ thống
         seedDefaultSystemUsers(seededRoles, cmBranch);
         User admin = userRepository.findByEmail("admin@agrishrimp.vn").orElse(null);
 
-        // 3. Khởi tạo Catalog, Tồn kho & Giao dịch tài chính mẫu
         if (productRepository.count() == 0 || orderRepository.count() == 0) {
             log.info(">>> ĐANG KHỞI TẠO DANH MỤC SẢN PHẨM, TỒN KHO VÀ LỊCH SỬ GIAO DỊCH...");
             seedCatalogAndFinancialData(branches, admin);
         }
 
-        // 4. Vouchers
         seedVouchersIfEmpty();
 
-        // 5. Banners
         seedBannersIfEmpty();
 
-        // 6. Blog Posts
         seedBlogIfEmpty(admin);
     }
 
     private void seedDefaultSystemUsers(Map<String, Role> seededRoles, Branch defaultBranch) {
-        // Staff
+
         userRepository.findByEmail("staff@agrishrimp.vn").orElseGet(() -> userRepository.save(User.builder()
                 .email("staff@agrishrimp.vn")
                 .fullName("Nguyễn Thị Mai (Nhân viên Tư vấn)")
@@ -185,7 +180,6 @@ public class DataSeeder implements CommandLineRunner {
                 .addressDetail("123 Trần Hưng Đạo, P.5, TP. Cà Mau")
                 .build()));
 
-        // Warehouse Manager
         userRepository.findByEmail("warehouse@agrishrimp.vn").orElseGet(() -> userRepository.save(User.builder()
                 .email("warehouse@agrishrimp.vn")
                 .fullName("Trần Văn Kho (Quản lý kho)")
@@ -199,7 +193,6 @@ public class DataSeeder implements CommandLineRunner {
                 .addressDetail("123 Trần Hưng Đạo, P.5, TP. Cà Mau")
                 .build()));
 
-        // Agronomist
         userRepository.findByEmail("agronomist@agrishrimp.vn").orElseGet(() -> userRepository.save(User.builder()
                 .email("agronomist@agrishrimp.vn")
                 .fullName("Kỹ Sư Lê Hoàng Thủy Sản")
@@ -213,7 +206,6 @@ public class DataSeeder implements CommandLineRunner {
                 .addressDetail("TP. Cà Mau")
                 .build()));
 
-        // Default Customer
         userRepository.findByEmail("customer@gmail.com").orElseGet(() -> {
             Role customerRole = seededRoles.get(CUSTOMER_ROLE_SLUG);
             User custUser = userRepository.save(User.builder()
@@ -244,21 +236,19 @@ public class DataSeeder implements CommandLineRunner {
     }
 
     private void seedCatalogAndFinancialData(List<Branch> branches, User admin) {
-        // Danh mục (Categories)
+
         Category catFeed = ensureCategory("Thức ăn thủy sản", "thuc-an-thuy-san", "https://images.unsplash.com/photo-1544551763-46a013bb70d5?auto=format&fit=crop&w=600&q=80");
         Category catProbiotic = ensureCategory("Men vi sinh & Chế phẩm sinh học", "men-vi-sinh-che-pham-sinh-hoc", "https://images.unsplash.com/photo-1576086213369-97a306d36557?auto=format&fit=crop&w=600&q=80");
         Category catMineral = ensureCategory("Khoáng chất & Dinh dưỡng", "khoang-chat-dinh-duong", "https://images.unsplash.com/photo-1584308666744-24d5c474f2ae?auto=format&fit=crop&w=600&q=80");
         Category catChemical = ensureCategory("Thuốc & Xử lý môi trường nước", "thuoc-xu-ly-moi-truong-nuoc", "https://images.unsplash.com/photo-1559884743-74a57598c6c7?auto=format&fit=crop&w=600&q=80");
         Category catEquipment = ensureCategory("Thiết bị & Vật tư đầm tôm", "thiet-bi-vat-tu-dam-tom", "https://images.unsplash.com/photo-1581092160607-ee22621dd758?auto=format&fit=crop&w=600&q=80");
 
-        // Thương hiệu (Brands)
         Brand brandCP = ensureBrand("Tập đoàn C.P. Việt Nam", "https://images.unsplash.com/photo-1599305445671-ac291c95aaa9?auto=format&fit=crop&w=200&q=80");
         Brand brandGrobest = ensureBrand("Grobest Việt Nam", "https://images.unsplash.com/photo-1599305445671-ac291c95aaa9?auto=format&fit=crop&w=200&q=80");
         Brand brandTrucAnh = ensureBrand("Trúc Anh Biotech", "https://images.unsplash.com/photo-1599305445671-ac291c95aaa9?auto=format&fit=crop&w=200&q=80");
         Brand brandBioMar = ensureBrand("BioMar Việt Nam", "https://images.unsplash.com/photo-1599305445671-ac291c95aaa9?auto=format&fit=crop&w=200&q=80");
         Brand brandShengLong = ensureBrand("Sheng Long Biotech", "https://images.unsplash.com/photo-1599305445671-ac291c95aaa9?auto=format&fit=crop&w=200&q=80");
 
-        // Nhà cung cấp (Suppliers)
         Supplier supCP = ensureSupplier("NCC-CP", "Công ty TNHH Thức Ăn Thủy Sản C.P. Việt Nam", "0300801234", "Nguyễn Văn Tâm", "0908111222", "sales@cp.com.vn", "KCN Sông Đốc, Cà Mau");
         Supplier supGrobest = ensureSupplier("NCC-GROBEST", "Công ty Cổ phần Grobest Việt Nam", "0301987654", "Lê Thanh Bình", "0908222333", "support@grobest.vn", "KCN An Nghiệp, Sóc Trăng");
         Supplier supTrucAnh = ensureSupplier("NCC-TRUCANH", "Công ty TNHH Sản Xuất & Thương Mại Trúc Anh Biotech", "1900654321", "Đỗ Thị Mai", "0908333444", "trucanh@biotech.vn", "Hiệp Thành, Bạc Liêu");
@@ -266,7 +256,6 @@ public class DataSeeder implements CommandLineRunner {
         Supplier supShengLong = ensureSupplier("NCC-SHENGLONG", "Công ty TNHH Khoa Kỹ Sinh Học Thăng Long", "0303456789", "Hoàng Văn Long", "0908555666", "shenglong@shenglong.vn", "KCN Đức Hòa, Long An");
         List<Supplier> suppliers = List.of(supCP, supGrobest, supTrucAnh, supBioMar, supShengLong);
 
-        // Sản phẩm & Biến thể (Products & ProductVariants)
         Product pGrobest = ensureProduct("Thức ăn tôm thẻ Grobest Super Premium 1.5mm", "gb-feed-15mm", "Thức ăn tăng trưởng cao cấp cho tôm thẻ chân trắng bao 25kg", catFeed, brandGrobest, supGrobest, "https://images.unsplash.com/photo-1544551763-46a013bb70d5?auto=format&fit=crop&w=600&q=80");
         ProductVariant pvGrobest = ensureVariant(pGrobest, "GB-FEED-15MM", "https://images.unsplash.com/photo-1544551763-46a013bb70d5?auto=format&fit=crop&w=600&q=80");
 
@@ -313,7 +302,6 @@ public class DataSeeder implements CommandLineRunner {
                 pvFeeder, new BigDecimal("5100000")
         );
 
-        // Tồn kho các chi nhánh (Inventories)
         Map<String, Inventory> inventoryMap = new HashMap<>();
         for (Branch b : branches) {
             for (ProductVariant v : variants) {
@@ -335,7 +323,6 @@ public class DataSeeder implements CommandLineRunner {
             }
         }
 
-        // Khách hàng thực tế (Customers & User accounts)
         List<User> customerUsers = List.of(
                 ensureCustomerUser("Nguyễn Văn Hùng", "hung.damdoi@gmail.com", "0918111001", "Trại tôm Đầm Dỗi, Phường 5, TP. Cà Mau", branches.get(0)),
                 ensureCustomerUser("Trần Thị Mỹ Linh", "mylinh.myxuyen@gmail.com", "0918111002", "HTX Thủy sản Mỹ Xuyên, TP. Sóc Trăng", branches.get(1)),
@@ -345,7 +332,6 @@ public class DataSeeder implements CommandLineRunner {
                 ensureCustomerUser("Đặng Văn Thành", "thanh.duyenhai@gmail.com", "0918111006", "Trại tôm thâm canh Duyên Hải, Cà Mau", branches.get(0))
         );
 
-        // Tạo dữ liệu tài chính lịch sử trong 8 tháng liên tục
         LocalDateTime now = LocalDateTime.now();
         int noteSeq = 100;
         int paySeq = 100;
@@ -355,7 +341,6 @@ public class DataSeeder implements CommandLineRunner {
             LocalDateTime monthBase = now.minusMonths(m);
             int daysInMonth = 28;
 
-            // A. Phiếu nhập kho từ Nhà cung cấp & Thanh toán công nợ
             for (int i = 0; i < 3; i++) {
                 Supplier sup = suppliers.get((m + i) % suppliers.size());
                 Branch branch = branches.get((m + i) % branches.size());
@@ -408,7 +393,6 @@ public class DataSeeder implements CommandLineRunner {
                 }
             }
 
-            // B. Đơn bán hàng & Giao dịch xuất kho
             int ordersThisMonth = 11 + (m % 4);
             for (int o = 0; o < ordersThisMonth; o++) {
                 orderSeq++;
@@ -1329,3 +1313,4 @@ public class DataSeeder implements CommandLineRunner {
             String parentCode) {
     }
 }
+

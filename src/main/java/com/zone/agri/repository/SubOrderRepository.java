@@ -42,8 +42,6 @@ public interface SubOrderRepository extends JpaRepository<SubOrder, Long> {
 
     List<SubOrder> findByStatusAndUpdatedAtBefore(OrderStatus status, java.time.LocalDateTime updatedAt);
 
-    // ── Truy vấn theo chi nhánh (dùng cho quản lý kho / chi nhánh) ──
-
     @Query("SELECT s FROM SubOrder s LEFT JOIN FETCH s.order o LEFT JOIN FETCH o.user " +
             "WHERE s.branch.id = :branchId ORDER BY s.createdAt DESC")
     List<SubOrder> findByBranchIdOrderByCreatedAtDesc(@Param("branchId") Long branchId);
@@ -73,7 +71,6 @@ public interface SubOrderRepository extends JpaRepository<SubOrder, Long> {
             "AND (:branchId IS NULL OR s.branch.id = :branchId)")
     long countAllByBranchIdExceptCancelled(@Param("branchId") Long branchId);
 
-    // Đếm luỹ kế tính đến 1 thời điểm — dùng để so sánh "Tổng đơn hàng" hôm nay với hôm qua.
     @Query("SELECT COUNT(s) FROM SubOrder s WHERE s.status <> com.zone.agri.entity.enums.OrderStatus.CANCELLED " +
             "AND s.createdAt <= :endDate AND (:branchId IS NULL OR s.branch.id = :branchId)")
     long countAllByBranchIdExceptCancelledBefore(@Param("endDate") java.time.LocalDateTime endDate,
@@ -86,8 +83,6 @@ public interface SubOrderRepository extends JpaRepository<SubOrder, Long> {
                                 @Param("endDate") java.time.LocalDateTime endDate,
                                 @Param("branchId") Long branchId);
 
-    // Đơn giao THÀNH CÔNG trong kỳ (theo receivedAt) — bản theo chi nhánh của countDeliveredOrders,
-    // dùng khi lọc theo 1 chi nhánh cụ thể vì Order.branch chỉ là "chi nhánh chính" lúc tạo đơn.
     @Query("SELECT COUNT(s) FROM SubOrder s WHERE s.status IN (com.zone.agri.entity.enums.OrderStatus.RECEIVED, com.zone.agri.entity.enums.OrderStatus.COMPLETED) " +
             "AND s.receivedAt BETWEEN :startDate AND :endDate " +
             "AND (:branchId IS NULL OR s.branch.id = :branchId)")
@@ -95,7 +90,6 @@ public interface SubOrderRepository extends JpaRepository<SubOrder, Long> {
                                   @Param("endDate") java.time.LocalDateTime endDate,
                                   @Param("branchId") Long branchId);
 
-    // Đơn BỊ HOÀN trong kỳ (theo returnedAt) — bản theo chi nhánh của countReturnedOrders.
     @Query("SELECT COUNT(s) FROM SubOrder s WHERE s.status = com.zone.agri.entity.enums.OrderStatus.RETURNED " +
             "AND s.returnedAt BETWEEN :startDate AND :endDate " +
             "AND (:branchId IS NULL OR s.branch.id = :branchId)")
@@ -103,7 +97,6 @@ public interface SubOrderRepository extends JpaRepository<SubOrder, Long> {
                                  @Param("endDate") java.time.LocalDateTime endDate,
                                  @Param("branchId") Long branchId);
 
-    // Đơn bị HUỶ trong kỳ (theo cancelledAt) — bản theo chi nhánh của countCancelledOrders.
     @Query("SELECT COUNT(s) FROM SubOrder s WHERE s.status = com.zone.agri.entity.enums.OrderStatus.CANCELLED " +
             "AND s.cancelledAt BETWEEN :startDate AND :endDate " +
             "AND (:branchId IS NULL OR s.branch.id = :branchId)")
@@ -130,9 +123,6 @@ public interface SubOrderRepository extends JpaRepository<SubOrder, Long> {
         java.math.BigDecimal getOrderDiscountAmount();
     }
 
-    // Trả về từng dòng SubOrder kèm subtotal/discount của Order cha để DashboardService
-    // phân bổ giảm giá theo tỉ lệ (giống allocateDiscount trong FinancialService) thay vì
-    // tính doanh thu chi nhánh mà bỏ qua voucher giảm giá.
     @Query("""
             SELECT s.createdAt AS createdAt,
                    COALESCE(s.subtotal, 0) AS subtotal,
@@ -179,9 +169,6 @@ public interface SubOrderRepository extends JpaRepository<SubOrder, Long> {
                                            @Param("endDate") java.time.LocalDateTime endDate,
                                            @Param("branchId") Long branchId);
 
-    // branchId có thể NULL (xem toàn hệ thống) — DashboardService luôn gộp kết quả này với
-    // ProductRepository#getCategorySalesLegacy() nên hàm này phải tự chạy được cho cả 2 trường hợp,
-    // không chỉ riêng 1 chi nhánh.
     @Query("SELECT c.id AS categoryId, c.name AS categoryName, " +
             "SUM(si.unitPrice * si.quantity) AS totalRevenue, " +
             "SUM(si.quantity) AS totalQuantity " +
@@ -272,8 +259,6 @@ public interface SubOrderRepository extends JpaRepository<SubOrder, Long> {
             @Param("startDate") LocalDateTime startDate,
             @Param("branchId") Long branchId);
 
-    // Bản SubOrder của OrderRepository#sumUnpaidOrdersAmount — dùng cho "Dòng tiền thu dự kiến (COD
-    // chưa đối soát)" ở panel rủi ro dòng tiền Sổ quỹ, để không bỏ sót phần đơn đã tách chi nhánh.
     @Query("""
         SELECT COALESCE(s.subtotal, 0) AS subtotal,
                COALESCE(s.shippingFee, 0) AS shippingFee,
@@ -288,8 +273,6 @@ public interface SubOrderRepository extends JpaRepository<SubOrder, Long> {
     """)
     List<SubOrderAmountProjection> findUnpaidCodSubOrderAmounts(@Param("branchId") Long branchId);
 
-    // JOIN FETCH order.user/s.branch — mapSubOrderToCashbookEntry() đọc parentOrder.getUser() và
-    // subOrder.getBranch() cho mỗi dòng; thiếu fetch join gây N+1 lazy-load khi sinh sổ quỹ.
     @Query("""
         SELECT s
         FROM SubOrder s
@@ -333,3 +316,4 @@ public interface SubOrderRepository extends JpaRepository<SubOrder, Long> {
             @Param("endDate") LocalDateTime endDate,
             @Param("branchId") Long branchId);
 }
+
