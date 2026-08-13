@@ -451,17 +451,17 @@ public class ShrimpPriceBlogAutomationService {
                     .append(" (").append(entry.getValue().size()).append(" loại)")
                     .append("</h3>\n");
             html.append("<table><thead><tr>")
-                    .append("<th>Mã / Loài</th>")
-                    .append("<th>Size</th>")
-                    .append("<th>Giá</th>")
-                    .append("<th>Thay đổi</th>")
-                    .append("<th>Cập nhật</th>")
+                    .append("<th scope=\"col\">Mã</th>")
+                    .append("<th scope=\"col\">Loài / quy cách</th>")
+                    .append("<th scope=\"col\">Size</th>")
+                    .append("<th scope=\"col\">Giá</th>")
+                    .append("<th scope=\"col\">Thay đổi</th>")
+                    .append("<th scope=\"col\">Cập nhật</th>")
                     .append("</tr></thead><tbody>\n");
             for (ShrimpPriceRow row : entry.getValue()) {
                 html.append("<tr>")
-                        .append("<td>")
-                        .append(renderCodeAndName(row))
-                        .append("</td>")
+                        .append("<td><strong>").append(escapeHtml(blankToDefault(row.code(), "—"))).append("</strong></td>")
+                        .append("<td>").append(escapeHtml(blankToDefault(row.itemName(), row.rawName()))).append("</td>")
                         .append("<td>").append(escapeHtml(blankToDefault(row.sizeText(), "—"))).append("</td>")
                         .append("<td><strong>").append(escapeHtml(formatPriceLabel(row))).append("</strong></td>")
                         .append("<td>").append(escapeHtml(blankToDefault(row.changeText(), "Đang cập nhật"))).append("</td>")
@@ -544,15 +544,6 @@ public class ShrimpPriceBlogAutomationService {
             return "Tôm sú";
         }
         return "Tôm khác";
-    }
-
-    private String renderCodeAndName(ShrimpPriceRow row) {
-        String code = row.code();
-        String itemName = blankToDefault(row.itemName(), row.rawName());
-        if (code == null || code.isBlank()) {
-            return escapeHtml(itemName);
-        }
-        return "<strong>" + escapeHtml(code) + "</strong><br>" + escapeHtml(itemName);
     }
 
     private String extractCode(String rawName) {
