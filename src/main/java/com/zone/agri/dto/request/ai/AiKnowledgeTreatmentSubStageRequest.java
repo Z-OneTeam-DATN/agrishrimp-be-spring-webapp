@@ -10,13 +10,10 @@ import lombok.NoArgsConstructor;
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-public class AiKnowledgeTreatmentStageRequest {
+public class AiKnowledgeTreatmentSubStageRequest {
 
-    private String stageTitle;
-    private String stageSigns;
-    private String treatmentGoal;
+    private String subStageTitle;
     private List<String> instructions;
     private List<Long> productIds;
     private List<String> extraProductNames;
-    private List<AiKnowledgeTreatmentSubStageRequest> subStages;
 }

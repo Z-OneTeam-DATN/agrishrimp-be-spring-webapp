@@ -1,4 +1,4 @@
-package com.zone.agri.dto.request.ai;
+package com.zone.agri.dto.response.ai;
 
 import java.util.List;
 import lombok.AllArgsConstructor;
@@ -10,13 +10,11 @@ import lombok.NoArgsConstructor;
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-public class AiKnowledgeTreatmentStageRequest {
+public class AiKnowledgeTreatmentSubStageResponse {
 
-    private String stageTitle;
-    private String stageSigns;
-    private String treatmentGoal;
+    private String subStageTitle;
     private List<String> instructions;
     private List<Long> productIds;
+    private List<SuggestedProductResponse> products;
     private List<String> extraProductNames;
-    private List<AiKnowledgeTreatmentSubStageRequest> subStages;
 }

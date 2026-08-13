@@ -14,4 +14,8 @@ public class TreatmentStageOptionResponse {
     private Integer stageNumber;
 
     private String stageTitle;
+
+    private Integer subStageIndex;
+    private String subStageNumber;
+    private String subStageTitle;
 }

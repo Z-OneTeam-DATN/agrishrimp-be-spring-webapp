@@ -211,17 +211,26 @@ public class AiDoctorDiagnosisService {
     // =========================================================
 
     public AiDoctorDiagnosisResponse generatePrescription(Long diagnosisId, Long userId) {
-        return generatePrescription(diagnosisId, userId, null);
+        return generatePrescription(diagnosisId, userId, null, null);
     }
 
     public AiDoctorDiagnosisResponse generatePrescriptionForStage(Long diagnosisId, Long userId, Integer stageIndex) {
         if (stageIndex == null) {
             throw new BadRequestException("Vui lòng chọn giai đoạn bệnh cần xem phác đồ.");
         }
-        return generatePrescription(diagnosisId, userId, stageIndex);
+        return generatePrescription(diagnosisId, userId, stageIndex, null);
     }
 
-    private AiDoctorDiagnosisResponse generatePrescription(Long diagnosisId, Long userId, Integer stageIndex) {
+    public AiDoctorDiagnosisResponse generatePrescriptionForSubStage(
+            Long diagnosisId, Long userId, Integer stageIndex, Integer subStageIndex) {
+        if (stageIndex == null || subStageIndex == null) {
+            throw new BadRequestException("Vui lòng chọn giai đoạn con cần xem phác đồ.");
+        }
+        return generatePrescription(diagnosisId, userId, stageIndex, subStageIndex);
+    }
+
+    private AiDoctorDiagnosisResponse generatePrescription(
+            Long diagnosisId, Long userId, Integer stageIndex, Integer subStageIndex) {
         AiDoctorDiagnosisHistory history = historyRepository.findByIdAndUserId(diagnosisId, userId)
                 .orElseThrow(() -> new NotFoundException("AI_DOCTOR_DIAGNOSIS_NOT_FOUND"));
 
@@ -240,19 +249,45 @@ public class AiDoctorDiagnosisService {
         List<TreatmentStageResponse> treatmentStages =
                 response.getTreatmentStages() != null ? response.getTreatmentStages() : Collections.emptyList();
 
-        if (stageIndex == null && treatmentStages.size() > 1) {
-            response.setTreatmentStages(null);
-            response.setStageSelection(TreatmentStageSelectionResponse.fromStages(treatmentStages));
-            log.info("[AiDoctor-Prescription] diagnosisId={}, diseaseCode={}, waitingStageSelection={}, stages={}",
-                    diagnosisId, diseaseCode, true, treatmentStages.size());
-            return response;
+        if (stageIndex == null) {
+            if (treatmentStages.size() > 1) {
+                response.setTreatmentStages(null);
+                response.setStageSelection(TreatmentStageSelectionResponse.fromStages(treatmentStages));
+                log.info("[AiDoctor-Prescription] diagnosisId={}, diseaseCode={}, waitingStageSelection={}, stages={}",
+                        diagnosisId, diseaseCode, true, treatmentStages.size());
+                return response;
+            }
+            if (treatmentStages.size() == 1) {
+                List<TreatmentStageResponse> subStages = resolveSubStages(treatmentStages.get(0));
+                if (subStages.size() > 1) {
+                    response.setTreatmentStages(null);
+                    response.setStageSelection(TreatmentStageSelectionResponse.fromSubStages(treatmentStages, 0));
+                    log.info("[AiDoctor-Prescription] diagnosisId={}, diseaseCode={}, waitingSubStageSelection={}, stageIndex={}, subStages={}",
+                            diagnosisId, diseaseCode, true, 0, subStages.size());
+                    return response;
+                }
+                if (subStages.size() == 1) {
+                    response.setTreatmentStages(subStages);
+                }
+            }
         }
 
         if (stageIndex != null) {
             if (stageIndex < 0 || stageIndex >= treatmentStages.size()) {
                 throw new BadRequestException("Giai đoạn bệnh không hợp lệ hoặc chưa có phác đồ tương ứng.");
             }
-            response.setTreatmentStages(List.of(treatmentStages.get(stageIndex)));
+            List<TreatmentStageResponse> subStages = resolveSubStages(treatmentStages.get(stageIndex));
+            if (subStageIndex == null) {
+                response.setTreatmentStages(null);
+                response.setStageSelection(TreatmentStageSelectionResponse.fromSubStages(treatmentStages, stageIndex));
+                log.info("[AiDoctor-Prescription] diagnosisId={}, diseaseCode={}, waitingSubStageSelection={}, stageIndex={}, subStages={}",
+                        diagnosisId, diseaseCode, true, stageIndex, subStages.size());
+                return response;
+            }
+            if (subStageIndex < 0 || subStageIndex >= subStages.size()) {
+                throw new BadRequestException("Giai đoạn con không hợp lệ hoặc chưa có phác đồ tương ứng.");
+            }
+            response.setTreatmentStages(List.of(subStages.get(subStageIndex)));
             response.setStageSelection(null);
         }
 
@@ -262,9 +297,20 @@ public class AiDoctorDiagnosisService {
                 response.getSignsSummary(),
                 response.getTreatmentStages() != null ? response.getTreatmentStages() : Collections.emptyList());
 
-        log.info("[AiDoctor-Prescription] diagnosisId={}, diseaseCode={}, stageIndex={}, stages={}",
-                diagnosisId, diseaseCode, stageIndex, response.getTreatmentStages() != null ? response.getTreatmentStages().size() : 0);
+        log.info("[AiDoctor-Prescription] diagnosisId={}, diseaseCode={}, stageIndex={}, subStageIndex={}, stages={}",
+                diagnosisId, diseaseCode, stageIndex, subStageIndex,
+                response.getTreatmentStages() != null ? response.getTreatmentStages().size() : 0);
         return response;
+    }
+
+    private List<TreatmentStageResponse> resolveSubStages(TreatmentStageResponse stage) {
+        if (stage == null) {
+            return Collections.emptyList();
+        }
+        if (stage.getSubStages() != null && !stage.getSubStages().isEmpty()) {
+            return stage.getSubStages();
+        }
+        return List.of(stage);
     }
 
     private CompletableFuture<AiImageNarrativeResult> kickOffNarrativeDescription(MultipartFile image, String userSymptoms, String traceId) {

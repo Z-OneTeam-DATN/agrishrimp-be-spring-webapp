@@ -317,8 +317,17 @@ public class AiDoctorClarifyService {
 
         if (treatmentStages.size() > 1) {
             responseBuilder.stageSelection(TreatmentStageSelectionResponse.fromStages(treatmentStages));
-        } else if (!treatmentStages.isEmpty()) {
-            responseBuilder.treatmentStages(treatmentStages);
+        } else if (treatmentStages.size() == 1) {
+            List<TreatmentStageResponse> subStages = treatmentStages.get(0).getSubStages() != null
+                    ? treatmentStages.get(0).getSubStages()
+                    : Collections.emptyList();
+            if (subStages.size() > 1) {
+                responseBuilder.stageSelection(TreatmentStageSelectionResponse.fromSubStages(treatmentStages, 0));
+            } else if (subStages.size() == 1) {
+                responseBuilder.treatmentStages(subStages);
+            } else {
+                responseBuilder.treatmentStages(treatmentStages);
+            }
         }
 
         return responseBuilder.build();

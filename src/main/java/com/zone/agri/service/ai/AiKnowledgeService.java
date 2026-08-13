@@ -21,6 +21,7 @@ import com.zone.agri.dto.request.ai.AiKnowledgeCategoryRequest;
 import com.zone.agri.dto.request.ai.AiKnowledgeChatConfigRequest;
 import com.zone.agri.dto.request.ai.AiKnowledgeImportApplyRequest;
 import com.zone.agri.dto.request.ai.AiKnowledgeImportPreviewRowRequest;
+import com.zone.agri.dto.request.ai.AiKnowledgeTreatmentSubStageRequest;
 import com.zone.agri.dto.request.ai.AiKnowledgeTreatmentStageRequest;
 import com.zone.agri.dto.request.ai.AiReviewCaseUpdateRequest;
 import com.zone.agri.dto.response.ai.AiClarifyCandidateSummary;
@@ -31,6 +32,7 @@ import com.zone.agri.dto.response.ai.AiKnowledgeChatConfigResponse;
 import com.zone.agri.dto.response.ai.AiKnowledgeImportPreviewResponse;
 import com.zone.agri.dto.response.ai.AiKnowledgeImportPreviewRowResponse;
 import com.zone.agri.dto.response.ai.AiKnowledgeReviewCaseResponse;
+import com.zone.agri.dto.response.ai.AiKnowledgeTreatmentSubStageResponse;
 import com.zone.agri.dto.response.ai.AiKnowledgeTreatmentStageResponse;
 import com.zone.agri.dto.response.ai.AiKeywordAnswerSetResponse;
 import com.zone.agri.entity.AiChatClarifySession;
@@ -1654,8 +1656,19 @@ public class AiKnowledgeService {
         entity.setTreatmentStagesJson(writeJson(toKnowledgeStages(defaultList(row.getTreatmentStages()).stream()
                 .map(stage -> AiKnowledgeTreatmentStageRequest.builder()
                         .stageTitle(stage.getStageTitle())
+                        .stageSigns(stage.getStageSigns())
+                        .treatmentGoal(stage.getTreatmentGoal())
                         .instructions(stage.getInstructions())
                         .productIds(stage.getProductIds())
+                        .extraProductNames(stage.getExtraProductNames())
+                        .subStages(defaultList(stage.getSubStages()).stream()
+                                .map(subStage -> AiKnowledgeTreatmentSubStageRequest.builder()
+                                        .subStageTitle(subStage.getSubStageTitle())
+                                        .instructions(subStage.getInstructions())
+                                        .productIds(subStage.getProductIds())
+                                        .extraProductNames(subStage.getExtraProductNames())
+                                        .build())
+                                .toList())
                         .build())
                 .toList())));
         entity.setConfidenceThreshold(clampThreshold(row.getConfidenceThreshold(), 0.65D));
@@ -1979,8 +1992,15 @@ public class AiKnowledgeService {
 
         if (treatmentStages.size() > 1) {
             responseBuilder.stageSelection(TreatmentStageSelectionResponse.fromStages(treatmentStages));
-        } else if (!treatmentStages.isEmpty()) {
-            responseBuilder.treatmentStages(treatmentStages);
+        } else if (treatmentStages.size() == 1) {
+            List<TreatmentStageResponse> subStages = defaultList(treatmentStages.get(0).getSubStages());
+            if (subStages.size() > 1) {
+                responseBuilder.stageSelection(TreatmentStageSelectionResponse.fromSubStages(treatmentStages, 0));
+            } else if (subStages.size() == 1) {
+                responseBuilder.treatmentStages(subStages);
+            } else {
+                responseBuilder.treatmentStages(treatmentStages);
+            }
         }
 
         return responseBuilder.build();
@@ -2625,37 +2645,20 @@ public class AiKnowledgeService {
     private List<TreatmentStageResponse> toTreatmentStageResponses(String treatmentStagesJson) {
         return defaultList(readJsonList(treatmentStagesJson, new TypeReference<List<KnowledgeStage>>() {
         })).stream()
-                .map(stage -> TreatmentStageResponse.builder()
-                        .stageTitle(stage.getStageTitle())
-                        .instructions(sanitizeStageInstructions(stage.getInstructions()))
-                        .products(resolveSuggestedProducts(stage.getProductIds()))
-                        .extraProductNames(defaultList(stage.getExtraProductNames()))
-                        .build())
+                .map(this::toTreatmentStageResponse)
                 .toList();
     }
 
     private List<AiKnowledgeTreatmentStageResponse> toKnowledgeTreatmentStageResponses(String treatmentStagesJson) {
         return defaultList(readJsonList(treatmentStagesJson, new TypeReference<List<KnowledgeStage>>() {
         })).stream()
-                .map(stage -> AiKnowledgeTreatmentStageResponse.builder()
-                        .stageTitle(stage.getStageTitle())
-                        .instructions(sanitizeStageInstructions(stage.getInstructions()))
-                        .productIds(defaultList(stage.getProductIds()))
-                        .products(resolveSuggestedProducts(stage.getProductIds()))
-                        .extraProductNames(defaultList(stage.getExtraProductNames()))
-                        .build())
+                .map(this::toKnowledgeTreatmentStageResponse)
                 .toList();
     }
 
     private List<AiKnowledgeTreatmentStageResponse> toTreatmentStageResponses(List<AiKnowledgeTreatmentStageRequest> stages) {
         return defaultList(stages).stream()
-                .map(stage -> AiKnowledgeTreatmentStageResponse.builder()
-                        .stageTitle(stage.getStageTitle())
-                        .instructions(sanitizeStageInstructions(stage.getInstructions()))
-                        .productIds(defaultList(stage.getProductIds()))
-                        .products(resolveSuggestedProducts(stage.getProductIds()))
-                        .extraProductNames(defaultList(stage.getExtraProductNames()))
-                        .build())
+                .map(this::toKnowledgeTreatmentStageResponse)
                 .toList();
     }
 
@@ -2663,13 +2666,158 @@ public class AiKnowledgeService {
         return defaultList(stages).stream()
                 .map(stage -> KnowledgeStage.builder()
                         .stageTitle(trimToNull(stage.getStageTitle()))
+                        .stageSigns(trimToNull(stage.getStageSigns()))
+                        .treatmentGoal(trimToNull(stage.getTreatmentGoal()))
                         .instructions(sanitizeStageInstructions(stage.getInstructions()))
                         .productIds(defaultList(stage.getProductIds()))
-                        .extraProductNames(defaultList(stage.getExtraProductNames()).stream()
-                                .map(this::trimToNull)
-                                .filter(Objects::nonNull)
-                                .toList())
+                        .extraProductNames(sanitizeExtraProductNames(stage.getExtraProductNames()))
+                        .subStages(toKnowledgeSubStages(stage))
                         .build())
+                .toList();
+    }
+
+    private TreatmentStageResponse toTreatmentStageResponse(KnowledgeStage stage) {
+        return TreatmentStageResponse.builder()
+                .stageTitle(stage.getStageTitle())
+                .stageSigns(trimToNull(stage.getStageSigns()))
+                .treatmentGoal(trimToNull(stage.getTreatmentGoal()))
+                .instructions(sanitizeStageInstructions(stage.getInstructions()))
+                .products(resolveSuggestedProducts(stage.getProductIds()))
+                .extraProductNames(defaultList(stage.getExtraProductNames()))
+                .subStages(toTreatmentSubStageResponses(stage))
+                .build();
+    }
+
+    private AiKnowledgeTreatmentStageResponse toKnowledgeTreatmentStageResponse(KnowledgeStage stage) {
+        return AiKnowledgeTreatmentStageResponse.builder()
+                .stageTitle(stage.getStageTitle())
+                .stageSigns(trimToNull(stage.getStageSigns()))
+                .treatmentGoal(trimToNull(stage.getTreatmentGoal()))
+                .instructions(sanitizeStageInstructions(stage.getInstructions()))
+                .productIds(defaultList(stage.getProductIds()))
+                .products(resolveSuggestedProducts(stage.getProductIds()))
+                .extraProductNames(defaultList(stage.getExtraProductNames()))
+                .subStages(toKnowledgeSubStageResponses(stage))
+                .build();
+    }
+
+    private AiKnowledgeTreatmentStageResponse toKnowledgeTreatmentStageResponse(AiKnowledgeTreatmentStageRequest stage) {
+        List<AiKnowledgeTreatmentSubStageResponse> subStages = defaultList(stage.getSubStages()).stream()
+                .map(this::toKnowledgeSubStageResponse)
+                .toList();
+        if (subStages.isEmpty() && hasLegacyStagePayload(stage.getInstructions(), stage.getProductIds(), stage.getExtraProductNames())) {
+            subStages = List.of(AiKnowledgeTreatmentSubStageResponse.builder()
+                    .subStageTitle(stage.getStageTitle())
+                    .instructions(sanitizeStageInstructions(stage.getInstructions()))
+                    .productIds(defaultList(stage.getProductIds()))
+                    .products(resolveSuggestedProducts(stage.getProductIds()))
+                    .extraProductNames(defaultList(stage.getExtraProductNames()))
+                    .build());
+        }
+
+        return AiKnowledgeTreatmentStageResponse.builder()
+                .stageTitle(stage.getStageTitle())
+                .stageSigns(trimToNull(stage.getStageSigns()))
+                .treatmentGoal(trimToNull(stage.getTreatmentGoal()))
+                .instructions(sanitizeStageInstructions(stage.getInstructions()))
+                .productIds(defaultList(stage.getProductIds()))
+                .products(resolveSuggestedProducts(stage.getProductIds()))
+                .extraProductNames(defaultList(stage.getExtraProductNames()))
+                .subStages(subStages)
+                .build();
+    }
+
+    private List<TreatmentStageResponse> toTreatmentSubStageResponses(KnowledgeStage stage) {
+        List<TreatmentStageResponse> subStages = defaultList(stage.getSubStages()).stream()
+                .map(subStage -> TreatmentStageResponse.builder()
+                        .stageTitle(subStage.getSubStageTitle())
+                        .instructions(sanitizeStageInstructions(subStage.getInstructions()))
+                        .products(resolveSuggestedProducts(subStage.getProductIds()))
+                        .extraProductNames(defaultList(subStage.getExtraProductNames()))
+                        .build())
+                .toList();
+        if (!subStages.isEmpty()) {
+            return subStages;
+        }
+        if (!hasLegacyStagePayload(stage.getInstructions(), stage.getProductIds(), stage.getExtraProductNames())) {
+            return Collections.emptyList();
+        }
+        return List.of(TreatmentStageResponse.builder()
+                .stageTitle(stage.getStageTitle())
+                .instructions(sanitizeStageInstructions(stage.getInstructions()))
+                .products(resolveSuggestedProducts(stage.getProductIds()))
+                .extraProductNames(defaultList(stage.getExtraProductNames()))
+                .build());
+    }
+
+    private List<AiKnowledgeTreatmentSubStageResponse> toKnowledgeSubStageResponses(KnowledgeStage stage) {
+        List<AiKnowledgeTreatmentSubStageResponse> subStages = defaultList(stage.getSubStages()).stream()
+                .map(subStage -> AiKnowledgeTreatmentSubStageResponse.builder()
+                        .subStageTitle(subStage.getSubStageTitle())
+                        .instructions(sanitizeStageInstructions(subStage.getInstructions()))
+                        .productIds(defaultList(subStage.getProductIds()))
+                        .products(resolveSuggestedProducts(subStage.getProductIds()))
+                        .extraProductNames(defaultList(subStage.getExtraProductNames()))
+                        .build())
+                .toList();
+        if (!subStages.isEmpty()) {
+            return subStages;
+        }
+        if (!hasLegacyStagePayload(stage.getInstructions(), stage.getProductIds(), stage.getExtraProductNames())) {
+            return Collections.emptyList();
+        }
+        return List.of(AiKnowledgeTreatmentSubStageResponse.builder()
+                .subStageTitle(stage.getStageTitle())
+                .instructions(sanitizeStageInstructions(stage.getInstructions()))
+                .productIds(defaultList(stage.getProductIds()))
+                .products(resolveSuggestedProducts(stage.getProductIds()))
+                .extraProductNames(defaultList(stage.getExtraProductNames()))
+                .build());
+    }
+
+    private AiKnowledgeTreatmentSubStageResponse toKnowledgeSubStageResponse(AiKnowledgeTreatmentSubStageRequest subStage) {
+        return AiKnowledgeTreatmentSubStageResponse.builder()
+                .subStageTitle(subStage.getSubStageTitle())
+                .instructions(sanitizeStageInstructions(subStage.getInstructions()))
+                .productIds(defaultList(subStage.getProductIds()))
+                .products(resolveSuggestedProducts(subStage.getProductIds()))
+                .extraProductNames(defaultList(subStage.getExtraProductNames()))
+                .build();
+    }
+
+    private List<KnowledgeSubStage> toKnowledgeSubStages(AiKnowledgeTreatmentStageRequest stage) {
+        List<KnowledgeSubStage> subStages = defaultList(stage.getSubStages()).stream()
+                .map(subStage -> KnowledgeSubStage.builder()
+                        .subStageTitle(trimToNull(subStage.getSubStageTitle()))
+                        .instructions(sanitizeStageInstructions(subStage.getInstructions()))
+                        .productIds(defaultList(subStage.getProductIds()))
+                        .extraProductNames(sanitizeExtraProductNames(subStage.getExtraProductNames()))
+                        .build())
+                .toList();
+        if (!subStages.isEmpty()) {
+            return subStages;
+        }
+        if (!hasLegacyStagePayload(stage.getInstructions(), stage.getProductIds(), stage.getExtraProductNames())) {
+            return Collections.emptyList();
+        }
+        return List.of(KnowledgeSubStage.builder()
+                .subStageTitle(trimToNull(stage.getStageTitle()))
+                .instructions(sanitizeStageInstructions(stage.getInstructions()))
+                .productIds(defaultList(stage.getProductIds()))
+                .extraProductNames(sanitizeExtraProductNames(stage.getExtraProductNames()))
+                .build());
+    }
+
+    private boolean hasLegacyStagePayload(List<String> instructions, List<Long> productIds, List<String> extraProductNames) {
+        return !sanitizeStageInstructions(instructions).isEmpty()
+                || !defaultList(productIds).isEmpty()
+                || !sanitizeExtraProductNames(extraProductNames).isEmpty();
+    }
+
+    private List<String> sanitizeExtraProductNames(List<String> extraProductNames) {
+        return defaultList(extraProductNames).stream()
+                .map(this::trimToNull)
+                .filter(Objects::nonNull)
                 .toList();
     }
 
@@ -2973,12 +3121,51 @@ public class AiKnowledgeService {
     @Builder
     private static class KnowledgeStage {
         private String stageTitle;
+        private String stageSigns;
+        private String treatmentGoal;
+        private List<String> instructions;
+        private List<Long> productIds;
+        private List<String> extraProductNames;
+        private List<KnowledgeSubStage> subStages;
+
+        public String getStageTitle() {
+            return stageTitle;
+        }
+
+        public String getStageSigns() {
+            return stageSigns;
+        }
+
+        public String getTreatmentGoal() {
+            return treatmentGoal;
+        }
+
+        public List<String> getInstructions() {
+            return instructions;
+        }
+
+        public List<Long> getProductIds() {
+            return productIds;
+        }
+
+        public List<String> getExtraProductNames() {
+            return extraProductNames;
+        }
+
+        public List<KnowledgeSubStage> getSubStages() {
+            return subStages;
+        }
+    }
+
+    @Builder
+    private static class KnowledgeSubStage {
+        private String subStageTitle;
         private List<String> instructions;
         private List<Long> productIds;
         private List<String> extraProductNames;
 
-        public String getStageTitle() {
-            return stageTitle;
+        public String getSubStageTitle() {
+            return subStageTitle;
         }
 
         public List<String> getInstructions() {
