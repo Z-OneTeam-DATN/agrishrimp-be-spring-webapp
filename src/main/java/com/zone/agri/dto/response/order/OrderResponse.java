@@ -1,5 +1,6 @@
 package com.zone.agri.dto.response.order;
 
+import com.fasterxml.jackson.annotation.JsonFormat;
 import lombok.Builder;
 import lombok.Data;
 
@@ -33,11 +34,13 @@ public class OrderResponse {
     private String legacyStatus;
     private String fulfillmentStatus;
     private String stockStatus;
+    @JsonFormat(pattern = "yyyy-MM-dd'T'HH:mm:ss")
     private LocalDateTime autoApproveAt;
     private Boolean autoApprovalPaused;
     private String branchName;
     private String branchPhone;
     private String branchAddress;
+    @JsonFormat(pattern = "yyyy-MM-dd'T'HH:mm:ss")
     private LocalDateTime createdAt;
     private String shippingAddress;
     private String note;

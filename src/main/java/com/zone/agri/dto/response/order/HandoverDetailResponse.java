@@ -1,5 +1,6 @@
 package com.zone.agri.dto.response.order;
 
+import com.fasterxml.jackson.annotation.JsonFormat;
 import lombok.Builder;
 import lombok.Data;
 import java.math.BigDecimal;
@@ -18,6 +19,7 @@ public class HandoverDetailResponse {
     private String status;
     private String creatorName;
     private String branchAddress; // Thêm cái này để in biên bản
+    @JsonFormat(pattern = "yyyy-MM-dd'T'HH:mm:ss")
     private LocalDateTime createdAt;
     private List<SubOrderHandoverItem> subOrders; // Danh sách đơn hàng bên trong
 

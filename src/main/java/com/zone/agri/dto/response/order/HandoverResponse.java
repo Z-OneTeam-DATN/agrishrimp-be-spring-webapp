@@ -1,5 +1,6 @@
 package com.zone.agri.dto.response.order;
 
+import com.fasterxml.jackson.annotation.JsonFormat;
 import com.zone.agri.entity.Handover;
 import lombok.Builder;
 import lombok.Data;
@@ -18,6 +19,7 @@ public class HandoverResponse {
     private BigDecimal totalCod;
     private String status;
     private String creatorName;
+    @JsonFormat(pattern = "yyyy-MM-dd'T'HH:mm:ss")
     private LocalDateTime createdAt;
 
     public static HandoverResponse fromEntity(Handover handover) {
