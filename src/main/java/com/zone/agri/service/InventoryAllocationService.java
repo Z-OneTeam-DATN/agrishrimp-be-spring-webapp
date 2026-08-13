@@ -31,6 +31,7 @@ public class InventoryAllocationService {
     private final InventoryRepository inventoryRepository;
     private final InventoryTransactionRepository inventoryTransactionRepository;
     private final SettingService settingService;
+    private final PublicSellingPriceService publicSellingPriceService;
 
     public record AllocationResult(
             List<SubOrderDraftDto> subOrders,
@@ -89,10 +90,11 @@ public class InventoryAllocationService {
         // Rule moi:
         // 1. Neu co chi nhanh nao du toan bo gio hang thi uu tien chi nhanh gan khach nhat trong nhom do.
         // 2. Neu khong co chi nhanh nao du tron bo, chon chi nhanh giao hang gan khach nhat de gom bo sung noi bo.
-        BranchWithRealDistance selectedBranchWithDistance = sellableBranches.stream()
+        List<BranchWithRealDistance> servingBranchCandidates = prioritizeShippingReadyBranches(sellableBranches);
+        BranchWithRealDistance selectedBranchWithDistance = servingBranchCandidates.stream()
                 .filter(candidate -> isBranchFullyStocked(candidate.branch().getId(), cart, inventoryMatrix))
                 .findFirst()
-                .orElse(sellableBranches.get(0));
+                .orElse(servingBranchCandidates.get(0));
 
         Long selectedBranchId = selectedBranchWithDistance.branch().getId();
         Map<Long, List<Inventory>> branchBatches = inventoryMatrix.getOrDefault(selectedBranchId, Collections.emptyMap());
@@ -115,7 +117,7 @@ public class InventoryAllocationService {
                     : null;
 
             int totalAllocatedForItem = 0;
-            BigDecimal lastUnitPrice = BigDecimal.ZERO;
+            BigDecimal displayedUnitPrice = publicSellingPriceService.resolveDisplayedVariantPrice(variant);
 
             Iterator<Inventory> batchIterator = batches.iterator();
             while (batchIterator.hasNext() && requested > 0) {
@@ -126,23 +128,13 @@ public class InventoryAllocationService {
                 }
 
                 int quantityToTake = Math.min(requested, availableInBatch);
-                BigDecimal importPrice = resolveDisplayImportPrice(batch, variantId, transferImportPriceCache);
-                lastUnitPrice = settingService.calculateSellingPrice(importPrice, categoryId, batch.getExpiryDate());
 
                 totalAllocatedForItem += quantityToTake;
                 batch.setQuantity(availableInBatch - quantityToTake);
                 requested -= quantityToTake;
             }
 
-            if (lastUnitPrice.compareTo(BigDecimal.ZERO) == 0) {
-                lastUnitPrice = resolveFallbackUnitPrice(
-                        variantId,
-                        inventoryMatrix,
-                        categoryId,
-                        transferImportPriceCache);
-            }
-
-            if (lastUnitPrice.compareTo(BigDecimal.ZERO) <= 0 && totalAvailableAcrossBranches > 0) {
+            if (displayedUnitPrice.compareTo(BigDecimal.ZERO) <= 0 && totalAvailableAcrossBranches > 0) {
                 throw new BadRequestException("San pham " + variantName
                         + " chua co gia ban hop le. Vui long kiem tra gia nhap ton kho truoc khi dat hang.");
             }
@@ -154,8 +146,8 @@ public class InventoryAllocationService {
                     .quantity(originalRequested)
                     .allocatedQuantity(totalAllocatedForItem)
                     .missingQuantity(requested)
-                    .unitPrice(lastUnitPrice)
-                    .subtotal(lastUnitPrice.multiply(BigDecimal.valueOf(originalRequested)))
+                    .unitPrice(displayedUnitPrice)
+                    .subtotal(displayedUnitPrice.multiply(BigDecimal.valueOf(originalRequested)))
                     .build());
 
             int networkShortage = Math.max(0, originalRequested - totalAvailableAcrossBranches);
@@ -180,7 +172,7 @@ public class InventoryAllocationService {
                     .branchId(selectedBranchId)
                     .branchName(selectedBranchWithDistance.branch().getName())
                     .branchAddress(selectedBranchWithDistance.branch().getAddressDetail())
-                    .fromDistrictId(null)
+                    .fromDistrictId(selectedBranchWithDistance.branch().getDistrictId())
                     .durationMinutes(selectedBranchWithDistance.durationMinutes())
                     .distanceKm(selectedBranchWithDistance.distanceKm())
                     .items(allocatedItems)
@@ -307,6 +299,10 @@ public class InventoryAllocationService {
         return branch != null
                 && branch.getBranchType() != null
                 && "WAREHOUSE".equalsIgnoreCase(branch.getBranchType());
+    }
+
+    private List<BranchWithRealDistance> prioritizeShippingReadyBranches(List<BranchWithRealDistance> branches) {
+        return branches;
     }
 
     private int calculateTotalAvailable(Long variantId,

@@ -60,9 +60,8 @@ public class AttributeService {
 
     @Transactional(readOnly = true)
     public List<AttributeDTO> getPublicAttributes() {
-        return repository.findAll().stream()
-                .filter(attribute -> attribute.getStatus() == null || attribute.getStatus() == AttributeStatus.ACTIVE)
-                .map(this::toDTO)
+        return repository.findPublicAttributesWithValues().stream()
+                .map(this::toPublicDTO)
                 .collect(Collectors.toList());
     }
 
@@ -211,6 +210,38 @@ public class AttributeService {
             dto.setValueDetails(Collections.emptyList());
         }
 
+        return dto;
+    }
+
+    private AttributeDTO toPublicDTO(Attribute entity) {
+        AttributeDTO dto = new AttributeDTO();
+        dto.setId(entity.getId());
+        dto.setName(entity.getName());
+        dto.setCode(entity.getCode());
+        dto.setStatus(entity.getStatus() != null ? entity.getStatus() : AttributeStatus.ACTIVE);
+
+        List<AttributeValue> attributeValues = entity.getAttributeValues();
+        if (attributeValues == null || attributeValues.isEmpty()) {
+            dto.setValues(Collections.emptyList());
+            dto.setValueDetails(Collections.emptyList());
+            return dto;
+        }
+
+        List<String> values = new ArrayList<>();
+        List<AttributeValueResponse> details = new ArrayList<>();
+        for (AttributeValue av : attributeValues) {
+            values.add(av.getValue());
+            details.add(AttributeValueResponse.builder()
+                    .attributeId(entity.getId())
+                    .attributeName(entity.getName())
+                    .attributeCode(entity.getCode())
+                    .valueId(av.getId())
+                    .value(av.getValue())
+                    .usedInVariant(null)
+                    .build());
+        }
+        dto.setValues(values);
+        dto.setValueDetails(details);
         return dto;
     }
 

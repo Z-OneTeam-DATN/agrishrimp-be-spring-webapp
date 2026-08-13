@@ -36,6 +36,7 @@ public class PublicProductService {
 
     private final ProductRepository productRepository;
     private final InventoryRepository inventoryRepository;
+    private final PublicSellingPriceService publicSellingPriceService;
 
     // =========================================================================
     // LIST — phân trang, tìm kiếm, lọc theo danh mục
@@ -205,24 +206,7 @@ public class PublicProductService {
      */
     private PublicVariantResponse toPublicVariant(ProductVariant variant) {
 
-        // 👉 XỬ LÝ LÔ HÀNG ĐỂ LẤY GIÁ BÁN
-        // Tìm toàn bộ lô hàng của biến thể này, ưu tiên lô nhập trước (FIFO)
-        List<Inventory> batches = inventoryRepository.findByProductVariantId(variant.getId());
-
-        BigDecimal currentSellingPrice = BigDecimal.ZERO;
-
-        // Lấy lô cũ nhất CÒN HÀNG để tính giá (Bám sát thuật toán tách đơn ở Backend)
-        Optional<Inventory> oldestAvailableBatch = batches.stream()
-                .filter(inv -> inv.getQuantity() != null && inv.getQuantity() > 0)
-                .min(Comparator.comparing(Inventory::getId)); // Tìm ID nhỏ nhất = Lô tạo sớm nhất
-
-        if (oldestAvailableBatch.isPresent()) {
-            BigDecimal importPrice = oldestAvailableBatch.get().getImportPrice() != null
-                    ? oldestAvailableBatch.get().getImportPrice()
-                    : BigDecimal.ZERO;
-            // Công thức lợi nhuận: Giá bán = Giá vốn * 1.3
-            currentSellingPrice = importPrice.multiply(BigDecimal.valueOf(1.3));
-        }
+        BigDecimal currentSellingPrice = publicSellingPriceService.resolveDisplayedVariantPrice(variant);
 
         // Các thuộc tính giữ nguyên
         List<AttributeValueResponse> attrs = variant.getAttributeValues() != null
@@ -243,7 +227,7 @@ public class PublicProductService {
                 .barcode(variant.getBarcode())
                 .price(currentSellingPrice) // 👉 Truyền giá bán động vào đây
                 .wholesalePrice(null) // Đã ẩn giá sỉ ra public theo chuẩn mới
-                .shippingWeight(null) // Đã ẩn trọng lượng theo chuẩn mới
+                .shippingWeight(variant.getShippingWeight())
                 .unit("Cái") // Giá trị mặc định do entity không còn lưu unit
                 .imageUrl(variant.getImageUrl())
                 .attributeValues(attrs)

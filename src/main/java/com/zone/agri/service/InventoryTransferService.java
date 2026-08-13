@@ -87,6 +87,11 @@ public class InventoryTransferService {
             Map<String, Integer> itemQuantities) {
     }
 
+    public record ReplenishmentCreationResult(
+            List<InventoryTransfer> transfers,
+            Map<Long, Integer> uncoveredQuantitiesByVariantId) {
+    }
+
     private record MissingItemRequirement(
             Long variantId,
             String sku,
@@ -478,6 +483,10 @@ public class InventoryTransferService {
     }
     @Transactional
     public List<InventoryTransfer> createReplenishmentTransfersForSubOrder(SubOrder subOrder) {
+        if (useGreedyReplenishmentCreation()) {
+            return createGreedyReplenishmentForSubOrder(subOrder).transfers();
+        }
+
         if (canUseSingleSourceReplenishmentRule()) {
             return createReplenishmentTransfersWithSingleSourceRule(subOrder);
         }
@@ -561,6 +570,46 @@ public class InventoryTransferService {
         return transfers;
     }
 
+    private boolean useGreedyReplenishmentCreation() {
+        return true;
+    }
+
+    @Transactional
+    public ReplenishmentCreationResult createGreedyReplenishmentForSubOrder(SubOrder subOrder) {
+        SubOrder replenishmentSubOrder = loadReplenishmentSubOrder(subOrder.getId());
+        validateReplenishmentSubOrder(replenishmentSubOrder);
+
+        List<InventoryTransfer> transfers = new ArrayList<>(findActiveReplenishmentTransfersForSubOrder(
+                replenishmentSubOrder.getId()));
+        List<MissingItemRequirement> requirements = reduceRequirementsByCoveredQuantities(
+                buildMissingItemRequirements(replenishmentSubOrder),
+                buildCoveredSkuQuantities(transfers));
+        if (requirements.isEmpty()) {
+            return new ReplenishmentCreationResult(transfers, Map.of());
+        }
+
+        ReplenishmentDecision decision = planReplenishmentForRequirements(replenishmentSubOrder, requirements);
+        if (decision.type() != ReplenishmentDecisionType.PURCHASE_REQUEST) {
+            transfers.addAll(createTransfersForDecision(decision));
+            return new ReplenishmentCreationResult(transfers, Map.of());
+        }
+
+        Branch warehouse = decision.sourceBranch() != null ? decision.sourceBranch() : resolveMainWarehouse();
+        Map<Long, Map<String, Integer>> transferPlanBySourceBranch = shouldUseDistributedReplenishment()
+                ? buildAutoReplenishmentPlan(requirements, replenishmentSubOrder.getBranch(), warehouse)
+                : buildWarehouseOnlyReplenishmentPlan(requirements, replenishmentSubOrder.getBranch(), warehouse);
+        transfers.addAll(createTransfersForPlan(
+                replenishmentSubOrder,
+                decision.referenceCode(),
+                transferPlanBySourceBranch));
+
+        return new ReplenishmentCreationResult(
+                transfers,
+                calculateUncoveredRequirements(
+                        requirements,
+                        buildCoveredSkuQuantities(transferPlanBySourceBranch)));
+    }
+
     private boolean shouldUseDistributedReplenishment() {
         return true;
     }
@@ -596,12 +645,19 @@ public class InventoryTransferService {
                         return itemRequest;
                     })
                     .toList());
-            transfers.add(createTransfer(request));
+            transfers.add(createTransferInternal(request, findCurrentUserOrNull(), toBranch));
         }
         return transfers;
     }
 
     private Map<Long, Map<String, Integer>> buildAutoReplenishmentPlan(SubOrder subOrder, Branch warehouse) {
+        if (useRequirementBasedGreedyPlan()) {
+            return buildAutoReplenishmentPlan(
+                    buildMissingItemRequirements(subOrder),
+                    subOrder.getBranch(),
+                    warehouse);
+        }
+
         Map<Long, Map<String, Integer>> transferPlanBySourceBranch = new LinkedHashMap<>();
         Branch toBranch = subOrder.getBranch();
         Long toBranchId = toBranch != null ? toBranch.getId() : null;
@@ -651,6 +707,170 @@ public class InventoryTransferService {
         return transferPlanBySourceBranch;
     }
 
+    private boolean useRequirementBasedGreedyPlan() {
+        return true;
+    }
+
+    private Map<Long, Map<String, Integer>> buildAutoReplenishmentPlan(
+            List<MissingItemRequirement> requirements,
+            Branch toBranch,
+            Branch warehouse) {
+        Map<Long, Map<String, Integer>> transferPlanBySourceBranch = new LinkedHashMap<>();
+        Long toBranchId = toBranch != null ? toBranch.getId() : null;
+        Long warehouseId = warehouse != null ? warehouse.getId() : null;
+
+        for (MissingItemRequirement requirement : requirements != null ? requirements : List.<MissingItemRequirement>of()) {
+            int remainingMissing = requirement.quantity();
+            if (remainingMissing <= 0 || requirement.variantId() == null || requirement.sku() == null
+                    || requirement.sku().isBlank()) {
+                continue;
+            }
+
+            for (SourceBranchCandidate candidate : loadNearestSellableSourceCandidates(toBranch, requirement.variantId())) {
+                if (remainingMissing <= 0) {
+                    break;
+                }
+
+                int quantityToMove = Math.min(remainingMissing, candidate.availableQuantity());
+                if (quantityToMove <= 0) {
+                    continue;
+                }
+
+                addTransferPlanQuantity(
+                        transferPlanBySourceBranch,
+                        candidate.branchId(),
+                        requirement.sku(),
+                        quantityToMove);
+                remainingMissing -= quantityToMove;
+            }
+
+            if (remainingMissing > 0 && warehouseId != null && !Objects.equals(warehouseId, toBranchId)) {
+                int warehouseAvailable = resolveAvailableQuantityAtBranch(requirement.variantId(), warehouseId);
+                if (ENFORCE_SOURCE_STOCK_CHECK_ON_CREATE && warehouseAvailable < remainingMissing) {
+                    throw new RuntimeException("Kho tong khong du hang de dieu chuyen bo sung cho SKU: "
+                            + requirement.sku());
+                }
+
+                int quantityToMove = Math.min(remainingMissing, warehouseAvailable);
+                if (quantityToMove > 0) {
+                    addTransferPlanQuantity(
+                            transferPlanBySourceBranch,
+                            warehouseId,
+                            requirement.sku(),
+                            quantityToMove);
+                }
+            }
+        }
+
+        return transferPlanBySourceBranch;
+    }
+
+    private Map<Long, Map<String, Integer>> buildWarehouseOnlyReplenishmentPlan(
+            List<MissingItemRequirement> requirements,
+            Branch toBranch,
+            Branch warehouse) {
+        Map<Long, Map<String, Integer>> transferPlanBySourceBranch = new LinkedHashMap<>();
+        Long toBranchId = toBranch != null ? toBranch.getId() : null;
+        Long warehouseId = warehouse != null ? warehouse.getId() : null;
+        if (warehouseId == null || Objects.equals(warehouseId, toBranchId)) {
+            return transferPlanBySourceBranch;
+        }
+
+        for (MissingItemRequirement requirement : requirements != null ? requirements : List.<MissingItemRequirement>of()) {
+            int warehouseAvailable = resolveAvailableQuantityAtBranch(requirement.variantId(), warehouseId);
+            int quantityToMove = Math.min(requirement.quantity(), warehouseAvailable);
+            if (quantityToMove > 0) {
+                addTransferPlanQuantity(
+                        transferPlanBySourceBranch,
+                        warehouseId,
+                        requirement.sku(),
+                        quantityToMove);
+            }
+        }
+
+        return transferPlanBySourceBranch;
+    }
+
+    private void addTransferPlanQuantity(
+            Map<Long, Map<String, Integer>> transferPlanBySourceBranch,
+            Long sourceBranchId,
+            String sku,
+            int quantity) {
+        if (sourceBranchId == null || sku == null || sku.isBlank() || quantity <= 0) {
+            return;
+        }
+
+        transferPlanBySourceBranch
+                .computeIfAbsent(sourceBranchId, ignored -> new LinkedHashMap<>())
+                .merge(sku, quantity, Integer::sum);
+    }
+
+    private Map<String, Integer> buildCoveredSkuQuantities(List<InventoryTransfer> transfers) {
+        Map<String, Integer> coveredBySku = new LinkedHashMap<>();
+        for (InventoryTransfer transfer : transfers != null ? transfers : List.<InventoryTransfer>of()) {
+            List<InventoryTransferDetail> details = transfer.getDetails() != null
+                    ? transfer.getDetails()
+                    : List.of();
+            for (InventoryTransferDetail detail : details) {
+                String sku = detail.getProductVariant() != null ? detail.getProductVariant().getSku() : null;
+                int quantity = Objects.requireNonNullElse(
+                        detail.getQuantityRequested(),
+                        Objects.requireNonNullElse(detail.getQuantity(), 0));
+                if (sku != null && !sku.isBlank() && quantity > 0) {
+                    coveredBySku.merge(sku, quantity, Integer::sum);
+                }
+            }
+        }
+        return coveredBySku;
+    }
+
+    private Map<String, Integer> buildCoveredSkuQuantities(Map<Long, Map<String, Integer>> transferPlanBySourceBranch) {
+        Map<String, Integer> coveredBySku = new LinkedHashMap<>();
+        for (Map<String, Integer> sourcePlan : transferPlanBySourceBranch != null
+                ? transferPlanBySourceBranch.values()
+                : List.<Map<String, Integer>>of()) {
+            for (Map.Entry<String, Integer> itemEntry : sourcePlan.entrySet()) {
+                if (itemEntry.getKey() != null && !itemEntry.getKey().isBlank()
+                        && Objects.requireNonNullElse(itemEntry.getValue(), 0) > 0) {
+                    coveredBySku.merge(itemEntry.getKey(), itemEntry.getValue(), Integer::sum);
+                }
+            }
+        }
+        return coveredBySku;
+    }
+
+    private List<MissingItemRequirement> reduceRequirementsByCoveredQuantities(
+            List<MissingItemRequirement> requirements,
+            Map<String, Integer> coveredBySku) {
+        List<MissingItemRequirement> remainingRequirements = new ArrayList<>();
+        Map<String, Integer> mutableCoveredBySku = new LinkedHashMap<>(
+                coveredBySku != null ? coveredBySku : Map.of());
+
+        for (MissingItemRequirement requirement : requirements != null ? requirements : List.<MissingItemRequirement>of()) {
+            int coveredQuantity = Math.max(0, mutableCoveredBySku.getOrDefault(requirement.sku(), 0));
+            int remainingQuantity = requirement.quantity() - Math.min(requirement.quantity(), coveredQuantity);
+            mutableCoveredBySku.put(requirement.sku(), Math.max(0, coveredQuantity - requirement.quantity()));
+            if (remainingQuantity > 0) {
+                remainingRequirements.add(new MissingItemRequirement(
+                        requirement.variantId(),
+                        requirement.sku(),
+                        remainingQuantity));
+            }
+        }
+
+        return remainingRequirements;
+    }
+
+    private Map<Long, Integer> calculateUncoveredRequirements(
+            List<MissingItemRequirement> requirements,
+            Map<String, Integer> coveredBySku) {
+        Map<Long, Integer> uncoveredByVariantId = new LinkedHashMap<>();
+        for (MissingItemRequirement requirement : reduceRequirementsByCoveredQuantities(requirements, coveredBySku)) {
+            uncoveredByVariantId.merge(requirement.variantId(), requirement.quantity(), Integer::sum);
+        }
+        return uncoveredByVariantId;
+    }
+
     private List<SourceBranchCandidate> loadNearestSellableSourceCandidates(Branch toBranch, Long variantId) {
         if (toBranch == null || toBranch.getId() == null || variantId == null) {
             return List.of();
@@ -662,10 +882,14 @@ public class InventoryTransferService {
         for (Inventory inventory : inventoryRepo.findByProductVariantId(variantId)) {
             Branch sourceBranch = inventory.getBranch();
             Long sourceBranchId = sourceBranch != null ? sourceBranch.getId() : null;
-            int availableQty = Objects.requireNonNullElse(inventory.getQuantity(), 0);
+            int availableQty = Math.max(
+                    0,
+                    Objects.requireNonNullElse(inventory.getQuantity(), 0)
+                            - Objects.requireNonNullElse(inventory.getReservedQuantity(), 0));
 
             if (sourceBranchId == null
                     || Objects.equals(sourceBranchId, toBranch.getId())
+                    || sourceBranch.getStatus() != BranchStatus.ACTIVE
                     || isWarehouseBranch(sourceBranch)
                     || availableQty <= 0) {
                 continue;
@@ -724,9 +948,16 @@ public class InventoryTransferService {
         SubOrder replenishmentSubOrder = loadReplenishmentSubOrder(subOrder.getId());
         validateReplenishmentSubOrder(replenishmentSubOrder);
 
+        return planReplenishmentForRequirements(
+                replenishmentSubOrder,
+                buildMissingItemRequirements(replenishmentSubOrder));
+    }
+
+    private ReplenishmentDecision planReplenishmentForRequirements(
+            SubOrder replenishmentSubOrder,
+            List<MissingItemRequirement> requirements) {
         Branch destinationBranch = replenishmentSubOrder.getBranch();
         Branch mainWarehouse = resolveMainWarehouse();
-        List<MissingItemRequirement> requirements = buildMissingItemRequirements(replenishmentSubOrder);
         Map<String, Integer> itemQuantities = buildItemQuantities(requirements);
         String referenceCode = buildReplenishmentReferenceCode(replenishmentSubOrder);
 
@@ -765,28 +996,28 @@ public class InventoryTransferService {
             return List.of();
         }
 
-        List<InventoryTransfer> existingTransfers = findActiveReplenishmentTransfersForSubOrder(subOrderId);
-        if (!existingTransfers.isEmpty()) {
-            return existingTransfers;
-        }
-
-        List<MissingItemRequirement> requirements = buildMissingItemRequirements(subOrder);
+        List<InventoryTransfer> transfers = new ArrayList<>(findActiveReplenishmentTransfersForSubOrder(subOrderId));
+        List<MissingItemRequirement> requirements = reduceRequirementsByCoveredQuantities(
+                buildMissingItemRequirements(subOrder),
+                buildCoveredSkuQuantities(transfers));
         if (requirements.isEmpty()) {
-            return List.of();
+            return transfers;
         }
 
         Branch mainWarehouse = resolveMainWarehouse();
-        if (Objects.equals(mainWarehouse.getId(), subOrder.getBranch().getId())
-                || !canBranchFullySupplyRequirements(mainWarehouse.getId(), requirements)) {
-            return List.of();
+        if (Objects.equals(mainWarehouse.getId(), subOrder.getBranch().getId())) {
+            return transfers;
         }
 
-        return createTransfersForDecision(new ReplenishmentDecision(
-                ReplenishmentDecisionType.MAIN_WAREHOUSE_TRANSFER,
-                mainWarehouse,
+        Map<Long, Map<String, Integer>> transferPlanBySourceBranch = buildWarehouseOnlyReplenishmentPlan(
+                requirements,
                 subOrder.getBranch(),
+                mainWarehouse);
+        transfers.addAll(createTransfersForPlan(
+                subOrder,
                 buildReplenishmentReferenceCode(subOrder),
-                buildItemQuantities(requirements)));
+                transferPlanBySourceBranch));
+        return transfers;
     }
 
     private List<InventoryTransfer> createReplenishmentTransfersWithSingleSourceRule(SubOrder subOrder) {
@@ -936,6 +1167,39 @@ public class InventoryTransferService {
                 })
                 .toList());
         return request;
+    }
+
+    private List<InventoryTransfer> createTransfersForPlan(
+            SubOrder subOrder,
+            String referenceCode,
+            Map<Long, Map<String, Integer>> transferPlanBySourceBranch) {
+        if (subOrder == null
+                || subOrder.getBranch() == null
+                || transferPlanBySourceBranch == null
+                || transferPlanBySourceBranch.isEmpty()) {
+            return List.of();
+        }
+
+        List<InventoryTransfer> transfers = new ArrayList<>();
+        Branch destinationBranch = subOrder.getBranch();
+        for (Map.Entry<Long, Map<String, Integer>> sourcePlan : transferPlanBySourceBranch.entrySet()) {
+            if (sourcePlan.getValue() == null || sourcePlan.getValue().isEmpty()) {
+                continue;
+            }
+
+            Branch sourceBranch = branchRepo.findById(sourcePlan.getKey())
+                    .orElseThrow(() -> new NotFoundException("Khong tim thay chi nhanh nguon bo sung"));
+            transfers.add(createTransferInternal(
+                    buildAutoReplenishmentTransferRequest(
+                            sourceBranch,
+                            destinationBranch,
+                            referenceCode,
+                            sourcePlan.getValue()),
+                    findCurrentUserOrNull(),
+                    destinationBranch));
+        }
+
+        return transfers;
     }
 
     private List<InventoryTransfer> createTransfersForDecision(ReplenishmentDecision decision) {

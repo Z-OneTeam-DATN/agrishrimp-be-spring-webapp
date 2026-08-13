@@ -118,6 +118,15 @@ routing:
 
 shipping:
   provider: ${SHIPPING_PROVIDER:ghn}
+  default-weight-gram: ${SHIPPING_DEFAULT_WEIGHT_GRAM:500}
+  fallback:
+    base-fee: ${SHIPPING_FALLBACK_BASE_FEE:15000}
+    per-km-fee: ${SHIPPING_FALLBACK_PER_KM_FEE:3000}
+    extra-weight-threshold-gram: ${SHIPPING_FALLBACK_EXTRA_WEIGHT_THRESHOLD_GRAM:1000}
+    extra-weight-step-gram: ${SHIPPING_FALLBACK_EXTRA_WEIGHT_STEP_GRAM:1000}
+    extra-weight-fee: ${SHIPPING_FALLBACK_EXTRA_WEIGHT_FEE:5000}
+    min-fee: ${SHIPPING_FALLBACK_MIN_FEE:20000}
+    max-fee: ${SHIPPING_FALLBACK_MAX_FEE:80000}
   ghn:
     token: ${GHN_API_KEY}
     shop-id: ${GHN_SHOP_ID}

@@ -46,6 +46,7 @@ import org.springframework.context.annotation.Lazy;
 import vn.payos.type.WebhookData;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.net.URLEncoder;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -99,6 +100,7 @@ public class OrderService {
     private final OrderStatusSyncService orderStatusSyncService;
     private final OrderInventoryReservationService orderInventoryReservationService;
     private final NotificationService notificationService;
+    private final PublicSellingPriceService publicSellingPriceService;
 
     @Lazy
     private final CustomerService customerService;
@@ -129,6 +131,9 @@ public class OrderService {
             InventoryTransferStatus.APPROVED,
             InventoryTransferStatus.SHIPPING,
             InventoryTransferStatus.INSPECTING);
+    private static final String REPLENISHMENT_DOCUMENT_TRANSFER = "TRANSFER";
+    private static final String REPLENISHMENT_DOCUMENT_PURCHASE_REQUEST = "PURCHASE_REQUEST";
+    private static final String REPLENISHMENT_DOCUMENT_BLOCKED = "BLOCKED";
     private static final List<PaymentStatus> ADMIN_UNPAID_PAYMENT_STATUSES = List.of(
             PaymentStatus.UNPAID,
             PaymentStatus.PENDING,
@@ -137,6 +142,13 @@ public class OrderService {
             PaymentStatus.FAILED,
             PaymentStatus.EXPIRED,
             PaymentStatus.REFUND_PENDING);
+    private static final List<PaymentStatus> ADMIN_INCOMPLETE_PAYMENT_STATUSES = List.of(
+            PaymentStatus.UNPAID,
+            PaymentStatus.PENDING,
+            PaymentStatus.PENDING_VERIFICATION,
+            PaymentStatus.PARTIALLY_PAID,
+            PaymentStatus.FAILED,
+            PaymentStatus.EXPIRED);
     private static final Set<OrderCancelReasonCode> CUSTOMER_CANCEL_REASON_CODES = EnumSet.of(
             OrderCancelReasonCode.CHANGE_PRODUCT,
             OrderCancelReasonCode.CHANGE_ADDRESS,
@@ -799,14 +811,18 @@ public class OrderService {
 
         List<String> transferCodes = new ArrayList<>();
         List<String> purchaseRequestCodes = new ArrayList<>();
+        List<ReplenishmentPlanItem> planItems = new ArrayList<>();
+        List<String> blockedItems = new ArrayList<>();
         for (SubOrder subOrder : awaitingSubOrders) {
-            processReplenishmentRequest(subOrder, transferCodes, purchaseRequestCodes);
+            processReplenishmentRequest(subOrder, transferCodes, purchaseRequestCodes, planItems, blockedItems);
         }
 
         return ReplenishmentRequestResponse.builder()
                 .message("Da xu ly yeu cau bo sung cho don hang.")
-                .transferCodes(transferCodes)
-                .purchaseRequestCodes(purchaseRequestCodes)
+                .transferCodes(distinctList(transferCodes))
+                .purchaseRequestCodes(distinctList(purchaseRequestCodes))
+                .planItems(planItems)
+                .blockedItems(distinctList(blockedItems))
                 .build();
     }
 
@@ -821,55 +837,218 @@ public class OrderService {
 
         List<String> transferCodes = new ArrayList<>();
         List<String> purchaseRequestCodes = new ArrayList<>();
-        processReplenishmentRequest(subOrder, transferCodes, purchaseRequestCodes);
+        List<ReplenishmentPlanItem> planItems = new ArrayList<>();
+        List<String> blockedItems = new ArrayList<>();
+        processReplenishmentRequest(subOrder, transferCodes, purchaseRequestCodes, planItems, blockedItems);
 
         return ReplenishmentRequestResponse.builder()
                 .message("Da xu ly yeu cau bo sung cho phan don.")
-                .transferCodes(transferCodes)
-                .purchaseRequestCodes(purchaseRequestCodes)
+                .transferCodes(distinctList(transferCodes))
+                .purchaseRequestCodes(distinctList(purchaseRequestCodes))
+                .planItems(planItems)
+                .blockedItems(distinctList(blockedItems))
                 .build();
     }
 
     private void processReplenishmentRequest(
             SubOrder subOrder,
             List<String> transferCodes,
-            List<String> purchaseRequestCodes) {
-        List<InventoryTransfer> existingTransfers = inventoryTransferService
-                .findActiveReplenishmentTransfersForSubOrder(subOrder.getId());
-        if (!existingTransfers.isEmpty()) {
-            transferCodes.addAll(existingTransfers.stream()
-                    .map(InventoryTransfer::getTransferCode)
-                    .filter(Objects::nonNull)
-                    .toList());
-            return;
-        }
+            List<String> purchaseRequestCodes,
+            List<ReplenishmentPlanItem> planItems,
+            List<String> blockedItems) {
+        InventoryTransferService.ReplenishmentCreationResult result = inventoryTransferService
+                .createGreedyReplenishmentForSubOrder(subOrder);
 
-        List<PurchaseRequest> existingRequests = purchaseRequestService
-                .findActiveAutoReplenishmentRequestsForSubOrder(subOrder.getId());
-        if (!existingRequests.isEmpty()) {
-            purchaseRequestCodes.addAll(existingRequests.stream()
-                    .map(PurchaseRequest::getCode)
-                    .filter(Objects::nonNull)
-                    .toList());
-            return;
-        }
-
-        InventoryTransferService.ReplenishmentDecision decision = inventoryTransferService
-                .planReplenishmentForSubOrder(subOrder);
-        if (decision.type() == InventoryTransferService.ReplenishmentDecisionType.PURCHASE_REQUEST) {
-            purchaseRequestCodes.addAll(purchaseRequestService
-                    .createAutomaticReplenishmentRequestsForSubOrder(subOrder)
-                    .stream()
-                    .map(PurchaseRequest::getCode)
-                    .filter(Objects::nonNull)
-                    .toList());
-            return;
-        }
-
-        transferCodes.addAll(inventoryTransferService.createReplenishmentTransfersForSubOrder(subOrder).stream()
+        appendTransferPlanItems(result.transfers(), planItems);
+        transferCodes.addAll(result.transfers().stream()
                 .map(InventoryTransfer::getTransferCode)
                 .filter(Objects::nonNull)
+                .distinct()
                 .toList());
+
+        if (!result.uncoveredQuantitiesByVariantId().isEmpty()) {
+            PurchaseRequestService.AutomaticReplenishmentRequestResult purchaseResult = purchaseRequestService
+                    .createAutomaticReplenishmentRequestResultForSubOrder(
+                            subOrder,
+                            result.uncoveredQuantitiesByVariantId());
+            appendPurchasePlanItems(purchaseResult.purchaseRequests(), planItems);
+            appendBlockedPlanItems(subOrder, purchaseResult, planItems, blockedItems);
+            purchaseRequestCodes.addAll(purchaseResult.purchaseRequests().stream()
+                    .map(PurchaseRequest::getCode)
+                    .filter(Objects::nonNull)
+                    .distinct()
+                    .toList());
+        }
+    }
+
+    private void appendTransferPlanItems(
+            List<InventoryTransfer> transfers,
+            List<ReplenishmentPlanItem> planItems) {
+        for (InventoryTransfer transfer : transfers != null ? transfers : List.<InventoryTransfer>of()) {
+            List<InventoryTransferDetail> details = transfer.getDetails() != null
+                    ? transfer.getDetails()
+                    : List.of();
+            for (InventoryTransferDetail detail : details) {
+                String sku = detail.getProductVariant() != null ? detail.getProductVariant().getSku() : null;
+                int quantity = Objects.requireNonNullElse(
+                        detail.getQuantityRequested(),
+                        Objects.requireNonNullElse(detail.getQuantity(), 0));
+                if (sku == null || sku.isBlank() || quantity <= 0) {
+                    continue;
+                }
+
+                planItems.add(ReplenishmentPlanItem.builder()
+                        .sku(sku)
+                        .missingQuantity(quantity)
+                        .sourceType(isWarehouseBranchForReplenishment(transfer.getFromBranch())
+                                ? "WAREHOUSE_TRANSFER"
+                                : "BRANCH_TRANSFER")
+                        .sourceBranchName(branchName(transfer.getFromBranch()))
+                        .destinationBranchName(branchName(transfer.getToBranch()))
+                        .documentId(transfer.getId())
+                        .documentType(REPLENISHMENT_DOCUMENT_TRANSFER)
+                        .documentCode(transfer.getTransferCode())
+                        .documentPath(transfer.getId() != null ? "/admin/transfers/" + transfer.getId() : null)
+                        .documentLabel(buildTransferDocumentLabel(transfer))
+                        .message("Da tao hoac giu phieu dieu chuyen " + transfer.getTransferCode())
+                        .build());
+            }
+        }
+    }
+
+    private void appendPurchasePlanItems(
+            List<PurchaseRequest> purchaseRequests,
+            List<ReplenishmentPlanItem> planItems) {
+        for (PurchaseRequest request : purchaseRequests != null ? purchaseRequests : List.<PurchaseRequest>of()) {
+            List<PurchaseRequestItem> items = request.getItems() != null
+                    ? request.getItems()
+                    : List.of();
+            for (PurchaseRequestItem item : items) {
+                String sku = item.getProductVariant() != null ? item.getProductVariant().getSku() : null;
+                int quantity = Objects.requireNonNullElse(item.getRemainingQty(), 0);
+                if (quantity <= 0) {
+                    quantity = Math.max(
+                            0,
+                            Objects.requireNonNullElse(item.getRequestedQty(), 0)
+                                    - Objects.requireNonNullElse(item.getAcceptedQty(), 0));
+                }
+                if (sku == null || sku.isBlank() || quantity <= 0) {
+                    continue;
+                }
+
+                planItems.add(ReplenishmentPlanItem.builder()
+                        .sku(sku)
+                        .missingQuantity(quantity)
+                        .sourceType("PURCHASE_REQUEST")
+                        .sourceBranchName(request.getSupplier() != null ? request.getSupplier().getName() : "NCC")
+                        .destinationBranchName(branchName(request.getBranch()))
+                        .documentId(request.getId())
+                        .documentType(REPLENISHMENT_DOCUMENT_PURCHASE_REQUEST)
+                        .documentCode(request.getCode())
+                        .documentPath(request.getId() != null ? "/admin/purchase-requests/" + request.getId() : null)
+                        .documentLabel(buildPurchaseRequestDocumentLabel(request))
+                        .message("Da tao hoac giu yeu cau mua " + request.getCode())
+                        .build());
+            }
+        }
+    }
+
+    private void appendBlockedPlanItems(
+            SubOrder subOrder,
+            PurchaseRequestService.AutomaticReplenishmentRequestResult purchaseResult,
+            List<ReplenishmentPlanItem> planItems,
+            List<String> blockedItems) {
+        if (purchaseResult == null || purchaseResult.blockedQuantitiesByVariantId().isEmpty()) {
+            return;
+        }
+
+        purchaseResult.blockedQuantitiesByVariantId().forEach((variantId, quantity) -> {
+            String sku = resolveSkuForVariant(subOrder, variantId);
+            String message = purchaseResult.blockedMessagesByVariantId()
+                    .getOrDefault(variantId, "Khong the tao yeu cau mua cho SKU: " + sku);
+            blockedItems.add(message);
+            planItems.add(ReplenishmentPlanItem.builder()
+                    .sku(sku)
+                    .missingQuantity(quantity)
+                    .sourceType("BLOCKED")
+                    .sourceBranchName(null)
+                    .destinationBranchName(branchName(subOrder != null ? subOrder.getBranch() : null))
+                    .documentId(null)
+                    .documentType(REPLENISHMENT_DOCUMENT_BLOCKED)
+                    .documentCode(null)
+                    .documentPath(null)
+                    .documentLabel(null)
+                    .message(message)
+                    .build());
+        });
+    }
+
+    private String resolveSkuForVariant(SubOrder subOrder, Long variantId) {
+        if (subOrder != null && subOrder.getItems() != null) {
+            for (SubOrderItem item : subOrder.getItems()) {
+                if (item.getProductVariant() != null
+                        && Objects.equals(item.getProductVariant().getId(), variantId)
+                        && item.getProductVariant().getSku() != null
+                        && !item.getProductVariant().getSku().isBlank()) {
+                    return item.getProductVariant().getSku();
+                }
+            }
+        }
+        return variantId != null ? "VARIANT-" + variantId : "UNKNOWN";
+    }
+
+    private boolean isWarehouseBranchForReplenishment(Branch branch) {
+        if (branch == null) {
+            return false;
+        }
+        String branchType = branch.getBranchType() != null ? branch.getBranchType().toLowerCase(Locale.ROOT) : "";
+        String branchName = branch.getName() != null ? branch.getName().toLowerCase(Locale.ROOT) : "";
+        return branchType.contains("warehouse") || branchName.contains("kho tong");
+    }
+
+    private String branchName(Branch branch) {
+        return branch != null ? branch.getName() : null;
+    }
+
+    private String buildTransferDocumentLabel(InventoryTransfer transfer) {
+        if (transfer == null) {
+            return "Phieu dieu chuyen";
+        }
+
+        String code = transfer.getTransferCode() != null && !transfer.getTransferCode().isBlank()
+                ? transfer.getTransferCode()
+                : "Chua co ma";
+        String fromBranchName = branchName(transfer.getFromBranch());
+        String toBranchName = branchName(transfer.getToBranch());
+        if (fromBranchName != null && toBranchName != null) {
+            return "Dieu chuyen: " + code + " - " + fromBranchName + " -> " + toBranchName;
+        }
+        return "Dieu chuyen: " + code;
+    }
+
+    private String buildPurchaseRequestDocumentLabel(PurchaseRequest request) {
+        if (request == null) {
+            return "Yeu cau NCC";
+        }
+
+        String code = request.getCode() != null && !request.getCode().isBlank()
+                ? request.getCode()
+                : "Chua co ma";
+        String supplierName = request.getSupplier() != null ? request.getSupplier().getName() : null;
+        if (supplierName != null && !supplierName.isBlank()) {
+            return "Yeu cau NCC: " + code + " - " + supplierName;
+        }
+        return "Yeu cau NCC: " + code;
+    }
+
+    private List<String> distinctList(List<String> values) {
+        return values == null
+                ? List.of()
+                : values.stream()
+                        .filter(Objects::nonNull)
+                        .filter(value -> !value.isBlank())
+                        .distinct()
+                        .toList();
     }
 
     @Transactional
@@ -1467,6 +1646,9 @@ public class OrderService {
 
         String statusStr = isUserView ? resolveUserWorkflowStatus(order) : resolveWorkflowStatus(order);
         String legacyStatusStr = order.getStatus() != null ? order.getStatus().name() : "";
+        List<ReplenishmentPlanItem> replenishmentDocuments = isUserView
+                ? List.of()
+                : findActiveReplenishmentDocuments(order);
 
         return OrderResponse.builder()
                 .id(order.getId())
@@ -1503,6 +1685,8 @@ public class OrderService {
                 .checkoutUrl(order.getPayosCheckoutUrl())
                 .items(itemResponses)
                 .subOrders(subOrderSummaries)
+                .replenishmentRequested(!replenishmentDocuments.isEmpty())
+                .replenishmentDocuments(replenishmentDocuments)
                 .build();
     }
 
@@ -1588,6 +1772,35 @@ public class OrderService {
         }
 
         String normalized = status.trim().toUpperCase(Locale.ROOT);
+        if ("INCOMPLETE".equals(normalized)) {
+            return criteriaBuilder.or(
+                    criteriaBuilder.equal(root.get("status"), OrderStatus.AWAITING_PAYMENT),
+                    criteriaBuilder.equal(root.get("status"), OrderStatus.CANCELLED),
+                    root.get("paymentStatus").in(ADMIN_INCOMPLETE_PAYMENT_STATUSES));
+        }
+
+        if (normalized.contains(",")) {
+            List<Predicate> statusPredicates = Arrays.stream(normalized.split(","))
+                    .map(String::trim)
+                    .filter(value -> !value.isBlank() && !"ALL".equals(value))
+                    .map(value -> buildSingleAdminStatusPredicate(value, root, query, criteriaBuilder))
+                    .toList();
+
+            if (statusPredicates.isEmpty()) {
+                return null;
+            }
+
+            return criteriaBuilder.or(statusPredicates.toArray(Predicate[]::new));
+        }
+
+        return buildSingleAdminStatusPredicate(normalized, root, query, criteriaBuilder);
+    }
+
+    private Predicate buildSingleAdminStatusPredicate(
+            String normalized,
+            Root<Order> root,
+            CriteriaQuery<?> query,
+            CriteriaBuilder criteriaBuilder) {
         Predicate activeTransferPredicate = buildActiveTransferPredicate(root, query, criteriaBuilder);
 
         return switch (normalized) {
@@ -1851,6 +2064,33 @@ public class OrderService {
                 .anyMatch(subOrder -> inventoryTransferRepository.existsByReferenceCodeAndStatusIn(
                         buildSubOrderReferenceCode(subOrder),
                         ACTIVE_TRANSFER_STATUSES));
+    }
+
+    private List<ReplenishmentPlanItem> findActiveReplenishmentDocuments(Order order) {
+        if (order == null || order.getSubOrders() == null || order.getSubOrders().isEmpty()) {
+            return List.of();
+        }
+
+        List<ReplenishmentPlanItem> documents = new ArrayList<>();
+        for (SubOrder subOrder : order.getSubOrders()) {
+            if (subOrder == null || subOrder.getId() == null) {
+                continue;
+            }
+
+            List<InventoryTransfer> transfers = inventoryTransferRepository
+                    .findByReferenceCodeAndStatusInOrderByCreatedAtDesc(
+                            buildSubOrderReferenceCode(subOrder),
+                            ACTIVE_TRANSFER_STATUSES);
+            appendTransferPlanItems(transfers, documents);
+
+            List<PurchaseRequest> purchaseRequests = purchaseRequestService
+                    .findActiveAutoReplenishmentRequestsForSubOrder(subOrder.getId());
+            appendPurchasePlanItems(purchaseRequests, documents);
+        }
+
+        return documents.stream()
+                .filter(item -> item.getDocumentId() != null)
+                .toList();
     }
 
     private boolean isPendingPayosPayment(Order order) {
@@ -2356,6 +2596,8 @@ public class OrderService {
         List<SubOrderSummaryDto> subOrderSummaries = new ArrayList<>();
         List<SubOrder> savedSubOrders = new ArrayList<>();
         boolean anySubOrderMissing = false;
+        boolean moveMissingToReplenishment = shouldMoveMissingOrderToReplenishment(paymentMethod, paymentStatus);
+        LocalDateTime replenishmentStatusChangedAt = LocalDateTime.now();
 
         for (SubOrderDraftDto subDraft : draft.getSubOrders()) {
             Branch branch = branchRepository.findById(subDraft.getBranchId())
@@ -2371,6 +2613,7 @@ public class OrderService {
                     .build();
             SubOrder savedSubOrder = subOrderRepository.save(subOrder);
             savedSubOrders.add(savedSubOrder);
+            boolean subOrderMissing = false;
 
             for (OrderItemDto item : subDraft.getItems()) {
                 ProductVariant variant = variantRepository.findById(item.getProductVariantId())
@@ -2395,6 +2638,9 @@ public class OrderService {
 
                 int missingQuantity = Math.max(0, requestedQuantity - allocatedQuantity);
                 anySubOrderMissing = anySubOrderMissing || missingQuantity > 0;
+                subOrderMissing = subOrderMissing || missingQuantity > 0;
+
+                BigDecimal unitPrice = resolveOrderItemUnitPrice(item, variant);
 
                 subOrderItemRepository.save(SubOrderItem.builder()
                         .subOrder(savedSubOrder)
@@ -2402,15 +2648,21 @@ public class OrderService {
                         .quantity(requestedQuantity)
                         .allocatedQuantity(allocatedQuantity)
                         .missingQuantity(missingQuantity)
-                        .unitPrice(item.getUnitPrice())
+                        .unitPrice(unitPrice)
                         .build());
+            }
+
+            if (subOrderMissing && moveMissingToReplenishment) {
+                applySubOrderStatus(savedSubOrder, OrderStatus.AWAITING_REPLENISHMENT, replenishmentStatusChangedAt);
+                savedSubOrder = subOrderRepository.save(savedSubOrder);
+                savedSubOrders.set(savedSubOrders.size() - 1, savedSubOrder);
             }
 
             subOrderSummaries.add(SubOrderSummaryDto.builder()
                     .subOrderId(savedSubOrder.getId())
                     .branchId(branch.getId())
                     .branchName(branch.getName())
-                    .status(subOrderStatus.name())
+                    .status(savedSubOrder.getStatus().name())
                     .subtotal(subDraft.getSubtotal())
                     .shippingFee(subDraft.getShippingFee())
                     .estimatedDays(subDraft.getEstimatedDays())
@@ -2419,9 +2671,12 @@ public class OrderService {
         }
 
         savedOrder.setSubOrders(savedSubOrders);
-        savedOrder.setStockStatus(anySubOrderMissing ? StockStatus.PARTIALLY_AVAILABLE : StockStatus.FULLY_AVAILABLE);
+        savedOrder.setStockStatus(resolveCommittedStockStatus(initialStockStatus, anySubOrderMissing));
         if (anySubOrderMissing) {
             savedOrder.setAutoApproveAt(null);
+            if (moveMissingToReplenishment) {
+                applyOrderStatus(savedOrder, OrderStatus.AWAITING_REPLENISHMENT, replenishmentStatusChangedAt);
+            }
         } else if (orderStatus == OrderStatus.PENDING
                 && (PaymentMethod.COD.equals(paymentMethod)
                         || PaymentMethod.CASH.equals(paymentMethod)
@@ -2429,6 +2684,7 @@ public class OrderService {
             savedOrder.setAutoApproveAt(LocalDateTime.now().plusMinutes(Math.max(1, autoApproveMinutes)));
         }
         orderRepository.save(savedOrder);
+        scheduleImmediateReplenishmentIfNeeded(savedSubOrders, savedOrder.getCode());
 
         return new CreatedOrderData(savedOrder, subOrderSummaries, voucherResolution.voucherCode());
     }
@@ -2788,6 +3044,8 @@ public class OrderService {
                     userId);
         }
 
+        BigDecimal unitPrice = resolveStoredOrderItemUnitPrice(item);
+
         return OrderItemResponse.builder()
                 .id(item.getId())
                 .productId(productId)
@@ -2797,9 +3055,8 @@ public class OrderService {
                 .quantity(item.getQuantity())
                 .allocatedQuantity(item.getQuantity())
                 .missingQuantity(0)
-                .price(item.getPrice() != null ? item.getPrice() : BigDecimal.ZERO)
-                .totalPrice(item.getPrice() != null ? item.getPrice().multiply(new BigDecimal(item.getQuantity()))
-                        : BigDecimal.ZERO)
+                .price(unitPrice)
+                .totalPrice(calculateLineTotal(unitPrice, item.getQuantity()))
                 .canReview(canReview)
                 .build();
     }
@@ -2831,6 +3088,8 @@ public class OrderService {
                     productId, userId);
         }
 
+        BigDecimal unitPrice = resolveStoredSubOrderItemUnitPrice(item);
+
         return OrderItemResponse.builder()
                 .id(item.getId())
                 .productId(productId)
@@ -2846,12 +3105,71 @@ public class OrderService {
                         exposeInternalDetails && item.getMissingQuantity() != null
                                 ? item.getMissingQuantity()
                                 : 0)
-                .price(item.getUnitPrice() != null ? item.getUnitPrice() : BigDecimal.ZERO)
-                .totalPrice(
-                        item.getUnitPrice() != null ? item.getUnitPrice().multiply(new BigDecimal(item.getQuantity()))
-                                : BigDecimal.ZERO)
+                .price(unitPrice)
+                .totalPrice(calculateLineTotal(unitPrice, item.getQuantity()))
                 .canReview(canReview)
                 .build();
+    }
+
+    private BigDecimal resolveOrderItemUnitPrice(OrderItemDto item, ProductVariant variant) {
+        return firstPositive(
+                item != null ? item.getUnitPrice() : null,
+                publicSellingPriceService.resolveDisplayedVariantPrice(variant),
+                deriveUnitPriceFromSubtotal(item));
+    }
+
+    private BigDecimal resolveStoredOrderItemUnitPrice(OrderItem item) {
+        return firstPositive(
+                item != null ? item.getPrice() : null,
+                publicSellingPriceService.resolveDisplayedVariantPrice(item != null ? item.getProductVariant() : null));
+    }
+
+    private BigDecimal resolveStoredSubOrderItemUnitPrice(SubOrderItem item) {
+        return firstPositive(
+                item != null ? item.getUnitPrice() : null,
+                publicSellingPriceService.resolveDisplayedVariantPrice(item != null ? item.getProductVariant() : null));
+    }
+
+    private BigDecimal deriveUnitPriceFromSubtotal(OrderItemDto item) {
+        if (item == null
+                || item.getSubtotal() == null
+                || item.getSubtotal().compareTo(BigDecimal.ZERO) <= 0
+                || Objects.requireNonNullElse(item.getQuantity(), 0) <= 0) {
+            return BigDecimal.ZERO;
+        }
+
+        return item.getSubtotal().divide(
+                BigDecimal.valueOf(item.getQuantity()),
+                4,
+                RoundingMode.HALF_UP);
+    }
+
+    private BigDecimal calculateLineTotal(BigDecimal unitPrice, Integer quantity) {
+        return Objects.requireNonNullElse(unitPrice, BigDecimal.ZERO)
+                .multiply(BigDecimal.valueOf(Objects.requireNonNullElse(quantity, 0)));
+    }
+
+    private int resolveVariantShippingWeightGram(ProductVariant variant) {
+        if (variant != null
+                && variant.getShippingWeight() != null
+                && variant.getShippingWeight().compareTo(BigDecimal.ZERO) > 0) {
+            return Math.max(1, variant.getShippingWeight().setScale(0, RoundingMode.CEILING).intValue());
+        }
+        return shippingService.resolveDefaultWeightGram();
+    }
+
+    private BigDecimal firstPositive(BigDecimal... values) {
+        if (values == null) {
+            return BigDecimal.ZERO;
+        }
+
+        for (BigDecimal value : values) {
+            if (value != null && value.compareTo(BigDecimal.ZERO) > 0) {
+                return value;
+            }
+        }
+
+        return BigDecimal.ZERO;
     }
 
     // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
@@ -3217,7 +3535,12 @@ public class OrderService {
             Order savedOrder = orderRepository.save(order);
 
             List<SubOrderSummaryDto> subOrderSummaries = new ArrayList<>();
+            List<SubOrder> savedSubOrders = new ArrayList<>();
             boolean anySubOrderMissing = false;
+            boolean moveMissingToReplenishment = shouldMoveMissingOrderToReplenishment(
+                    paymentMethod,
+                    initialPaymentStatus);
+            LocalDateTime replenishmentStatusChangedAt = LocalDateTime.now();
 
             for (SubOrderDraftDto subDraft : liveQuote.subOrders()) {
                 Branch branch = branchRepository.findById(subDraft.getBranchId())
@@ -3230,6 +3553,8 @@ public class OrderService {
                         .subtotal(subDraft.getSubtotal()).shippingFee(subDraft.getShippingFee())
                         .estimatedDays(subDraft.getEstimatedDays()).carrier(subDraft.getCarrier()).build();
                 SubOrder savedSubOrder = subOrderRepository.save(subOrder);
+                savedSubOrders.add(savedSubOrder);
+                boolean subOrderMissing = false;
 
                 for (OrderItemDto item : subDraft.getItems()) {
                     ProductVariant variant = variantRepository.findById(item.getProductVariantId())
@@ -3255,8 +3580,11 @@ public class OrderService {
 
                     int missingQuantity = Math.max(0, requestedQuantity - allocatedQuantity);
                     anySubOrderMissing = anySubOrderMissing || missingQuantity > 0;
+                    subOrderMissing = subOrderMissing || missingQuantity > 0;
 
 
+
+                    BigDecimal unitPrice = resolveOrderItemUnitPrice(item, variant);
 
                     subOrderItemRepository.save(SubOrderItem.builder()
                             .subOrder(savedSubOrder)
@@ -3264,21 +3592,33 @@ public class OrderService {
                             .quantity(requestedQuantity)
                             .allocatedQuantity(allocatedQuantity)
                             .missingQuantity(missingQuantity)
-                            .unitPrice(item.getUnitPrice())
+                            .unitPrice(unitPrice)
                             .build());
                 }
+
+                if (subOrderMissing && moveMissingToReplenishment) {
+                    applySubOrderStatus(savedSubOrder, OrderStatus.AWAITING_REPLENISHMENT, replenishmentStatusChangedAt);
+                    savedSubOrder = subOrderRepository.save(savedSubOrder);
+                    savedSubOrders.set(savedSubOrders.size() - 1, savedSubOrder);
+                }
+
                 subOrderSummaries.add(SubOrderSummaryDto.builder()
                         .subOrderId(savedSubOrder.getId()).branchId(branch.getId()).branchName(branch.getName())
-                        .status(subOrderStatus.name()).subtotal(subDraft.getSubtotal())
+                        .status(savedSubOrder.getStatus().name()).subtotal(subDraft.getSubtotal())
                         .shippingFee(subDraft.getShippingFee())
                         .estimatedDays(subDraft.getEstimatedDays()).carrier(subDraft.getCarrier()).build());
             }
 
-            savedOrder.setStockStatus(anySubOrderMissing ? StockStatus.PARTIALLY_AVAILABLE : StockStatus.FULLY_AVAILABLE);
+            savedOrder.setSubOrders(savedSubOrders);
+            savedOrder.setStockStatus(resolveCommittedStockStatus(initialStockStatus, anySubOrderMissing));
             if (anySubOrderMissing) {
                 savedOrder.setAutoApproveAt(null);
+                if (moveMissingToReplenishment) {
+                    applyOrderStatus(savedOrder, OrderStatus.AWAITING_REPLENISHMENT, replenishmentStatusChangedAt);
+                }
             }
             orderRepository.save(savedOrder);
+            scheduleImmediateReplenishmentIfNeeded(savedSubOrders, savedOrder.getCode());
 
             String checkoutUrl = null;
             if (PaymentMethod.PAYOS.equals(paymentMethod)) {
@@ -3540,6 +3880,41 @@ public class OrderService {
             return StockStatus.valueOf(stockStatus.trim().toUpperCase(Locale.ROOT));
         } catch (IllegalArgumentException ex) {
             return StockStatus.FULLY_AVAILABLE;
+        }
+    }
+
+    private StockStatus resolveCommittedStockStatus(StockStatus quotedStockStatus, boolean hasMissingItems) {
+        if (!hasMissingItems) {
+            return StockStatus.FULLY_AVAILABLE;
+        }
+
+        return quotedStockStatus == StockStatus.AVAILABLE_AFTER_TRANSFER
+                ? StockStatus.AVAILABLE_AFTER_TRANSFER
+                : StockStatus.PARTIALLY_AVAILABLE;
+    }
+
+    private boolean shouldMoveMissingOrderToReplenishment(
+            PaymentMethod paymentMethod,
+            PaymentStatus paymentStatus) {
+        if (PaymentMethod.PAYOS.equals(paymentMethod) || PaymentMethod.TRANSFER.equals(paymentMethod)) {
+            return PaymentStatus.PAID.equals(paymentStatus);
+        }
+
+        return true;
+    }
+
+    private void scheduleImmediateReplenishmentIfNeeded(List<SubOrder> subOrders, String orderCode) {
+        if (subOrders == null || subOrders.isEmpty()) {
+            return;
+        }
+
+        List<Long> awaitingSubOrderIds = subOrders.stream()
+                .filter(subOrder -> subOrder != null && subOrder.getStatus() == OrderStatus.AWAITING_REPLENISHMENT)
+                .map(SubOrder::getId)
+                .filter(Objects::nonNull)
+                .toList();
+        if (!awaitingSubOrderIds.isEmpty()) {
+            immediateReplenishmentService.scheduleAfterCommit(awaitingSubOrderIds, orderCode);
         }
     }
 
@@ -4123,6 +4498,7 @@ public class OrderService {
         Order savedOrder = orderRepository.save(order);
 
         BigDecimal subTotal = BigDecimal.ZERO;
+        int totalShippingWeightGram = 0;
 
         for (CheckoutItemRequest itemReq : req.getItems()) {
             ProductVariant variant = variantRepository.findById(itemReq.getVariantId())
@@ -4173,6 +4549,7 @@ public class OrderService {
                         .build());
 
                 subTotal = subTotal.add(sellingPrice.multiply(new BigDecimal(deduct)));
+                totalShippingWeightGram += resolveVariantShippingWeightGram(variant) * deduct;
             }
 
             if (remainingToDeduct > 0) {
@@ -4193,7 +4570,9 @@ public class OrderService {
         }
 
         // đŸ‘‰ PHĂ Váº¬N CHUYá»‚N
-        BigDecimal shippingFee = new BigDecimal("15000");
+        BigDecimal shippingFee = shippingService
+                .buildFallbackQuote(totalShippingWeightGram, 0d, "LEGACY_CHECKOUT_MISSING_GHN_ADDRESS")
+                .getTotalFee();
 
         // đŸ‘‰ CHá»T Tá»”NG TIá»€N VĂ€ Cáº¬P NHáº¬T ÄÆ N HĂ€NG
         BigDecimal finalAmount = subTotal.add(shippingFee).subtract(discountAmount);

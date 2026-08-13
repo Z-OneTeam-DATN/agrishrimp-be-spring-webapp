@@ -83,6 +83,8 @@ public interface PurchaseRequestRepository extends JpaRepository<PurchaseRequest
         FROM PurchaseRequest pr
         LEFT JOIN FETCH pr.supplier
         LEFT JOIN FETCH pr.branch
+        LEFT JOIN FETCH pr.items i
+        LEFT JOIN FETCH i.productVariant pv
         WHERE pr.autoReplenishment = true
           AND pr.linkedSubOrderId = :subOrderId
           AND pr.status NOT IN :excludedStatuses

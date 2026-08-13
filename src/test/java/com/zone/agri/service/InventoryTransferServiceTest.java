@@ -20,12 +20,14 @@ import com.zone.agri.entity.Branch;
 import com.zone.agri.entity.Inventory;
 import com.zone.agri.entity.InventoryTransaction;
 import com.zone.agri.entity.InventoryTransfer;
+import com.zone.agri.entity.InventoryTransferDetail;
 import com.zone.agri.entity.Order;
 import com.zone.agri.entity.Product;
 import com.zone.agri.entity.ProductVariant;
 import com.zone.agri.entity.SubOrder;
 import com.zone.agri.entity.SubOrderItem;
 import com.zone.agri.entity.User;
+import com.zone.agri.entity.enums.BranchStatus;
 import com.zone.agri.entity.enums.InventoryTransferStatus;
 import com.zone.agri.entity.enums.OrderStatus;
 import com.zone.agri.entity.enums.TransactionType;
@@ -122,6 +124,7 @@ class InventoryTransferServiceTest {
                 .name("Kho Tong")
                 .build();
         setId(warehouse, 1L, "id");
+        warehouse.setStatus(BranchStatus.ACTIVE);
         warehouse.setLat(10.10);
         warehouse.setLng(105.70);
 
@@ -131,6 +134,7 @@ class InventoryTransferServiceTest {
                 .name("Chi Nhanh HCM")
                 .build();
         setId(sourceBranch, 2L, "id");
+        sourceBranch.setStatus(BranchStatus.ACTIVE);
         sourceBranch.setLat(10.76);
         sourceBranch.setLng(106.67);
 
@@ -140,6 +144,7 @@ class InventoryTransferServiceTest {
                 .name("Chi Nhanh Can Tho")
                 .build();
         setId(destinationBranch, 3L, "id");
+        destinationBranch.setStatus(BranchStatus.ACTIVE);
         destinationBranch.setLat(10.03);
         destinationBranch.setLng(105.78);
 
@@ -257,28 +262,17 @@ class InventoryTransferServiceTest {
     }
 
     @Test
-    void createReplenishmentTransfersForSubOrder_createsPendingTransferWithoutBlockingOnStockCheck() {
+    void createGreedyReplenishmentForSubOrder_returnsUncoveredQuantityWhenNoSourceHasStock() {
         when(subOrderRepo.findByIdWithItems(34L)).thenReturn(Optional.of(replenishmentSubOrder));
         when(transferRepo.findByReferenceCodeAndStatusInOrderByCreatedAtDesc(any(), any())).thenReturn(List.of());
         when(inventoryRepo.findByProductVariantId(10L)).thenReturn(List.of());
-        when(transferRepo.countTotalTransfers()).thenReturn(3L);
 
-        List<InventoryTransfer> transfers = callAs(
+        InventoryTransferService.ReplenishmentCreationResult result = callAs(
                 requesterUser,
-                () -> inventoryTransferService.createReplenishmentTransfersForSubOrder(replenishmentSubOrder));
+                () -> inventoryTransferService.createGreedyReplenishmentForSubOrder(replenishmentSubOrder));
 
-        assertThat(transfers).hasSize(1);
-        InventoryTransfer transfer = transfers.get(0);
-        assertThat(transfer.getTransferCode()).isEqualTo("PDC-000004");
-        assertThat(transfer.getTransferType()).isEqualTo("ORDER_REPLENISHMENT");
-        assertThat(transfer.getStatus()).isEqualTo(InventoryTransferStatus.PENDING);
-        assertThat(transfer.getReferenceCode()).isEqualTo("ORDTEST001-SUB-34");
-        assertThat(transfer.getDescription()).contains("ORDTEST001");
-        assertThat(transfer.getFromBranch().getId()).isEqualTo(1L);
-        assertThat(transfer.getToBranch().getId()).isEqualTo(3L);
-        assertThat(transfer.getTotalQuantity()).isEqualTo(2);
-        assertThat(transfer.getDetails()).hasSize(1);
-        assertThat(transfer.getDetails().get(0).getQuantityRequested()).isEqualTo(2);
+        assertThat(result.transfers()).isEmpty();
+        assertThat(result.uncoveredQuantitiesByVariantId()).containsEntry(variant.getId(), 2);
     }
 
     @Test
@@ -289,6 +283,7 @@ class InventoryTransferServiceTest {
                 .name("Chi Nhanh Soc Trang")
                 .build();
         setId(supplyingBranch, 4L, "id");
+        supplyingBranch.setStatus(BranchStatus.ACTIVE);
         supplyingBranch.setLat(9.60);
         supplyingBranch.setLng(105.97);
 
@@ -300,14 +295,16 @@ class InventoryTransferServiceTest {
         when(branchRepo.findById(supplyingBranch.getId())).thenReturn(Optional.of(supplyingBranch));
         when(inventoryRepo.findByProductVariantId(variant.getId())).thenReturn(List.of(
                 createInventory(supplyingBranch, variant, 3),
-                createInventory(warehouse, variant, 0)));
+                createInventory(warehouse, variant, 2)));
         when(transferRepo.countTotalTransfers()).thenReturn(10L, 11L);
 
-        List<InventoryTransfer> transfers = callAs(
+        InventoryTransferService.ReplenishmentCreationResult result = callAs(
                 requesterUser,
-                () -> inventoryTransferService.createReplenishmentTransfersForSubOrder(replenishmentSubOrder));
+                () -> inventoryTransferService.createGreedyReplenishmentForSubOrder(replenishmentSubOrder));
+        List<InventoryTransfer> transfers = result.transfers();
 
         assertThat(transfers).hasSize(2);
+        assertThat(result.uncoveredQuantitiesByVariantId()).isEmpty();
 
         InventoryTransfer branchTransfer = transfers.stream()
                 .filter(transfer -> transfer.getFromBranch().getId().equals(supplyingBranch.getId()))
@@ -319,6 +316,43 @@ class InventoryTransferServiceTest {
                 .orElseThrow();
 
         assertThat(branchTransfer.getTotalQuantity()).isEqualTo(3);
+        assertThat(warehouseTransfer.getTotalQuantity()).isEqualTo(2);
+    }
+
+    @Test
+    void createMainWarehouseReplenishmentTransferIfPossible_ignoresExistingTransferForOtherQuantity() {
+        replenishmentSubOrder.getItems().get(0).setMissingQuantity(5);
+        InventoryTransfer existingTransfer = InventoryTransfer.builder()
+                .transferCode("PDC-OLD")
+                .status(InventoryTransferStatus.PENDING)
+                .fromBranch(sourceBranch)
+                .toBranch(destinationBranch)
+                .referenceCode("ORDTEST001-SUB-34")
+                .build();
+        InventoryTransferDetail existingDetail = InventoryTransferDetail.builder()
+                .inventoryTransfer(existingTransfer)
+                .productVariant(variant)
+                .quantity(3)
+                .quantityRequested(3)
+                .build();
+        existingTransfer.getDetails().add(existingDetail);
+
+        when(subOrderRepo.findByIdWithItems(34L)).thenReturn(Optional.of(replenishmentSubOrder));
+        when(transferRepo.findByReferenceCodeAndStatusInOrderByCreatedAtDesc(any(), any()))
+                .thenReturn(List.of(existingTransfer));
+        when(inventoryRepo.findByProductVariantId(variant.getId())).thenReturn(List.of(
+                createInventory(warehouse, variant, 2)));
+        when(transferRepo.countTotalTransfers()).thenReturn(12L);
+
+        List<InventoryTransfer> transfers = callAs(
+                requesterUser,
+                () -> inventoryTransferService.createMainWarehouseReplenishmentTransferIfPossible(34L));
+
+        assertThat(transfers).hasSize(2);
+        InventoryTransfer warehouseTransfer = transfers.stream()
+                .filter(transfer -> transfer.getFromBranch().getId().equals(warehouse.getId()))
+                .findFirst()
+                .orElseThrow();
         assertThat(warehouseTransfer.getTotalQuantity()).isEqualTo(2);
     }
 
