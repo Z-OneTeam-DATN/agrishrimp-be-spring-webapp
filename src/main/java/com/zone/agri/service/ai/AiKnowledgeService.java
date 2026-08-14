@@ -926,6 +926,9 @@ public class AiKnowledgeService {
             String sourceChannel,
             boolean createReviewCaseWhenUnmatched,
             String previewDiseaseCode) {
+        if (request == null) {
+            request = new AiDoctorChatRequest();
+        }
         String normalizedMessage = AiKnowledgeTextUtils.normalize(request.getMessage());
         AiKnowledgeChatConfig config = ensureChatConfig();
         String sessionId = trimToNull(request.getSessionId()) != null
@@ -1052,6 +1055,10 @@ public class AiKnowledgeService {
             log.warn("[AiChatClarify] sessionId={} Gemini call fail, escalate: {}", session.getSessionId(), ex.getMessage());
             return escalateChatClarify(session, latestFarmerText, createReviewCaseWhenUnmatched);
         }
+        if (llmResult == null) {
+            log.warn("[AiChatClarify] sessionId={} Gemini tra ve null, escalate", session.getSessionId());
+            return escalateChatClarify(session, latestFarmerText, createReviewCaseWhenUnmatched);
+        }
 
         String responseType = llmResult.getResponseType();
 
@@ -1129,7 +1136,7 @@ public class AiKnowledgeService {
             AiChatClarifySession session, String latestFarmerText, boolean createReviewCaseWhenUnmatched) {
         session.setStatus(AiClarifySessionStatus.ESCALATED);
         if (createReviewCaseWhenUnmatched) {
-            AiKnowledgeReviewCase reviewCase = createReviewCase(
+            createReviewCaseSafely(
                     session.getUserId(),
                     session.getSessionId(),
                     session.getSourceChannel(),
@@ -1139,8 +1146,8 @@ public class AiKnowledgeService {
                     null,
                     null,
                     0D,
-                    AiReviewCaseReason.LOW_CONFIDENCE);
-            session.setReviewCaseId(reviewCase.getId());
+                    AiReviewCaseReason.LOW_CONFIDENCE)
+                    .ifPresent(reviewCase -> session.setReviewCaseId(reviewCase.getId()));
         }
         chatClarifySessionRepository.save(session);
 
@@ -1180,11 +1187,13 @@ public class AiKnowledgeService {
         session = chatClarifySessionRepository.save(session);
 
         if (createReviewCaseWhenUnmatched) {
-            AiKnowledgeReviewCase reviewCase = createReviewCase(
+            Optional<AiKnowledgeReviewCase> reviewCase = createReviewCaseSafely(
                     userId, sessionId, sourceChannel, farmerMessage,
                     null, null, null, null, 0D, AiReviewCaseReason.NO_KNOWLEDGE_MATCH);
-            session.setReviewCaseId(reviewCase.getId());
-            session = chatClarifySessionRepository.save(session);
+            if (reviewCase.isPresent()) {
+                session.setReviewCaseId(reviewCase.get().getId());
+                session = chatClarifySessionRepository.save(session);
+            }
         }
 
         return advanceFreeConsult(session, farmerMessage, imageBase64, imageMimeType);
@@ -2303,17 +2312,50 @@ public class AiKnowledgeService {
             AiKnowledgeMatchType matchedType,
             String matchedKnowledgeCode,
             Double matchScore) {
-        chatLogRepository.save(AiKnowledgeChatLog.builder()
-                .userId(userId)
-                .sessionId(sessionId)
-                .sourceChannel(sourceChannel)
-                .questionText(questionText)
-                .answerText(answerText)
-                .matched(matched)
-                .matchedType(matchedType)
-                .matchedKnowledgeCode(matchedKnowledgeCode)
-                .matchScore(matchScore)
-                .build());
+        try {
+            chatLogRepository.save(AiKnowledgeChatLog.builder()
+                    .userId(userId)
+                    .sessionId(sessionId)
+                    .sourceChannel(sourceChannel)
+                    .questionText(questionText)
+                    .answerText(answerText)
+                    .matched(matched)
+                    .matchedType(matchedType)
+                    .matchedKnowledgeCode(matchedKnowledgeCode)
+                    .matchScore(matchScore)
+                    .build());
+        } catch (Exception ex) {
+            log.warn("[AiChatLog] Khong luu duoc chat log sessionId={}: {}", sessionId, ex.getMessage());
+        }
+    }
+
+    private Optional<AiKnowledgeReviewCase> createReviewCaseSafely(
+            Long userId,
+            String sessionId,
+            String sourceChannel,
+            String questionText,
+            String userSymptoms,
+            String imageUrl,
+            String aiSuggestedDiseaseCode,
+            String matchedKnowledgeCode,
+            Double matchScore,
+            AiReviewCaseReason reason) {
+        try {
+            return Optional.of(createReviewCase(
+                    userId,
+                    sessionId,
+                    sourceChannel,
+                    questionText,
+                    userSymptoms,
+                    imageUrl,
+                    aiSuggestedDiseaseCode,
+                    matchedKnowledgeCode,
+                    matchScore,
+                    reason));
+        } catch (Exception ex) {
+            log.warn("[AiReviewCase] Khong tao duoc case duyet cho sessionId={}: {}", sessionId, ex.getMessage());
+            return Optional.empty();
+        }
     }
 
     @Transactional
@@ -2341,7 +2383,11 @@ public class AiKnowledgeService {
                 .reason(reason)
                 .status(AiReviewCaseStatus.NEW)
                 .build());
-        notificationService.notifyAgronomistsReviewCaseCreated(saved);
+        try {
+            notificationService.notifyAgronomistsReviewCaseCreated(saved);
+        } catch (Exception ex) {
+            log.warn("[AiReviewCase] Da tao case id={} nhung gui notification that bai: {}", saved.getId(), ex.getMessage());
+        }
         return saved;
     }
 

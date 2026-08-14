@@ -63,6 +63,7 @@ public class SchemaUpdateConfig implements BeanPostProcessor {
             patchUsers(conn, stmt);
             patchCustomers(conn, stmt);
             patchProductVariants(conn, stmt);
+            patchAiDoctorChatTables(stmt);
 
             executeSql(stmt,
                     "Patch inventory_notes adds check_scope_type",
@@ -855,6 +856,112 @@ public class SchemaUpdateConfig implements BeanPostProcessor {
         } catch (Exception e) {
             log.debug("Skipped dropping foreign key on {}.{}: {}", tableName, columnName, e.getMessage());
         }
+    }
+
+    private void patchAiDoctorChatTables(Statement stmt) {
+        executeSql(stmt,
+                "Create ai_knowledge_chat_config table",
+                """
+                        CREATE TABLE IF NOT EXISTS ai_knowledge_chat_config (
+                            id BIGINT PRIMARY KEY,
+                            greeting_message LONGTEXT NULL,
+                            fallback_message LONGTEXT NULL,
+                            fallback_contact_name VARCHAR(150) NULL,
+                            fallback_contact_phone VARCHAR(30) NULL,
+                            created_at DATETIME NULL,
+                            updated_at DATETIME NULL,
+                            created_by_user_id BIGINT NULL,
+                            updated_by_user_id BIGINT NULL
+                        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                        """);
+
+        executeSql(stmt,
+                "Patch ai_knowledge_chat_config adds fallback_contact_name",
+                "ALTER TABLE ai_knowledge_chat_config ADD COLUMN fallback_contact_name VARCHAR(150) NULL");
+
+        executeSql(stmt,
+                "Patch ai_knowledge_chat_config adds fallback_contact_phone",
+                "ALTER TABLE ai_knowledge_chat_config ADD COLUMN fallback_contact_phone VARCHAR(30) NULL");
+
+        executeSql(stmt,
+                "Create ai_chat_clarify_sessions table",
+                """
+                        CREATE TABLE IF NOT EXISTS ai_chat_clarify_sessions (
+                            id BIGINT PRIMARY KEY AUTO_INCREMENT,
+                            session_id VARCHAR(100) NOT NULL,
+                            user_id BIGINT NULL,
+                            source_channel VARCHAR(50) NULL,
+                            candidate_disease_codes_json TEXT NULL,
+                            conversation_json LONGTEXT NULL,
+                            turn_count INT NOT NULL DEFAULT 0,
+                            status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE',
+                            decided_disease_code VARCHAR(50) NULL,
+                            review_case_id BIGINT NULL,
+                            created_at DATETIME NULL,
+                            updated_at DATETIME NULL,
+                            created_by_user_id BIGINT NULL,
+                            updated_by_user_id BIGINT NULL,
+                            INDEX idx_chat_clarify_session_id (session_id),
+                            INDEX idx_chat_clarify_status (status)
+                        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                        """);
+
+        executeSql(stmt,
+                "Patch ai_chat_clarify_sessions adds review_case_id",
+                "ALTER TABLE ai_chat_clarify_sessions ADD COLUMN review_case_id BIGINT NULL");
+
+        executeSql(stmt,
+                "Create ai_knowledge_chat_logs table",
+                """
+                        CREATE TABLE IF NOT EXISTS ai_knowledge_chat_logs (
+                            id BIGINT PRIMARY KEY AUTO_INCREMENT,
+                            user_id BIGINT NULL,
+                            session_id VARCHAR(120) NULL,
+                            source_channel VARCHAR(50) NULL,
+                            question_text LONGTEXT NOT NULL,
+                            answer_text LONGTEXT NULL,
+                            matched BIT(1) NOT NULL DEFAULT b'0',
+                            matched_type VARCHAR(30) NULL,
+                            matched_knowledge_code VARCHAR(120) NULL,
+                            match_score DOUBLE NULL,
+                            created_at DATETIME NULL,
+                            updated_at DATETIME NULL,
+                            created_by_user_id BIGINT NULL,
+                            updated_by_user_id BIGINT NULL,
+                            INDEX idx_ai_chat_logs_matched (matched),
+                            INDEX idx_ai_chat_logs_matched_type (matched_type)
+                        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                        """);
+
+        executeSql(stmt,
+                "Create ai_knowledge_review_cases table",
+                """
+                        CREATE TABLE IF NOT EXISTS ai_knowledge_review_cases (
+                            id BIGINT PRIMARY KEY AUTO_INCREMENT,
+                            user_id BIGINT NULL,
+                            session_id VARCHAR(120) NULL,
+                            source_channel VARCHAR(50) NULL,
+                            question_text LONGTEXT NULL,
+                            user_symptoms LONGTEXT NULL,
+                            image_url TEXT NULL,
+                            ai_suggested_disease_code VARCHAR(120) NULL,
+                            matched_knowledge_code VARCHAR(500) NULL,
+                            match_score DOUBLE NULL,
+                            reason VARCHAR(40) NOT NULL DEFAULT 'NO_KNOWLEDGE_MATCH',
+                            status VARCHAR(30) NOT NULL DEFAULT 'NEW',
+                            resolution_notes LONGTEXT NULL,
+                            created_at DATETIME NULL,
+                            updated_at DATETIME NULL,
+                            created_by_user_id BIGINT NULL,
+                            updated_by_user_id BIGINT NULL,
+                            INDEX idx_ai_review_case_status (status),
+                            INDEX idx_ai_review_case_reason (reason)
+                        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                        """);
+
+        executeSql(stmt,
+                "Patch ai_knowledge_review_cases widens matched_knowledge_code",
+                "ALTER TABLE ai_knowledge_review_cases MODIFY COLUMN matched_knowledge_code VARCHAR(500) NULL");
     }
 
     private void executeSql(Statement stmt, String description, String sql) {
