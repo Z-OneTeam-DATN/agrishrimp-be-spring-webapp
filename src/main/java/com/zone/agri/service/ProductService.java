@@ -1315,13 +1315,15 @@ public class ProductService {
     }
 
     public List<ProductResponse> getTopBestSellers(int limit) {
-        Pageable pageable = PageRequest.of(0, limit * 2);
-        List<Product> products = productRepository.findTopBestSellers(pageable);
+        List<Product> products = productRepository.findProductsForSale();
         Map<Long, Long> soldCountMap = buildSoldCountMap(
                 products.stream().map(Product::getId).toList());
 
         return convertToResponseList(products, soldCountMap).stream()
                 .filter(p -> p.getInventory() != null && p.getInventory() > 0)
+                .sorted(Comparator
+                        .comparing(this::safeLong, Comparator.reverseOrder())
+                        .thenComparing(ProductResponse::getId, Comparator.nullsLast(Comparator.reverseOrder())))
                 .limit(limit)
                 .collect(Collectors.toList());
     }
@@ -1411,7 +1413,8 @@ public class ProductService {
         boolean hasPackagingValueIdFilter = !packagingValueIdList.isEmpty();
         boolean hasPackagingFilter = hasPackagingValueIdFilter || !packagingValues.isEmpty();
         boolean hasPriceFilter = minPrice != null || maxPrice != null;
-        boolean needsPostMappingPagination = hasPriceFilter || hasPackagingFilter;
+        boolean needsBestSellingPostSort = sortOption == PublicProductSort.BEST_SELLING;
+        boolean needsPostMappingPagination = hasPriceFilter || hasPackagingFilter || needsBestSellingPostSort;
         List<Long> categoryIds = resolveCategoryFilterIds(categoryId);
         boolean hasCategoryFilter = !categoryIds.isEmpty();
         String normalizedKeyword = blankToNull(keyword);
