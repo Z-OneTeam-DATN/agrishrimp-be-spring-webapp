@@ -1419,9 +1419,12 @@ public class ProductService {
         List<Long> keywordBrandIds = resolveKeywordBrandFilterIds(normalizedKeyword);
         boolean hasKeywordCategoryFilter = !keywordCategoryIds.isEmpty();
         boolean hasKeywordBrandFilter = !keywordBrandIds.isEmpty();
+        Pageable queryPageable = pageable.isPaged()
+                ? PageRequest.of(pageable.getPageNumber(), pageable.getPageSize())
+                : Pageable.unpaged();
         Pageable lookupPageable = needsPostMappingPagination
                 ? PageRequest.of(0, PRICE_FILTER_SCAN_LIMIT)
-                : pageable;
+                : queryPageable;
 
         Page<Long> productIdsPage = productRepository.findPublicProductIdsFiltered(
                 normalizedKeyword,
