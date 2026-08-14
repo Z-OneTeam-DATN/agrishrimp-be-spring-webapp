@@ -387,9 +387,13 @@ public class ChatService {
             Product p = m.getPinnedProduct();
             String imageUrl = null;
             if (p.getProductImages() != null && !p.getProductImages().isEmpty()) {
-                imageUrl = p.getProductImages().iterator().next().getImageUrl();
+                imageUrl = firstImageUrl(p.getProductImages().iterator().next().getImageUrl());
             } else if (p.getVariants() != null && !p.getVariants().isEmpty()) {
-                imageUrl = p.getVariants().iterator().next().getImageUrl();
+                imageUrl = p.getVariants().stream()
+                        .map(variant -> firstImageUrl(variant.getImageUrl()))
+                        .filter(url -> url != null && !url.isBlank())
+                        .findFirst()
+                        .orElse(null);
             }
             builder.pinnedProduct(ChatMessageResponse.PinnedProductInfo.builder()
                     .id(p.getId())
@@ -400,6 +404,21 @@ public class ChatService {
         }
 
         return builder.build();
+    }
+
+    private String firstImageUrl(String imageUrl) {
+        if (imageUrl == null || imageUrl.isBlank()) {
+            return null;
+        }
+        for (String candidate : imageUrl.split(",")) {
+            String trimmed = candidate.trim();
+            if (!trimmed.isBlank()
+                    && !"null".equalsIgnoreCase(trimmed)
+                    && !"undefined".equalsIgnoreCase(trimmed)) {
+                return trimmed;
+            }
+        }
+        return null;
     }
 
     // Map of conversationId -> Map of userId -> username
