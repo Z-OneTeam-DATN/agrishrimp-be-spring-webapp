@@ -75,21 +75,7 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
       "HAVING SUM(i.quantity) > 0")
   List<Product> findProductsForSale();
 
-  @Query("SELECT p FROM Product p " +
-      "JOIN p.category c " +
-      "JOIN p.variants v " +
-      "JOIN OrderItem oi ON oi.productVariant.id = v.id " +
-      "JOIN Inventory i ON i.productVariant.id = v.id " +
-      "JOIN oi.order o " +
-      "WHERE p.status = 'ACTIVE' AND c.status = 'ACTIVE' " +
-      "AND v.status = 'ACTIVE' " +
-      "AND o.status = com.zone.agri.entity.enums.OrderStatus.COMPLETED " +
-      "AND o.subOrders IS EMPTY " +
-      "AND i.branch.status = com.zone.agri.entity.enums.BranchStatus.ACTIVE " +
-      "GROUP BY p.id " +
-      "HAVING SUM(i.quantity) > 0 " +
-      "ORDER BY SUM(oi.quantity) DESC")
-  List<Product> findTopBestSellers(Pageable pageable);
+
 
   @Query("""
       SELECT p.id, SUM(oi.quantity)
