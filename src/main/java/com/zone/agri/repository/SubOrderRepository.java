@@ -158,7 +158,7 @@ public interface SubOrderRepository extends JpaRepository<SubOrder, Long> {
     @Query("SELECT CAST(s.createdAt AS date) as date, SUM(ABS(it.quantityChange) * i.importPrice) as cost " +
             "FROM InventoryTransaction it " +
             "JOIN it.inventory i " +
-            "JOIN Order o ON it.referenceCode = o.code " +
+            "JOIN Order o ON (it.referenceCode = o.code OR it.referenceCode LIKE CONCAT(o.code, '-SUB-%')) " +
             "JOIN SubOrder s ON s.order.id = o.id AND s.branch.id = i.branch.id " +
             "WHERE it.type = com.zone.agri.entity.enums.TransactionType.SALE " +
             "AND i.branch.id = :branchId " +
