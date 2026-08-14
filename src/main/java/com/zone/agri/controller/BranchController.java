@@ -35,7 +35,8 @@ public class BranchController {
     @SecurityRequirement(name = "bearerAuth")
     @RequirePermission({
             "BRANCH_VIEW", "STAFF_CREATE",
-            "REPORT_INVENTORY_VIEW", "REPORT_FINANCE_VIEW", "REPORT_REVENUE_VIEW"
+            "REPORT_INVENTORY_VIEW", "REPORT_FINANCE_VIEW", "REPORT_REVENUE_VIEW",
+            "PURCHASE_REQUEST_CREATE"
     })
     @GetMapping()
     public ResponseEntity<List<BranchDTO>> getAll() {

@@ -48,7 +48,7 @@ public class SupplierController {
 
     @Operation(summary = "Danh sách nhà cung cấp", description = "Tìm kiếm, lọc theo trạng thái và phân trang danh sách nhà cung cấp.")
     @SecurityRequirement(name = "bearerAuth")
-    @RequirePermission("SUPPLIER_VIEW")
+    @RequirePermission({"SUPPLIER_VIEW", "PURCHASE_REQUEST_CREATE"})
     @GetMapping
     public ResponseEntity<Page<SupplierResponse>> getAllSuppliers(
             @Parameter(description = "Từ khóa tìm kiếm (Tên, MST, SĐT)", example = "Công ty TNHH A") @RequestParam(required = false) String keyword,
@@ -62,7 +62,7 @@ public class SupplierController {
 
     @Operation(summary = "Chi tiết nhà cung cấp", description = "Xem hồ sơ chi tiết của một đối tác.")
     @SecurityRequirement(name = "bearerAuth")
-    @RequirePermission("SUPPLIER_VIEW")
+    @RequirePermission({"SUPPLIER_VIEW", "PURCHASE_REQUEST_CREATE"})
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Tìm thấy hồ sơ", content = @Content(schema = @Schema(implementation = SupplierResponse.class))),
             @ApiResponse(responseCode = "404", description = "Không tìm thấy ID nhà cung cấp")
@@ -106,7 +106,7 @@ public class SupplierController {
 
     @Operation(summary = "Catalog sản phẩm của nhà cung cấp", description = "Danh sách sản phẩm mà nhà cung cấp này có thể cung ứng kèm trạng thái.")
     @SecurityRequirement(name = "bearerAuth")
-    @RequirePermission("SUPPLIER_VIEW")
+    @RequirePermission({"SUPPLIER_VIEW", "PURCHASE_REQUEST_CREATE"})
     @GetMapping("/{id}/product-catalog")
     public ResponseEntity<List<SupplierProductCatalogResponse>> getSupplierProductCatalog(@PathVariable Long id) {
         return ResponseEntity.ok(supplierService.getProductCatalog(id));
