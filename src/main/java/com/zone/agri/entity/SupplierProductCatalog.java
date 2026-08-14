@@ -64,6 +64,9 @@ public class SupplierProductCatalog {
     @Column(name = "status", length = 20, nullable = false)
     SupplierProductCatalogStatus status;
 
+    @Column(name = "price", precision = 12, scale = 2)
+    java.math.BigDecimal price;
+
     @Column(name = "note", columnDefinition = "TEXT")
     String note;
 

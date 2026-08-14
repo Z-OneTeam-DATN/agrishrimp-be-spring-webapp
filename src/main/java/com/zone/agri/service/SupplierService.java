@@ -263,6 +263,7 @@ public class SupplierService {
                     catalog.setSupplier(supplier);
                     catalog.setProductVariant(variant);
                     catalog.setStatus(request.getStatus());
+                    catalog.setPrice(request.getPrice());
                     catalog.setNote(normalizeOptionalText(request.getNote()));
                     catalog.setStatusChangedAt(LocalDateTime.now());
                     catalog.setVersion(0);
@@ -274,6 +275,7 @@ public class SupplierService {
                         catalog.setStatusChangedAt(LocalDateTime.now());
                         catalog.setStatus(request.getStatus());
                     }
+                    catalog.setPrice(request.getPrice());
                     catalog.setNote(normalizeOptionalText(request.getNote()));
                 }
                 supplierProductCatalogRepository.save(catalog);
