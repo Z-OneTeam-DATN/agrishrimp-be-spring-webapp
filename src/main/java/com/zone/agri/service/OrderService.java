@@ -482,7 +482,10 @@ public class OrderService {
             throw new BadRequestException("ÄÆ¡n hĂ ng Ä‘ang giao, khĂ´ng thá»ƒ há»§y");
         }
 
-        if (!canCustomerCancelOrder(currentStatus)) {
+        if (!canCustomerCancelOrder(order)) {
+            if (isPendingAutoApproval(order)) {
+                throw new BadRequestException("Don hang dang cho tu xac nhan, khong the huy.");
+            }
             throw new BadRequestException("Đơn hàng đã được xác nhận hoặc đang xử lý, không thể hủy");
         }
         NormalizedCancelReason cancelReason = normalizeCustomerCancelReason(request);
@@ -1143,8 +1146,22 @@ public class OrderService {
         }
     }
 
-    private boolean canCustomerCancelOrder(OrderStatus status) {
-        return status == OrderStatus.PENDING || status == OrderStatus.AWAITING_PAYMENT;
+    private boolean canCustomerCancelOrder(Order order) {
+        if (order == null || order.getStatus() == null) {
+            return false;
+        }
+
+        if (order.getStatus() == OrderStatus.PENDING) {
+            return !isPendingAutoApproval(order);
+        }
+
+        return order.getStatus() == OrderStatus.AWAITING_PAYMENT;
+    }
+
+    private boolean isPendingAutoApproval(Order order) {
+        return order != null
+                && order.getStatus() == OrderStatus.PENDING
+                && order.getAutoApproveAt() != null;
     }
 
     private NormalizedCancelReason normalizeCustomerCancelReason(OrderCancelRequest request) {
@@ -1954,7 +1971,7 @@ public class OrderService {
             case AWAITING_REPLENISHMENT -> hasActiveTransferRequest(order)
                     ? "PENDING_TRANSFER"
                     : "PENDING_SHORTAGE_REVIEW";
-            case PENDING -> order.getAutoApproveAt() != null
+            case PENDING -> isPendingAutoApproval(order)
                     ? "PENDING_AUTO_APPROVAL"
                     : "PENDING";
             default -> order.getStatus().name();
@@ -1971,7 +1988,7 @@ public class OrderService {
         }
 
         if (order.getStatus() == OrderStatus.PENDING) {
-            return "PENDING";
+            return isPendingAutoApproval(order) ? "PENDING_AUTO_APPROVAL" : "PENDING";
         }
 
         if (order.getStatus() == OrderStatus.AWAITING_REPLENISHMENT) {
@@ -3374,7 +3391,7 @@ public class OrderService {
 
         List<BranchWithRealDistance> sellableBranches = filterCustomerFulfillmentBranches(branches);
         if (sellableBranches.isEmpty()) {
-            throw new BadRequestException("Hiá»‡n chÆ°a cĂ³ chi nhĂ¡nh bĂ¡n hĂ ng phĂ¹ há»£p cho Ä‘á»‹a chá»‰ giao hĂ ng nĂ y.");
+            throw new BadRequestException("Hiá»‡n chÆ°a cĂ³ chi nhĂ¡nh phĂ¹ há»£p cho Ä‘á»‹a chá»‰ giao hĂ ng nĂ y.");
         }
 
         return sellableBranches;
@@ -4017,23 +4034,13 @@ public class OrderService {
             return Collections.emptyList();
         }
 
-        List<BranchWithRealDistance> preferredBranches = branches.stream()
-                .filter(branchWithDistance -> isCustomerFulfillmentBranch(branchWithDistance.branch()))
-                .toList();
-
-        if (!preferredBranches.isEmpty()) {
-            return preferredBranches;
-        }
-
         return branches.stream()
-                .filter(branchWithDistance -> branchWithDistance.branch() != null)
+                .filter(branchWithDistance -> isCustomerFulfillmentBranch(branchWithDistance.branch()))
                 .toList();
     }
 
     private boolean isCustomerFulfillmentBranch(Branch branch) {
-        return branch != null
-                && (branch.getBranchType() == null
-                        || !"WAREHOUSE".equalsIgnoreCase(branch.getBranchType()));
+        return branch != null;
     }
 
     private String buildSubOrderSignature(List<SubOrderDraftDto> subOrders) {

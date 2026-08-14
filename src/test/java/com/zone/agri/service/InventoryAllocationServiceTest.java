@@ -12,6 +12,7 @@ import com.zone.agri.repository.InventoryTransactionRepository;
 import com.zone.agri.service.BranchSearchService.BranchWithRealDistance;
 import com.zone.agri.service.InventoryAllocationService.AllocationResult;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -19,8 +20,10 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
-import java.time.LocalDateTime;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -36,11 +39,16 @@ class InventoryAllocationServiceTest {
     @Mock
     private SettingService settingService;
 
+    @Mock
+    private PublicSellingPriceService publicSellingPriceService;
+
     @InjectMocks
     private InventoryAllocationService allocationService;
 
-    private Branch branch1, branch2;
-    private ProductVariant varA, varB;
+    private Branch branch1;
+    private Branch branch2;
+    private ProductVariant varA;
+    private ProductVariant varB;
     private Map<Long, ProductVariant> variantMap;
 
     @BeforeEach
@@ -49,26 +57,21 @@ class InventoryAllocationServiceTest {
                 .thenReturn(new BigDecimal("1.3"));
         org.mockito.Mockito.when(settingService.getProfitRoundingRuleRaw())
                 .thenReturn("NONE");
-        org.mockito.Mockito.when(settingService.calculateSellingPrice(
-                org.mockito.ArgumentMatchers.any(BigDecimal.class),
-                org.mockito.ArgumentMatchers.nullable(Long.class),
-                org.mockito.ArgumentMatchers.nullable(LocalDateTime.class)))
-                .thenAnswer(invocation -> {
-                    BigDecimal importPrice = invocation.getArgument(0);
-                    return importPrice.multiply(new BigDecimal("1.3"));
-                });
 
-        branch1 = Branch.builder().build();
+        branch1 = Branch.builder()
+                .name("Can Tho Store")
+                .addressDetail("15 Mau Than, Can Tho")
+                .branchType("STORE")
+                .build();
         setId(branch1, 1L, "id");
-        branch1.setName("Chi Nhánh Cần Thơ");
-        branch1.setAddressDetail("15 Mậu Thân, Cần Thơ");
 
-        branch2 = Branch.builder().build();
+        branch2 = Branch.builder()
+                .name("Soc Trang Warehouse")
+                .addressDetail("21 Tran Hung Dao, Soc Trang")
+                .branchType("WAREHOUSE")
+                .build();
         setId(branch2, 2L, "id");
-        branch2.setName("Chi Nhánh Sóc Trăng");
-        branch2.setAddressDetail("21 Trần Hưng Đạo, Sóc Trăng");
 
-        // Biến thể không còn lưu giá, nhưng vẫn setup giả định để map
         varA = ProductVariant.builder().sku("SKU-A").build();
         setId(varA, 101L, "id");
 
@@ -76,9 +79,22 @@ class InventoryAllocationServiceTest {
         setId(varB, 102L, "id");
 
         variantMap = Map.of(101L, varA, 102L, varB);
+
+        org.mockito.Mockito.when(publicSellingPriceService.resolveDisplayedVariantPrice(
+                org.mockito.ArgumentMatchers.any(ProductVariant.class)))
+                .thenAnswer(invocation -> {
+                    ProductVariant variant = invocation.getArgument(0);
+                    if (variant == null || variant.getSku() == null) {
+                        return BigDecimal.ZERO;
+                    }
+                    return switch (variant.getSku()) {
+                        case "SKU-A" -> new BigDecimal("130000");
+                        case "SKU-B" -> new BigDecimal("260000");
+                        default -> BigDecimal.ZERO;
+                    };
+                });
     }
 
-    // Helper tạo Lô hàng (Batch)
     private Inventory createBatch(Long id, Branch branch, ProductVariant variant, int qty, double importPrice) {
         Inventory inv = Inventory.builder()
                 .branch(branch)
@@ -90,8 +106,6 @@ class InventoryAllocationServiceTest {
         return inv;
     }
 
-    // ── Case a: 1 chi nhánh đủ hàng ──────────────────────────────
-
     @Test
     void allocate_case_a_singleBranchEnoughStock() {
         List<CartItemDto> cart = List.of(
@@ -99,8 +113,6 @@ class InventoryAllocationServiceTest {
                 new CartItemDto(102L, 3)
         );
 
-        // Map giả lập Lô Hàng:
-        // Branch 1 có: varA(10 món, vốn 100k), varB(10 món, vốn 200k)
         Map<Long, Map<Long, List<Inventory>>> matrix = new HashMap<>();
         Map<Long, List<Inventory>> b1Stock = new HashMap<>();
         b1Stock.put(101L, new ArrayList<>(List.of(createBatch(1L, branch1, varA, 10, 100000))));
@@ -120,20 +132,17 @@ class InventoryAllocationServiceTest {
         assertThat(subOrder.getBranchId()).isEqualTo(1L);
         assertThat(subOrder.getItems()).hasSize(2);
 
-        // Giá bán = vốn * 1.3 -> varA = 130k, varB = 260k
         BigDecimal expectedSubtotal = new BigDecimal("130000").multiply(BigDecimal.valueOf(5))
                 .add(new BigDecimal("260000").multiply(BigDecimal.valueOf(3)));
         assertThat(subOrder.getSubtotal()).isEqualByComparingTo(expectedSubtotal);
     }
 
-    // ── Case b: chọn chi nhánh gần nhất và ghi nhận phần thiếu ─────
-
-    @org.junit.jupiter.api.Disabled("Legacy split-across-branches expectation")
+    @Disabled("Legacy split-across-branches expectation")
     @Test
     void allocate_case_b_choosesNearestBranchAndReportsMissingQuantity() {
         List<CartItemDto> cart = List.of(
-                new CartItemDto(101L, 10), // varA: branch1 chỉ có 6, branch2 có thêm 4
-                new CartItemDto(102L, 5)   // varB: branch1 đủ
+                new CartItemDto(101L, 10),
+                new CartItemDto(102L, 5)
         );
 
         Map<Long, Map<Long, List<Inventory>>> matrix = new HashMap<>();
@@ -173,19 +182,17 @@ class InventoryAllocationServiceTest {
         assertThat(outOfStock.getAvailableQty()).isEqualTo(8);
     }
 
-    // ── Case c: 1 sản phẩm không có ở đâu ───────────────────────
-
     @Test
     void allocate_case_c_productNotAvailableAnywhere() {
         List<CartItemDto> cart = List.of(
-                new CartItemDto(101L, 5),  // có hàng
-                new CartItemDto(102L, 3)   // không có ở đâu
+                new CartItemDto(101L, 5),
+                new CartItemDto(102L, 3)
         );
 
         Map<Long, Map<Long, List<Inventory>>> matrix = new HashMap<>();
         Map<Long, List<Inventory>> b1Stock = new HashMap<>();
         b1Stock.put(101L, new ArrayList<>(List.of(createBatch(1L, branch1, varA, 10, 100000))));
-        matrix.put(1L, b1Stock); // Không có varB
+        matrix.put(1L, b1Stock);
 
         List<BranchWithRealDistance> branches = List.of(
                 new BranchWithRealDistance(branch1, 2.5, 300, 5.0)
@@ -202,13 +209,11 @@ class InventoryAllocationServiceTest {
         assertThat(outOfStock.getAvailableQty()).isEqualTo(0);
     }
 
-    // ── Case d: có hàng nhưng không đủ số lượng (partial) ────────
-
-    @org.junit.jupiter.api.Disabled("Legacy split-across-branches expectation")
+    @Disabled("Legacy split-across-branches expectation")
     @Test
     void allocate_case_d_partialStockAcrossBranches() {
         List<CartItemDto> cart = List.of(
-                new CartItemDto(101L, 20) // cần 20, branch1 có 8, branch2 có 7 → tổng 15 < 20
+                new CartItemDto(101L, 20)
         );
 
         Map<Long, Map<Long, List<Inventory>>> matrix = new HashMap<>();
@@ -238,8 +243,6 @@ class InventoryAllocationServiceTest {
         assertThat(outOfStock.getRequestedQty()).isEqualTo(20);
         assertThat(outOfStock.getAvailableQty()).isEqualTo(7);
     }
-
-    // ── Helper method ─────────────────────────────────────────────
 
     @Test
     void allocate_case_e_chooseFartherBranchWhenItAloneCanFulfillWholeCart() {
@@ -379,6 +382,68 @@ class InventoryAllocationServiceTest {
             assertThat(outOfStock.getRequestedQty()).isEqualTo(2);
             assertThat(outOfStock.getAvailableQty()).isZero();
         });
+    }
+
+    @Test
+    void allocate_case_i_chooseNearestWarehouseWhenWarehouseAndStoreCanBothFulfill() {
+        List<CartItemDto> cart = List.of(
+                new CartItemDto(101L, 5),
+                new CartItemDto(102L, 5)
+        );
+
+        Map<Long, Map<Long, List<Inventory>>> matrix = new HashMap<>();
+
+        Map<Long, List<Inventory>> storeStock = new HashMap<>();
+        storeStock.put(101L, new ArrayList<>(List.of(createBatch(1L, branch1, varA, 5, 100000))));
+        storeStock.put(102L, new ArrayList<>(List.of(createBatch(2L, branch1, varB, 5, 200000))));
+        matrix.put(1L, storeStock);
+
+        Map<Long, List<Inventory>> warehouseStock = new HashMap<>();
+        warehouseStock.put(101L, new ArrayList<>(List.of(createBatch(3L, branch2, varA, 5, 100000))));
+        warehouseStock.put(102L, new ArrayList<>(List.of(createBatch(4L, branch2, varB, 5, 200000))));
+        matrix.put(2L, warehouseStock);
+
+        List<BranchWithRealDistance> branches = List.of(
+                new BranchWithRealDistance(branch2, 1.5, 180, 3.0),
+                new BranchWithRealDistance(branch1, 4.0, 480, 8.0)
+        );
+
+        AllocationResult result = allocationService.allocate(cart, variantMap, branches, matrix);
+
+        assertThat(result.subOrders()).hasSize(1);
+        assertThat(result.outOfStockItems()).isEmpty();
+        assertThat(result.subOrders().get(0).getBranchId()).isEqualTo(2L);
+    }
+
+    @Test
+    void allocate_case_j_chooseNearestStoreWhenStoreAndWarehouseCanBothFulfill() {
+        List<CartItemDto> cart = List.of(
+                new CartItemDto(101L, 5),
+                new CartItemDto(102L, 5)
+        );
+
+        Map<Long, Map<Long, List<Inventory>>> matrix = new HashMap<>();
+
+        Map<Long, List<Inventory>> storeStock = new HashMap<>();
+        storeStock.put(101L, new ArrayList<>(List.of(createBatch(1L, branch1, varA, 5, 100000))));
+        storeStock.put(102L, new ArrayList<>(List.of(createBatch(2L, branch1, varB, 5, 200000))));
+        matrix.put(1L, storeStock);
+
+        Map<Long, List<Inventory>> warehouseStock = new HashMap<>();
+        warehouseStock.put(101L, new ArrayList<>(List.of(createBatch(3L, branch2, varA, 5, 100000))));
+        warehouseStock.put(102L, new ArrayList<>(List.of(createBatch(4L, branch2, varB, 5, 200000))));
+        matrix.put(2L, warehouseStock);
+
+        List<BranchWithRealDistance> branches = List.of(
+                new BranchWithRealDistance(branch1, 1.5, 180, 3.0),
+                new BranchWithRealDistance(branch2, 4.0, 480, 8.0)
+        );
+
+        AllocationResult result = allocationService.allocate(cart, variantMap, branches, matrix);
+
+        assertThat(result.subOrders()).hasSize(1);
+        assertThat(result.outOfStockItems()).isEmpty();
+        assertThat(result.subOrders().get(0).getBranchId()).isEqualTo(1L);
     }
 
     private OrderItemDto findItem(SubOrderDraftDto subOrder, Long variantId) {

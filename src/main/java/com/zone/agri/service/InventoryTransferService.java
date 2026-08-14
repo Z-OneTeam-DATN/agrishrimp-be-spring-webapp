@@ -245,7 +245,7 @@ public class InventoryTransferService {
             if (!fromWarehouse && !autoReplenishmentTransfer) {
                 throw new BadRequestException("Luồng cấp phát nội bộ chỉ được xuất từ chi nhánh loại kho.");
             }
-            if (toWarehouse) {
+            if (toWarehouse && !autoReplenishmentTransfer) {
                 throw new BadRequestException("Luồng cấp phát nội bộ phải chuyển tới chi nhánh nhận, không phải chi nhánh loại kho.");
             }
         } else if (fromWarehouse || toWarehouse) {
@@ -718,6 +718,7 @@ public class InventoryTransferService {
         Map<Long, Map<String, Integer>> transferPlanBySourceBranch = new LinkedHashMap<>();
         Long toBranchId = toBranch != null ? toBranch.getId() : null;
         Long warehouseId = warehouse != null ? warehouse.getId() : null;
+        boolean includeWarehouseSources = shouldIncludeWarehouseSources(toBranch);
 
         for (MissingItemRequirement requirement : requirements != null ? requirements : List.<MissingItemRequirement>of()) {
             int remainingMissing = requirement.quantity();
@@ -744,8 +745,11 @@ public class InventoryTransferService {
                 remainingMissing -= quantityToMove;
             }
 
-            if (remainingMissing > 0 && warehouseId != null && !Objects.equals(warehouseId, toBranchId)) {
-                int warehouseAvailable = resolveAvailableQuantityAtBranch(requirement.variantId(), warehouseId);
+            if (!includeWarehouseSources
+                    && remainingMissing > 0
+                    && warehouseId != null
+                    && !Objects.equals(warehouseId, toBranchId)) {
+                int warehouseAvailable = resolveTransferableQuantityAtBranch(requirement.variantId(), warehouseId);
                 if (ENFORCE_SOURCE_STOCK_CHECK_ON_CREATE && warehouseAvailable < remainingMissing) {
                     throw new RuntimeException("Kho tong khong du hang de dieu chuyen bo sung cho SKU: "
                             + requirement.sku());
@@ -777,7 +781,7 @@ public class InventoryTransferService {
         }
 
         for (MissingItemRequirement requirement : requirements != null ? requirements : List.<MissingItemRequirement>of()) {
-            int warehouseAvailable = resolveAvailableQuantityAtBranch(requirement.variantId(), warehouseId);
+            int warehouseAvailable = resolveTransferableQuantityAtBranch(requirement.variantId(), warehouseId);
             int quantityToMove = Math.min(requirement.quantity(), warehouseAvailable);
             if (quantityToMove > 0) {
                 addTransferPlanQuantity(
@@ -877,7 +881,9 @@ public class InventoryTransferService {
         }
 
         Map<Long, Integer> availableByBranch = new LinkedHashMap<>();
+        Map<Long, Integer> safetyThresholdByBranch = new LinkedHashMap<>();
         Map<Long, Branch> branchById = new LinkedHashMap<>();
+        boolean includeWarehouseSources = shouldIncludeWarehouseSources(toBranch);
 
         for (Inventory inventory : inventoryRepo.findByProductVariantId(variantId)) {
             Branch sourceBranch = inventory.getBranch();
@@ -888,28 +894,44 @@ public class InventoryTransferService {
                             - Objects.requireNonNullElse(inventory.getReservedQuantity(), 0));
 
             if (sourceBranchId == null
+                    || sourceBranch == null
                     || Objects.equals(sourceBranchId, toBranch.getId())
                     || sourceBranch.getStatus() != BranchStatus.ACTIVE
-                    || isWarehouseBranch(sourceBranch)
+                    || (!includeWarehouseSources && isWarehouseBranch(sourceBranch))
                     || availableQty <= 0) {
                 continue;
             }
 
             availableByBranch.merge(sourceBranchId, availableQty, Integer::sum);
+            safetyThresholdByBranch.merge(
+                    sourceBranchId,
+                    Math.max(0, Objects.requireNonNullElse(inventory.getMinStock(), 0)),
+                    Integer::max);
             branchById.putIfAbsent(sourceBranchId, sourceBranch);
         }
 
         return availableByBranch.entrySet().stream()
-                .map(entry -> new SourceBranchCandidate(
-                        entry.getKey(),
-                        entry.getValue(),
-                        calculateHaversineDistance(
-                                toBranch.getLat(),
-                                toBranch.getLng(),
-                                branchById.get(entry.getKey()) != null ? branchById.get(entry.getKey()).getLat() : null,
-                                branchById.get(entry.getKey()) != null ? branchById.get(entry.getKey()).getLng() : null)))
+                .map(entry -> {
+                    Branch sourceBranch = branchById.get(entry.getKey());
+                    int transferableQuantity = Math.max(
+                            0,
+                            entry.getValue() - safetyThresholdByBranch.getOrDefault(entry.getKey(), 0));
+                    return new SourceBranchCandidate(
+                            entry.getKey(),
+                            transferableQuantity,
+                            calculateHaversineDistance(
+                                    toBranch.getLat(),
+                                    toBranch.getLng(),
+                                    sourceBranch != null ? sourceBranch.getLat() : null,
+                                    sourceBranch != null ? sourceBranch.getLng() : null));
+                })
+                .filter(candidate -> candidate.availableQuantity() > 0)
                 .sorted(Comparator
                         .comparingDouble(SourceBranchCandidate::distanceKm)
+                        .thenComparing(candidate -> {
+                            Branch sourceBranch = branchById.get(candidate.branchId());
+                            return isWarehouseBranch(sourceBranch) ? 0 : 1;
+                        })
                         .thenComparing(SourceBranchCandidate::branchId))
                 .toList();
     }
@@ -928,7 +950,32 @@ public class InventoryTransferService {
                 .sum();
     }
 
+    private int resolveSafetyThresholdAtBranch(Long variantId, Long branchId) {
+        if (variantId == null || branchId == null) {
+            return 0;
+        }
+
+        return inventoryRepo.findByProductVariantId(variantId).stream()
+                .filter(inv -> inv.getBranch() != null && Objects.equals(inv.getBranch().getId(), branchId))
+                .map(Inventory::getMinStock)
+                .filter(Objects::nonNull)
+                .mapToInt(Integer::intValue)
+                .max()
+                .orElse(0);
+    }
+
+    private int resolveTransferableQuantityAtBranch(Long variantId, Long branchId) {
+        return Math.max(
+                0,
+                resolveAvailableQuantityAtBranch(variantId, branchId)
+                        - resolveSafetyThresholdAtBranch(variantId, branchId));
+    }
+
     private record SourceBranchCandidate(Long branchId, int availableQuantity, double distanceKm) {
+    }
+
+    private boolean shouldIncludeWarehouseSources(Branch destinationBranch) {
+        return isWarehouseBranch(destinationBranch);
     }
 
     private boolean canUseSingleSourceReplenishmentRule() {
@@ -1110,12 +1157,13 @@ public class InventoryTransferService {
             return null;
         }
 
+        boolean includeWarehouseSources = shouldIncludeWarehouseSources(destinationBranch);
         return branchRepo.findAll().stream()
                 .filter(branch -> branch != null
                         && branch.getId() != null
                         && !Objects.equals(branch.getId(), destinationBranch.getId())
                         && branch.getStatus() == BranchStatus.ACTIVE
-                        && !isWarehouseBranch(branch)
+                        && (includeWarehouseSources || !isWarehouseBranch(branch))
                         && canBranchFullySupplyRequirements(branch.getId(), requirements))
                 .min(Comparator
                         .<Branch>comparingDouble(branch -> calculateHaversineDistance(
@@ -1123,6 +1171,7 @@ public class InventoryTransferService {
                                 destinationBranch.getLng(),
                                 branch.getLat(),
                                 branch.getLng()))
+                        .thenComparing(branch -> isWarehouseBranch(branch) ? 0 : 1)
                         .thenComparing(Branch::getId))
                 .orElse(null);
     }
@@ -1135,7 +1184,7 @@ public class InventoryTransferService {
         }
 
         for (MissingItemRequirement requirement : requirements) {
-            if (resolveAvailableQuantityAtBranch(requirement.variantId(), branchId) < requirement.quantity()) {
+            if (resolveTransferableQuantityAtBranch(requirement.variantId(), branchId) < requirement.quantity()) {
                 return false;
             }
         }

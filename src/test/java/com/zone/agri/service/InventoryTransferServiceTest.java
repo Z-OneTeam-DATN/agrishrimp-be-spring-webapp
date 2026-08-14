@@ -1,6 +1,7 @@
 package com.zone.agri.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -272,6 +273,129 @@ class InventoryTransferServiceTest {
                 () -> inventoryTransferService.createGreedyReplenishmentForSubOrder(replenishmentSubOrder));
 
         assertThat(result.transfers()).isEmpty();
+        assertThat(result.uncoveredQuantitiesByVariantId()).containsEntry(variant.getId(), 2);
+    }
+
+    @Test
+    void createGreedyReplenishmentForSubOrder_allowsReverseTransferIntoWarehouse() {
+        requesterUser.setBranch(warehouse);
+        replenishmentSubOrder.setBranch(warehouse);
+
+        when(subOrderRepo.findByIdWithItems(34L)).thenReturn(Optional.of(replenishmentSubOrder));
+        when(transferRepo.findByReferenceCodeAndStatusInOrderByCreatedAtDesc(any(), any())).thenReturn(List.of());
+        when(inventoryRepo.findByProductVariantId(variant.getId()))
+                .thenReturn(List.of(createInventory(sourceBranch, variant, 2)));
+        when(transferRepo.countTotalTransfers()).thenReturn(40L);
+
+        InventoryTransferService.ReplenishmentCreationResult result = callAs(
+                requesterUser,
+                () -> inventoryTransferService.createGreedyReplenishmentForSubOrder(replenishmentSubOrder));
+
+        assertThat(result.uncoveredQuantitiesByVariantId()).isEmpty();
+        assertThat(result.transfers()).hasSize(1);
+        assertThat(result.transfers().get(0).getFromBranch()).isEqualTo(sourceBranch);
+        assertThat(result.transfers().get(0).getToBranch()).isEqualTo(warehouse);
+        assertThat(result.transfers().get(0).getTotalQuantity()).isEqualTo(2);
+    }
+
+    @Test
+    void createGreedyReplenishmentForSubOrder_prefersWarehouseSourceWhenDistanceTied() {
+        requesterUser.setBranch(warehouse);
+        replenishmentSubOrder.setBranch(warehouse);
+
+        Branch warehouseSource = Branch.builder()
+                .branchCode("WH-SECONDARY")
+                .branchType("WAREHOUSE")
+                .name("Kho Phu")
+                .build();
+        setId(warehouseSource, 4L, "id");
+        warehouseSource.setStatus(BranchStatus.ACTIVE);
+        warehouseSource.setLat(10.30);
+        warehouseSource.setLng(105.90);
+
+        Branch storeSource = Branch.builder()
+                .branchCode("CN-NEAR")
+                .branchType("STORE")
+                .name("Chi Nhanh Gan")
+                .build();
+        setId(storeSource, 5L, "id");
+        storeSource.setStatus(BranchStatus.ACTIVE);
+        storeSource.setLat(10.30);
+        storeSource.setLng(105.90);
+
+        when(subOrderRepo.findByIdWithItems(34L)).thenReturn(Optional.of(replenishmentSubOrder));
+        when(transferRepo.findByReferenceCodeAndStatusInOrderByCreatedAtDesc(any(), any())).thenReturn(List.of());
+        when(branchRepo.findAll()).thenReturn(List.of(warehouse, warehouseSource, storeSource));
+        when(branchRepo.findById(warehouseSource.getId())).thenReturn(Optional.of(warehouseSource));
+        when(branchRepo.findById(storeSource.getId())).thenReturn(Optional.of(storeSource));
+        when(inventoryRepo.findByProductVariantId(variant.getId())).thenReturn(List.of(
+                createInventory(warehouseSource, variant, 2),
+                createInventory(storeSource, variant, 2)));
+        when(transferRepo.countTotalTransfers()).thenReturn(41L);
+
+        InventoryTransferService.ReplenishmentCreationResult result = callAs(
+                requesterUser,
+                () -> inventoryTransferService.createGreedyReplenishmentForSubOrder(replenishmentSubOrder));
+
+        assertThat(result.uncoveredQuantitiesByVariantId()).isEmpty();
+        assertThat(result.transfers()).hasSize(1);
+        assertThat(result.transfers().get(0).getFromBranch()).isEqualTo(warehouseSource);
+    }
+
+    @Test
+    void createGreedyReplenishmentForSubOrder_respectsMinStockWhenWarehouseIsPrimary() {
+        requesterUser.setBranch(warehouse);
+        replenishmentSubOrder.setBranch(warehouse);
+        replenishmentSubOrder.getItems().get(0).setMissingQuantity(4);
+
+        when(subOrderRepo.findByIdWithItems(34L)).thenReturn(Optional.of(replenishmentSubOrder));
+        when(transferRepo.findByReferenceCodeAndStatusInOrderByCreatedAtDesc(any(), any())).thenReturn(List.of());
+        when(inventoryRepo.findByProductVariantId(variant.getId()))
+                .thenReturn(List.of(createInventory(sourceBranch, variant, 10, 0, 7)));
+        when(transferRepo.countTotalTransfers()).thenReturn(42L);
+
+        InventoryTransferService.ReplenishmentCreationResult result = callAs(
+                requesterUser,
+                () -> inventoryTransferService.createGreedyReplenishmentForSubOrder(replenishmentSubOrder));
+
+        assertThat(result.transfers()).hasSize(1);
+        assertThat(result.transfers().get(0).getTotalQuantity()).isEqualTo(3);
+        assertThat(result.uncoveredQuantitiesByVariantId()).containsEntry(variant.getId(), 1);
+    }
+
+    @Test
+    void createGreedyReplenishmentForSubOrder_returnsPartialCoverageForWarehouseDestination() {
+        requesterUser.setBranch(warehouse);
+        replenishmentSubOrder.setBranch(warehouse);
+        replenishmentSubOrder.getItems().get(0).setMissingQuantity(5);
+
+        Branch warehouseSource = Branch.builder()
+                .branchCode("WH-SUPPORT")
+                .branchType("WAREHOUSE")
+                .name("Kho Ho Tro")
+                .build();
+        setId(warehouseSource, 4L, "id");
+        warehouseSource.setStatus(BranchStatus.ACTIVE);
+        warehouseSource.setLat(10.50);
+        warehouseSource.setLng(105.95);
+
+        when(subOrderRepo.findByIdWithItems(34L)).thenReturn(Optional.of(replenishmentSubOrder));
+        when(transferRepo.findByReferenceCodeAndStatusInOrderByCreatedAtDesc(any(), any())).thenReturn(List.of());
+        when(branchRepo.findAll()).thenReturn(List.of(warehouse, sourceBranch, warehouseSource));
+        when(branchRepo.findById(warehouseSource.getId())).thenReturn(Optional.of(warehouseSource));
+        when(inventoryRepo.findByProductVariantId(variant.getId())).thenReturn(List.of(
+                createInventory(sourceBranch, variant, 2),
+                createInventory(warehouseSource, variant, 1)));
+        when(transferRepo.countTotalTransfers()).thenReturn(43L, 44L);
+
+        InventoryTransferService.ReplenishmentCreationResult result = callAs(
+                requesterUser,
+                () -> inventoryTransferService.createGreedyReplenishmentForSubOrder(replenishmentSubOrder));
+
+        assertThat(result.transfers()).hasSize(2);
+        assertThat(result.transfers())
+                .extracting(InventoryTransfer::getTotalQuantity)
+                .containsExactlyInAnyOrder(2, 1);
         assertThat(result.uncoveredQuantitiesByVariantId()).containsEntry(variant.getId(), 2);
     }
 
@@ -567,6 +691,22 @@ class InventoryTransferServiceTest {
         assertThat(transfer.getStatus()).isEqualTo(InventoryTransferStatus.CANCELLED);
     }
 
+    @Test
+    void createTransfer_rejectsManualStockTransferIntoWarehouse() {
+        defectBranch.setStatus(BranchStatus.ACTIVE);
+        when(branchRepo.findById(defectBranch.getId())).thenReturn(Optional.of(defectBranch));
+
+        TransferRequest request = buildRequest(
+                warehouse.getId(),
+                defectBranch.getId(),
+                TransferBusinessType.STOCK_TRANSFER,
+                1,
+                null);
+
+        assertThatThrownBy(() -> callAs(requesterUser, () -> inventoryTransferService.createTransfer(request)))
+                .isInstanceOf(com.zone.agri.exception.BadRequestException.class);
+    }
+
     private TransferRequest buildRequest(
             Long fromBranchId,
             Long toBranchId,
@@ -615,10 +755,21 @@ class InventoryTransferServiceTest {
     }
 
     private Inventory createInventory(Branch branch, ProductVariant productVariant, int quantity) {
+        return createInventory(branch, productVariant, quantity, 0, null);
+    }
+
+    private Inventory createInventory(
+            Branch branch,
+            ProductVariant productVariant,
+            int quantity,
+            int reservedQuantity,
+            Integer minStock) {
         return Inventory.builder()
                 .branch(branch)
                 .productVariant(productVariant)
                 .quantity(quantity)
+                .reservedQuantity(reservedQuantity)
+                .minStock(minStock)
                 .build();
     }
 
