@@ -117,6 +117,20 @@ jobs:
 
           docker pull "$IMAGE:latest"
 
+          recreate_api() {
+            if docker compose -f docker-compose.prod.yml up -d --no-deps --pull never api; then
+              return 0
+            fi
+
+            echo "API recreate failed. Cleaning stale api container and retrying once..."
+            docker compose -f docker-compose.prod.yml rm -sf api 2>/dev/null || true
+            API_CONTAINER_ID=$(docker ps -aq --filter "name=^/agrishrimp-api$" | head -n 1)
+            if [ -n "$API_CONTAINER_ID" ]; then
+              docker rm -f "$API_CONTAINER_ID" 2>/dev/null || true
+            fi
+            docker compose -f docker-compose.prod.yml up -d --no-deps --pull never api
+          }
+
           echo "Ensuring required compose dependencies and network are up..."
           if ! docker compose -f docker-compose.prod.yml up -d db redis; then
             echo "Dependency bootstrap failed. Cleaning stale dependency containers and retrying once..."
@@ -141,7 +155,7 @@ jobs:
             sleep 10
           done
 
-          docker compose -f docker-compose.prod.yml up -d --no-deps --pull never api
+          recreate_api
 
           echo "Waiting for Spring Boot..."
           sleep 20
@@ -166,7 +180,7 @@ jobs:
           echo "❌ Rolling back..."
           if [ "$CURRENT_IMAGE" != "none" ]; then
             docker tag "$CURRENT_IMAGE" "$IMAGE:latest" 2>/dev/null || true
-            docker compose -f docker-compose.prod.yml up -d --no-deps --pull never api
+            recreate_api
             echo "⏮️  Rolled back"
           fi
           exit 1
