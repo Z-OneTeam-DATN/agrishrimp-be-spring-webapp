@@ -87,17 +87,21 @@ public class AiDiseaseProtocolSeeder implements CommandLineRunner {
 
         Long authorUserId = resolveAuthorUserId();
         int seeded = 0;
+        int skipped = 0;
         for (String resourcePath : PROTOCOL_RESOURCE_PATHS) {
             try {
                 ProtocolDraft protocol = parseProtocol(resourcePath);
-                upsertDiseaseProtocol(protocol, authorUserId);
-                seeded++;
+                if (seedDiseaseProtocolIfMissing(protocol, authorUserId)) {
+                    seeded++;
+                } else {
+                    skipped++;
+                }
             } catch (Exception exception) {
                 log.error("Không thể seed phác đồ AI Doctor từ {}: {}", resourcePath, exception.getMessage(), exception);
                 throw new IllegalStateException("Không thể seed phác đồ AI Doctor từ " + resourcePath, exception);
             }
         }
-        log.info(">>> ĐÃ SEED/CẬP NHẬT {} PHÁC ĐỒ AI DOCTOR CHUẨN.", seeded);
+        log.info(">>> ĐÃ SEED {} PHÁC ĐỒ AI DOCTOR CHUẨN, BỎ QUA {} PHÁC ĐỒ ĐÃ TỒN TẠI.", seeded, skipped);
     }
 
     private Long resolveAuthorUserId() {
@@ -115,9 +119,15 @@ public class AiDiseaseProtocolSeeder implements CommandLineRunner {
         return null;
     }
 
-    private void upsertDiseaseProtocol(ProtocolDraft protocol, Long authorUserId) throws JsonProcessingException {
-        AiDiseaseKnowledge entity = diseaseRepository.findByCode(protocol.code)
-                .orElseGet(() -> AiDiseaseKnowledge.builder().code(protocol.code).build());
+    private boolean seedDiseaseProtocolIfMissing(ProtocolDraft protocol, Long authorUserId) throws JsonProcessingException {
+        Optional<AiDiseaseKnowledge> existing = diseaseRepository.findByCode(protocol.code);
+        if (existing.isPresent()) {
+            log.info("Phác đồ AI Doctor code={} đã tồn tại, không seed đè để giữ chỉnh sửa của admin/kỹ sư.",
+                    protocol.code);
+            return false;
+        }
+
+        AiDiseaseKnowledge entity = AiDiseaseKnowledge.builder().code(protocol.code).build();
         DiseaseSeedMetadata metadata = METADATA_OVERRIDES.get(protocol.code);
         if (metadata == null) {
             throw new IllegalStateException("Thiếu metadata seed cho mã bệnh " + protocol.code);
@@ -149,6 +159,7 @@ public class AiDiseaseProtocolSeeder implements CommandLineRunner {
         syncAuditUser(saved.getId(), authorUserId);
         log.info("Seeded AI disease protocol: code={}, id={}, stages={}",
                 saved.getCode(), saved.getId(), protocol.stages.size());
+        return true;
     }
 
     private AiKnowledgeCategory resolveOrCreateCategory(String categoryName) {
