@@ -1,5 +1,6 @@
 package com.zone.agri.dto.response.order;
 
+import com.fasterxml.jackson.annotation.JsonFormat;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -25,6 +26,7 @@ public class BranchOrderResponse {
     private String customerName;
     private String customerPhone;
     private String shippingAddress;
+    @JsonFormat(pattern = "yyyy-MM-dd'T'HH:mm:ss")
     private LocalDateTime createdAt;
     private String paymentMethod;
     private String paymentStatus;
@@ -33,6 +35,7 @@ public class BranchOrderResponse {
     private String orderLegacyStatus;
     private String fulfillmentStatus;
     private String stockStatus;
+    @JsonFormat(pattern = "yyyy-MM-dd'T'HH:mm:ss")
     private LocalDateTime autoApproveAt;
 
     // ── Thông tin phần đơn của chi nhánh (SubOrder) ─────────────
@@ -43,6 +46,7 @@ public class BranchOrderResponse {
     private BigDecimal shippingFee;
     private String estimatedDays;
     private String carrier;
+    @JsonFormat(pattern = "yyyy-MM-dd'T'HH:mm:ss")
     private LocalDateTime statusUpdatedAt;
     private boolean shippingOverdue;
     private boolean canMarkReceived;
