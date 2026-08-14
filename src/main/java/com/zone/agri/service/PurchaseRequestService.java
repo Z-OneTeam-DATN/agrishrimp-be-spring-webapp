@@ -9,6 +9,7 @@ import com.zone.agri.entity.*;
 import com.zone.agri.entity.enums.PurchaseRequestStatus;
 import com.zone.agri.entity.enums.SupplierProductCatalogStatus;
 import com.zone.agri.exception.BadRequestException;
+import com.zone.agri.exception.Forbidden;
 import com.zone.agri.exception.NotFoundException;
 import com.zone.agri.repository.*;
 import lombok.RequiredArgsConstructor;
@@ -147,6 +148,27 @@ public class PurchaseRequestService {
 
     private boolean enforceMainWarehousePurchaseRequests() {
         return true;
+    }
+
+    private void assertPurchaseRequestCreatorCanUseBranch(Branch branch) {
+        validatePurchaseRequestBranch(branch);
+
+        if (RoleUtils.hasSuperAdminAuthority(AuthUtils.getAuthorities())) {
+            return;
+        }
+
+        User creator = getCurrentUser();
+        Branch creatorBranch = creator != null ? creator.getBranch() : null;
+        if (!isMainWarehouseBranch(creatorBranch)) {
+            throw new Forbidden("Chi kho tong moi duoc tao phieu yeu cau nhap NCC.");
+        }
+
+        if (branch == null
+                || branch.getId() == null
+                || creatorBranch.getId() == null
+                || !Objects.equals(creatorBranch.getId(), branch.getId())) {
+            throw new Forbidden("Chi duoc tao phieu yeu cau nhap NCC cho kho tong minh quan ly.");
+        }
     }
 
     @Transactional(readOnly = true)
@@ -407,7 +429,7 @@ public class PurchaseRequestService {
         }
 
         Branch branch = resolveRequestBranch(request);
-        validatePurchaseRequestBranch(branch);
+        assertPurchaseRequestCreatorCanUseBranch(branch);
         warehouseContext.assertAccess(branch.getId());
 
         String code = generateCode();
@@ -521,7 +543,7 @@ public class PurchaseRequestService {
             throw new BadRequestException("Nhà cung cấp đang tạm ngừng giao dịch. Không thể tạo phiếu yêu cầu mua.");
         }
         Branch branch = resolveRequestBranch(request);
-        validatePurchaseRequestBranch(branch);
+        assertPurchaseRequestCreatorCanUseBranch(branch);
         warehouseContext.assertAccess(branch.getId());
 
         pr.setSupplier(supplier);
@@ -831,13 +853,8 @@ public class PurchaseRequestService {
     }
 
     private void validatePurchaseRequestBranch(Branch branch) {
-        if (RoleUtils.hasSuperAdminAuthority(AuthUtils.getAuthorities())) {
-            return;
-        }
-
         if (enforceMainWarehousePurchaseRequests()) {
-            Branch mainWarehouse = resolveMainWarehouseBranch();
-            if (branch == null || branch.getId() == null || !Objects.equals(branch.getId(), mainWarehouse.getId())) {
+            if (!isMainWarehouseBranch(branch)) {
                 throw new BadRequestException("Phieu yeu cau mua NCC chi duoc tao cho kho tong.");
             }
             return;
