@@ -92,6 +92,14 @@ public interface InventoryRepository extends JpaRepository<Inventory, Long> {
         @Query("SELECT SUM(i.quantity) FROM Inventory i WHERE i.productVariant.id = :variantId")
         Long sumQuantityByVariantId(@Param("variantId") Long variantId);
 
+        @Query("""
+                        SELECT i.productVariant.id, COALESCE(SUM(i.quantity), 0L)
+                        FROM Inventory i
+                        WHERE i.productVariant.id IN :variantIds
+                        GROUP BY i.productVariant.id
+                        """)
+        List<Object[]> sumQuantityGroupByVariantIds(@Param("variantIds") List<Long> variantIds);
+
         boolean existsByProductVariantProductId(Long productId);
 
         @Query("""

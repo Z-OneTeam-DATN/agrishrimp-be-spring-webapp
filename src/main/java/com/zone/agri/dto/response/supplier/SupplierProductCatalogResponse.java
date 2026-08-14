@@ -38,6 +38,8 @@ public class SupplierProductCatalogResponse {
     private String updatedByName;
     private Long checkingAgeDays;
     private Boolean checkingTooLong;
+    private Long systemStockQuantity;
+    private Boolean lowStock;
 
     public static SupplierProductCatalogResponse fromEntity(SupplierProductCatalog catalog) {
         return SupplierProductCatalogResponse.builder()

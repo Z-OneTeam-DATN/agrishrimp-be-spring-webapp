@@ -21,6 +21,7 @@ import com.zone.agri.repository.ProductVariantRepository;
 import com.zone.agri.repository.SupplierProductCatalogRepository;
 import com.zone.agri.repository.SupplierRepository;
 import com.zone.agri.repository.UserRepository;
+import com.zone.agri.repository.InventoryRepository;
 import com.zone.agri.repository.InventoryReceiptPaymentRepository;
 import com.zone.agri.repository.PurchaseRequestRepository;
 import com.zone.agri.exception.ConflictException;
@@ -49,6 +50,7 @@ import java.util.stream.Collectors;
 @Slf4j
 public class SupplierService {
     private static final long CHECKING_TOO_LONG_DAYS = 14L;
+    private static final long LOW_STOCK_THRESHOLD = 10L;
 
     private final SupplierRepository supplierRepository;
     private final InventoryNoteRepository inventoryNoteRepository;
@@ -56,6 +58,7 @@ public class SupplierService {
     private final ProductVariantRepository productVariantRepository;
     private final SupplierProductCatalogRepository supplierProductCatalogRepository;
     private final UserRepository userRepository;
+    private final InventoryRepository inventoryRepository;
     private final InventoryReceiptPaymentRepository inventoryReceiptPaymentRepository;
     private final PurchaseRequestRepository purchaseRequestRepository;
 
@@ -176,9 +179,10 @@ public class SupplierService {
                 .flatMap(item -> java.util.stream.Stream.of(item.getCreatedByUserId(), item.getUpdatedByUserId()))
                 .filter(Objects::nonNull)
                 .toList());
+        Map<Long, Long> systemStockByVariantId = resolveSystemStockByVariantId(catalogItems);
 
         return catalogItems.stream()
-                .map(item -> toCatalogResponse(item, userNames))
+                .map(item -> toCatalogResponse(item, userNames, systemStockByVariantId))
                 .collect(Collectors.toList());
     }
 
@@ -321,7 +325,10 @@ public class SupplierService {
         return response;
     }
 
-    private SupplierProductCatalogResponse toCatalogResponse(SupplierProductCatalog catalog, Map<Long, String> userNames) {
+    private SupplierProductCatalogResponse toCatalogResponse(
+            SupplierProductCatalog catalog,
+            Map<Long, String> userNames,
+            Map<Long, Long> systemStockByVariantId) {
         SupplierProductCatalogResponse response = SupplierProductCatalogResponse.fromEntity(catalog);
         response.setCreatedByName(getMapValueOrNull(userNames, catalog.getCreatedByUserId()));
         response.setUpdatedByName(getMapValueOrNull(userNames, catalog.getUpdatedByUserId()));
@@ -329,7 +336,34 @@ public class SupplierService {
         Long checkingAgeDays = calculateCheckingAgeDays(catalog.getStatus(), catalog.getStatusChangedAt());
         response.setCheckingAgeDays(checkingAgeDays);
         response.setCheckingTooLong(checkingAgeDays != null && checkingAgeDays >= CHECKING_TOO_LONG_DAYS);
+
+        Long variantId = catalog.getProductVariant() != null ? catalog.getProductVariant().getId() : null;
+        long systemStockQuantity = variantId != null
+                ? systemStockByVariantId.getOrDefault(variantId, 0L)
+                : 0L;
+        response.setSystemStockQuantity(systemStockQuantity);
+        response.setLowStock(systemStockQuantity < LOW_STOCK_THRESHOLD);
         return response;
+    }
+
+    private Map<Long, Long> resolveSystemStockByVariantId(List<SupplierProductCatalog> catalogItems) {
+        List<Long> variantIds = catalogItems.stream()
+                .map(SupplierProductCatalog::getProductVariant)
+                .filter(Objects::nonNull)
+                .map(ProductVariant::getId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
+
+        if (variantIds.isEmpty()) {
+            return Map.of();
+        }
+
+        return inventoryRepository.sumQuantityGroupByVariantIds(variantIds).stream()
+                .filter(row -> row[0] != null)
+                .collect(Collectors.toMap(
+                        row -> ((Number) row[0]).longValue(),
+                        row -> row[1] == null ? 0L : ((Number) row[1]).longValue()));
     }
 
     private List<SupplierWarningResponse> buildWarnings(Supplier supplier, List<SupplierProductCatalog> catalogItems, boolean catalogLoaded) {
