@@ -30,8 +30,10 @@ import java.util.Set;
 public class NotificationService {
 
     private static final Set<OrderStatus> CUSTOMER_NOTIFIABLE_STATUSES = EnumSet.of(
-            OrderStatus.CONFIRMED, OrderStatus.PROCESSING, OrderStatus.SHIPPING,
-            OrderStatus.COMPLETED, OrderStatus.CANCELLED, OrderStatus.RETURNED);
+            OrderStatus.PENDING, OrderStatus.AWAITING_PAYMENT, OrderStatus.AWAITING_REPLENISHMENT,
+            OrderStatus.CONFIRMED, OrderStatus.PROCESSING, OrderStatus.READY_FOR_PICKUP,
+            OrderStatus.SHIPPING, OrderStatus.RECEIVED, OrderStatus.COMPLETED,
+            OrderStatus.CANCELLED, OrderStatus.RETURNED);
 
     private final NotificationRepository notificationRepository;
     private final UserRepository userRepository;
@@ -76,6 +78,37 @@ public class NotificationService {
     // ĐƠN HÀNG — khách hàng nhận khi trạng thái đổi tới mốc quan trọng,
     // admin nhận khi đơn chờ nhập bù kho
     // =========================================================
+
+    @Transactional
+    public void notifyOrderPlaced(Order order) {
+        if (order == null || order.getUser() == null) {
+            return;
+        }
+
+        User customer = order.getUser();
+        String title = "Đơn hàng " + order.getCode() + " đã được ghi nhận";
+        String content = "Cảm ơn bạn đã đặt hàng. AgriShrimp sẽ xử lý đơn trong thời gian sớm nhất.";
+
+        try {
+            sendNotification(customer.getId(), title, content, NotificationType.ORDER, order.getId());
+        } catch (Exception e) {
+            log.warn("[Notify] Failed to send order-created notification for order {}: {}",
+                    order.getId(), e.getMessage());
+        }
+
+        if (customer.getEmail() != null && !customer.getEmail().isBlank()) {
+            try {
+                emailService.sendOrderPlacedEmail(order);
+            } catch (Exception e) {
+                log.warn("[Email] Failed to send order-created email for order {}: {}",
+                        order.getId(), e.getMessage());
+            }
+        }
+
+        if (order.getStatus() == OrderStatus.AWAITING_REPLENISHMENT) {
+            notifyAdminsOrderNeedsReplenishment(order);
+        }
+    }
 
     @Transactional
     public void notifyOrderStatusChange(Order order, OrderStatus previousStatus, OrderStatus newStatus) {

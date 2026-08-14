@@ -3654,6 +3654,7 @@ public class OrderService {
 
             saveConfirmResultToRedis(request.getPrepareToken(), response);
             saveConfirmResultByIdempotency(userId, normalizedIdempotencyKey, response);
+            notificationService.notifyOrderPlaced(savedOrder);
             return response;
         } finally {
             redisTemplate.delete(confirmLockKey);
@@ -4604,6 +4605,7 @@ public class OrderService {
                 .forEach(vId -> cartItemRepository.findByUserIdAndProductVariantId(userId, vId)
                         .ifPresent(cartItemRepository::delete));
 
+        notificationService.notifyOrderPlaced(savedOrder);
         return savedOrder;
     }
 

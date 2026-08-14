@@ -9,6 +9,8 @@ import com.zone.agri.entity.Order;
 import com.zone.agri.entity.PurchaseRequest;
 import com.zone.agri.entity.Voucher;
 import com.zone.agri.entity.enums.OrderStatus;
+import com.zone.agri.entity.enums.PaymentMethod;
+import com.zone.agri.entity.enums.PaymentStatus;
 import com.zone.agri.exception.BadRequestException;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -250,6 +252,100 @@ public class EmailService {
         sendEmail(supplierEmail, subject, htmlContent);
     }
 
+    public void sendOrderPlacedEmail(Order order) {
+        String toEmail = order.getUser().getEmail();
+        String name = order.getUser().getFullName();
+        String orderCode = order.getCode();
+        String statusLabel = orderStatusLabel(order.getStatus());
+        String paymentMethodLabel = paymentMethodLabel(order.getPaymentMethod());
+        String paymentStatusLabel = paymentStatusLabel(order.getPaymentStatus());
+        String receiverName = order.getReceiverName() != null && !order.getReceiverName().isBlank()
+                ? order.getReceiverName()
+                : name;
+        String receiverPhone = order.getReceiverPhone() != null && !order.getReceiverPhone().isBlank()
+                ? order.getReceiverPhone()
+                : "Chưa cập nhật";
+        String address = order.getDeliveryAddress() != null && !order.getDeliveryAddress().isBlank()
+                ? order.getDeliveryAddress()
+                : order.getShippingAddress();
+        if (address == null || address.isBlank()) {
+            address = "Chưa cập nhật";
+        }
+
+        String paymentNote = "";
+        if (order.getPaymentMethod() == PaymentMethod.PAYOS
+                && order.getPayosCheckoutUrl() != null
+                && !order.getPayosCheckoutUrl().isBlank()) {
+            paymentNote = """
+                    <div style="background:#fff7ed;border-left:4px solid #f97316;border-radius:8px;padding:14px 18px;margin:16px 0;">
+                        <p style="margin:0;font-size:14px;color:#9a3412;line-height:1.7;">
+                            Đơn hàng đang chờ thanh toán PayOS. Bạn có thể mở lại đơn hàng trong tài khoản để tiếp tục thanh toán.
+                        </p>
+                    </div>
+                    """;
+        }
+
+        String subject = "[AgriShrimp] Đã ghi nhận đơn hàng %s".formatted(orderCode);
+        String body = """
+                <p style="font-size:16px;color:#374151;line-height:1.8;">
+                    Xin chào <strong>%s</strong>,
+                </p>
+                <p style="font-size:15px;color:#374151;line-height:1.8;">
+                    AgriShrimp đã ghi nhận đơn hàng <strong>%s</strong> của bạn. Chúng tôi sẽ xử lý và cập nhật trạng thái đơn hàng trong thời gian sớm nhất.
+                </p>
+
+                <div style="margin:18px 0;">
+                    <table style="width:100%%;border-collapse:collapse;border:1px solid #d1d5db;">
+                        <tr>
+                            <td style="padding:10px 12px;border:1px solid #d1d5db;background:#f8fafc;font-size:13px;color:#374151;width:34%%;font-weight:600;">Mã đơn hàng</td>
+                            <td style="padding:10px 12px;border:1px solid #d1d5db;font-size:14px;color:#1e40af;font-weight:bold;">%s</td>
+                        </tr>
+                        <tr>
+                            <td style="padding:10px 12px;border:1px solid #d1d5db;background:#f8fafc;font-size:13px;color:#374151;font-weight:600;">Trạng thái đơn</td>
+                            <td style="padding:10px 12px;border:1px solid #d1d5db;font-size:14px;color:#111827;">%s</td>
+                        </tr>
+                        <tr>
+                            <td style="padding:10px 12px;border:1px solid #d1d5db;background:#f8fafc;font-size:13px;color:#374151;font-weight:600;">Thanh toán</td>
+                            <td style="padding:10px 12px;border:1px solid #d1d5db;font-size:14px;color:#111827;">%s - %s</td>
+                        </tr>
+                        <tr>
+                            <td style="padding:10px 12px;border:1px solid #d1d5db;background:#f8fafc;font-size:13px;color:#374151;font-weight:600;">Người nhận</td>
+                            <td style="padding:10px 12px;border:1px solid #d1d5db;font-size:14px;color:#111827;">%s - %s</td>
+                        </tr>
+                        <tr>
+                            <td style="padding:10px 12px;border:1px solid #d1d5db;background:#f8fafc;font-size:13px;color:#374151;font-weight:600;">Địa chỉ giao hàng</td>
+                            <td style="padding:10px 12px;border:1px solid #d1d5db;font-size:14px;color:#111827;">%s</td>
+                        </tr>
+                        <tr>
+                            <td style="padding:10px 12px;border:1px solid #d1d5db;background:#f8fafc;font-size:13px;color:#374151;font-weight:600;">Tổng thanh toán</td>
+                            <td style="padding:10px 12px;border:1px solid #d1d5db;font-size:15px;color:#dc2626;font-weight:bold;">%s</td>
+                        </tr>
+                    </table>
+                </div>
+
+                %s
+
+                <p style="font-size:14px;color:#6b7280;line-height:1.7;">
+                    Bạn có thể theo dõi trạng thái mới nhất trong mục "Đơn hàng của tôi" sau khi đăng nhập.
+                </p>
+                """.formatted(
+                escapeEmailText(name),
+                escapeEmailText(orderCode),
+                escapeEmailText(orderCode),
+                escapeEmailText(statusLabel),
+                escapeEmailText(paymentMethodLabel),
+                escapeEmailText(paymentStatusLabel),
+                escapeEmailText(receiverName),
+                escapeEmailText(receiverPhone),
+                escapeEmailText(address),
+                formatCurrency(order.getFinalAmount()),
+                paymentNote
+        );
+
+        String htmlContent = buildEmailTemplate("Đơn Hàng Đã Được Ghi Nhận", body, "Xem đơn hàng của tôi →");
+        sendEmail(toEmail, subject, htmlContent);
+    }
+
     public void sendOrderStatusChangeEmail(Order order, OrderStatus newStatus) {
         String toEmail = order.getUser().getEmail();
         String name = order.getUser().getFullName();
@@ -447,14 +543,50 @@ public class EmailService {
     }
 
     private String orderStatusLabel(OrderStatus status) {
+        if (status == null) {
+            return "Chưa cập nhật";
+        }
         return switch (status) {
+            case PENDING -> "Chờ xác nhận";
+            case AWAITING_PAYMENT -> "Chờ thanh toán";
+            case AWAITING_REPLENISHMENT -> "Chờ nhập bù kho";
             case CONFIRMED -> "Đã xác nhận";
             case PROCESSING -> "Đang chuẩn bị hàng";
+            case READY_FOR_PICKUP -> "Chờ bàn giao";
             case SHIPPING -> "Đang giao hàng";
+            case RECEIVED -> "Đã nhận hàng";
             case COMPLETED -> "Đã hoàn tất";
             case CANCELLED -> "Đã huỷ";
             case RETURNED -> "Đã hoàn trả";
-            default -> status.name();
+        };
+    }
+
+    private String paymentMethodLabel(PaymentMethod method) {
+        if (method == null) {
+            return "Chưa cập nhật";
+        }
+        return switch (method) {
+            case CASH -> "Tiền mặt";
+            case TRANSFER -> "Chuyển khoản";
+            case COD -> "Thanh toán khi nhận hàng";
+            case PAYOS -> "PayOS";
+        };
+    }
+
+    private String paymentStatusLabel(PaymentStatus status) {
+        if (status == null) {
+            return "Chưa cập nhật";
+        }
+        return switch (status) {
+            case UNPAID -> "Chưa thanh toán";
+            case PENDING -> "Đang chờ";
+            case PENDING_VERIFICATION -> "Chờ xác minh";
+            case PARTIALLY_PAID -> "Thanh toán một phần";
+            case PAID -> "Đã thanh toán";
+            case FAILED -> "Thanh toán lỗi";
+            case EXPIRED -> "Đã hết hạn";
+            case REFUND_PENDING -> "Chờ hoàn tiền";
+            case REFUNDED -> "Đã hoàn tiền";
         };
     }
 
