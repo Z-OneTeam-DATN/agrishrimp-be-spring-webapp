@@ -188,7 +188,7 @@ public class GeminiClarifyClient {
     public GeminiClarifyClient(RestTemplateBuilder builder, ObjectMapper objectMapper) {
         this.restTemplate = builder
                 .connectTimeout(Duration.ofSeconds(10))
-                .readTimeout(Duration.ofSeconds(45))
+                .readTimeout(Duration.ofSeconds(20))
                 .build();
         this.objectMapper = objectMapper;
     }
