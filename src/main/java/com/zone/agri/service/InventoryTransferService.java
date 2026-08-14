@@ -219,6 +219,22 @@ public class InventoryTransferService {
         }
     }
 
+    private void assertTransferRequestActor(User user, Branch fromBranch, Branch toBranch, String action) {
+        if (user == null
+                || user.getBranch() == null
+                || user.getBranch().getId() == null
+                || RoleUtils.hasAdminLikeAuthority(AuthUtils.getAuthorities())) {
+            return;
+        }
+
+        Long userBranchId = user.getBranch().getId();
+        Long fromBranchId = fromBranch != null ? fromBranch.getId() : null;
+        Long toBranchId = toBranch != null ? toBranch.getId() : null;
+        if (!Objects.equals(userBranchId, fromBranchId) && !Objects.equals(userBranchId, toBranchId)) {
+            throw new Forbidden("Ban chi duoc " + action + " phieu dieu chuyen co lien quan toi chi nhanh cua minh.");
+        }
+    }
+
     private TransferBusinessType resolveBusinessType(String rawBusinessType) {
         return "INTERNAL_SALE".equalsIgnoreCase(rawBusinessType)
                 ? TransferBusinessType.INTERNAL_SALE
@@ -405,6 +421,7 @@ public class InventoryTransferService {
                 .orElseThrow(() -> new NotFoundException("Không tìm thấy kho nhận"));
         TransferBusinessType businessType = resolveBusinessType(req.getTransferBusinessType());
 
+        assertTransferRequestActor(createdByUser, fromBranch, toBranch, "tao");
         validateTransferRequestBasics(req, fromBranch, toBranch, businessType);
         if (businessType == TransferBusinessType.INTERNAL_SALE) {
             validateInternalSalePricesForRequest(req.getItems());
@@ -445,8 +462,11 @@ public class InventoryTransferService {
 
     @Transactional
     public TransferDetailResponse updateTransfer(Long transferId, TransferRequest req) {
+        User currentUser = getCurrentUser();
         InventoryTransfer transfer = transferRepo.findByIdWithDetails(transferId)
                 .orElseThrow(() -> new NotFoundException("Không tìm thấy phiếu điều chuyển"));
+
+        assertTransferRequestActor(currentUser, transfer.getFromBranch(), transfer.getToBranch(), "sua");
 
         if (transfer.getStatus() != InventoryTransferStatus.PENDING
                 && transfer.getStatus() != InventoryTransferStatus.SOURCE_CONFIRMED) {
@@ -469,6 +489,7 @@ public class InventoryTransferService {
                 .orElseThrow(() -> new NotFoundException("Không tìm thấy kho nhận"));
         TransferBusinessType businessType = resolveBusinessType(req.getTransferBusinessType());
 
+        assertTransferRequestActor(currentUser, fromBranch, toBranch, "sua");
         validateTransferRequestBasics(req, fromBranch, toBranch, businessType);
         if (businessType == TransferBusinessType.INTERNAL_SALE) {
             validateInternalSalePricesForRequest(req.getItems());

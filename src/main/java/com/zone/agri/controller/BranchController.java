@@ -36,7 +36,7 @@ public class BranchController {
     @RequirePermission({
             "BRANCH_VIEW", "STAFF_CREATE",
             "REPORT_INVENTORY_VIEW", "REPORT_FINANCE_VIEW", "REPORT_REVENUE_VIEW",
-            "PURCHASE_REQUEST_CREATE"
+            "PURCHASE_REQUEST_CREATE", "TRANSFER_CREATE", "TRANSFER_UPDATE"
     })
     @GetMapping()
     public ResponseEntity<List<BranchDTO>> getAll() {
