@@ -118,6 +118,7 @@ public class ReturnRequestService {
             throw new BadRequestException("Chỉ hỗ trợ trả hàng với đơn đã giao hoàn tất");
         }
 
+        validateBankTransferRefundMethod(request.getRefundMethod());
         validateEvidenceRequirements(request.getEvidences());
 
         Map<Long, SubOrderItem> subOrderItemMap = loadSubOrderItems(request.getItems());
@@ -150,7 +151,7 @@ public class ReturnRequestService {
                 .code(generateReturnRequestCode())
                 .status(ReturnRequestStatus.PENDING)
                 .issueType(request.getIssueType())
-                .refundMethod(request.getRefundMethod())
+                .refundMethod(ReturnRefundMethod.BANK_TRANSFER)
                 .requiresPhysicalReturn(requiresPhysicalReturn)
                 .customerName(request.getFullName().trim())
                 .customerPhone(request.getPhoneNumber().trim())
@@ -361,7 +362,10 @@ public class ReturnRequestService {
         if (Boolean.FALSE.equals(entity.getRequiresPhysicalReturn()) && entity.getStatus() != ReturnRequestStatus.APPROVED) {
             throw new BadRequestException("Yêu cầu thiếu hàng phải được duyệt trước khi hoàn tiền");
         }
-        entity.setRefundMethod(request.getRefundMethod() != null ? request.getRefundMethod() : entity.getRefundMethod());
+        if (request.getRefundMethod() != null) {
+            validateBankTransferRefundMethod(request.getRefundMethod());
+        }
+        entity.setRefundMethod(ReturnRefundMethod.BANK_TRANSFER);
         entity.setTotalRefundAmount(safeAmount(request.getRefundAmount()));
         entity.setStatus(ReturnRequestStatus.REFUNDED);
         entity.setRefundedAt(LocalDateTime.now());
@@ -573,6 +577,12 @@ public class ReturnRequestService {
 
     private BigDecimal safeAmount(BigDecimal amount) {
         return amount != null ? amount : BigDecimal.ZERO;
+    }
+
+    private void validateBankTransferRefundMethod(ReturnRefundMethod refundMethod) {
+        if (refundMethod != ReturnRefundMethod.BANK_TRANSFER) {
+            throw new BadRequestException("Yêu cầu trả hàng chỉ hỗ trợ hoàn tiền qua chuyển khoản ngân hàng");
+        }
     }
 
     private String firstNonBlank(String... values) {
