@@ -27,6 +27,8 @@ public class ProductVariantService {
 
     private final ProductVariantRepository variantRepo;
     private final InventoryRepository inventoryRepo;
+    private final com.zone.agri.repository.BranchRepository branchRepo;
+
     /**
      * BÁO CÁO SẢN PHẨM DƯỚI ĐỊNH MỨC (LOW STOCK REPORT)
      * Chỉ lấy các biến thể có tổng tồn kho dưới 10 tại chi nhánh yêu cầu
@@ -34,17 +36,31 @@ public class ProductVariantService {
     public List<LowStockReportResponse> getLowStockReport(Long branchId) {
         int threshold = 10;
 
-        // 1. Lấy TẤT CẢ các Variant đang kinh doanh (ACTIVE)
+        // 1. Lấy ID chi nhánh tổng (WAREHOUSE đầu tiên hoặc mặc định 1L)
+        Long mainBranchId = branchRepo.findAll().stream()
+                .filter(b -> b != null && b.getBranchType() != null && b.getBranchType().trim().toLowerCase().contains("warehouse"))
+                .map(com.zone.agri.entity.Branch::getId)
+                .findFirst()
+                .orElse(1L);
+
+        // 2. Lấy TẤT CẢ các Variant đang kinh doanh (ACTIVE)
         List<ProductVariant> allVariants = variantRepo.findAllActiveWithProduct(null, null);
 
-        // 2. Tính toán tồn kho cho từng biến thể tại chi nhánh yêu cầu
+        // 3. Tính toán tồn kho cho từng biến thể tại chi nhánh yêu cầu
         return allVariants.stream().map(v -> {
             // Lấy TẤT CẢ các bản ghi kho của biến thể này
-            List<Inventory> inventories = inventoryRepo.findByProductVariantId(v.getId());
+            List<Inventory> allInventories = inventoryRepo.findByProductVariantId(v.getId());
 
+            // Tồn kho chi nhánh tổng
+            int mainBranchQty = allInventories.stream()
+                    .filter(i -> i.getBranch() != null && i.getBranch().getId().equals(mainBranchId))
+                    .mapToInt(i -> Objects.requireNonNullElse(i.getQuantity(), 0))
+                    .sum();
+
+            List<Inventory> inventories = allInventories;
             // Lọc theo chi nhánh nếu có
             if (branchId != null) {
-                inventories = inventories.stream()
+                inventories = allInventories.stream()
                         .filter(inv -> inv.getBranch() != null && inv.getBranch().getId().equals(branchId))
                         .collect(Collectors.toList());
             }
@@ -56,8 +72,7 @@ public class ProductVariantService {
 
             // Định mức (Threshold): dùng đúng Inventory.minStock đã cấu hình cho biến thể/chi
             // nhánh này (lấy giá trị lớn nhất nếu có nhiều lô cùng chi nhánh); chỉ rơi về mặc định
-            // 10 khi chưa ai cấu hình minStock cho bản ghi kho nào — trước đây luôn cứng 10 dù DB
-            // đã có sẵn cột minStock, khiến cấu hình định mức riêng từng SKU bị bỏ qua hoàn toàn.
+            // 10 khi chưa ai cấu hình minStock cho bản ghi kho nào
             int currentThreshold = inventories.stream()
                     .map(Inventory::getMinStock)
                     .filter(Objects::nonNull)
@@ -81,6 +96,7 @@ public class ProductVariantService {
                     .shortage(Math.max(0, currentThreshold - totalStock))
                     .isLowStock(totalStock < currentThreshold)
                     .lastImportDate(lastImport)
+                    .mainBranchQuantity(mainBranchQty)
                     .build();
         })
                 .filter(LowStockReportResponse::isLowStock) // Lọc những đứa tồn kho thấp (bao gồm cả 0)
