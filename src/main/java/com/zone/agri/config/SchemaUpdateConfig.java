@@ -138,6 +138,10 @@ public class SchemaUpdateConfig implements BeanPostProcessor {
                             "ADD COLUMN linked_destination_branch_id BIGINT NULL, " +
                             "ADD COLUMN linked_reference_code VARCHAR(120) NULL");
 
+            executeSql(stmt,
+                    "Patch supplier_product_catalogs adds price column",
+                    "ALTER TABLE supplier_product_catalogs ADD COLUMN price DECIMAL(12,2) NULL");
+
             patchInventoryTransfers(conn, stmt);
 
             executeSql(stmt,
@@ -198,6 +202,7 @@ public class SchemaUpdateConfig implements BeanPostProcessor {
                                 id BIGINT PRIMARY KEY AUTO_INCREMENT,
                                 supplier_id BIGINT NOT NULL,
                                 product_variant_id BIGINT NOT NULL,
+                                price DECIMAL(12,2) NULL,
                                 status ENUM('AVAILABLE','UNAVAILABLE','CHECKING') NOT NULL DEFAULT 'CHECKING',
                                 note TEXT NULL,
                                 status_changed_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,

@@ -28,6 +28,7 @@ public class SupplierProductCatalogResponse {
     private String categoryName;
     private SupplierProductCatalogStatus status;
     private String note;
+    private java.math.BigDecimal price;
     private LocalDateTime statusChangedAt;
     private Integer version;
     private LocalDateTime createdAt;
@@ -78,6 +79,7 @@ public class SupplierProductCatalogResponse {
                         ? catalog.getProductVariant().getProduct().getCategory().getName()
                         : null)
                 .status(catalog.getStatus())
+                .price(catalog.getPrice())
                 .note(catalog.getNote())
                 .statusChangedAt(catalog.getStatusChangedAt())
                 .version(catalog.getVersion())

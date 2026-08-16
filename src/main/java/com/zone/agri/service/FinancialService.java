@@ -21,6 +21,7 @@ import com.zone.agri.common.AuthUtils;
 import com.zone.agri.dto.response.financial.CashbookEntryResponse;
 import com.zone.agri.dto.response.financial.CashbookReportResponse;
 import com.zone.agri.dto.response.financial.CashbookSummaryResponse;
+import com.zone.agri.dto.response.financial.SupplierDebtDetailResponse;
 import com.zone.agri.dto.response.financial.ProfitLossResponse;
 import com.zone.agri.dto.response.supplier.SupplierDebtResponse;
 import com.zone.agri.entity.Customer;
@@ -219,6 +220,45 @@ public class FinancialService {
                 .sorted(Comparator
                         .comparing(SupplierDebtResponse::getTotalDebt, Comparator.reverseOrder())
                         .thenComparing(item -> Objects.toString(item.getSupplierName(), "")))
+                .toList();
+    }
+
+    @Transactional(readOnly = true)
+    public List<SupplierDebtDetailResponse> getSupplierDebtDetail(Long supplierId, Long branchId) {
+        Long finalBranchId = resolveBranchId(branchId);
+        LocalDateTime snapshotDate = LocalDateTime.now();
+
+        List<SupplierRepository.SupplierDebtLedgerProjection> ledgerRows = supplierRepository
+                .findSupplierDebtLedger(null, snapshotDate, finalBranchId, null);
+
+        return ledgerRows.stream()
+                .filter(row -> row.getSupplierId() != null && row.getSupplierId().equals(supplierId))
+                .map(row -> {
+                    BigDecimal totalAmount = getSafeBigDecimal(row.getTotalAmount());
+                    BigDecimal paidAmount = getSafeBigDecimal(row.getPaidAmount());
+                    BigDecimal outstandingAmount = BigDecimal.ZERO;
+
+                    if (row.getNoteType() == InventoryNoteType.IMPORT) {
+                        outstandingAmount = totalAmount.subtract(paidAmount);
+                        if (outstandingAmount.compareTo(BigDecimal.ZERO) < 0) {
+                            outstandingAmount = BigDecimal.ZERO;
+                        }
+                    } else if (row.getNoteType() == InventoryNoteType.EXPORT) {
+                        outstandingAmount = totalAmount.negate();
+                    }
+
+                    return SupplierDebtDetailResponse.builder()
+                            .noteId(row.getNoteId())
+                            .noteCode(row.getNoteCode())
+                            .noteType(row.getNoteType() != null ? row.getNoteType().name() : "")
+                            .createdAt(row.getCreatedAt())
+                            .totalAmount(totalAmount)
+                            .paidAmount(paidAmount)
+                            .outstandingAmount(outstandingAmount)
+                            .branchName(row.getBranchName())
+                            .build();
+                })
+                .sorted(Comparator.comparing(SupplierDebtDetailResponse::getCreatedAt, Comparator.reverseOrder()))
                 .toList();
     }
 

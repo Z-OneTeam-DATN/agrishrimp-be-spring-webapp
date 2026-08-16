@@ -10,6 +10,8 @@ public class SupplierProductCatalogRequest {
 
     private SupplierProductCatalogStatus status;
 
+    private java.math.BigDecimal price;
+
     @Size(max = 255, message = "Ghi chú tối đa 255 ký tự")
     private String note;
 
@@ -55,5 +57,13 @@ public class SupplierProductCatalogRequest {
 
     public void setIsDeleted(Boolean isDeleted) {
         this.isDeleted = isDeleted;
+    }
+
+    public java.math.BigDecimal getPrice() {
+        return price;
+    }
+
+    public void setPrice(java.math.BigDecimal price) {
+        this.price = price;
     }
 }
