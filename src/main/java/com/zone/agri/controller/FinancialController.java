@@ -6,6 +6,7 @@ import java.util.List;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -14,6 +15,7 @@ import com.zone.agri.dto.response.financial.CashbookReportResponse;
 import com.zone.agri.dto.response.financial.ProfitLossInsightResponse;
 import com.zone.agri.dto.response.financial.ProfitLossResponse;
 import com.zone.agri.dto.response.inventory.ReceiptPaymentResponse;
+import com.zone.agri.dto.response.financial.SupplierDebtDetailResponse;
 import com.zone.agri.dto.response.supplier.SupplierDebtResponse;
 import com.zone.agri.security.annotation.RequirePermission;
 import com.zone.agri.service.FinancialService;
@@ -58,6 +60,13 @@ public class FinancialController {
             @RequestParam(required = false, defaultValue = "not_zero") String debtFilter) {
         return ResponseEntity
                 .ok(financialService.getSupplierDebts(search, startDate, endDate, branchId, staffId, debtFilter));
+    }
+
+    @GetMapping("/supplier-debts/{supplierId}/detail")
+    public ResponseEntity<List<SupplierDebtDetailResponse>> getSupplierDebtDetail(
+            @PathVariable Long supplierId,
+            @RequestParam(required = false) Long branchId) {
+        return ResponseEntity.ok(financialService.getSupplierDebtDetail(supplierId, branchId));
     }
 
     @GetMapping("/cashbook")

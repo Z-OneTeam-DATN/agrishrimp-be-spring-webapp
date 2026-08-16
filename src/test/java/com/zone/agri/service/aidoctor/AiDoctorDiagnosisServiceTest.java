@@ -16,12 +16,16 @@ import com.zone.agri.dto.ai.AiPredictionItem;
 import com.zone.agri.dto.response.ai.AiDoctorDiagnosisResponse;
 import com.zone.agri.entity.AiDiseaseKnowledge;
 import com.zone.agri.entity.AiDoctorDiagnosisHistory;
+import com.zone.agri.entity.Product;
 import com.zone.agri.entity.enums.AiKnowledgeStatus;
+import com.zone.agri.entity.enums.ProductStatus;
 import com.zone.agri.exception.BadRequestException;
 import com.zone.agri.repository.AiDiseaseKnowledgeRepository;
 import com.zone.agri.repository.AiDoctorDiagnosisHistoryRepository;
 import com.zone.agri.repository.AiKnowledgeReviewCaseRepository;
+import com.zone.agri.repository.ProductRepository;
 import com.zone.agri.service.ai.AiKnowledgeService;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
@@ -70,6 +74,8 @@ import org.springframework.transaction.annotation.Transactional;
 @Transactional
 class AiDoctorDiagnosisServiceTest {
 
+    private static final String DEFAULT_SYMPTOMS = "Tom bo an, ruot rong, gan tuy doi mau.";
+
     @Autowired
     private AiDoctorDiagnosisService aiDoctorDiagnosisService;
 
@@ -84,6 +90,9 @@ class AiDoctorDiagnosisServiceTest {
 
     @Autowired
     private AiKnowledgeReviewCaseRepository reviewCaseRepository;
+
+    @Autowired
+    private ProductRepository productRepository;
 
     @Autowired
     private ObjectMapper objectMapper;
@@ -103,6 +112,7 @@ class AiDoctorDiagnosisServiceTest {
     private void seedDiseaseWithProtocol(String code, String nameVi, String symptomKeyword,
             double matchThreshold, double confidenceThreshold) throws Exception {
         String causesJson = objectMapper.writeValueAsString(List.of("Moi truong bien dong", "Mat do nuoi qua cao"));
+        String imageUrlsJson = objectMapper.writeValueAsString(List.of("http://img/" + code + ".jpg"));
         String stagesJson = objectMapper.writeValueAsString(List.of(Map.of(
                 "stageTitle", "Giai doan 1: On dinh moi truong",
                 "instructions", List.of("Giam soc cho tom", "Tang cuong oxy hoa tan"),
@@ -115,6 +125,7 @@ class AiDoctorDiagnosisServiceTest {
                 .signsSummary("Dau hieu dac trung cua " + nameVi)
                 .causesJson(causesJson)
                 .treatmentStagesJson(stagesJson)
+                .imageUrlsJson(imageUrlsJson)
                 .confidenceThreshold(confidenceThreshold)
                 .matchThreshold(matchThreshold)
                 .enabled(true)
@@ -176,6 +187,20 @@ class AiDoctorDiagnosisServiceTest {
         return AiImageNarrativeResult.builder().isShrimp(true).description(description).build();
     }
 
+    @Test
+    void imageWithoutSymptoms_returnsImageObservationBeforeCallingAiModel() {
+        when(geminiClarifyClient.describeImage(any(), any(), any()))
+                .thenReturn(narrative("Mang tom chuyen mau den sam."));
+
+        AiDoctorDiagnosisResponse response =
+                aiDoctorDiagnosisService.diagnose(fakeImage(), " ", 1L, "sess-missing-symptoms");
+
+        assertThat(response.getStatus()).isEqualTo("IMAGE_OBSERVATION");
+        assertThat(response.getAiDescription()).contains("Mang tom chuyen mau den sam.");
+        assertThat(response.getAiDescription()).contains("chưa đưa ra kết luận");
+        verify(aiDiagnosisClient, never()).predict(any());
+    }
+
     // =========================================================
     // 1) Response DISEASE co ca aiDescription lan cac truong cau truc cu
     // =========================================================
@@ -187,13 +212,101 @@ class AiDoctorDiagnosisServiceTest {
         when(aiDiagnosisClient.predict(any())).thenReturn(predictResponse("DISEASE", finalPrediction));
         when(geminiClarifyClient.describeImage(any(), any(), any())).thenReturn(narrative("Gemini mo ta anh e2e."));
 
-        AiDoctorDiagnosisResponse response = aiDoctorDiagnosisService.diagnose(fakeImage(), "", 1L, "sess-1");
+        AiDoctorDiagnosisResponse response = aiDoctorDiagnosisService.diagnose(fakeImage(), DEFAULT_SYMPTOMS, 1L, "sess-1");
 
         assertThat(response.getStatus()).isEqualTo("DISEASE");
         assertThat(response.getAiDescription()).contains("Gemini mo ta anh e2e.");
-        assertThat(response.getAiDescription()).contains("90%");
-        assertThat(response.getAiDescription()).contains("Giai doan 1: On dinh moi truong");
+        assertThat(response.getAiDescription()).doesNotContain("90%");
+        assertThat(response.getAiDescription()).doesNotContain("% khả năng");
+        assertThat(response.getAiDescription()).doesNotContain("Giai doan 1: On dinh moi truong");
+        assertThat(response.getTreatmentStages()).isNotEmpty();
+        assertThat(response.getTreatmentStages().get(0).getStageTitle()).contains("Giai doan 1: On dinh moi truong");
         assertThat(response.getDisease().getCode()).isEqualTo("DIS_E2E");
+        assertThat(response.getDisease().getImageUrls()).containsExactly("http://img/DIS_E2E.jpg");
+    }
+
+    @Test
+    void selectedParentStage_returnsAllChildStepsAndAssignedCatalogProducts() throws Exception {
+        Product productOne = productRepository.save(Product.builder()
+                .name("San pham gan buoc 1.1")
+                .slug("san-pham-gan-buoc-11")
+                .status(ProductStatus.ACTIVE)
+                .createdAt(LocalDateTime.now())
+                .build());
+        Product productTwo = productRepository.save(Product.builder()
+                .name("San pham gan buoc 1.2")
+                .slug("san-pham-gan-buoc-12")
+                .status(ProductStatus.ACTIVE)
+                .createdAt(LocalDateTime.now())
+                .build());
+        String stagesJson = objectMapper.writeValueAsString(List.of(
+                Map.of(
+                        "stageTitle", "Giai doan cha 1",
+                        "stageSigns", "Dau hieu cha 1",
+                        "treatmentGoal", "Xu ly cha 1",
+                        "instructions", List.of(),
+                        "productIds", List.of(),
+                        "extraProductNames", List.of(),
+                        "subStages", List.of(
+                                Map.of(
+                                        "subStageTitle", "Buoc con mot",
+                                        "instructions", List.of("Huong dan buoc con mot"),
+                                        "productIds", List.of(productOne.getId()),
+                                        "extraProductNames", List.of("San pham text 1")),
+                                Map.of(
+                                        "subStageTitle", "Buoc con hai",
+                                        "instructions", List.of("Huong dan buoc con hai"),
+                                        "productIds", List.of(productTwo.getId()),
+                                        "extraProductNames", List.of()))),
+                Map.of(
+                        "stageTitle", "Giai doan cha 2",
+                        "stageSigns", "Dau hieu cha 2",
+                        "treatmentGoal", "Xu ly cha 2",
+                        "instructions", List.of(),
+                        "productIds", List.of(),
+                        "extraProductNames", List.of(),
+                        "subStages", List.of(
+                                Map.of(
+                                        "subStageTitle", "Buoc con stage 2",
+                                        "instructions", List.of("Huong dan stage 2"),
+                                        "productIds", List.of(),
+                                        "extraProductNames", List.of())))));
+        diseaseKnowledgeRepository.save(AiDiseaseKnowledge.builder()
+                .code("DIS_PARENT_STAGE")
+                .nameVi("Benh co giai doan cha con")
+                .nameEn("Parent child disease")
+                .symptomKeywordsRaw("parentstagekeyword")
+                .signsSummary("Dau hieu parent stage")
+                .causesJson(objectMapper.writeValueAsString(List.of("Nguyen nhan test")))
+                .treatmentStagesJson(stagesJson)
+                .confidenceThreshold(0.65D)
+                .matchThreshold(0.4D)
+                .enabled(true)
+                .priority(0)
+                .canonical(false)
+                .status(AiKnowledgeStatus.APPROVED)
+                .build());
+        AiPredictionItem finalPrediction =
+                prediction("DIS_PARENT_STAGE", "Benh co giai doan cha con", "Parent child disease", 90.0D);
+        when(aiDiagnosisClient.predict(any())).thenReturn(predictResponse("DISEASE", finalPrediction));
+        when(geminiClarifyClient.describeImage(any(), any(), any())).thenReturn(narrative("Mo ta anh."));
+
+        AiDoctorDiagnosisResponse diagnosis =
+                aiDoctorDiagnosisService.diagnose(fakeImage(), DEFAULT_SYMPTOMS, 7L, "sess-parent-stage");
+        AiDoctorDiagnosisResponse prescription =
+                aiDoctorDiagnosisService.generatePrescriptionForStage(Long.valueOf(diagnosis.getDiagnosisId()), 7L, 0);
+
+        assertThat(diagnosis.getStageSelection().getOptions()).hasSize(2);
+        assertThat(prescription.getStageSelection()).isNull();
+        assertThat(prescription.getTreatmentStages()).hasSize(2);
+        assertThat(prescription.getTreatmentStages().get(0).getStageTitle()).startsWith("1.1");
+        assertThat(prescription.getTreatmentStages().get(1).getStageTitle()).startsWith("1.2");
+        assertThat(prescription.getTreatmentStages().get(0).getProducts())
+                .extracting("id")
+                .containsExactly(productOne.getId());
+        assertThat(prescription.getTreatmentStages().get(1).getProducts())
+                .extracting("id")
+                .containsExactly(productTwo.getId());
     }
 
     // =========================================================
@@ -208,14 +321,15 @@ class AiDoctorDiagnosisServiceTest {
         when(geminiClarifyClient.describeImage(any(), any(), any()))
                 .thenThrow(new RuntimeException("simulated Gemini outage"));
 
-        AiDoctorDiagnosisResponse response = aiDoctorDiagnosisService.diagnose(fakeImage(), "", 1L, "sess-2");
+        AiDoctorDiagnosisResponse response = aiDoctorDiagnosisService.diagnose(fakeImage(), DEFAULT_SYMPTOMS, 1L, "sess-2");
 
         assertThat(response.getStatus()).isEqualTo("DISEASE");
         assertThat(response.getDisease().getCode()).isEqualTo("DIS_GRACE");
         assertThat(response.getTreatmentStages()).isNotEmpty();
-        // Khong co mo ta Gemini nhung van con cau trich dan + phac do -> aiDescription khong rong.
+        // Khong co mo ta Gemini nhung van con cau nhan dien + phac do -> aiDescription khong rong.
         assertThat(response.getAiDescription()).isNotBlank();
-        assertThat(response.getAiDescription()).contains("Giai doan 1: On dinh moi truong");
+        assertThat(response.getAiDescription()).doesNotContain("Giai doan 1: On dinh moi truong");
+        assertThat(response.getTreatmentStages().get(0).getStageTitle()).contains("Giai doan 1: On dinh moi truong");
     }
 
     // =========================================================
@@ -234,7 +348,7 @@ class AiDoctorDiagnosisServiceTest {
         });
 
         long start = System.currentTimeMillis();
-        AiDoctorDiagnosisResponse response = aiDoctorDiagnosisService.diagnose(fakeImage(), "", 1L, "sess-3");
+        AiDoctorDiagnosisResponse response = aiDoctorDiagnosisService.diagnose(fakeImage(), DEFAULT_SYMPTOMS, 1L, "sess-3");
         long elapsedMs = System.currentTimeMillis() - start;
 
         assertThat(elapsedMs).isLessThan(2500L);
@@ -250,7 +364,7 @@ class AiDoctorDiagnosisServiceTest {
     void blurryStatus_throwsBadRequest_unaffectedByNarrativeAddition() {
         when(aiDiagnosisClient.predict(any())).thenReturn(predictResponse("BLURRY", null));
 
-        assertThatThrownBy(() -> aiDoctorDiagnosisService.diagnose(fakeImage(), "", 1L, "sess-4"))
+        assertThatThrownBy(() -> aiDoctorDiagnosisService.diagnose(fakeImage(), DEFAULT_SYMPTOMS, 1L, "sess-4"))
                 .isInstanceOf(BadRequestException.class);
     }
 
@@ -261,7 +375,7 @@ class AiDoctorDiagnosisServiceTest {
                 .thenReturn(AiImageNarrativeResult.builder().isShrimp(false)
                         .description("Day la anh mot chiec la, khong phai tom.").build());
 
-        AiDoctorDiagnosisResponse response = aiDoctorDiagnosisService.diagnose(fakeImage(), "", 1L, "sess-5");
+        AiDoctorDiagnosisResponse response = aiDoctorDiagnosisService.diagnose(fakeImage(), DEFAULT_SYMPTOMS, 1L, "sess-5");
 
         assertThat(response.getStatus()).isEqualTo("UNRECOGNIZED");
         assertThat(response.getAiDescription()).contains("Day la anh mot chiec la, khong phai tom.");
@@ -281,7 +395,7 @@ class AiDoctorDiagnosisServiceTest {
     void healthyStatus_returnsHealthyResponse_noAiDescription() {
         when(aiDiagnosisClient.predict(any())).thenReturn(predictResponse("HEALTHY", null));
 
-        AiDoctorDiagnosisResponse response = aiDoctorDiagnosisService.diagnose(fakeImage(), "", 1L, "sess-6");
+        AiDoctorDiagnosisResponse response = aiDoctorDiagnosisService.diagnose(fakeImage(), DEFAULT_SYMPTOMS, 1L, "sess-6");
 
         assertThat(response.getStatus()).isEqualTo("HEALTHY");
         assertThat(response.getAiDescription()).isNull();
@@ -305,7 +419,7 @@ class AiDoctorDiagnosisServiceTest {
                 .thenReturn(AiImageNarrativeResult.builder().isShrimp(false)
                         .description("Day la anh mot chu cho, khong phai tom.").build());
 
-        AiDoctorDiagnosisResponse response = aiDoctorDiagnosisService.diagnose(fakeImage(), "", 1L, "sess-6b");
+        AiDoctorDiagnosisResponse response = aiDoctorDiagnosisService.diagnose(fakeImage(), DEFAULT_SYMPTOMS, 1L, "sess-6b");
 
         assertThat(response.getStatus()).isEqualTo("UNRECOGNIZED");
         assertThat(response.getAiDescription()).contains("Day la anh mot chu cho, khong phai tom.");
@@ -319,7 +433,7 @@ class AiDoctorDiagnosisServiceTest {
         when(geminiClarifyClient.describeImage(any(), any(), any()))
                 .thenThrow(new RuntimeException("simulated Gemini outage"));
 
-        AiDoctorDiagnosisResponse response = aiDoctorDiagnosisService.diagnose(fakeImage(), "", 1L, "sess-6c");
+        AiDoctorDiagnosisResponse response = aiDoctorDiagnosisService.diagnose(fakeImage(), DEFAULT_SYMPTOMS, 1L, "sess-6c");
 
         assertThat(response.getStatus()).isEqualTo("HEALTHY");
     }
@@ -336,11 +450,12 @@ class AiDoctorDiagnosisServiceTest {
         when(geminiClarifyClient.freeConsult(any(), any(), any()))
                 .thenReturn("Co the do moi truong bien dong, ban theo doi them vai ngay nhe.");
 
-        AiDoctorDiagnosisResponse response = aiDoctorDiagnosisService.diagnose(fakeImage(), "", 1L, "sess-8");
+        AiDoctorDiagnosisResponse response = aiDoctorDiagnosisService.diagnose(fakeImage(), DEFAULT_SYMPTOMS, 1L, "sess-8");
 
         assertThat(response.getStatus()).isEqualTo("UNRECOGNIZED");
         assertThat(response.getAiDescription()).contains("Co the do moi truong bien dong, ban theo doi them vai ngay nhe.");
-        assertThat(response.getAiDescription()).contains("chưa được kỹ sư xác nhận");
+        assertThat(response.getAiDescription()).contains("Vui lòng liên hệ ngay kỹ sư thủy sản");
+        assertThat(response.getAiDescription()).contains("để được hỗ trợ chính xác nhất");
 
         AiDoctorDiagnosisHistory saved = historyRepository.findByIdAndUserId(Long.valueOf(response.getDiagnosisId()), 1L)
                 .orElseThrow();
@@ -354,7 +469,7 @@ class AiDoctorDiagnosisServiceTest {
         when(geminiClarifyClient.freeConsult(any(), any(), any()))
                 .thenThrow(new RuntimeException("simulated Gemini outage"));
 
-        AiDoctorDiagnosisResponse response = aiDoctorDiagnosisService.diagnose(fakeImage(), "", 1L, "sess-9");
+        AiDoctorDiagnosisResponse response = aiDoctorDiagnosisService.diagnose(fakeImage(), DEFAULT_SYMPTOMS, 1L, "sess-9");
 
         assertThat(response.getStatus()).isEqualTo("UNRECOGNIZED");
         assertThat(response.getAiDescription()).isNotBlank();
@@ -374,7 +489,7 @@ class AiDoctorDiagnosisServiceTest {
         when(aiDiagnosisClient.predict(any())).thenReturn(predictResponse("DISEASE", finalPrediction));
         when(geminiClarifyClient.describeImage(any(), any(), any())).thenReturn(narrative("Mo ta luu history."));
 
-        AiDoctorDiagnosisResponse response = aiDoctorDiagnosisService.diagnose(fakeImage(), "", 42L, "sess-7");
+        AiDoctorDiagnosisResponse response = aiDoctorDiagnosisService.diagnose(fakeImage(), DEFAULT_SYMPTOMS, 42L, "sess-7");
 
         Long historyId = Long.valueOf(response.getDiagnosisId());
         AiDoctorDiagnosisHistory saved = historyRepository.findByIdAndUserId(historyId, 42L).orElseThrow();
@@ -388,7 +503,7 @@ class AiDoctorDiagnosisServiceTest {
     void diagnose_guestUser_doesNotSaveHistory() {
         when(aiDiagnosisClient.predict(any())).thenReturn(predictResponse("HEALTHY", null));
 
-        AiDoctorDiagnosisResponse response = aiDoctorDiagnosisService.diagnose(fakeImage(), "", null, "sess-guest");
+        AiDoctorDiagnosisResponse response = aiDoctorDiagnosisService.diagnose(fakeImage(), DEFAULT_SYMPTOMS, null, "sess-guest");
 
         assertThat(response.getStatus()).isEqualTo("HEALTHY");
         assertThat(response.getDiagnosisId()).startsWith("healthy_");
@@ -405,7 +520,7 @@ class AiDoctorDiagnosisServiceTest {
         when(aiDiagnosisClient.predict(any())).thenReturn(predictResponse("DISEASE", finalPrediction));
         when(geminiClarifyClient.describeImage(any(), any(), any())).thenReturn(narrative("Mo ta anh."));
 
-        AiDoctorDiagnosisResponse response = aiDoctorDiagnosisService.diagnose(fakeImage(), "", 1L, "sess-draft-1");
+        AiDoctorDiagnosisResponse response = aiDoctorDiagnosisService.diagnose(fakeImage(), DEFAULT_SYMPTOMS, 1L, "sess-draft-1");
 
         assertThat(response.getStatus()).isEqualTo("UNRECOGNIZED");
     }
@@ -417,7 +532,7 @@ class AiDoctorDiagnosisServiceTest {
         when(aiDiagnosisClient.predict(any())).thenReturn(predictResponse("DISEASE", finalPrediction));
         when(geminiClarifyClient.describeImage(any(), any(), any())).thenReturn(narrative("Mo ta anh preview."));
 
-        AiDoctorDiagnosisResponse response = aiDoctorDiagnosisService.diagnoseForTest(fakeImage(), "", "DIS_DRAFT_PREVIEW");
+        AiDoctorDiagnosisResponse response = aiDoctorDiagnosisService.diagnoseForTest(fakeImage(), DEFAULT_SYMPTOMS, "DIS_DRAFT_PREVIEW");
 
         assertThat(response.getStatus()).isEqualTo("DISEASE");
         assertThat(response.getDisease().getCode()).isEqualTo("DIS_DRAFT_PREVIEW");
@@ -430,7 +545,7 @@ class AiDoctorDiagnosisServiceTest {
         when(aiDiagnosisClient.predict(any())).thenReturn(predictResponse("DISEASE", finalPrediction));
         when(geminiClarifyClient.describeImage(any(), any(), any())).thenReturn(narrative("Mo ta anh."));
 
-        AiDoctorDiagnosisResponse response = aiDoctorDiagnosisService.diagnoseForTest(fakeImage(), "", "DIS_DRAFT_NOHIST");
+        AiDoctorDiagnosisResponse response = aiDoctorDiagnosisService.diagnoseForTest(fakeImage(), DEFAULT_SYMPTOMS, "DIS_DRAFT_NOHIST");
 
         assertThat(response.getStatus()).isEqualTo("DISEASE");
         assertThat(historyRepository.findAll()).isEmpty();
@@ -444,7 +559,7 @@ class AiDoctorDiagnosisServiceTest {
         when(geminiClarifyClient.describeImage(any(), any(), any())).thenReturn(narrative("Mo ta anh."));
         long reviewCaseCountBefore = reviewCaseRepository.count();
 
-        aiDoctorDiagnosisService.diagnoseForTest(fakeImage(), "", "DIS_DRAFT_LOWCONF");
+        aiDoctorDiagnosisService.diagnoseForTest(fakeImage(), DEFAULT_SYMPTOMS, "DIS_DRAFT_LOWCONF");
 
         assertThat(reviewCaseRepository.count()).isEqualTo(reviewCaseCountBefore);
     }

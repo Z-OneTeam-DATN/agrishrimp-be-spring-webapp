@@ -18,8 +18,10 @@ import com.zone.agri.service.aidoctor.AiDoctorDiagnosisHistoryService;
 import com.zone.agri.service.aidoctor.AiDoctorDiagnosisService;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import java.time.LocalDate;
+import java.util.Collections;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.MediaType;
@@ -37,6 +39,7 @@ import org.springframework.web.multipart.MultipartFile;
 @RestController
 @RequestMapping("/api/ai-doctor")
 @RequiredArgsConstructor
+@Slf4j
 @SecurityRequirement(name = "bearerAuth")
 public class AiDoctorController {
 
@@ -75,10 +78,34 @@ public class AiDoctorController {
         return ResponseEntity.ok(diagnosisService.generatePrescription(id, user.getId()));
     }
 
-    @PostMapping("/chat")
-    public ResponseEntity<AiChatResponse> chat(@RequestBody AiDoctorChatRequest request) {
+    @PostMapping("/diagnosis/{id}/prescription/stages/{stageIndex}")
+    public ResponseEntity<AiDoctorDiagnosisResponse> generatePrescriptionForStage(
+            @PathVariable Long id,
+            @PathVariable Integer stageIndex) {
         UserDetail user = requireUser();
-        return ResponseEntity.ok(aiKnowledgeService.answerChat(request, user.getId(), "AI_DOCTOR_PRIVATE", true));
+        return ResponseEntity.ok(diagnosisService.generatePrescriptionForStage(id, user.getId(), stageIndex));
+    }
+
+    @PostMapping("/diagnosis/{id}/prescription/stages/{stageIndex}/sub-stages/{subStageIndex}")
+    public ResponseEntity<AiDoctorDiagnosisResponse> generatePrescriptionForSubStage(
+            @PathVariable Long id,
+            @PathVariable Integer stageIndex,
+            @PathVariable Integer subStageIndex) {
+        UserDetail user = requireUser();
+        return ResponseEntity.ok(diagnosisService.generatePrescriptionForSubStage(
+                id, user.getId(), stageIndex, subStageIndex));
+    }
+
+    @PostMapping("/chat")
+    public ResponseEntity<AiChatResponse> chat(@RequestBody(required = false) AiDoctorChatRequest request) {
+        UserDetail user = requireUser();
+        AiDoctorChatRequest safeRequest = request != null ? request : new AiDoctorChatRequest();
+        try {
+            return ResponseEntity.ok(aiKnowledgeService.answerChat(safeRequest, user.getId(), "AI_DOCTOR_PRIVATE", true));
+        } catch (Exception ex) {
+            log.error("[AiDoctorChat] Failed to answer chat for userId={}: {}", user.getId(), ex.getMessage(), ex);
+            return ResponseEntity.ok(buildChatFallbackResponse(safeRequest));
+        }
     }
 
     @PostMapping("/diagnosis/{id}/clarify")
@@ -108,5 +135,15 @@ public class AiDoctorController {
             throw new CustomAuthenticationException("Bạn cần đăng nhập để sử dụng AI Doctor");
         }
         return user;
+    }
+
+    private AiChatResponse buildChatFallbackResponse(AiDoctorChatRequest request) {
+        AiChatResponse response = new AiChatResponse();
+        response.setSuccess(true);
+        response.setConversationId(request != null ? request.getSessionId() : null);
+        response.setReply("<p>Xin lỗi, bác sĩ AI chưa xử lý được câu này ngay lúc này. "
+                + "Bà con vui lòng mô tả thêm dấu hiệu hoặc gửi ảnh tôm kèm triệu chứng để mình kiểm tra kỹ hơn.</p>");
+        response.setSuggestedActions(Collections.emptyList());
+        return response;
     }
 }

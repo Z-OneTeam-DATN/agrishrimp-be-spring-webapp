@@ -7,12 +7,15 @@ import com.zone.agri.dto.ai.AiImageNarrativeResult;
 import com.zone.agri.dto.ai.AiPredictResponse;
 import com.zone.agri.dto.ai.AiPredictionItem;
 import com.zone.agri.dto.response.ai.AiDoctorDiagnosisResponse;
+import com.zone.agri.dto.response.ai.TreatmentStageResponse;
+import com.zone.agri.dto.response.ai.TreatmentStageSelectionResponse;
 import com.zone.agri.entity.AiDoctorDiagnosisHistory;
 import com.zone.agri.entity.Product;
 import com.zone.agri.exception.BadRequestException;
 import com.zone.agri.exception.NotFoundException;
 import com.zone.agri.repository.AiDoctorDiagnosisHistoryRepository;
 import com.zone.agri.service.ai.AiKnowledgeService;
+import com.zone.agri.utils.AiTextFormatUtils;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -48,6 +51,8 @@ public class AiDoctorDiagnosisService {
 
     private static final long MAX_IMAGE_SIZE_BYTES = 5_000_000L;
     private static final int MAX_SYMPTOMS_LENGTH = 500;
+    private static final String REQUIRED_SYMPTOMS_MESSAGE =
+            "Vui lòng mô tả thêm dấu hiệu đi kèm ảnh để bác sĩ đưa ra kết quả cuối cùng.";
 
     // Nam duoi read-timeout rieng cua Gemini (45s) de con du gio cho YOLO + Cloudinary trong tran
     // 90s timeout /diagnosis phia FE — khong de mot cuoc goi Gemini cham lam FE tu bo request du
@@ -94,6 +99,14 @@ public class AiDoctorDiagnosisService {
 
         log.info("[AiDoctor] traceId={} start: userId={}, file={}, symptomsLen={}",
                 traceId, userId, image.getOriginalFilename(), normalizedSymptoms.length());
+
+        if (normalizedSymptoms.isBlank()) {
+            CompletableFuture<AiImageNarrativeResult> narrativeFuture =
+                    kickOffNarrativeDescription(image, normalizedSymptoms, traceId);
+            AiImageNarrativeResult narrative = resolveNarrativeGracefully(narrativeFuture, traceId);
+            log.info("[AiDoctor] traceId={} image observation only, waiting symptoms", traceId);
+            return buildImageObservationOnlyResponse(narrative, traceId);
+        }
 
         // 1a. Bat song song mo ta anh tu Gemini ngay tu dau (doc bytes 1 lan tren thread hien tai
         // roi truyen byte[] thuan vao task async — khong doc MultipartFile tu thread khac, vi
@@ -209,6 +222,26 @@ public class AiDoctorDiagnosisService {
     // =========================================================
 
     public AiDoctorDiagnosisResponse generatePrescription(Long diagnosisId, Long userId) {
+        return generatePrescription(diagnosisId, userId, null, null);
+    }
+
+    public AiDoctorDiagnosisResponse generatePrescriptionForStage(Long diagnosisId, Long userId, Integer stageIndex) {
+        if (stageIndex == null) {
+            throw new BadRequestException("Vui lòng chọn giai đoạn bệnh cần xem phác đồ.");
+        }
+        return generatePrescription(diagnosisId, userId, stageIndex, null);
+    }
+
+    public AiDoctorDiagnosisResponse generatePrescriptionForSubStage(
+            Long diagnosisId, Long userId, Integer stageIndex, Integer subStageIndex) {
+        if (stageIndex == null || subStageIndex == null) {
+            throw new BadRequestException("Vui lòng chọn giai đoạn con cần xem phác đồ.");
+        }
+        return generatePrescription(diagnosisId, userId, stageIndex, subStageIndex);
+    }
+
+    private AiDoctorDiagnosisResponse generatePrescription(
+            Long diagnosisId, Long userId, Integer stageIndex, Integer subStageIndex) {
         AiDoctorDiagnosisHistory history = historyRepository.findByIdAndUserId(diagnosisId, userId)
                 .orElseThrow(() -> new NotFoundException("AI_DOCTOR_DIAGNOSIS_NOT_FOUND"));
 
@@ -224,15 +257,122 @@ public class AiDoctorDiagnosisService {
             throw new BadRequestException("Không thể tạo phác đồ cho ca chẩn đoán này");
         }
         AiDoctorDiagnosisResponse response = aiKnowledgeService.buildPrescriptionFromApprovedKnowledge(diseaseCode, diagnosisId);
+        List<TreatmentStageResponse> treatmentStages =
+                response.getTreatmentStages() != null ? response.getTreatmentStages() : Collections.emptyList();
+
+        if (stageIndex == null) {
+            if (treatmentStages.size() > 1) {
+                response.setTreatmentStages(null);
+                response.setStageSelection(TreatmentStageSelectionResponse.fromStages(treatmentStages));
+                log.info("[AiDoctor-Prescription] diagnosisId={}, diseaseCode={}, waitingStageSelection={}, stages={}",
+                        diagnosisId, diseaseCode, true, treatmentStages.size());
+                return response;
+            }
+            if (treatmentStages.size() == 1) {
+                response.setTreatmentStages(resolveStagesForSelectedParent(treatmentStages.get(0), 0));
+                response.setStageSelection(null);
+            }
+        }
+
+        if (stageIndex != null) {
+            if (stageIndex < 0 || stageIndex >= treatmentStages.size()) {
+                throw new BadRequestException("Giai đoạn bệnh không hợp lệ hoặc chưa có phác đồ tương ứng.");
+            }
+            List<TreatmentStageResponse> subStages = resolveSubStages(treatmentStages.get(stageIndex));
+            if (subStageIndex == null) {
+                response.setTreatmentStages(resolveStagesForSelectedParent(treatmentStages.get(stageIndex), stageIndex));
+                response.setStageSelection(null);
+                log.info("[AiDoctor-Prescription] diagnosisId={}, diseaseCode={}, selectedStageIndex={}, treatmentSteps={}",
+                        diagnosisId, diseaseCode, stageIndex, response.getTreatmentStages().size());
+            } else if (subStageIndex < 0 || subStageIndex >= subStages.size()) {
+                throw new BadRequestException("Giai đoạn con không hợp lệ hoặc chưa có phác đồ tương ứng.");
+            } else {
+                response.setTreatmentStages(List.of(numberedSubStage(subStages.get(subStageIndex), stageIndex, subStageIndex)));
+                response.setStageSelection(null);
+            }
+        }
+
         diagnosisHistoryService.updateWithPrescription(
                 diagnosisId,
                 response.getCauses() != null ? response.getCauses() : Collections.emptyList(),
                 response.getSignsSummary(),
                 response.getTreatmentStages() != null ? response.getTreatmentStages() : Collections.emptyList());
 
-        log.info("[AiDoctor-Prescription] diagnosisId={}, diseaseCode={}, stages={}",
-                diagnosisId, diseaseCode, response.getTreatmentStages() != null ? response.getTreatmentStages().size() : 0);
+        log.info("[AiDoctor-Prescription] diagnosisId={}, diseaseCode={}, stageIndex={}, subStageIndex={}, stages={}",
+                diagnosisId, diseaseCode, stageIndex, subStageIndex,
+                response.getTreatmentStages() != null ? response.getTreatmentStages().size() : 0);
         return response;
+    }
+
+    private List<TreatmentStageResponse> resolveSubStages(TreatmentStageResponse stage) {
+        if (stage == null) {
+            return Collections.emptyList();
+        }
+        if (stage.getSubStages() != null && !stage.getSubStages().isEmpty()) {
+            return stage.getSubStages();
+        }
+        return List.of(stage);
+    }
+
+    private List<TreatmentStageResponse> resolveStagesForSelectedParent(TreatmentStageResponse stage, int stageIndex) {
+        if (stage == null) {
+            return Collections.emptyList();
+        }
+        if (stage.getSubStages() == null || stage.getSubStages().isEmpty()) {
+            return List.of(stage);
+        }
+        List<TreatmentStageResponse> subStages = stage.getSubStages();
+        return java.util.stream.IntStream.range(0, subStages.size())
+                .mapToObj(subStageIndex -> numberedSubStage(subStages.get(subStageIndex), stageIndex, subStageIndex))
+                .toList();
+    }
+
+    private TreatmentStageResponse numberedSubStage(TreatmentStageResponse subStage, int stageIndex, int subStageIndex) {
+        String number = (stageIndex + 1) + "." + (subStageIndex + 1);
+        String title = subStage.getStageTitle();
+        String numberedTitle = title != null && title.trim().matches("^\\d+(\\.\\d+)?\\s*[-–—].*")
+                ? title.trim()
+                : number + " — " + (title != null && !title.isBlank() ? title.trim() : "Giai đoạn " + number);
+        return TreatmentStageResponse.builder()
+                .stageTitle(numberedTitle)
+                .stageSigns(subStage.getStageSigns())
+                .treatmentGoal(subStage.getTreatmentGoal())
+                .instructions(subStage.getInstructions())
+                .products(subStage.getProducts())
+                .extraProductNames(subStage.getExtraProductNames())
+                .subStages(subStage.getSubStages())
+                .build();
+    }
+
+    private AiDoctorDiagnosisResponse buildImageObservationOnlyResponse(
+            AiImageNarrativeResult narrative, String traceId) {
+        StringBuilder html = new StringBuilder();
+        String description = narrative != null ? narrative.getDescription() : null;
+        if (description != null && !description.isBlank()) {
+            html.append(AiTextFormatUtils.plainTextToHtml(description));
+        } else {
+            html.append("<p>Mình đã nhận ảnh tôm của bà con, nhưng hiện chưa mô tả rõ được ảnh này.</p>");
+        }
+
+        if (narrative != null && !narrative.isShrimp()) {
+            html.append("<p><strong>Mình chưa thấy rõ con tôm trong ảnh này.</strong> Bà con gửi lại ảnh tôm rõ hơn kèm dấu hiệu thực tế trong ao để bác sĩ chẩn đoán chính xác nhé.</p>");
+        } else {
+            html.append("<p><strong>Mình chưa đưa ra kết luận bệnh ở bước này.</strong> ")
+                    .append(REQUIRED_SYMPTOMS_MESSAGE)
+                    .append("</p>");
+            html.append("<ul>");
+            html.append("<li>Tôm ăn bình thường hay giảm ăn, ruột có rỗng/đứt khúc không?</li>");
+            html.append("<li>Tôm có tấp mé, nổi đầu, bơi lờ đờ hoặc rớt đáy không?</li>");
+            html.append("<li>Tỷ lệ tôm có dấu hiệu bất thường khoảng bao nhiêu phần trăm?</li>");
+            html.append("<li>Ao gần đây có mưa lớn, sụp tảo, khí độc NH3/NO2/H2S hoặc đáy ao hôi đen không?</li>");
+            html.append("</ul>");
+        }
+
+        return AiDoctorDiagnosisResponse.builder()
+                .diagnosisId("obs_" + traceId)
+                .status("IMAGE_OBSERVATION")
+                .aiDescription(html.toString())
+                .build();
     }
 
     private CompletableFuture<AiImageNarrativeResult> kickOffNarrativeDescription(MultipartFile image, String userSymptoms, String traceId) {

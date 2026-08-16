@@ -681,7 +681,9 @@ class InventoryTransferServiceTest {
                 null);
         updateRequest.setDescription("Cap nhat lai so luong");
 
-        TransferDetailResponse updated = inventoryTransferService.updateTransfer(transfer.getId(), updateRequest);
+        TransferDetailResponse updated = callAs(
+                requesterUser,
+                () -> inventoryTransferService.updateTransfer(transfer.getId(), updateRequest));
 
         assertThat(updated.getStatus()).isEqualTo(InventoryTransferStatus.PENDING);
         assertThat(updated.getTotalQuantity()).isEqualTo(2);

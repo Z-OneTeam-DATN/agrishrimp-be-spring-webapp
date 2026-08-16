@@ -1315,13 +1315,50 @@ public class ProductService {
     }
 
     public List<ProductResponse> getTopBestSellers(int limit) {
-        Pageable pageable = PageRequest.of(0, limit * 2);
-        List<Product> products = productRepository.findTopBestSellers(pageable);
-        Map<Long, Long> soldCountMap = buildSoldCountMap(
-                products.stream().map(Product::getId).toList());
+        Map<Long, Long> soldCountMap = new HashMap<>();
 
-        return convertToResponseList(products, soldCountMap).stream()
+        productRepository.getTopSellingProductsLegacy(null).forEach(row -> {
+            if (row.getProductId() != null && row.getQuantitySold() != null) {
+                soldCountMap.put(row.getProductId(),
+                        soldCountMap.getOrDefault(row.getProductId(), 0L) + row.getQuantitySold());
+            }
+        });
+
+        productRepository.getTopSellingProducts(null).forEach(row -> {
+            if (row.getProductId() != null && row.getQuantitySold() != null) {
+                soldCountMap.put(row.getProductId(),
+                        soldCountMap.getOrDefault(row.getProductId(), 0L) + row.getQuantitySold());
+            }
+        });
+
+        if (soldCountMap.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        List<Long> sortedProductIds = soldCountMap.entrySet().stream()
+                .sorted((a, b) -> Long.compare(b.getValue(), a.getValue()))
+                .map(Map.Entry::getKey)
+                .toList();
+
+        List<Product> products = productRepository.findAllById(sortedProductIds);
+
+        Map<Long, Product> productMap = products.stream()
+                .collect(Collectors.toMap(Product::getId, p -> p));
+
+        List<Product> sortedProducts = sortedProductIds.stream()
+                .map(productMap::get)
+                .filter(Objects::nonNull)
+                .filter(p -> p.getStatus() == com.zone.agri.entity.enums.ProductStatus.ACTIVE)
+                .filter(p -> p.getCategory() != null && p.getCategory().getStatus() == com.zone.agri.entity.enums.CategoryStatus.ACTIVE)
+                .toList();
+
+        List<ProductResponse> responses = convertToResponseList(sortedProducts, soldCountMap);
+
+        return responses.stream()
                 .filter(p -> p.getInventory() != null && p.getInventory() > 0)
+                .sorted(Comparator
+                        .comparing(this::safeLong, Comparator.reverseOrder())
+                        .thenComparing(ProductResponse::getId, Comparator.nullsLast(Comparator.reverseOrder())))
                 .limit(limit)
                 .collect(Collectors.toList());
     }
@@ -1411,7 +1448,8 @@ public class ProductService {
         boolean hasPackagingValueIdFilter = !packagingValueIdList.isEmpty();
         boolean hasPackagingFilter = hasPackagingValueIdFilter || !packagingValues.isEmpty();
         boolean hasPriceFilter = minPrice != null || maxPrice != null;
-        boolean needsPostMappingPagination = hasPriceFilter || hasPackagingFilter;
+        boolean needsBestSellingPostSort = sortOption == PublicProductSort.BEST_SELLING;
+        boolean needsPostMappingPagination = hasPriceFilter || hasPackagingFilter || needsBestSellingPostSort;
         List<Long> categoryIds = resolveCategoryFilterIds(categoryId);
         boolean hasCategoryFilter = !categoryIds.isEmpty();
         String normalizedKeyword = blankToNull(keyword);
@@ -1419,9 +1457,12 @@ public class ProductService {
         List<Long> keywordBrandIds = resolveKeywordBrandFilterIds(normalizedKeyword);
         boolean hasKeywordCategoryFilter = !keywordCategoryIds.isEmpty();
         boolean hasKeywordBrandFilter = !keywordBrandIds.isEmpty();
+        Pageable queryPageable = pageable.isPaged()
+                ? PageRequest.of(pageable.getPageNumber(), pageable.getPageSize())
+                : Pageable.unpaged();
         Pageable lookupPageable = needsPostMappingPagination
                 ? PageRequest.of(0, PRICE_FILTER_SCAN_LIMIT)
-                : pageable;
+                : queryPageable;
 
         Page<Long> productIdsPage = productRepository.findPublicProductIdsFiltered(
                 normalizedKeyword,

@@ -92,7 +92,7 @@ public class ProductController {
 
     @Operation(summary = "Lấy danh sách sản phẩm (có lọc)")
     @SecurityRequirement(name = "bearerAuth")
-    @RequirePermission("PRODUCT_VIEW")
+    @RequirePermission({"PRODUCT_VIEW", "PURCHASE_REQUEST_CREATE"})
     @GetMapping
     public ResponseEntity<List<ProductResponse>> getAll(
             @Parameter(description = "Tìm kiếm theo tên, thương hiệu hoặc mã SKU", example = "Sản phẩm")

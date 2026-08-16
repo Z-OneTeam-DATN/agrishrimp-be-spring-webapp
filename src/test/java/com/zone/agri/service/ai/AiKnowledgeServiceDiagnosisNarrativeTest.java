@@ -30,7 +30,7 @@ import org.springframework.transaction.annotation.Transactional;
 /**
  * Test có chủ đích cho phần narrative mới ghép vào luồng chẩn đoán ảnh (YOLO) —
  * {@code AiKnowledgeService#enrichDiagnosis}: mô tả ảnh của Gemini (nhận vào dưới dạng String đã
- * resolve sẵn, không tự gọi Gemini trong hàm này) + câu trích dẫn %/tên bệnh do code tự ghép +
+ * resolve sẵn, không tự gọi Gemini trong hàm này) + câu nhận diện tên bệnh do code tự ghép +
  * nội dung an toàn đã có sẵn (phác đồ đã duyệt hoặc câu chuyển tiếp tĩnh).
  *
  * Chạy thật với DB H2 trong bộ nhớ (không cần Docker), mock GeminiClarifyClient chỉ để đảm bảo
@@ -86,6 +86,7 @@ class AiKnowledgeServiceDiagnosisNarrativeTest {
     private AiDiseaseKnowledge seedDiseaseWithProtocol(String code, String nameVi, String symptomKeyword,
             double matchThreshold, double confidenceThreshold) throws Exception {
         String causesJson = objectMapper.writeValueAsString(List.of("Moi truong bien dong", "Mat do nuoi qua cao"));
+        String imageUrlsJson = objectMapper.writeValueAsString(List.of("http://img/" + code + ".jpg"));
         String stagesJson = objectMapper.writeValueAsString(List.of(Map.of(
                 "stageTitle", "Giai doan 1: On dinh moi truong",
                 "instructions", List.of("Giam soc cho tom", "Tang cuong oxy hoa tan"),
@@ -98,6 +99,7 @@ class AiKnowledgeServiceDiagnosisNarrativeTest {
                 .signsSummary("Dau hieu dac trung cua " + nameVi)
                 .causesJson(causesJson)
                 .treatmentStagesJson(stagesJson)
+                .imageUrlsJson(imageUrlsJson)
                 .confidenceThreshold(confidenceThreshold)
                 .matchThreshold(matchThreshold)
                 .enabled(true)
@@ -126,11 +128,11 @@ class AiKnowledgeServiceDiagnosisNarrativeTest {
     }
 
     // =========================================================
-    // 1) Khop cao: mo ta Gemini + trich dan %/ten benh + dung nguyen phac do da duyet
+    // 1) Khop cao: mo ta Gemini + ten benh, khong hien % YOLO + dung nguyen phac do da duyet
     // =========================================================
 
     @Test
-    void highConfidence_aiDescriptionHasGeminiText_citation_andApprovedTreatment() throws Exception {
+    void highConfidence_aiDescriptionHasGeminiText_diseaseNameNoYoloPercent_andApprovedTreatment() throws Exception {
         seedDiseaseWithProtocol("DIS_HC", "Benh dom trang test", "khongdungdematch", 0.4D, 0.65D);
         AiPredictionItem finalPrediction = prediction("DIS_HC", "Benh dom trang test", "White spot test", 92.0D);
 
@@ -141,19 +143,23 @@ class AiKnowledgeServiceDiagnosisNarrativeTest {
         assertThat(response.getStatus()).isEqualTo("DISEASE");
         assertThat(response.getNeedsClarification()).isNull();
         assertThat(response.getAiDescription()).contains("Minh thay vo tom co dom trang ro rang.");
-        assertThat(response.getAiDescription()).contains("92%");
+        assertThat(response.getAiDescription()).doesNotContain("92%");
+        assertThat(response.getAiDescription()).doesNotContain("% khả năng");
         assertThat(response.getAiDescription()).contains("Benh dom trang test");
-        assertThat(response.getAiDescription()).contains("Giai doan 1: On dinh moi truong");
-        assertThat(response.getAiDescription()).contains("Giam soc cho tom");
-        assertThat(response.getAiDescription()).contains("Vi sinh xu ly day ao");
+        assertThat(response.getDisease().getImageUrls()).containsExactly("http://img/DIS_HC.jpg");
+        assertThat(response.getAiDescription()).doesNotContain("Giai doan 1: On dinh moi truong");
+        assertThat(response.getTreatmentStages()).isNotEmpty();
+        assertThat(response.getTreatmentStages().get(0).getStageTitle()).contains("Giai doan 1: On dinh moi truong");
+        assertThat(response.getTreatmentStages().get(0).getInstructions()).contains("Giam soc cho tom");
+        assertThat(response.getTreatmentStages().get(0).getExtraProductNames()).contains("Vi sinh xu ly day ao");
     }
 
     // =========================================================
-    // 2) Khop nhung duoi nguong: co mo ta + trich dan, KHONG kem phac do
+    // 2) Khop nhung duoi nguong: co mo ta + ten benh, KHONG hien % YOLO, KHONG kem phac do
     // =========================================================
 
     @Test
-    void lowConfidence_aiDescriptionHasCitation_butNoTreatmentContent_needsClarificationTrue() throws Exception {
+    void lowConfidence_aiDescriptionHasDiseaseNameNoYoloPercent_butNoTreatmentContent_needsClarificationTrue() throws Exception {
         seedDiseaseWithProtocol("DIS_LC", "Benh gan tuy test", "khongdungdematch2", 0.6D, 0.65D);
         // confidence 20% duoi ca confidenceThreshold (0.65) lan matchThreshold (0.6, vi diseaseScore
         // ban dau = confidence khi khop truc tiep qua ma benh) -> ca 2 dieu kien deu fail.
@@ -166,8 +172,10 @@ class AiKnowledgeServiceDiagnosisNarrativeTest {
         assertThat(response.getNeedsClarification()).isTrue();
         assertThat(response.getTreatmentStages()).isEmpty();
         assertThat(response.getAiDescription()).contains("Mau gan tuy nhat hon binh thuong.");
-        assertThat(response.getAiDescription()).contains("20%");
+        assertThat(response.getAiDescription()).doesNotContain("20%");
+        assertThat(response.getAiDescription()).doesNotContain("% khả năng");
         assertThat(response.getAiDescription()).contains("Benh gan tuy test");
+        assertThat(response.getDisease().getImageUrls()).containsExactly("http://img/DIS_LC.jpg");
         // Guardrail chinh cua test nay: khong duoc ro ri noi dung phac do da duyet khi chua du tin cay.
         assertThat(response.getAiDescription()).doesNotContain("Giai doan 1: On dinh moi truong");
         assertThat(response.getAiDescription()).doesNotContain("Giam soc cho tom");
@@ -182,7 +190,16 @@ class AiKnowledgeServiceDiagnosisNarrativeTest {
     @Test
     void noKnowledgeMatchAtAll_callsGeminiFreeSuggestion_returnsUnrecognizedStatus() {
         when(geminiClarifyClient.freeConsult(any(), any(), any()))
-                .thenReturn("Co the do soc moi truong hoac nhiem khuan ngoai da.");
+                .thenReturn("""
+                        Chao ban, minh la Bac si Tom day.
+
+                        Dua tren hinh anh ban gui, minh quan sat thay dau hieu lap lai.
+
+                        Co the do soc moi truong hoac nhiem khuan ngoai da.
+
+                        - Tom co giam an khong?
+                        - Ao co bien dong moi truong khong?
+                        """);
 
         AiPredictionItem finalPrediction = prediction("DIS_NONE_XYZ", "Benh khong xac dinh XYZ", "Unknown XYZ", 55.0D);
 
@@ -194,10 +211,15 @@ class AiKnowledgeServiceDiagnosisNarrativeTest {
         assertThat(response.getStatus()).isEqualTo("UNRECOGNIZED");
         assertThat(response.getNeedsClarification()).isNull();
         assertThat(response.getAiDescription()).contains("Anh khong ro nhieu chi tiet.");
-        assertThat(response.getAiDescription()).contains("55%");
+        assertThat(response.getAiDescription()).doesNotContain("55%");
+        assertThat(response.getAiDescription()).doesNotContain("% khả năng");
         assertThat(response.getAiDescription()).contains("Benh khong xac dinh XYZ");
         assertThat(response.getAiDescription()).contains("Co the do soc moi truong hoac nhiem khuan ngoai da.");
-        assertThat(response.getAiDescription()).contains("chưa được kỹ sư xác nhận");
+        assertThat(response.getAiDescription()).doesNotContain("Bac si Tom day");
+        assertThat(response.getAiDescription()).doesNotContain("dau hieu lap lai");
+        assertThat(response.getAiDescription()).contains("<ul><li>Tom co giam an khong?</li>");
+        assertThat(response.getAiDescription()).contains("Vui lòng liên hệ ngay kỹ sư thủy sản");
+        assertThat(response.getAiDescription()).contains("để được hỗ trợ chính xác nhất");
         assertThat(reviewCaseRepository.count()).isEqualTo(reviewCasesBefore + 1);
         AiKnowledgeReviewCase latest = reviewCaseRepository.findTop100ByOrderByCreatedAtDesc().get(0);
         assertThat(latest.getReason()).isEqualTo(AiReviewCaseReason.NO_KNOWLEDGE_MATCH);
@@ -223,7 +245,7 @@ class AiKnowledgeServiceDiagnosisNarrativeTest {
     // =========================================================
 
     @Test
-    void nullGeminiImageDescription_isNullSafe_producesCitationOnlyProse_noCrash() {
+    void nullGeminiImageDescription_isNullSafe_producesDiseaseNameOnlyProse_noCrash() {
         AiPredictionItem finalPrediction = prediction("DIS_NONE_ABC", "Benh khong xac dinh ABC", "Unknown ABC", 40.0D);
 
         AiDoctorDiagnosisResponse response = aiKnowledgeService.enrichDiagnosis(
@@ -232,7 +254,8 @@ class AiKnowledgeServiceDiagnosisNarrativeTest {
 
         assertThat(response.getAiDescription()).isNotBlank();
         assertThat(response.getAiDescription()).doesNotContain("null");
-        assertThat(response.getAiDescription()).contains("40%");
+        assertThat(response.getAiDescription()).doesNotContain("40%");
+        assertThat(response.getAiDescription()).doesNotContain("% khả năng");
         assertThat(response.getAiDescription()).contains("Benh khong xac dinh ABC");
     }
 
@@ -255,6 +278,21 @@ class AiKnowledgeServiceDiagnosisNarrativeTest {
         assertThat(response.getStatus()).isEqualTo("DISEASE");
         assertThat(response.getDisease().getCode()).isEqualTo("DIS_TXT");
         assertThat(response.getNeedsClarification()).isNull();
+    }
+
+    @Test
+    void yoloNameMatchesDiseaseKeyword_evenWhenCodeDiffers_returnsApprovedDiseaseImages() throws Exception {
+        seedDiseaseWithProtocol("BG", "Hoi chung den mang", "viem mang", 0.4D, 0.65D);
+        AiPredictionItem finalPrediction = prediction("MODEL_GILL_INFLAMMATION", "Tom bi viem mang", "Gill inflammation", 98.0D);
+
+        AiDoctorDiagnosisResponse response = aiKnowledgeService.enrichDiagnosis(
+                predictResponse(finalPrediction), finalPrediction, "http://img/6.jpg", "",
+                "sess-" + System.nanoTime(), 1L, null);
+
+        assertThat(response.getStatus()).isEqualTo("DISEASE");
+        assertThat(response.getDisease().getCode()).isEqualTo("BG");
+        assertThat(response.getDisease().getImageUrls()).containsExactly("http://img/BG.jpg");
+        assertThat(response.getAiDescription()).doesNotContain("% khả năng");
     }
 
     @Test

@@ -18,6 +18,8 @@ import com.zone.agri.dto.response.ai.AiClarifyCandidateSummary;
 import com.zone.agri.dto.response.ai.AiDoctorClarifyResponse;
 import com.zone.agri.dto.response.ai.AiDoctorDiagnosisResponse;
 import com.zone.agri.dto.response.ai.DiseaseResponse;
+import com.zone.agri.dto.response.ai.TreatmentStageResponse;
+import com.zone.agri.dto.response.ai.TreatmentStageSelectionResponse;
 import com.zone.agri.entity.AiDoctorClarifySession;
 import com.zone.agri.entity.AiDoctorDiagnosisHistory;
 import com.zone.agri.entity.AiKnowledgeReviewCase;
@@ -295,8 +297,10 @@ public class AiDoctorClarifyService {
     private AiDoctorDiagnosisResponse buildFinalDiagnosis(AiDoctorClarifySession session, AiClarifyCandidateSummary candidate) {
         AiDoctorDiagnosisResponse prescription = aiKnowledgeService.buildPrescriptionFromApprovedKnowledge(
                 candidate.getDiseaseCode(), session.getDiagnosisHistoryId());
+        List<TreatmentStageResponse> treatmentStages =
+                prescription.getTreatmentStages() != null ? prescription.getTreatmentStages() : Collections.emptyList();
 
-        return AiDoctorDiagnosisResponse.builder()
+        AiDoctorDiagnosisResponse.AiDoctorDiagnosisResponseBuilder responseBuilder = AiDoctorDiagnosisResponse.builder()
                 .diagnosisId(session.getDiagnosisId())
                 .status("DISEASE")
                 .imageUrl(session.getImageUrl())
@@ -304,13 +308,50 @@ public class AiDoctorClarifyService {
                         .code(candidate.getDiseaseCode())
                         .nameVi(candidate.getNameVi())
                         .nameEn(candidate.getNameEn())
+                        .imageUrls(prescription.getDisease() != null ? prescription.getDisease().getImageUrls() : null)
                         .build())
                 .causes(prescription.getCauses())
                 .signsSummary(prescription.getSignsSummary())
-                .treatmentStages(prescription.getTreatmentStages())
                 // Đã chốt bệnh qua hỏi-đáp — không còn "đang chờ xác nhận" nữa, khai báo tường
                 // minh (không chỉ dựa vào việc bỏ trống field) để mọi client đều hiểu đúng.
-                .needsClarification(false)
+                .needsClarification(false);
+
+        if (treatmentStages.size() > 1) {
+            responseBuilder.stageSelection(TreatmentStageSelectionResponse.fromStages(treatmentStages));
+        } else if (treatmentStages.size() == 1) {
+            List<TreatmentStageResponse> subStages = treatmentStages.get(0).getSubStages() != null
+                    ? treatmentStages.get(0).getSubStages()
+                    : Collections.emptyList();
+            if (!subStages.isEmpty()) {
+                responseBuilder.treatmentStages(numberedSubStages(subStages, 0));
+            } else {
+                responseBuilder.treatmentStages(treatmentStages);
+            }
+        }
+
+        return responseBuilder.build();
+    }
+
+    private List<TreatmentStageResponse> numberedSubStages(List<TreatmentStageResponse> subStages, int stageIndex) {
+        return java.util.stream.IntStream.range(0, subStages.size())
+                .mapToObj(subStageIndex -> numberedSubStage(subStages.get(subStageIndex), stageIndex, subStageIndex))
+                .toList();
+    }
+
+    private TreatmentStageResponse numberedSubStage(TreatmentStageResponse subStage, int stageIndex, int subStageIndex) {
+        String number = (stageIndex + 1) + "." + (subStageIndex + 1);
+        String title = subStage.getStageTitle();
+        String numberedTitle = title != null && title.trim().matches("^\\d+(\\.\\d+)?\\s*[-–—].*")
+                ? title.trim()
+                : number + " — " + (title != null && !title.isBlank() ? title.trim() : "Giai đoạn " + number);
+        return TreatmentStageResponse.builder()
+                .stageTitle(numberedTitle)
+                .stageSigns(subStage.getStageSigns())
+                .treatmentGoal(subStage.getTreatmentGoal())
+                .instructions(subStage.getInstructions())
+                .products(subStage.getProducts())
+                .extraProductNames(subStage.getExtraProductNames())
+                .subStages(subStage.getSubStages())
                 .build();
     }
 

@@ -72,9 +72,6 @@ public class ShrimpPriceBlogAutomationService {
     @Value("${app.shrimp-price-blog.source-url:" + DEFAULT_SOURCE_URL + "}")
     private String sourceUrl;
 
-    @Value("${app.shrimp-price-blog.review-emails:}")
-    private String configuredReviewEmails;
-
     @Value("${app.shrimp-price-blog.author-email:}")
     private String configuredAuthorEmail;
 
@@ -397,10 +394,6 @@ public class ShrimpPriceBlogAutomationService {
     private List<EmailRecipient> resolveReviewRecipients() {
         Map<String, EmailRecipient> recipientsByEmail = new LinkedHashMap<>();
 
-        for (String email : splitEmails(configuredReviewEmails)) {
-            recipientsByEmail.put(email.toLowerCase(Locale.ROOT), new EmailRecipient(email, "Admin"));
-        }
-
         List<User> reviewerUsers = userRepository.findActiveUsersByRoleSlugOrPermissionCode("SUPER_ADMIN", "BLOG_APPROVE");
         for (User user : reviewerUsers) {
             if (user.getEmail() == null || user.getEmail().isBlank()) {
@@ -413,18 +406,6 @@ public class ShrimpPriceBlogAutomationService {
         }
 
         return List.copyOf(recipientsByEmail.values());
-    }
-
-    private List<String> splitEmails(String rawValue) {
-        if (rawValue == null || rawValue.isBlank()) {
-            return List.of();
-        }
-        return Pattern.compile("[,;\\s]+")
-                .splitAsStream(rawValue)
-                .map(String::trim)
-                .filter(value -> !value.isBlank() && value.contains("@"))
-                .distinct()
-                .toList();
     }
 
     private String buildArticleContent(

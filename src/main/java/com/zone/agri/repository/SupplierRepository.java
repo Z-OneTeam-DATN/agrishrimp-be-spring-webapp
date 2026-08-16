@@ -71,6 +71,10 @@ public interface SupplierRepository extends JpaRepository<Supplier, Long> {
 
                 Long getNoteId();
 
+                String getNoteCode();
+
+                String getBranchName();
+
                 InventoryNoteType getNoteType();
 
                 BigDecimal getTotalAmount();
@@ -90,7 +94,7 @@ public interface SupplierRepository extends JpaRepository<Supplier, Long> {
                         "OR s.code LIKE CONCAT('%', :search, '%') OR s.phone LIKE CONCAT('%', :search, '%'))")
         List<SupplierDebtSupplierProjection> findSuppliersForDebtReport(@Param("search") String search);
 
-        @Query("SELECT i.supplier.id AS supplierId, i.supplier.code AS supplierCode, i.supplier.name AS supplierName, i.supplier.phone AS phone, i.id AS noteId, i.type AS noteType, " +
+        @Query("SELECT i.supplier.id AS supplierId, i.supplier.code AS supplierCode, i.supplier.name AS supplierName, i.supplier.phone AS phone, i.id AS noteId, i.code AS noteCode, i.branch.name AS branchName, i.type AS noteType, " +
                         "COALESCE(i.totalAmount, 0) AS totalAmount, " +
                         "COALESCE((SELECT SUM(p.amount) FROM InventoryReceiptPayment p WHERE p.inventoryNote.id = i.id AND p.paymentDate <= :endDate), 0) AS paidAmount, " +
                         "i.createdAt AS createdAt, " +

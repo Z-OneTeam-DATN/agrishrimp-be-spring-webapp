@@ -10,6 +10,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -29,11 +30,13 @@ import com.zone.agri.entity.SubOrder;
 import com.zone.agri.entity.SubOrderItem;
 import com.zone.agri.entity.Supplier;
 import com.zone.agri.entity.SupplierProductCatalog;
+import com.zone.agri.entity.User;
 import com.zone.agri.entity.enums.OrderStatus;
 import com.zone.agri.entity.enums.PurchaseRequestStatus;
 import com.zone.agri.entity.enums.SupplierProductCatalogStatus;
 import com.zone.agri.entity.enums.SupplierStatus;
 import com.zone.agri.exception.BadRequestException;
+import com.zone.agri.exception.Forbidden;
 import com.zone.agri.repository.BranchRepository;
 import com.zone.agri.repository.InventoryNoteRepository;
 import com.zone.agri.repository.ProductVariantRepository;
@@ -89,6 +92,25 @@ class PurchaseRequestServiceTest {
     @InjectMocks
     private PurchaseRequestService purchaseRequestService;
 
+    @AfterEach
+    void tearDown() {
+        SecurityContextHolder.clearContext();
+    }
+
+    private void authenticateWarehouseManager(Branch branch) {
+        String email = "warehouse.manager@example.com";
+        SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken(
+                email,
+                "N/A",
+                List.of(new SimpleGrantedAuthority("PURCHASE_REQUEST_CREATE"))));
+
+        User user = User.builder()
+                .email(email)
+                .branch(branch)
+                .build();
+        when(userRepository.findByEmail(email)).thenReturn(Optional.of(user));
+    }
+
     @Test
     void createRequest_shouldThrowBadRequestExceptionWhenSupplierIsInactive() {
         String supplierCode = "NCC-INACTIVE";
@@ -117,12 +139,13 @@ class PurchaseRequestServiceTest {
                 .status(SupplierStatus.ACTIVE)
                 .build();
 
-        Branch branch = Branch.builder().id(2L).branchType("WAREHOUSE").name("Kho Tong").build();
+        Branch branch = Branch.builder().id(2L).branchType("WAREHOUSE").name("Chi Nhanh 2").build();
         ProductVariant variant = ProductVariant.builder().id(10L).sku("SKU-10").build();
 
+        authenticateWarehouseManager(branch);
         when(supplierRepository.findByCode(supplierCode)).thenReturn(Optional.of(supplier));
         when(branchRepository.findById(2L)).thenReturn(Optional.of(branch));
-        when(branchRepository.findAll()).thenReturn(List.of(branch));
+        when(purchaseRequestRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
         when(productVariantRepository.findBySku("SKU-10")).thenReturn(Optional.of(variant));
         
         // Mock catalog check returns false (not available)
@@ -141,6 +164,31 @@ class PurchaseRequestServiceTest {
         assertThatThrownBy(() -> purchaseRequestService.createRequest(request))
                 .isInstanceOf(BadRequestException.class)
                 .hasMessageContaining("SKU SKU-10 không nằm trong catalog đang bán của nhà cung cấp");
+    }
+
+    @Test
+    void createRequest_shouldRejectWarehouseUserCreatingForAnotherWarehouse() {
+        String supplierCode = "NCC-ACTIVE";
+        Supplier supplier = Supplier.builder()
+                .id(1L)
+                .code(supplierCode)
+                .status(SupplierStatus.ACTIVE)
+                .build();
+
+        Branch ownWarehouse = Branch.builder().id(2L).branchType("WAREHOUSE").name("Chi Nhanh 2").build();
+        Branch anotherWarehouse = Branch.builder().id(3L).branchType("WAREHOUSE").name("Chi Nhanh 3").build();
+
+        authenticateWarehouseManager(ownWarehouse);
+        when(supplierRepository.findByCode(supplierCode)).thenReturn(Optional.of(supplier));
+        when(branchRepository.findById(3L)).thenReturn(Optional.of(anotherWarehouse));
+
+        PurchaseRequestCreateRequest request = new PurchaseRequestCreateRequest();
+        request.setSupplierCode(supplierCode);
+        request.setBranchId(3L);
+
+        assertThatThrownBy(() -> purchaseRequestService.createRequest(request))
+                .isInstanceOf(Forbidden.class)
+                .hasMessageContaining("Chi duoc tao phieu yeu cau nhap NCC cho kho tong minh quan ly.");
     }
 
     @Test

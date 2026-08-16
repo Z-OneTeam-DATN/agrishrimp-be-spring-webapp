@@ -61,6 +61,7 @@ import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.TreeSet;
@@ -85,6 +86,8 @@ public class DataSeeder implements CommandLineRunner {
     private static final String LEGACY_USER_ROLE_SLUG = "USER";
     private static final String ACTIVITY_LOG_MODULE_CODE = "ACTIVITY_LOG";
     private static final String ACTIVITY_LOG_VIEW_PERMISSION_CODE = "ACTIVITY_LOG_VIEW";
+    private static final String SEEDED_SUPER_ADMIN_EMAIL = "nhienle747@gmail.com";
+    private static final String SEEDED_ADMIN_EMAIL = "lin03281412@gmail.com";
 
     private final RoleRepository roleRepository;
     private final PermissionRepository permissionRepository;
@@ -135,7 +138,9 @@ public class DataSeeder implements CommandLineRunner {
         }
 
         log.info(">>> ĐANG TẠO DỮ LIỆU MẪU CHUẨN CHO BÁO CÁO TÀI CHÍNH (8 THÁNG GẦN NHẤT)...");
-        User admin = userRepository.findByEmail("admin@agrishrimp.vn").orElse(null);
+        User admin = userRepository.findByEmail(SEEDED_ADMIN_EMAIL)
+                .or(() -> userRepository.findFirstByRole_SlugOrderByIdAsc("ADMIN"))
+                .orElse(null);
 
         // 1. Chi nhánh (Branches)
         Branch cmBranch = ensureBranch("CN-CM01", "Chi nhánh Cà Mau", "STORE", "02903838388", "camau@agrishrimp.vn", "123 Trần Hưng Đạo, Phường 5, TP. Cà Mau", "Tỉnh Cà Mau", 87);
@@ -594,6 +599,7 @@ public class DataSeeder implements CommandLineRunner {
 
         migrateLegacyUserRoleToCustomer(seededRoles.get(CUSTOMER_ROLE_SLUG));
         bootstrapSuperAdmin(superAdminRole);
+        syncSeededSystemUserEmails();
     }
 
     private List<RoleSeedSpec> buildRoleSeedSpecs() {
@@ -1121,6 +1127,43 @@ public class DataSeeder implements CommandLineRunner {
 
         User savedUser = userRepository.save(bootstrapUser);
         log.info("Bootstrap SUPER_ADMIN user ready: id={}, email={}", savedUser.getId(), normalizedEmail);
+    }
+
+    private void syncSeededSystemUserEmails() {
+        syncSeededRoleUserEmail("SUPER_ADMIN", SEEDED_SUPER_ADMIN_EMAIL);
+        syncSeededRoleUserEmail("ADMIN", SEEDED_ADMIN_EMAIL);
+    }
+
+    private void syncSeededRoleUserEmail(String roleSlug, String targetEmail) {
+        Optional<User> userOpt = userRepository.findFirstByRole_SlugOrderByIdAsc(roleSlug);
+        if (userOpt.isEmpty()) {
+            log.warn("System user email sync skipped: no user found for role {}", roleSlug);
+            return;
+        }
+
+        User user = userOpt.get();
+        String normalizedEmail = targetEmail.trim();
+        Optional<User> emailOwner = userRepository.findByEmail(normalizedEmail);
+        if (emailOwner.isPresent() && !Objects.equals(emailOwner.get().getId(), user.getId())) {
+            log.warn("System user email sync skipped for role {}: email {} already belongs to user id={}",
+                    roleSlug,
+                    normalizedEmail,
+                    emailOwner.get().getId());
+            return;
+        }
+
+        if (normalizedEmail.equalsIgnoreCase(user.getEmail())) {
+            return;
+        }
+
+        String previousEmail = user.getEmail();
+        user.setEmail(normalizedEmail);
+        User savedUser = userRepository.save(user);
+        log.info("System user email synchronized: role={}, userId={}, {} -> {}",
+                roleSlug,
+                savedUser.getId(),
+                previousEmail,
+                normalizedEmail);
     }
 
     private record RoleSeedSpec(

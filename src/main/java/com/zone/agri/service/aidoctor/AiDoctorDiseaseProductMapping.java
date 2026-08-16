@@ -35,6 +35,8 @@ public class AiDoctorDiseaseProductMapping {
         // Nhóm bệnh vi khuẩn tổng hợp
         DISEASE_CATEGORY_KEYWORDS.put("BACTERIAL_GROUP",List.of("kháng sinh", "kháng khuẩn", "vi sinh", "probiotic", "gan", "hóa chất", "diệt khuẩn", "vitamin", "khoáng"));
         // Bệnh đầu vàng (Yellowhead / YHV)
+        DISEASE_CATEGORY_KEYWORDS.put("YHD",            List.of("vitamin", "khoáng", "hóa chất", "diệt khuẩn", "vôi", "vi sinh"));
+        DISEASE_CATEGORY_KEYWORDS.put("YHV1",           List.of("vitamin", "khoáng", "hóa chất", "diệt khuẩn", "vôi", "vi sinh"));
         DISEASE_CATEGORY_KEYWORDS.put("YELLOWHEAD",     List.of("vitamin", "khoáng", "hóa chất", "diệt khuẩn", "vôi", "vi sinh"));
         // Hoại tử gan tụy thể hoại tử (NHP)
         DISEASE_CATEGORY_KEYWORDS.put("NHP",            List.of("kháng sinh", "vi sinh", "gan", "hóa chất", "diệt khuẩn"));

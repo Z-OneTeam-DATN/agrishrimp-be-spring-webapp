@@ -75,18 +75,7 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
       "HAVING SUM(i.quantity) > 0")
   List<Product> findProductsForSale();
 
-  @Query("SELECT p FROM Product p " +
-      "JOIN p.category c " +
-      "JOIN p.variants v " +
-      "JOIN OrderItem oi ON oi.productVariant.id = v.id " +
-      "JOIN Inventory i ON i.productVariant.id = v.id " +
-      "WHERE p.status = 'ACTIVE' AND c.status = 'ACTIVE' " +
-      "AND v.status = 'ACTIVE' " +
-      "AND i.branch.status = com.zone.agri.entity.enums.BranchStatus.ACTIVE " +
-      "GROUP BY p.id " +
-      "HAVING SUM(i.quantity) > 0 " +
-      "ORDER BY SUM(oi.quantity) DESC")
-  List<Product> findTopBestSellers(Pageable pageable);
+
 
   @Query("""
       SELECT p.id, SUM(oi.quantity)
@@ -95,11 +84,8 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
       JOIN oi.productVariant pv
       JOIN pv.product p
       WHERE p.id IN :productIds
-        AND o.status IN (
-          com.zone.agri.entity.enums.OrderStatus.COMPLETED,
-          com.zone.agri.entity.enums.OrderStatus.RECEIVED,
-          com.zone.agri.entity.enums.OrderStatus.SHIPPING
-        )
+        AND o.status = com.zone.agri.entity.enums.OrderStatus.COMPLETED
+        AND o.subOrders IS EMPTY
       GROUP BY p.id
       """)
   List<Object[]> sumLegacySoldQuantityByProductIds(@Param("productIds") List<Long> productIds);
@@ -111,11 +97,7 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
       JOIN si.productVariant pv
       JOIN pv.product p
       WHERE p.id IN :productIds
-        AND s.status IN (
-          com.zone.agri.entity.enums.OrderStatus.COMPLETED,
-          com.zone.agri.entity.enums.OrderStatus.RECEIVED,
-          com.zone.agri.entity.enums.OrderStatus.SHIPPING
-        )
+        AND s.status = com.zone.agri.entity.enums.OrderStatus.COMPLETED
       GROUP BY p.id
       """)
   List<Object[]> sumSubOrderSoldQuantityByProductIds(@Param("productIds") List<Long> productIds);
@@ -372,7 +354,7 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
       "JOIN si.subOrder s " +
       "JOIN si.productVariant pv " +
       "JOIN pv.product p " +
-      "WHERE s.status IN (com.zone.agri.entity.enums.OrderStatus.COMPLETED, com.zone.agri.entity.enums.OrderStatus.RECEIVED, com.zone.agri.entity.enums.OrderStatus.SHIPPING) "
+      "WHERE s.status = com.zone.agri.entity.enums.OrderStatus.COMPLETED "
       +
       "AND (:branchId IS NULL OR s.branch.id = :branchId) " +
       "GROUP BY p.id, p.name " +
@@ -387,7 +369,7 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
       "JOIN oi.order o " +
       "JOIN oi.productVariant pv " +
       "JOIN pv.product p " +
-      "WHERE o.status IN (com.zone.agri.entity.enums.OrderStatus.COMPLETED, com.zone.agri.entity.enums.OrderStatus.RECEIVED, com.zone.agri.entity.enums.OrderStatus.SHIPPING) "
+      "WHERE o.status = com.zone.agri.entity.enums.OrderStatus.COMPLETED "
       +
       "AND o.subOrders IS EMPTY " +
       "AND (:branchId IS NULL OR o.branch.id = :branchId) " +

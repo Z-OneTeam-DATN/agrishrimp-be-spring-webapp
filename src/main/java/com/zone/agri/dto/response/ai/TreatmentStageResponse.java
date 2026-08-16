@@ -10,7 +10,10 @@ import java.util.List;
 public class TreatmentStageResponse {
 
     private String stageTitle;
+    private String stageSigns;
+    private String treatmentGoal;
     private List<String> instructions;
     private List<SuggestedProductResponse> products;
     private List<String> extraProductNames;
+    private List<TreatmentStageResponse> subStages;
 }

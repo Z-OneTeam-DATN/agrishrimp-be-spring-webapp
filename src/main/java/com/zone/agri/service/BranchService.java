@@ -36,6 +36,10 @@ import java.util.stream.Collectors;
 public class BranchService {
 
     private static final String BRANCH_VIEW_AUTHORITY = "BRANCH_VIEW";
+    private static final List<String> BRANCH_DIRECTORY_AUTHORITIES = List.of(
+            BRANCH_VIEW_AUTHORITY,
+            "TRANSFER_CREATE",
+            "TRANSFER_UPDATE");
 
     private final BranchRepository branchRepository;
     private final UserRepository userRepository;
@@ -277,7 +281,7 @@ public class BranchService {
     }
 
     private boolean canViewAllBranches(UserDetail currentUser) {
-        return isAdminLike(currentUser) || hasAuthority(BRANCH_VIEW_AUTHORITY);
+        return isAdminLike(currentUser) || BRANCH_DIRECTORY_AUTHORITIES.stream().anyMatch(this::hasAuthority);
     }
 
     private boolean isAdminLike(UserDetail currentUser) {

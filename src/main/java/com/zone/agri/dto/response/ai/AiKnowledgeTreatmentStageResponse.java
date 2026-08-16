@@ -14,8 +14,11 @@ import lombok.NoArgsConstructor;
 public class AiKnowledgeTreatmentStageResponse {
 
     private String stageTitle;
+    private String stageSigns;
+    private String treatmentGoal;
     private List<String> instructions;
     private List<Long> productIds;
     private List<SuggestedProductResponse> products;
     private List<String> extraProductNames;
+    private List<AiKnowledgeTreatmentSubStageResponse> subStages;
 }

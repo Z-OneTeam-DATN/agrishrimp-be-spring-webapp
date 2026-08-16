@@ -21,4 +21,5 @@ public class LowStockReportResponse {
     private Integer shortage;
     private boolean isLowStock;
     private LocalDateTime lastImportDate;
+    private Integer mainBranchQuantity;
 }

@@ -253,16 +253,16 @@ public interface OrderRepository extends JpaRepository<Order, Long>, JpaSpecific
                      @Param("endDate") LocalDateTime endDate,
                      @Param("branchId") Long branchId);
 
-       @Query("SELECT SUM(ABS(it.quantityChange) * i.importPrice) " +
-                     "FROM Order o " +
-                     "JOIN InventoryTransaction it ON it.referenceCode = o.code " +
-                     "JOIN it.inventory i " +
-                     "WHERE o.status IN (com.zone.agri.entity.enums.OrderStatus.COMPLETED, com.zone.agri.entity.enums.OrderStatus.RECEIVED, com.zone.agri.entity.enums.OrderStatus.SHIPPING) "
-                     +
-                     "AND it.quantityChange < 0 " +
-                     "AND o.createdAt BETWEEN :startDate AND :endDate " +
-                     "AND (:branchId IS NULL OR i.branch.id = :branchId)")
-       BigDecimal sumTotalCost(@Param("startDate") LocalDateTime startDate,
+        @Query("SELECT SUM(ABS(it.quantityChange) * i.importPrice) " +
+                      "FROM Order o " +
+                      "JOIN InventoryTransaction it ON (it.referenceCode = o.code OR it.referenceCode LIKE CONCAT(o.code, '-SUB-%')) " +
+                      "JOIN it.inventory i " +
+                      "WHERE o.status IN (com.zone.agri.entity.enums.OrderStatus.COMPLETED, com.zone.agri.entity.enums.OrderStatus.RECEIVED, com.zone.agri.entity.enums.OrderStatus.SHIPPING) "
+                      +
+                      "AND it.quantityChange < 0 " +
+                      "AND o.createdAt BETWEEN :startDate AND :endDate " +
+                      "AND (:branchId IS NULL OR i.branch.id = :branchId)")
+        BigDecimal sumTotalCost(@Param("startDate") LocalDateTime startDate,
                      @Param("endDate") LocalDateTime endDate,
                      @Param("branchId") Long branchId);
 
@@ -280,7 +280,7 @@ public interface OrderRepository extends JpaRepository<Order, Long>, JpaSpecific
        @Query("SELECT CAST(o.createdAt AS date) as date, SUM(ABS(it.quantityChange) * i.importPrice) as cost " +
                      "FROM InventoryTransaction it " +
                      "JOIN it.inventory i " +
-                     "JOIN Order o ON it.referenceCode = o.code " +
+                     "JOIN Order o ON (it.referenceCode = o.code OR it.referenceCode LIKE CONCAT(o.code, '-SUB-%')) " +
                      "WHERE o.status IN (com.zone.agri.entity.enums.OrderStatus.COMPLETED, com.zone.agri.entity.enums.OrderStatus.RECEIVED, com.zone.agri.entity.enums.OrderStatus.SHIPPING) "
                      +
                      "AND it.quantityChange < 0 " +
