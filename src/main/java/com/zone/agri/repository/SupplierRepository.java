@@ -71,9 +71,63 @@ public interface SupplierRepository extends JpaRepository<Supplier, Long> {
 
                 Long getNoteId();
 
-                String getNoteCode();
+                default String getNoteCode() {
+                    if (this instanceof org.springframework.data.projection.TargetAware) {
+                        Object target = ((org.springframework.data.projection.TargetAware) this).getTarget();
+                        if (target instanceof java.util.Map) {
+                            return (String) ((java.util.Map<?, ?>) target).get("noteCode");
+                        } else if (target instanceof jakarta.persistence.Tuple) {
+                            try {
+                                return ((jakarta.persistence.Tuple) target).get("noteCode", String.class);
+                            } catch (Exception e) {
+                                return null;
+                            }
+                        } else if (target != null) {
+                            try {
+                                java.lang.reflect.Method method = target.getClass().getMethod("getNoteCode");
+                                return (String) method.invoke(target);
+                            } catch (Exception e) {
+                                try {
+                                    java.lang.reflect.Field field = target.getClass().getDeclaredField("noteCode");
+                                    field.setAccessible(true);
+                                    return (String) field.get(target);
+                                } catch (Exception ex) {
+                                    return null;
+                                }
+                            }
+                        }
+                    }
+                    return null;
+                }
 
-                String getBranchName();
+                default String getBranchName() {
+                    if (this instanceof org.springframework.data.projection.TargetAware) {
+                        Object target = ((org.springframework.data.projection.TargetAware) this).getTarget();
+                        if (target instanceof java.util.Map) {
+                            return (String) ((java.util.Map<?, ?>) target).get("branchName");
+                        } else if (target instanceof jakarta.persistence.Tuple) {
+                            try {
+                                return ((jakarta.persistence.Tuple) target).get("branchName", String.class);
+                            } catch (Exception e) {
+                                return null;
+                            }
+                        } else if (target != null) {
+                            try {
+                                java.lang.reflect.Method method = target.getClass().getMethod("getBranchName");
+                                return (String) method.invoke(target);
+                            } catch (Exception e) {
+                                try {
+                                    java.lang.reflect.Field field = target.getClass().getDeclaredField("branchName");
+                                    field.setAccessible(true);
+                                    return (String) field.get(target);
+                                } catch (Exception ex) {
+                                    return null;
+                                }
+                            }
+                        }
+                    }
+                    return null;
+                }
 
                 InventoryNoteType getNoteType();
 
