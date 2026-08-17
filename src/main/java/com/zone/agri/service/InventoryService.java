@@ -502,8 +502,8 @@ public class InventoryService {
 
     // --- 4 & 5. LẤY DANH SÁCH & CHI TIẾT ---
     @Transactional(readOnly = true)
-    public List<InventoryReceiptResponse> getAllReceipts() {
-        Long warehouseId = resolveImportListBranchId();
+    public List<InventoryReceiptResponse> getAllReceipts(Long branchId) {
+        Long warehouseId = (branchId != null) ? branchId : resolveImportListBranchId();
         List<InventoryNote> notes = (warehouseId == null) 
                 ? noteRepository.findAllByTypeWithPartners(InventoryNoteType.IMPORT)
                 : noteRepository.findAllByTypeAndBranchWithPartners(InventoryNoteType.IMPORT, warehouseId);

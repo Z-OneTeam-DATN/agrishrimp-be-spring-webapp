@@ -1787,7 +1787,7 @@ public class InventoryTransferService {
     // ==========================================
     // HÀM LẤY DANH SÁCH
     // ==========================================
-    public Page<TransferResponse> getTransfers(String keyword, String statusStr, Pageable pageable) {
+    public Page<TransferResponse> getTransfers(String keyword, String statusStr, Long explicitBranchId, Pageable pageable) {
         InventoryTransferStatus status = null;
         if (statusStr != null && !statusStr.isEmpty() && !statusStr.equalsIgnoreCase("all")) {
             try {
@@ -1795,7 +1795,7 @@ public class InventoryTransferService {
             } catch (Exception e) {
             }
         }
-        Long branchId = canApproveTransfersAcrossBranches() ? null : warehouseContext.resolveWarehouseId();
+        Long branchId = (explicitBranchId != null) ? explicitBranchId : (canApproveTransfersAcrossBranches() ? null : warehouseContext.resolveWarehouseId());
         return branchId == null
                 ? transferRepo.searchTransfers(keyword, status, pageable)
                 : transferRepo.searchTransfersForBranch(keyword, status, branchId, pageable);

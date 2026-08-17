@@ -462,8 +462,8 @@ public class InventoryNoteService {
     }
 
     @Transactional(readOnly = true)
-    public List<InventoryNoteResponse> getAllCheckNotes() {
-        Long warehouseId = resolveCheckListBranchId();
+    public List<InventoryNoteResponse> getAllCheckNotes(Long branchId) {
+        Long warehouseId = (branchId != null) ? branchId : resolveCheckListBranchId();
         List<InventoryNote> notes = (warehouseId == null)
                 ? inventoryNoteRepository.findAllByTypeWithPartners(InventoryNoteType.CHECK)
                 : inventoryNoteRepository.findAllByTypeAndBranchWithPartners(InventoryNoteType.CHECK, warehouseId);
@@ -728,23 +728,23 @@ public class InventoryNoteService {
     }
 
     @Transactional(readOnly = true)
-    public List<InventoryNoteResponse> getAllExportCommands() {
+    public List<InventoryNoteResponse> getAllExportCommands(Long branchId) {
         return getNotesByStatuses(InventoryNoteType.EXPORT, Arrays.asList(
                 InventoryNoteStatus.PENDING,
                 InventoryNoteStatus.APPROVED,
                 InventoryNoteStatus.COMPLETED,
                 InventoryNoteStatus.REJECTED,
                 InventoryNoteStatus.CANCELLED
-        ));
+        ), branchId);
     }
 
     @Transactional(readOnly = true)
-    public List<InventoryNoteResponse> getAllExportReceipts() {
-        return getNotesByStatuses(InventoryNoteType.EXPORT, Collections.singletonList(InventoryNoteStatus.COMPLETED));
+    public List<InventoryNoteResponse> getAllExportReceipts(Long branchId) {
+        return getNotesByStatuses(InventoryNoteType.EXPORT, Collections.singletonList(InventoryNoteStatus.COMPLETED), branchId);
     }
 
-    private List<InventoryNoteResponse> getNotesByStatuses(InventoryNoteType type, Collection<InventoryNoteStatus> statuses) {
-        Long warehouseId = resolveExportListBranchId();
+    private List<InventoryNoteResponse> getNotesByStatuses(InventoryNoteType type, Collection<InventoryNoteStatus> statuses, Long branchId) {
+        Long warehouseId = (branchId != null) ? branchId : resolveExportListBranchId();
         List<InventoryNote> notes = (warehouseId == null)
                 ? inventoryNoteRepository.findAllByTypeAndStatusInWithPartners(type, statuses)
                 : inventoryNoteRepository.findAllByTypeAndStatusInAndBranchWithPartners(type, statuses, warehouseId);
