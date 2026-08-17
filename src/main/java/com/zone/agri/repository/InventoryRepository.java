@@ -41,6 +41,9 @@ public interface InventoryRepository extends JpaRepository<Inventory, Long> {
                         @Param("batchNumber") String batchNumber,
                         @Param("importPrice") BigDecimal importPrice);
 
+        @Query("SELECT i FROM Inventory i LEFT JOIN FETCH i.branch LEFT JOIN FETCH i.productVariant")
+        List<Inventory> findAllWithBranchAndVariant();
+
         @Query("SELECT i FROM Inventory i WHERE i.branch.id = :branchId AND i.productVariant.id = :variantId AND i.quantity > 0 "
                         +
                         "ORDER BY i.expiryDate ASC, i.lastReceiptDate ASC")
@@ -160,6 +163,11 @@ public interface InventoryRepository extends JpaRepository<Inventory, Long> {
                         "WHERE p.id NOT IN (SELECT DISTINCT i.productVariant.product.id FROM Inventory i " +
                         "WHERE (:branchId IS NULL OR i.branch.id = :branchId) AND i.quantity > 0)")
         long countOutOfStockProducts(@Param("branchId") Long branchId);
+
+        @Query("SELECT COUNT(DISTINCT i.productVariant.product.id) FROM Inventory i " +
+                        "WHERE i.branch.id = :branchId " +
+                        "AND i.productVariant.product.id NOT IN (SELECT DISTINCT inv.productVariant.product.id FROM Inventory inv WHERE inv.branch.id = :branchId AND inv.quantity > 0)")
+        long countOutOfStockProductsForBranch(@Param("branchId") Long branchId);
 
         @Query("SELECT i FROM Inventory i WHERE i.defectiveQuantity > :threshold")
         List<Inventory> findAllByDefectiveQuantityGreaterThan(@Param("threshold") int threshold);

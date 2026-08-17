@@ -46,10 +46,16 @@ public class ProductVariantService {
         // 2. Lấy TẤT CẢ các Variant đang kinh doanh (ACTIVE)
         List<ProductVariant> allVariants = variantRepo.findAllActiveWithProduct(null, null);
 
+        // Fetch all inventories with eager relations once to avoid O(N) lazy loading queries
+        List<Inventory> allDbInventories = inventoryRepo.findAllWithBranchAndVariant();
+        Map<Long, List<Inventory>> inventoriesByVariantId = allDbInventories.stream()
+                .filter(i -> i.getProductVariant() != null)
+                .collect(Collectors.groupingBy(i -> i.getProductVariant().getId()));
+
         // 3. Tính toán tồn kho cho từng biến thể tại chi nhánh yêu cầu
         return allVariants.stream().map(v -> {
-            // Lấy TẤT CẢ các bản ghi kho của biến thể này
-            List<Inventory> allInventories = inventoryRepo.findByProductVariantId(v.getId());
+            // Lấy TẤT CẢ các bản ghi kho của biến thể này từ map
+            List<Inventory> allInventories = inventoriesByVariantId.getOrDefault(v.getId(), Collections.emptyList());
 
             // Tồn kho chi nhánh tổng
             int mainBranchQty = allInventories.stream()
@@ -99,6 +105,7 @@ public class ProductVariantService {
                     .mainBranchQuantity(mainBranchQty)
                     .build();
         })
+                .filter(Objects::nonNull)
                 .filter(LowStockReportResponse::isLowStock) // Lọc những đứa tồn kho thấp (bao gồm cả 0)
                 .sorted(Comparator.comparing(LowStockReportResponse::getQuantity)) // Hết hàng (0) sẽ lên đầu bảng
                 .collect(Collectors.toList());

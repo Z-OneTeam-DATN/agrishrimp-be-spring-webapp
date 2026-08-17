@@ -681,7 +681,9 @@ public class DashboardService {
 
         long totalItems = inventoryRepository.countDistinctProducts(finalBranchId);
         long lowStockCount = inventoryRepository.getLowStockProductIds(lowStockThreshold, finalBranchId).size();
-        long outOfStockCount = inventoryRepository.countOutOfStockProducts(finalBranchId);
+        long outOfStockCount = (finalBranchId == null)
+                ? inventoryRepository.countOutOfStockProducts(null)
+                : inventoryRepository.countOutOfStockProductsForBranch(finalBranchId);
         BigDecimal totalValue = getSafeBigDecimal(inventoryRepository.sumTotalValue(finalBranchId));
 
         LocalDateTime todayStart = LocalDate.now().atStartOfDay();

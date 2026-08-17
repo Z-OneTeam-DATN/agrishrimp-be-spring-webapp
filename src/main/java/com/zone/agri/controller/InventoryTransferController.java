@@ -56,10 +56,13 @@ public class InventoryTransferController {
             @Parameter(description = "So trang")
             @RequestParam(defaultValue = "0") int page,
             @Parameter(description = "So luong ban ghi tren mot trang")
-            @RequestParam(defaultValue = "10") int size) {
+            @RequestParam(defaultValue = "10") int size,
+            @Parameter(description = "ID Chi nhanh")
+            @RequestParam(required = false) Long branchId) {
 
         Pageable pageable = PageRequest.of(page, size, Sort.by("createdAt").descending());
-        return ResponseEntity.ok(transferService.getTransfers(keyword, status, pageable));
+        Long finalBranchId = com.zone.agri.common.AuthUtils.resolveRequestedOrUserBranch(branchId, "TRANSFER_VIEW");
+        return ResponseEntity.ok(transferService.getTransfers(keyword, status, finalBranchId, pageable));
     }
 
     @Operation(summary = "Lap phieu dieu chuyen moi")

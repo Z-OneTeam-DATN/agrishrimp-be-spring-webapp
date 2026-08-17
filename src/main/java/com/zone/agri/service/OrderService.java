@@ -751,6 +751,7 @@ public class OrderService {
                         .sku(row.getSku())
                         .productName(row.getProductName())
                         .variantName(row.getVariantName())
+                        .imageUrl(row.getImageUrl())
                         .totalMissingQuantity(
                                 row.getTotalMissingQuantity() != null ? row.getTotalMissingQuantity().intValue() : 0)
                         .affectedSubOrders(row.getAffectedSubOrders())

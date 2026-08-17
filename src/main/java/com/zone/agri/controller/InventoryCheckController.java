@@ -62,8 +62,10 @@ public class InventoryCheckController {
             "INVENTORY_CHECK_DELETE"
     })
     @GetMapping
-    public ResponseEntity<List<InventoryNoteResponse>> getAll() {
-        return ResponseEntity.ok(inventoryNoteService.getAllCheckNotes());
+    public ResponseEntity<List<InventoryNoteResponse>> getAll(
+            @RequestParam(required = false) Long branchId) {
+        Long finalBranchId = com.zone.agri.common.AuthUtils.resolveRequestedOrUserBranch(branchId, "INVENTORY_CHECK_VIEW");
+        return ResponseEntity.ok(inventoryNoteService.getAllCheckNotes(finalBranchId));
     }
 
     /**
