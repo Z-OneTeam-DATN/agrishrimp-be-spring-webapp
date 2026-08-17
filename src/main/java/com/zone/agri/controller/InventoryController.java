@@ -106,8 +106,9 @@ public class InventoryController {
     @SecurityRequirement(name = "bearerAuth")
     @RequirePermission("IMPORT_VIEW")
     @GetMapping("/receipts")
-    public ResponseEntity<List<InventoryReceiptResponse>> getAllReceipts() {
-        return ResponseEntity.ok(inventoryService.getAllReceipts());
+    public ResponseEntity<List<InventoryReceiptResponse>> getAllReceipts(
+            @RequestParam(required = false) Long branchId) {
+        return ResponseEntity.ok(inventoryService.getAllReceipts(branchId));
     }
 
     @SecurityRequirement(name = "bearerAuth")
@@ -161,15 +162,17 @@ public class InventoryController {
     @SecurityRequirement(name = "bearerAuth")
     @RequirePermission("EXPORT_VIEW")
     @GetMapping("/export-commands")
-    public ResponseEntity<?> getAllExportCommands() {
-        return ResponseEntity.ok(inventoryNoteService.getAllExportCommands());
+    public ResponseEntity<?> getAllExportCommands(
+            @RequestParam(required = false) Long branchId) {
+        return ResponseEntity.ok(inventoryNoteService.getAllExportCommands(branchId));
     }
 
     @SecurityRequirement(name = "bearerAuth")
     @RequirePermission("EXPORT_VIEW")
     @GetMapping("/export-receipts")
-    public ResponseEntity<?> getAllExportReceipts() {
-        return ResponseEntity.ok(inventoryNoteService.getAllExportReceipts());
+    public ResponseEntity<?> getAllExportReceipts(
+            @RequestParam(required = false) Long branchId) {
+        return ResponseEntity.ok(inventoryNoteService.getAllExportReceipts(branchId));
     }
 
     @SecurityRequirement(name = "bearerAuth")

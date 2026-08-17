@@ -53,13 +53,15 @@ public class InventoryTransferController {
             @RequestParam(required = false) String keyword,
             @Parameter(description = "Trang thai phieu")
             @RequestParam(required = false, defaultValue = "all") String status,
+            @Parameter(description = "Chi nhanh")
+            @RequestParam(required = false) Long branchId,
             @Parameter(description = "So trang")
             @RequestParam(defaultValue = "0") int page,
             @Parameter(description = "So luong ban ghi tren mot trang")
             @RequestParam(defaultValue = "10") int size) {
 
         Pageable pageable = PageRequest.of(page, size, Sort.by("createdAt").descending());
-        return ResponseEntity.ok(transferService.getTransfers(keyword, status, pageable));
+        return ResponseEntity.ok(transferService.getTransfers(keyword, status, branchId, pageable));
     }
 
     @Operation(summary = "Lap phieu dieu chuyen moi")

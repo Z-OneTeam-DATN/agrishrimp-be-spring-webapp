@@ -62,8 +62,9 @@ public class InventoryCheckController {
             "INVENTORY_CHECK_DELETE"
     })
     @GetMapping
-    public ResponseEntity<List<InventoryNoteResponse>> getAll() {
-        return ResponseEntity.ok(inventoryNoteService.getAllCheckNotes());
+    public ResponseEntity<List<InventoryNoteResponse>> getAll(
+            @RequestParam(required = false) Long branchId) {
+        return ResponseEntity.ok(inventoryNoteService.getAllCheckNotes(branchId));
     }
 
     /**
