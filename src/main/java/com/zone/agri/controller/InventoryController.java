@@ -106,8 +106,10 @@ public class InventoryController {
     @SecurityRequirement(name = "bearerAuth")
     @RequirePermission("IMPORT_VIEW")
     @GetMapping("/receipts")
-    public ResponseEntity<List<InventoryReceiptResponse>> getAllReceipts() {
-        return ResponseEntity.ok(inventoryService.getAllReceipts());
+    public ResponseEntity<List<InventoryReceiptResponse>> getAllReceipts(
+            @RequestParam(required = false) Long branchId) {
+        Long finalBranchId = com.zone.agri.common.AuthUtils.resolveRequestedOrUserBranch(branchId, "IMPORT_VIEW");
+        return ResponseEntity.ok(inventoryService.getAllReceipts(finalBranchId));
     }
 
     @SecurityRequirement(name = "bearerAuth")
@@ -151,7 +153,8 @@ public class InventoryController {
     public ResponseEntity<List<com.zone.agri.dto.response.inventory.InventorySearchResponse>> getDefectiveItemsBySupplier(
             @RequestParam Long supplierId,
             @RequestParam(required = false) Long branchId) {
-        return ResponseEntity.ok(inventoryService.getDefectiveItemsBySupplier(supplierId, branchId));
+        Long finalBranchId = com.zone.agri.common.AuthUtils.resolveRequestedOrUserBranch(branchId, "EXPORT_CREATE");
+        return ResponseEntity.ok(inventoryService.getDefectiveItemsBySupplier(supplierId, finalBranchId));
     }
 
     // ==============================
@@ -161,15 +164,19 @@ public class InventoryController {
     @SecurityRequirement(name = "bearerAuth")
     @RequirePermission("EXPORT_VIEW")
     @GetMapping("/export-commands")
-    public ResponseEntity<?> getAllExportCommands() {
-        return ResponseEntity.ok(inventoryNoteService.getAllExportCommands());
+    public ResponseEntity<?> getAllExportCommands(
+            @RequestParam(required = false) Long branchId) {
+        Long finalBranchId = com.zone.agri.common.AuthUtils.resolveRequestedOrUserBranch(branchId, "EXPORT_VIEW");
+        return ResponseEntity.ok(inventoryNoteService.getAllExportCommands(finalBranchId));
     }
 
     @SecurityRequirement(name = "bearerAuth")
     @RequirePermission("EXPORT_VIEW")
     @GetMapping("/export-receipts")
-    public ResponseEntity<?> getAllExportReceipts() {
-        return ResponseEntity.ok(inventoryNoteService.getAllExportReceipts());
+    public ResponseEntity<?> getAllExportReceipts(
+            @RequestParam(required = false) Long branchId) {
+        Long finalBranchId = com.zone.agri.common.AuthUtils.resolveRequestedOrUserBranch(branchId, "EXPORT_VIEW");
+        return ResponseEntity.ok(inventoryNoteService.getAllExportReceipts(finalBranchId));
     }
 
     @SecurityRequirement(name = "bearerAuth")

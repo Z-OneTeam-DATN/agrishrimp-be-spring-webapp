@@ -38,6 +38,7 @@ public interface SubOrderItemRepository extends JpaRepository<SubOrderItem, Long
                    pv.sku AS sku,
                    p.name AS productName,
                    pv.customSpecs AS variantName,
+                   pv.imageUrl AS imageUrl,
                    SUM(COALESCE(soi.missingQuantity, 0)) AS totalMissingQuantity,
                    COUNT(DISTINCT so.id) AS affectedSubOrders
             FROM SubOrderItem soi
@@ -51,7 +52,7 @@ public interface SubOrderItemRepository extends JpaRepository<SubOrderItem, Long
             )
               AND COALESCE(soi.missingQuantity, 0) > 0
               AND (:branchId IS NULL OR so.branch.id = :branchId)
-            GROUP BY pv.id, pv.sku, p.name, pv.customSpecs
+            GROUP BY pv.id, pv.sku, p.name, pv.customSpecs, pv.imageUrl
             ORDER BY SUM(COALESCE(soi.missingQuantity, 0)) DESC, pv.id ASC
             """)
     List<BackorderReportProjection> getBackorderReport(@Param("branchId") Long branchId);
@@ -61,6 +62,7 @@ public interface SubOrderItemRepository extends JpaRepository<SubOrderItem, Long
         String getSku();
         String getProductName();
         String getVariantName();
+        String getImageUrl();
         Long getTotalMissingQuantity();
         Long getAffectedSubOrders();
     }

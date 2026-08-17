@@ -14,6 +14,7 @@ public class MissingItemReportDto {
     private String sku;
     private String productName;
     private String variantName;
+    private String imageUrl;
     private Integer totalMissingQuantity;
     private Long affectedSubOrders;
 }
