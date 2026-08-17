@@ -257,6 +257,9 @@ public class PurchaseRequestService {
             if (catalog.getProductVariant() == null || catalog.getProductVariant().getId() == null) {
                 continue;
             }
+            if (!hasValidSupplierCatalogPrice(catalog)) {
+                continue;
+            }
             firstCatalogByVariantId.putIfAbsent(catalog.getProductVariant().getId(), catalog);
         }
 
@@ -270,7 +273,7 @@ public class PurchaseRequestService {
                 blockedQuantitiesByVariantId.put(variant.getId(), missingEntry.getValue());
                 blockedMessagesByVariantId.put(
                         variant.getId(),
-                        "Chua cau hinh nha cung cap dang hoat dong cho SKU: " + variant.getSku());
+                        "Chua cau hinh nha cung cap dang hoat dong va gia hop le cho SKU: " + variant.getSku());
                 missingIterator.remove();
             }
         }
@@ -293,6 +296,7 @@ public class PurchaseRequestService {
             }
 
             supplierById.putIfAbsent(supplier.getId(), supplier);
+            BigDecimal catalogPrice = catalog.getPrice();
             itemsBySupplierId.computeIfAbsent(supplier.getId(), ignored -> new ArrayList<>())
                     .add(PurchaseRequestItem.builder()
                             .productVariant(variant)
@@ -301,7 +305,7 @@ public class PurchaseRequestService {
                             .acceptedQty(0)
                             .defectiveQty(0)
                             .remainingQty(missingEntry.getValue())
-                            .unitPrice(BigDecimal.ZERO)
+                            .unitPrice(catalogPrice)
                             .note("Tu dong bo sung cho phan don " + referenceCode)
                             .build());
         }
@@ -332,7 +336,7 @@ public class PurchaseRequestService {
                     .linkedSubOrderId(replenishmentSubOrder.getId())
                     .linkedDestinationBranchId(replenishmentSubOrder.getBranch().getId())
                     .linkedReferenceCode(referenceCode)
-                    .totalAmount(BigDecimal.ZERO)
+                    .totalAmount(calculateItemsTotal(supplierEntry.getValue()))
                     .items(new ArrayList<>())
                     .build();
 
@@ -474,8 +478,7 @@ public class PurchaseRequestService {
             ProductVariant variant = productVariantRepository.findBySku(itemReq.getProductCode())
                     .orElseThrow(() -> new NotFoundException("SKU không tồn tại: " + itemReq.getProductCode()));
 
-            validateSupplierCatalogContainsVariant(supplier, variant);
-            BigDecimal unitPrice = Objects.requireNonNullElse(itemReq.getUnitPrice(), BigDecimal.ZERO);
+            BigDecimal unitPrice = resolveSupplierCatalogPrice(supplier, variant);
 
             PurchaseRequestItem item = PurchaseRequestItem.builder()
                     .purchaseRequest(pr)
@@ -563,7 +566,7 @@ public class PurchaseRequestService {
         for (PurchaseRequestCreateRequest.ItemRequest itemReq : request.getItems()) {
             ProductVariant variant = productVariantRepository.findBySku(itemReq.getProductCode())
                     .orElseThrow(() -> new NotFoundException("SKU khĂ´ng tá»“n táº¡i: " + itemReq.getProductCode()));
-            validateSupplierCatalogContainsVariant(supplier, variant);
+            resolveSupplierCatalogPrice(supplier, variant);
         }
 
         BigDecimal totalAmount = BigDecimal.ZERO;
@@ -571,7 +574,7 @@ public class PurchaseRequestService {
             ProductVariant variant = productVariantRepository.findBySku(itemReq.getProductCode())
                     .orElseThrow(() -> new NotFoundException("SKU không tồn tại: " + itemReq.getProductCode()));
 
-            BigDecimal unitPrice = Objects.requireNonNullElse(itemReq.getUnitPrice(), BigDecimal.ZERO);
+            BigDecimal unitPrice = resolveSupplierCatalogPrice(supplier, variant);
 
             PurchaseRequestItem item = PurchaseRequestItem.builder()
                     .purchaseRequest(pr)
@@ -878,20 +881,42 @@ public class PurchaseRequestService {
         }
     }
 
-    private void validateSupplierCatalogContainsVariant(Supplier supplier, ProductVariant variant) {
+    private BigDecimal resolveSupplierCatalogPrice(Supplier supplier, ProductVariant variant) {
         if (supplier == null || variant == null) {
             throw new BadRequestException("Dữ liệu nhà cung cấp hoặc sản phẩm không hợp lệ. Vui lòng tải lại trang và thử lại.");
         }
 
-        boolean isAvailableForSupplier = supplierProductCatalogRepository.existsAvailableBySupplierIdAndProductVariantId(
-                supplier.getId(),
-                variant.getId());
+        SupplierProductCatalog catalog = supplierProductCatalogRepository.findAvailableBySupplierIdAndProductVariantId(
+                        supplier.getId(),
+                        variant.getId())
+                .orElseThrow(() -> new BadRequestException(
+                        "SKU " + variant.getSku() + " không nằm trong catalog đang bán của nhà cung cấp "
+                                + supplier.getCode() + ". Vui lòng chọn sản phẩm trong danh sách catalog của nhà cung cấp."));
 
-        if (!isAvailableForSupplier) {
-            throw new BadRequestException(
-                    "SKU " + variant.getSku() + " không nằm trong catalog đang bán của nhà cung cấp "
-                            + supplier.getCode() + ". Vui lòng chọn sản phẩm trong danh sách catalog của nhà cung cấp.");
+        if (!hasValidSupplierCatalogPrice(catalog)) {
+            throw new BadRequestException("SKU " + variant.getSku()
+                    + " chua co gia NCC hop le trong catalog " + supplier.getCode()
+                    + ". Vui long cap nhat gia catalog nha cung cap truoc khi tao phieu.");
         }
+
+        return catalog.getPrice();
+    }
+
+    private boolean hasValidSupplierCatalogPrice(SupplierProductCatalog catalog) {
+        return catalog != null
+                && catalog.getPrice() != null
+                && catalog.getPrice().compareTo(BigDecimal.ZERO) > 0;
+    }
+
+    private BigDecimal calculateItemsTotal(List<PurchaseRequestItem> items) {
+        if (items == null || items.isEmpty()) {
+            return BigDecimal.ZERO;
+        }
+
+        return items.stream()
+                .map(item -> Objects.requireNonNullElse(item.getUnitPrice(), BigDecimal.ZERO)
+                        .multiply(BigDecimal.valueOf(Objects.requireNonNullElse(item.getRequestedQty(), 0))))
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
     }
 
     private PurchaseRequestResponse mapToResponse(PurchaseRequest pr) {

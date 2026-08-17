@@ -27,6 +27,17 @@ public interface SupplierProductCatalogRepository extends JpaRepository<Supplier
             @Param("productVariantId") Long productVariantId);
 
     @Query("""
+            SELECT spc
+            FROM SupplierProductCatalog spc
+            WHERE spc.supplier.id = :supplierId
+              AND spc.productVariant.id = :productVariantId
+              AND spc.status = com.zone.agri.entity.enums.SupplierProductCatalogStatus.AVAILABLE
+            """)
+    Optional<SupplierProductCatalog> findAvailableBySupplierIdAndProductVariantId(
+            @Param("supplierId") Long supplierId,
+            @Param("productVariantId") Long productVariantId);
+
+    @Query("""
             SELECT CASE WHEN COUNT(spc) > 0 THEN true ELSE false END
             FROM SupplierProductCatalog spc
             WHERE spc.supplier.id = :supplierId

@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -27,8 +28,10 @@ import com.zone.agri.entity.ProductVariant;
 import com.zone.agri.entity.SubOrder;
 import com.zone.agri.entity.SubOrderItem;
 import com.zone.agri.entity.Supplier;
+import com.zone.agri.entity.SupplierProductCatalog;
 import com.zone.agri.entity.User;
 import com.zone.agri.entity.enums.OrderStatus;
+import com.zone.agri.entity.enums.SupplierProductCatalogStatus;
 import com.zone.agri.entity.enums.SupplierStatus;
 import com.zone.agri.exception.BadRequestException;
 import com.zone.agri.exception.Forbidden;
@@ -143,9 +146,8 @@ class PurchaseRequestServiceTest {
         when(purchaseRequestRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
         when(productVariantRepository.findBySku("SKU-10")).thenReturn(Optional.of(variant));
         
-        // Mock catalog check returns false (not available)
-        when(supplierProductCatalogRepository.existsAvailableBySupplierIdAndProductVariantId(1L, 10L))
-                .thenReturn(false);
+        when(supplierProductCatalogRepository.findAvailableBySupplierIdAndProductVariantId(1L, 10L))
+                .thenReturn(Optional.empty());
 
         PurchaseRequestCreateRequest request = new PurchaseRequestCreateRequest();
         request.setSupplierCode(supplierCode);
@@ -159,6 +161,50 @@ class PurchaseRequestServiceTest {
         assertThatThrownBy(() -> purchaseRequestService.createRequest(request))
                 .isInstanceOf(BadRequestException.class)
                 .hasMessageContaining("SKU SKU-10 không nằm trong catalog đang bán của nhà cung cấp");
+    }
+
+    @Test
+    void createRequest_shouldUseSupplierCatalogPriceInsteadOfRequestPrice() {
+        String supplierCode = "NCC-ACTIVE";
+        Supplier supplier = Supplier.builder()
+                .id(1L)
+                .code(supplierCode)
+                .status(SupplierStatus.ACTIVE)
+                .build();
+
+        Branch branch = Branch.builder().id(2L).branchType("WAREHOUSE").name("Chi Nhanh 2").build();
+        ProductVariant variant = ProductVariant.builder().id(10L).sku("SKU-10").build();
+        SupplierProductCatalog catalog = SupplierProductCatalog.builder()
+                .supplier(supplier)
+                .productVariant(variant)
+                .status(SupplierProductCatalogStatus.AVAILABLE)
+                .price(new BigDecimal("123000"))
+                .build();
+
+        authenticateWarehouseManager(branch);
+        when(supplierRepository.findByCode(supplierCode)).thenReturn(Optional.of(supplier));
+        when(branchRepository.findById(2L)).thenReturn(Optional.of(branch));
+        when(purchaseRequestRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(productVariantRepository.findBySku("SKU-10")).thenReturn(Optional.of(variant));
+        when(supplierProductCatalogRepository.findAvailableBySupplierIdAndProductVariantId(1L, 10L))
+                .thenReturn(Optional.of(catalog));
+        when(inventoryNoteRepository.findGoodsReceiptsByPurchaseRequestId(any())).thenReturn(List.of());
+
+        PurchaseRequestCreateRequest request = new PurchaseRequestCreateRequest();
+        request.setSupplierCode(supplierCode);
+        request.setBranchId(2L);
+
+        PurchaseRequestCreateRequest.ItemRequest itemReq = new PurchaseRequestCreateRequest.ItemRequest();
+        itemReq.setProductCode("SKU-10");
+        itemReq.setRequestedQty(2);
+        itemReq.setUnitPrice(BigDecimal.ONE);
+        request.setItems(List.of(itemReq));
+
+        var response = purchaseRequestService.createRequest(request);
+
+        assertThat(response.getItems()).hasSize(1);
+        assertThat(response.getItems().get(0).getUnitPrice()).isEqualByComparingTo("123000");
+        assertThat(response.getTotalAmount()).isEqualByComparingTo("246000");
     }
 
     @Test
