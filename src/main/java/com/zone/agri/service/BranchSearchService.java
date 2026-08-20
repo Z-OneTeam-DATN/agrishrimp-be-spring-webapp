@@ -84,9 +84,9 @@ public class BranchSearchService {
     }
 
     /**
-     * Ưu tiên chi nhánh theo ward/district/province của địa chỉ giao hàng.
-     * Nếu có tọa độ thật từ client thì tiếp tục sort theo khoảng cách trong cùng nhóm ưu tiên.
-     * Không geocode lại từ chuỗi địa chỉ để tránh phụ thuộc dịch vụ ngoài.
+     * Chọn chi nhánh giao hàng theo khoảng cách/thời gian thực tế nếu có tọa độ.
+     * Nếu branch thiếu tọa độ thì dùng fallback hành chính theo ward/district/province
+     * để giữ thứ tự ổn định.
      */
     public List<BranchWithRealDistance> findBranchesForDelivery(
             Integer provinceId,
@@ -104,19 +104,7 @@ public class BranchSearchService {
         String normalizedWardCode = normalizeWardCode(wardCode);
 
         if (userLat != null && userLng != null) {
-            List<BranchWithDistance> rankedByDistance = allActive.stream()
-                    .map(branch -> {
-                        double dist = (branch.getLat() != null && branch.getLng() != null)
-                                ? HaversineUtils.distanceKm(userLat, userLng, branch.getLat(), branch.getLng())
-                                : Double.MAX_VALUE;
-                        return new BranchWithDistance(branch, dist);
-                    })
-                    .sorted(Comparator
-                            .comparingInt((BranchWithDistance candidate) -> administrativeMatchScore(
-                                    candidate.branch(), provinceId, districtId, normalizedWardCode))
-                            .thenComparingDouble(BranchWithDistance::distanceKm)
-                            .thenComparing(candidate -> candidate.branch().getId(), Comparator.nullsLast(Long::compareTo)))
-                    .toList();
+            List<BranchWithDistance> rankedByDistance = sortByHaversine(userLat, userLng, allActive);
 
             return applyAdministrativeFallbackOrdering(
                     enrichWithRealDistance(userLat, userLng, rankedByDistance),
@@ -256,10 +244,10 @@ public class BranchSearchService {
         return branches.stream()
                 .map(candidate -> withAdministrativeFallbackDistance(candidate, provinceId, districtId, wardCode))
                 .sorted(Comparator
-                        .comparingInt((BranchWithRealDistance candidate) ->
-                                administrativeMatchScore(candidate.branch(), provinceId, districtId, wardCode))
-                        .thenComparingDouble(BranchWithRealDistance::durationSeconds)
+                        .comparingDouble(BranchWithRealDistance::durationSeconds)
                         .thenComparingDouble(BranchWithRealDistance::distanceKm)
+                        .thenComparingInt((BranchWithRealDistance candidate) ->
+                                administrativeMatchScore(candidate.branch(), provinceId, districtId, wardCode))
                         .thenComparing(candidate -> candidate.branch().getId(), Comparator.nullsLast(Long::compareTo)))
                 .toList();
     }
@@ -269,7 +257,7 @@ public class BranchSearchService {
             Integer provinceId,
             Integer districtId,
             String wardCode) {
-        if (candidate == null || candidate.branch() == null || candidate.branch().getDistrictId() != null) {
+        if (candidate == null || candidate.branch() == null || hasCoordinates(candidate.branch())) {
             return candidate;
         }
 
@@ -277,6 +265,10 @@ public class BranchSearchService {
         double distanceKm = administrativeDistanceForScore(score);
         double durationSec = estimateDuration(distanceKm);
         return new BranchWithRealDistance(candidate.branch(), distanceKm, durationSec, durationSec / 60.0);
+    }
+
+    private boolean hasCoordinates(Branch branch) {
+        return branch != null && branch.getLat() != null && branch.getLng() != null;
     }
 
     private double administrativeDistanceForScore(int score) {

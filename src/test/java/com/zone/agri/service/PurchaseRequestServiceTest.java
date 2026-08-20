@@ -3,6 +3,7 @@ package com.zone.agri.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.when;
 
 import java.math.BigDecimal;
@@ -24,6 +25,7 @@ import com.zone.agri.common.WarehouseContext;
 import com.zone.agri.dto.request.purchase.PurchaseRequestCreateRequest;
 import com.zone.agri.entity.Branch;
 import com.zone.agri.entity.Order;
+import com.zone.agri.entity.PurchaseRequest;
 import com.zone.agri.entity.ProductVariant;
 import com.zone.agri.entity.SubOrder;
 import com.zone.agri.entity.SubOrderItem;
@@ -31,6 +33,7 @@ import com.zone.agri.entity.Supplier;
 import com.zone.agri.entity.SupplierProductCatalog;
 import com.zone.agri.entity.User;
 import com.zone.agri.entity.enums.OrderStatus;
+import com.zone.agri.entity.enums.PurchaseRequestStatus;
 import com.zone.agri.entity.enums.SupplierProductCatalogStatus;
 import com.zone.agri.entity.enums.SupplierStatus;
 import com.zone.agri.exception.BadRequestException;
@@ -266,5 +269,71 @@ class PurchaseRequestServiceTest {
         assertThat(result.purchaseRequests()).isEmpty();
         assertThat(result.blockedQuantitiesByVariantId()).containsEntry(variant.getId(), 2);
         assertThat(result.blockedMessagesByVariantId().get(variant.getId())).contains("SKU-Z");
+    }
+
+    @Test
+    void createAutomaticReplenishmentRequestResultForSubOrder_keepsApprovedPrWhenResendConfigMissing() {
+        Branch warehouse = Branch.builder().id(1L).branchType("WAREHOUSE").name("Kho Tong").build();
+        ProductVariant variant = ProductVariant.builder().id(10L).sku("SKU-WH").build();
+        Supplier supplier = Supplier.builder()
+                .id(20L)
+                .code("NCC-WH")
+                .email("ncc@example.com")
+                .status(SupplierStatus.ACTIVE)
+                .build();
+        SupplierProductCatalog catalog = SupplierProductCatalog.builder()
+                .productVariant(variant)
+                .supplier(supplier)
+                .status(SupplierProductCatalogStatus.AVAILABLE)
+                .build();
+        Order order = Order.builder().id(1000L).code("ORD-WH-001").status(OrderStatus.AWAITING_REPLENISHMENT).build();
+        SubOrder subOrder = SubOrder.builder()
+                .id(34L)
+                .order(order)
+                .branch(warehouse)
+                .status(OrderStatus.AWAITING_REPLENISHMENT)
+                .items(List.of(SubOrderItem.builder()
+                        .productVariant(variant)
+                        .quantity(3)
+                        .allocatedQuantity(0)
+                        .missingQuantity(3)
+                        .build()))
+                .build();
+
+        when(subOrderRepository.findByIdWithItems(34L)).thenReturn(Optional.of(subOrder));
+        when(purchaseRequestRepository.findAutoReplenishmentRequestsByLinkedSubOrderIdExcludingStatuses(any(), any()))
+                .thenReturn(List.of());
+        when(branchRepository.findAll()).thenReturn(List.of(warehouse));
+        when(supplierProductCatalogRepository.findByProductVariantIdInAndStatus(any(), any()))
+                .thenReturn(List.of(catalog));
+        when(purchaseRequestRepository.save(any(PurchaseRequest.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+        when(userRepository.findByEmail("auto@example.com")).thenReturn(Optional.empty());
+        doThrow(new BadRequestException("Chua cau hinh RESEND_API_KEY"))
+                .when(emailService)
+                .sendPurchaseRequestToSupplier(any(PurchaseRequest.class));
+
+        UsernamePasswordAuthenticationToken authentication = new UsernamePasswordAuthenticationToken(
+                "auto@example.com",
+                "secret",
+                List.of(new SimpleGrantedAuthority("PURCHASE_REQUEST_APPROVE")));
+        SecurityContextHolder.getContext().setAuthentication(authentication);
+
+        try {
+            PurchaseRequestService.AutomaticReplenishmentRequestResult result =
+                    purchaseRequestService.createAutomaticReplenishmentRequestResultForSubOrder(
+                            subOrder,
+                            Map.of(variant.getId(), 3));
+
+            assertThat(result.purchaseRequests()).hasSize(1);
+            PurchaseRequest purchaseRequest = result.purchaseRequests().get(0);
+            assertThat(purchaseRequest.getStatus()).isEqualTo(PurchaseRequestStatus.APPROVED);
+            assertThat(purchaseRequest.getSentToSupplierAt()).isNull();
+            assertThat(purchaseRequest.getBranch()).isEqualTo(warehouse);
+            assertThat(purchaseRequest.getLinkedDestinationBranchId()).isEqualTo(warehouse.getId());
+            assertThat(purchaseRequest.getNote()).contains("RESEND_API_KEY");
+        } finally {
+            SecurityContextHolder.clearContext();
+        }
     }
 }

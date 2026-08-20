@@ -64,15 +64,9 @@ public class InventoryAllocationService {
             return new AllocationResult(subOrders, outOfStockItems);
         }
 
-        List<BranchWithRealDistance> preferredBranches = branchesSortedByDist.stream()
-                .filter(candidate -> !isWarehouse(candidate.branch()))
+        List<BranchWithRealDistance> sellableBranches = branchesSortedByDist.stream()
+                .filter(candidate -> candidate.branch() != null)
                 .toList();
-
-        List<BranchWithRealDistance> sellableBranches = !preferredBranches.isEmpty()
-                ? preferredBranches
-                : branchesSortedByDist.stream()
-                        .filter(candidate -> candidate.branch() != null)
-                        .toList();
 
         if (sellableBranches.isEmpty()) {
             return new AllocationResult(subOrders, outOfStockItems);
@@ -287,12 +281,6 @@ public class InventoryAllocationService {
     private boolean hasAllocatableStock(Long branchId, List<CartItemDto> cart,
                                         Map<Long, Map<Long, List<Inventory>>> matrix) {
         return calculateAllocatableQuantity(branchId, cart, matrix) > 0;
-    }
-
-    private boolean isWarehouse(com.zone.agri.entity.Branch branch) {
-        return branch != null
-                && branch.getBranchType() != null
-                && "WAREHOUSE".equalsIgnoreCase(branch.getBranchType());
     }
 
     private List<BranchWithRealDistance> prioritizeShippingReadyBranches(List<BranchWithRealDistance> branches) {

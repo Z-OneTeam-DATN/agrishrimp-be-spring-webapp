@@ -146,6 +146,25 @@ public class PurchaseRequestService {
         return "Tu dong tao yeu cau mua bo sung cho " + orderCode + " de cap cho " + branchName;
     }
 
+    private boolean isMissingResendApiKey(BadRequestException exception) {
+        return exception != null
+                && exception.getMessage() != null
+                && exception.getMessage().contains("RESEND_API_KEY");
+    }
+
+    private String appendOperationalNote(String baseNote, String extraNote) {
+        if (extraNote == null || extraNote.isBlank()) {
+            return baseNote;
+        }
+        if (baseNote == null || baseNote.isBlank()) {
+            return extraNote;
+        }
+        if (baseNote.contains(extraNote)) {
+            return baseNote;
+        }
+        return baseNote + "\n" + extraNote;
+    }
+
     private boolean enforceMainWarehousePurchaseRequests() {
         return true;
     }
@@ -348,10 +367,20 @@ public class PurchaseRequestService {
             purchaseRequest = purchaseRequestRepository.save(purchaseRequest);
             if (purchaseRequest.getStatus() == PurchaseRequestStatus.APPROVED
                     && supplier.getEmail() != null && !supplier.getEmail().isBlank()) {
-                emailService.sendPurchaseRequestToSupplier(purchaseRequest);
-                purchaseRequest.setStatus(PurchaseRequestStatus.SENT_TO_SUPPLIER);
-                purchaseRequest.setSentToSupplierAt(LocalDateTime.now());
-                purchaseRequest = purchaseRequestRepository.save(purchaseRequest);
+                try {
+                    emailService.sendPurchaseRequestToSupplier(purchaseRequest);
+                    purchaseRequest.setStatus(PurchaseRequestStatus.SENT_TO_SUPPLIER);
+                    purchaseRequest.setSentToSupplierAt(LocalDateTime.now());
+                    purchaseRequest = purchaseRequestRepository.save(purchaseRequest);
+                } catch (BadRequestException ex) {
+                    if (!isMissingResendApiKey(ex)) {
+                        throw ex;
+                    }
+                    purchaseRequest.setNote(appendOperationalNote(
+                            purchaseRequest.getNote(),
+                            "Auto-approved nhung chua gui NCC vi thieu cau hinh RESEND_API_KEY."));
+                    purchaseRequest = purchaseRequestRepository.save(purchaseRequest);
+                }
             }
 
             createdRequests.add(purchaseRequest);
