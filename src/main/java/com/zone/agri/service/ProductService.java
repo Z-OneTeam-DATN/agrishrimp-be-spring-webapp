@@ -582,8 +582,7 @@ public class ProductService {
                 .stream()
                 .sorted(Comparator.comparing(ProductImage::getId, Comparator.nullsLast(Long::compareTo)))
                 .map(ProductImage::getImageUrl)
-                .filter(Objects::nonNull)
-                .filter(url -> !url.isBlank())
+                .flatMap(url -> splitIndexImageUrls(url).stream())
                 .findFirst();
 
         if (mainImageUrl.isPresent()) {
@@ -595,8 +594,7 @@ public class ProductService {
                 .stream()
                 .sorted(Comparator.comparing(ProductVariant::getId, Comparator.nullsLast(Long::compareTo)))
                 .map(ProductVariant::getImageUrl)
-                .filter(Objects::nonNull)
-                .filter(url -> !url.isBlank())
+                .flatMap(url -> splitIndexImageUrls(url).stream())
                 .findFirst();
     }
 
@@ -611,19 +609,28 @@ public class ProductService {
                 .orElse(Collections.emptySet())
                 .stream()
                 .map(ProductImage::getImageUrl)
-                .filter(Objects::nonNull)
-                .filter(url -> !url.isBlank())
+                .flatMap(url -> splitIndexImageUrls(url).stream())
                 .forEach(imageUrls::add);
 
         Optional.ofNullable(product.getVariants())
                 .orElse(Collections.emptySet())
                 .stream()
                 .map(ProductVariant::getImageUrl)
-                .filter(Objects::nonNull)
-                .filter(url -> !url.isBlank())
+                .flatMap(url -> splitIndexImageUrls(url).stream())
                 .forEach(imageUrls::add);
 
         return imageUrls;
+    }
+
+    private List<String> splitIndexImageUrls(String rawUrl) {
+        if (rawUrl == null || rawUrl.isBlank()) {
+            return Collections.emptyList();
+        }
+
+        return Arrays.stream(rawUrl.split(","))
+                .map(String::trim)
+                .filter(url -> !url.isBlank())
+                .collect(Collectors.toList());
     }
 
     @SuppressWarnings("all")
