@@ -97,6 +97,22 @@ public interface OrderRepository extends JpaRepository<Order, Long>, JpaSpecific
 
        List<Order> findByUserIdOrderByCreatedAtDesc(Long userId);
 
+       @Query("""
+              SELECT COALESCE(pv.imageUrl, pi.imageUrl)
+              FROM Order o
+              JOIN o.orderItems oi
+              JOIN oi.productVariant pv
+              JOIN pv.product p
+              LEFT JOIN p.productImages pi
+              WHERE o.id = :orderId
+                AND (
+                  (pv.imageUrl IS NOT NULL AND pv.imageUrl <> '')
+                  OR (pi.imageUrl IS NOT NULL AND pi.imageUrl <> '')
+                )
+              ORDER BY oi.id ASC, pi.id ASC
+              """)
+       List<String> findDisplayImageCandidatesByOrderId(@Param("orderId") Long orderId, Pageable pageable);
+
        List<Order> findByStatusAndCreatedAtBefore(OrderStatus status, LocalDateTime createdAt);
 
        List<Order> findByStatusAndUpdatedAtBefore(OrderStatus status, LocalDateTime updatedAt);

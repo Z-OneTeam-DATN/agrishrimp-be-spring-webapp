@@ -11,6 +11,7 @@ import com.zone.agri.entity.Voucher;
 import com.zone.agri.entity.enums.NotificationType;
 import com.zone.agri.entity.enums.OrderStatus;
 import com.zone.agri.repository.NotificationRepository;
+import com.zone.agri.repository.OrderRepository;
 import com.zone.agri.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -30,12 +31,11 @@ import java.util.Set;
 public class NotificationService {
 
     private static final Set<OrderStatus> CUSTOMER_NOTIFIABLE_STATUSES = EnumSet.of(
-            OrderStatus.PENDING, OrderStatus.AWAITING_PAYMENT, OrderStatus.AWAITING_REPLENISHMENT,
-            OrderStatus.CONFIRMED, OrderStatus.PROCESSING, OrderStatus.READY_FOR_PICKUP,
-            OrderStatus.SHIPPING, OrderStatus.RECEIVED, OrderStatus.COMPLETED,
-            OrderStatus.CANCELLED, OrderStatus.RETURNED);
+            OrderStatus.PENDING, OrderStatus.CONFIRMED, OrderStatus.SHIPPING,
+            OrderStatus.COMPLETED, OrderStatus.CANCELLED, OrderStatus.RETURNED);
 
     private final NotificationRepository notificationRepository;
+    private final OrderRepository orderRepository;
     private final UserRepository userRepository;
     private final SimpMessagingTemplate messagingTemplate;
     private final WebPushService webPushService;
@@ -85,23 +85,25 @@ public class NotificationService {
             return;
         }
 
-        User customer = order.getUser();
-        String title = "Đơn hàng " + order.getCode() + " đã được ghi nhận";
-        String content = "Cảm ơn bạn đã đặt hàng. AgriShrimp sẽ xử lý đơn trong thời gian sớm nhất.";
+        if (CUSTOMER_NOTIFIABLE_STATUSES.contains(order.getStatus())) {
+            User customer = order.getUser();
+            String title = "Đơn hàng " + order.getCode() + " đã được ghi nhận";
+            String content = "Cảm ơn bạn đã đặt hàng. AgriShrimp sẽ xử lý đơn trong thời gian sớm nhất.";
 
-        try {
-            sendNotification(customer.getId(), title, content, NotificationType.ORDER, order.getId());
-        } catch (Exception e) {
-            log.warn("[Notify] Failed to send order-created notification for order {}: {}",
-                    order.getId(), e.getMessage());
-        }
-
-        if (customer.getEmail() != null && !customer.getEmail().isBlank()) {
             try {
-                emailService.sendOrderPlacedEmail(order);
+                sendNotification(customer.getId(), title, content, NotificationType.ORDER, order.getId());
             } catch (Exception e) {
-                log.warn("[Email] Failed to send order-created email for order {}: {}",
+                log.warn("[Notify] Failed to send order-created notification for order {}: {}",
                         order.getId(), e.getMessage());
+            }
+
+            if (customer.getEmail() != null && !customer.getEmail().isBlank()) {
+                try {
+                    emailService.sendOrderPlacedEmail(order);
+                } catch (Exception e) {
+                    log.warn("[Email] Failed to send order-created email for order {}: {}",
+                            order.getId(), e.getMessage());
+                }
             }
         }
 
@@ -291,7 +293,28 @@ public class NotificationService {
                 .notificationType(n.getNotificationType())
                 .isRead(n.getIsRead())
                 .referenceId(n.getReferenceId())
+                .imageUrl(resolveNotificationImageUrl(n))
                 .createdAt(n.getCreatedAt())
                 .build();
+    }
+
+    private String resolveNotificationImageUrl(Notification notification) {
+        if (notification == null
+                || notification.getNotificationType() != NotificationType.ORDER
+                || notification.getReferenceId() == null) {
+            return null;
+        }
+
+        return orderRepository.findDisplayImageCandidatesByOrderId(notification.getReferenceId(), PageRequest.of(0, 1))
+                .stream()
+                .filter(url -> url != null && !url.isBlank())
+                .map(this::firstImageUrl)
+                .findFirst()
+                .orElse(null);
+    }
+
+    private String firstImageUrl(String imageUrl) {
+        String first = imageUrl.split(",")[0].trim();
+        return first.isBlank() ? null : first;
     }
 }

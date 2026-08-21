@@ -6,6 +6,10 @@ import com.resend.services.emails.model.CreateEmailOptions;
 import com.resend.services.emails.model.CreateEmailResponse;
 import com.zone.agri.entity.BlogPost;
 import com.zone.agri.entity.Order;
+import com.zone.agri.entity.OrderItem;
+import com.zone.agri.entity.Product;
+import com.zone.agri.entity.ProductImage;
+import com.zone.agri.entity.ProductVariant;
 import com.zone.agri.entity.PurchaseRequest;
 import com.zone.agri.entity.Voucher;
 import com.zone.agri.entity.enums.OrderStatus;
@@ -20,6 +24,8 @@ import lombok.extern.slf4j.Slf4j;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.text.NumberFormat;
+import java.time.format.DateTimeFormatter;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 
@@ -38,6 +44,9 @@ public class EmailService {
 
     @Value("${resend.from-name:AgriShrimp}")
     private String fromName;
+
+    @Value("${app.web-base-url:https://agrishrimp.io.vn}")
+    private String webBaseUrl;
 
     // ─────────────────────────────────────────────────────────────────────────
     // Public API
@@ -272,65 +281,36 @@ public class EmailService {
             address = "Chưa cập nhật";
         }
 
+        String orderUrl = buildWebUrl(order.getId() != null ? "/orders/" + order.getId() : "/orders/list");
+        String placedAt = order.getCreatedAt() != null
+                ? order.getCreatedAt().format(DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm"))
+                : "Chưa cập nhật";
+
         String paymentNote = "";
         if (order.getPaymentMethod() == PaymentMethod.PAYOS
                 && order.getPayosCheckoutUrl() != null
                 && !order.getPayosCheckoutUrl().isBlank()) {
             paymentNote = """
-                    <div style="background:#fff7ed;border-left:4px solid #f97316;border-radius:8px;padding:14px 18px;margin:16px 0;">
-                        <p style="margin:0;font-size:14px;color:#9a3412;line-height:1.7;">
-                            Đơn hàng đang chờ thanh toán PayOS. Bạn có thể mở lại đơn hàng trong tài khoản để tiếp tục thanh toán.
-                        </p>
-                    </div>
+                    <tr>
+                        <td style="padding:0 20px 18px;">
+                            <table width="100%%" cellpadding="0" cellspacing="0" style="background:#fff7ed;border-left:4px solid #f97316;border-radius:6px;">
+                                <tr>
+                                    <td style="padding:12px 14px;font-size:13px;color:#9a3412;line-height:1.6;">
+                                        Đơn hàng đang chờ thanh toán PayOS. Bạn có thể mở lại đơn hàng trên web để tiếp tục thanh toán.
+                                    </td>
+                                </tr>
+                            </table>
+                        </td>
+                    </tr>
                     """;
         }
 
         String subject = "[AgriShrimp] Đã ghi nhận đơn hàng %s".formatted(orderCode);
-        String body = """
-                <p style="font-size:16px;color:#374151;line-height:1.8;">
-                    Xin chào <strong>%s</strong>,
-                </p>
-                <p style="font-size:15px;color:#374151;line-height:1.8;">
-                    AgriShrimp đã ghi nhận đơn hàng <strong>%s</strong> của bạn. Chúng tôi sẽ xử lý và cập nhật trạng thái đơn hàng trong thời gian sớm nhất.
-                </p>
-
-                <div style="margin:18px 0;">
-                    <table style="width:100%%;border-collapse:collapse;border:1px solid #d1d5db;">
-                        <tr>
-                            <td style="padding:10px 12px;border:1px solid #d1d5db;background:#f8fafc;font-size:13px;color:#374151;width:34%%;font-weight:600;">Mã đơn hàng</td>
-                            <td style="padding:10px 12px;border:1px solid #d1d5db;font-size:14px;color:#1e40af;font-weight:bold;">%s</td>
-                        </tr>
-                        <tr>
-                            <td style="padding:10px 12px;border:1px solid #d1d5db;background:#f8fafc;font-size:13px;color:#374151;font-weight:600;">Trạng thái đơn</td>
-                            <td style="padding:10px 12px;border:1px solid #d1d5db;font-size:14px;color:#111827;">%s</td>
-                        </tr>
-                        <tr>
-                            <td style="padding:10px 12px;border:1px solid #d1d5db;background:#f8fafc;font-size:13px;color:#374151;font-weight:600;">Thanh toán</td>
-                            <td style="padding:10px 12px;border:1px solid #d1d5db;font-size:14px;color:#111827;">%s - %s</td>
-                        </tr>
-                        <tr>
-                            <td style="padding:10px 12px;border:1px solid #d1d5db;background:#f8fafc;font-size:13px;color:#374151;font-weight:600;">Người nhận</td>
-                            <td style="padding:10px 12px;border:1px solid #d1d5db;font-size:14px;color:#111827;">%s - %s</td>
-                        </tr>
-                        <tr>
-                            <td style="padding:10px 12px;border:1px solid #d1d5db;background:#f8fafc;font-size:13px;color:#374151;font-weight:600;">Địa chỉ giao hàng</td>
-                            <td style="padding:10px 12px;border:1px solid #d1d5db;font-size:14px;color:#111827;">%s</td>
-                        </tr>
-                        <tr>
-                            <td style="padding:10px 12px;border:1px solid #d1d5db;background:#f8fafc;font-size:13px;color:#374151;font-weight:600;">Tổng thanh toán</td>
-                            <td style="padding:10px 12px;border:1px solid #d1d5db;font-size:15px;color:#dc2626;font-weight:bold;">%s</td>
-                        </tr>
-                    </table>
-                </div>
-
-                %s
-
-                <p style="font-size:14px;color:#6b7280;line-height:1.7;">
-                    Bạn có thể theo dõi trạng thái mới nhất trong mục "Đơn hàng của tôi" sau khi đăng nhập.
-                </p>
-                """.formatted(
+        String htmlContent = buildOrderPlacedEmailTemplate(
+                "Đơn hàng đã được ghi nhận",
+                "AgriShrimp đã nhận đơn <strong style=\"color:#1f2329;\">%s</strong>. Bạn có thể theo dõi trạng thái và xem chi tiết hình ảnh sản phẩm ngay trên web.".formatted(escapeEmailText(orderCode)),
+                "Xem chi tiết đơn hàng trên web",
                 escapeEmailText(name),
-                escapeEmailText(orderCode),
                 escapeEmailText(orderCode),
                 escapeEmailText(statusLabel),
                 escapeEmailText(paymentMethodLabel),
@@ -338,38 +318,68 @@ public class EmailService {
                 escapeEmailText(receiverName),
                 escapeEmailText(receiverPhone),
                 escapeEmailText(address),
+                escapeEmailText(placedAt),
+                formatCurrency(order.getTotalAmount()),
+                formatCurrency(order.getTotalShippingFee()),
+                formatCurrency(order.getDiscountAmount()),
                 formatCurrency(order.getFinalAmount()),
-                paymentNote
+                buildOrderItemRows(order),
+                paymentNote,
+                orderUrl
         );
-
-        String htmlContent = buildEmailTemplate("Đơn Hàng Đã Được Ghi Nhận", body, "Xem đơn hàng của tôi →");
         sendEmail(toEmail, subject, htmlContent);
     }
 
     public void sendOrderStatusChangeEmail(Order order, OrderStatus newStatus) {
         String toEmail = order.getUser().getEmail();
         String name = order.getUser().getFullName();
+        String orderCode = order.getCode();
         String statusLabel = orderStatusLabel(newStatus);
+        String paymentMethodLabel = paymentMethodLabel(order.getPaymentMethod());
+        String paymentStatusLabel = paymentStatusLabel(order.getPaymentStatus());
+        String receiverName = order.getReceiverName() != null && !order.getReceiverName().isBlank()
+                ? order.getReceiverName()
+                : name;
+        String receiverPhone = order.getReceiverPhone() != null && !order.getReceiverPhone().isBlank()
+                ? order.getReceiverPhone()
+                : "Chưa cập nhật";
+        String address = order.getDeliveryAddress() != null && !order.getDeliveryAddress().isBlank()
+                ? order.getDeliveryAddress()
+                : order.getShippingAddress();
+        if (address == null || address.isBlank()) {
+            address = "Chưa cập nhật";
+        }
 
-        String subject = "[AgriShrimp] Đơn hàng %s: %s".formatted(order.getCode(), statusLabel);
-        String body = """
-                <p style="font-size:16px;color:#374151;line-height:1.8;">
-                    Xin chào <strong>%s</strong>,
-                </p>
-                <p style="font-size:15px;color:#374151;line-height:1.8;">
-                    Đơn hàng <strong>%s</strong> của bạn vừa được cập nhật trạng thái:
-                </p>
+        String orderUrl = buildWebUrl(order.getId() != null ? "/orders/" + order.getId() : "/orders/list");
+        String placedAt = order.getCreatedAt() != null
+                ? order.getCreatedAt().format(DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm"))
+                : "Chưa cập nhật";
 
-                <div style="text-align:center;margin:24px 0;">
-                    <span style="display:inline-block;background:#eaf2ff;color:#1e40af;font-size:20px;font-weight:bold;padding:10px 24px;border-radius:50px;">%s</span>
-                </div>
-
-                <p style="font-size:14px;color:#6b7280;line-height:1.7;">
-                    Bạn có thể xem chi tiết đơn hàng và lịch sử cập nhật trong mục "Đơn hàng của tôi" sau khi đăng nhập.
-                </p>
-                """.formatted(name, order.getCode(), statusLabel);
-
-        String htmlContent = buildEmailTemplate("Cập Nhật Đơn Hàng", body, "Xem đơn hàng của tôi →");
+        String subject = "[AgriShrimp] Đơn hàng %s: %s".formatted(orderCode, statusLabel);
+        String htmlContent = buildOrderPlacedEmailTemplate(
+                orderStatusEmailTitle(newStatus),
+                "Đơn hàng <strong style=\"color:#1f2329;\">%s</strong> của bạn vừa được cập nhật sang trạng thái <strong style=\"color:#1f2329;\">%s</strong>. Bạn có thể mở web để xem chi tiết và hình ảnh sản phẩm.".formatted(
+                        escapeEmailText(orderCode),
+                        escapeEmailText(statusLabel)
+                ),
+                "Xem chi tiết thông tin theo dõi",
+                escapeEmailText(name),
+                escapeEmailText(orderCode),
+                escapeEmailText(statusLabel),
+                escapeEmailText(paymentMethodLabel),
+                escapeEmailText(paymentStatusLabel),
+                escapeEmailText(receiverName),
+                escapeEmailText(receiverPhone),
+                escapeEmailText(address),
+                escapeEmailText(placedAt),
+                formatCurrency(order.getTotalAmount()),
+                formatCurrency(order.getTotalShippingFee()),
+                formatCurrency(order.getDiscountAmount()),
+                formatCurrency(order.getFinalAmount()),
+                buildOrderItemRows(order),
+                "",
+                orderUrl
+        );
         sendEmail(toEmail, subject, htmlContent);
     }
 
@@ -540,6 +550,337 @@ public class EmailService {
 
         String htmlContent = buildEmailTemplate("Bài Giá Tôm Chờ Duyệt", body, safeUrl, "Mở bài trong admin");
         sendEmail(toEmail, subject, htmlContent);
+    }
+
+    private String buildOrderPlacedEmailTemplate(
+            String emailTitle,
+            String emailIntro,
+            String ctaText,
+            String customerName,
+            String orderCode,
+            String statusLabel,
+            String paymentMethodLabel,
+            String paymentStatusLabel,
+            String receiverName,
+            String receiverPhone,
+            String address,
+            String placedAt,
+            String subtotal,
+            String shippingFee,
+            String discountAmount,
+            String finalAmount,
+            String itemRows,
+            String paymentNote,
+            String orderUrl) {
+        return """
+                <!DOCTYPE html>
+                <html lang="vi">
+                <head>
+                    <meta charset="UTF-8"/>
+                    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+                    <title>AgriShrimp Shop</title>
+                </head>
+                <body style="margin:0;padding:0;background:#ffffff;font-family:Arial,'Segoe UI',sans-serif;color:#1f2329;">
+                    <table width="100%%" cellpadding="0" cellspacing="0" style="width:100%%;background:#ffffff;">
+                        <tr>
+                            <td align="center" style="padding:24px 10px;">
+                                <table width="430" cellpadding="0" cellspacing="0" style="width:100%%;max-width:430px;background:#ffffff;border-collapse:collapse;">
+                                    <tr>
+                                        <td style="background:#050505;padding:22px 20px 16px;">
+                                            <table width="100%%" cellpadding="0" cellspacing="0">
+                                                <tr>
+                                                    <td style="vertical-align:middle;">
+                                                        <img src="%s" width="38" height="38" alt="AgriShrimp" style="display:inline-block;vertical-align:middle;border-radius:8px;margin-right:10px;"/>
+                                                        <span style="display:inline-block;vertical-align:middle;color:#ffffff;font-size:25px;font-weight:800;line-height:1;">AgriShrimp<br/><span style="font-size:20px;font-weight:700;">Shop</span></span>
+                                                    </td>
+                                                    <td width="86" align="right" style="vertical-align:top;">
+                                                        <table cellpadding="0" cellspacing="0" width="86">
+                                                            <tr>
+                                                                <td style="height:34px;background:#78eee8;border-radius:0 0 0 42px;"></td>
+                                                            </tr>
+                                                            <tr>
+                                                                <td style="height:28px;background:#ef4866;border-radius:42px 0 0 0;"></td>
+                                                            </tr>
+                                                        </table>
+                                                    </td>
+                                                </tr>
+                                            </table>
+                                        </td>
+                                    </tr>
+                                    <tr>
+                                        <td style="background:#f5f5f5;border-bottom:1px solid #eeeeee;">
+                                            <table width="100%%" cellpadding="0" cellspacing="0">
+                                                <tr>
+                                                    <td align="center" style="width:50%%;padding:13px 8px;font-size:14px;font-weight:700;color:#111111;">Đơn hàng</td>
+                                                    <td align="center" style="width:1px;color:#cfcfcf;font-size:13px;">|</td>
+                                                    <td align="center" style="width:50%%;padding:13px 8px;font-size:14px;font-weight:700;color:#111111;">Giỏ hàng</td>
+                                                </tr>
+                                            </table>
+                                        </td>
+                                    </tr>
+                                    <tr>
+                                        <td style="padding:30px 20px 10px;">
+                                            <h1 style="margin:0 0 16px;font-size:29px;line-height:1.35;color:#1f2329;font-weight:800;">
+                                                %s
+                                            </h1>
+                                            <p style="margin:0 0 14px;font-size:13px;line-height:1.7;color:#5f6368;">Xin chào %s!</p>
+                                            <p style="margin:0 0 14px;font-size:13px;line-height:1.7;color:#5f6368;">
+                                                %s
+                                            </p>
+                                            <p style="margin:0 0 18px;font-size:13px;line-height:1.7;color:#5f6368;">Đội ngũ AgriShrimp Shop</p>
+                                            <table width="100%%" cellpadding="0" cellspacing="0">
+                                                <tr>
+                                                    <td align="center" style="background:#ef4866;border-radius:6px;">
+                                                        <a href="%s" style="display:block;padding:14px 16px;color:#ffffff;text-decoration:none;font-size:14px;font-weight:800;">
+                                                            %s
+                                                        </a>
+                                                    </td>
+                                                </tr>
+                                            </table>
+                                        </td>
+                                    </tr>
+                                    <tr>
+                                        <td style="height:10px;border-bottom:8px solid #f5f5f5;"></td>
+                                    </tr>
+                                    <tr>
+                                        <td style="padding:22px 20px 8px;">
+                                            <p style="margin:0 0 14px;font-size:15px;color:#111111;font-weight:800;">AgriShrimp Store</p>
+                                            %s
+                                            <table width="100%%" cellpadding="0" cellspacing="0" style="margin-top:12px;">
+                                                <tr>
+                                                    <td style="padding:6px 0;font-size:13px;color:#777777;">ID đơn hàng</td>
+                                                    <td align="right" style="padding:6px 0;font-size:13px;color:#111111;font-weight:600;">%s</td>
+                                                </tr>
+                                                <tr>
+                                                    <td style="padding:6px 0;font-size:13px;color:#777777;">Ngày đặt hàng</td>
+                                                    <td align="right" style="padding:6px 0;font-size:13px;color:#111111;">%s</td>
+                                                </tr>
+                                                <tr>
+                                                    <td style="padding:6px 0;font-size:13px;color:#777777;">Trạng thái</td>
+                                                    <td align="right" style="padding:6px 0;font-size:13px;color:#111111;">%s</td>
+                                                </tr>
+                                                <tr>
+                                                    <td style="padding:6px 0;font-size:13px;color:#777777;">Thanh toán</td>
+                                                    <td align="right" style="padding:6px 0;font-size:13px;color:#111111;">%s - %s</td>
+                                                </tr>
+                                            </table>
+                                        </td>
+                                    </tr>
+                                    %s
+                                    <tr>
+                                        <td style="height:10px;border-bottom:8px solid #f5f5f5;"></td>
+                                    </tr>
+                                    <tr>
+                                        <td style="padding:20px;">
+                                            <h2 style="margin:0 0 16px;font-size:16px;color:#111111;font-weight:800;">Tóm tắt kiện hàng</h2>
+                                            <table width="100%%" cellpadding="0" cellspacing="0">
+                                                <tr>
+                                                    <td style="padding:6px 0;font-size:14px;color:#737373;">Tổng phụ</td>
+                                                    <td align="right" style="padding:6px 0;font-size:14px;color:#111111;">%s</td>
+                                                </tr>
+                                                <tr>
+                                                    <td style="padding:6px 0;font-size:14px;color:#737373;">Vận chuyển</td>
+                                                    <td align="right" style="padding:6px 0;font-size:14px;color:#111111;">%s</td>
+                                                </tr>
+                                                <tr>
+                                                    <td style="padding:6px 0;font-size:14px;color:#737373;">Giảm giá</td>
+                                                    <td align="right" style="padding:6px 0;font-size:14px;color:#111111;">- %s</td>
+                                                </tr>
+                                                <tr>
+                                                    <td style="padding:8px 0 0;font-size:15px;color:#111111;font-weight:800;">Tổng thanh toán</td>
+                                                    <td align="right" style="padding:8px 0 0;font-size:15px;color:#111111;font-weight:800;">%s</td>
+                                                </tr>
+                                            </table>
+                                        </td>
+                                    </tr>
+                                    <tr>
+                                        <td style="height:10px;border-bottom:8px solid #f5f5f5;"></td>
+                                    </tr>
+                                    <tr>
+                                        <td style="padding:20px;">
+                                            <h2 style="margin:0 0 14px;font-size:16px;color:#111111;font-weight:800;">Địa chỉ vận chuyển</h2>
+                                            <p style="margin:0 0 8px;font-size:14px;line-height:1.6;color:#4a4a4a;">%s</p>
+                                            <p style="margin:0 0 8px;font-size:14px;line-height:1.6;color:#4a4a4a;">%s</p>
+                                            <p style="margin:0;font-size:14px;line-height:1.6;color:#4a4a4a;">%s</p>
+                                        </td>
+                                    </tr>
+                                    <tr>
+                                        <td style="padding:6px 20px 22px;">
+                                            <h2 style="margin:0 0 12px;font-size:16px;color:#111111;font-weight:800;">Bạn gặp vấn đề?</h2>
+                                            <table width="100%%" cellpadding="0" cellspacing="0">
+                                                <tr>
+                                                    <td style="padding:10px 0;font-size:13px;color:#111111;">Xem tất cả vấn đề</td>
+                                                    <td align="right" style="font-size:20px;color:#777777;">&gt;</td>
+                                                </tr>
+                                                <tr>
+                                                    <td colspan="2" align="center" style="border:1px solid #dddddd;border-radius:5px;">
+                                                        <a href="%s" style="display:block;padding:12px;color:#111111;text-decoration:none;font-size:14px;font-weight:700;">Truy cập Trung tâm trợ giúp</a>
+                                                    </td>
+                                                </tr>
+                                            </table>
+                                        </td>
+                                    </tr>
+                                    <tr>
+                                        <td style="background:#f5f5f5;padding:22px 20px;text-align:center;">
+                                            <p style="margin:0 0 14px;font-size:11px;line-height:1.6;color:#888888;">
+                                                Thông tin đơn hàng phản ánh dữ liệu tại thời điểm email được gửi và có thể thay đổi khi hệ thống cập nhật.
+                                            </p>
+                                            <p style="margin:0 0 14px;font-size:11px;line-height:1.7;color:#777777;">
+                                                Tin nhắn này được gửi tới bạn vì có hoạt động mua hàng gần đây trên AgriShrimp Shop.
+                                            </p>
+                                            <p style="margin:0;font-size:18px;font-weight:800;color:#111111;">AgriShrimp Shop</p>
+                                        </td>
+                                    </tr>
+                                </table>
+                            </td>
+                        </tr>
+                    </table>
+                </body>
+                </html>
+                """.formatted(
+                LOGO_URL,
+                emailTitle,
+                customerName,
+                emailIntro,
+                escapeEmailText(orderUrl),
+                ctaText,
+                itemRows,
+                orderCode,
+                placedAt,
+                statusLabel,
+                paymentMethodLabel,
+                paymentStatusLabel,
+                paymentNote,
+                subtotal,
+                shippingFee,
+                discountAmount,
+                finalAmount,
+                receiverName,
+                receiverPhone,
+                address,
+                escapeEmailText(buildWebUrl("/contact"))
+        );
+    }
+
+    private String buildOrderItemRows(Order order) {
+        if (order.getOrderItems() == null || order.getOrderItems().isEmpty()) {
+            return """
+                    <table width="100%%" cellpadding="0" cellspacing="0">
+                        <tr>
+                            <td style="padding:10px 0;font-size:13px;color:#777777;">Chưa có thông tin sản phẩm trong email này.</td>
+                        </tr>
+                    </table>
+                    """;
+        }
+
+        return order.getOrderItems().stream()
+                .map(this::buildOrderItemRow)
+                .reduce("", String::concat);
+    }
+
+    private String buildOrderItemRow(OrderItem item) {
+        ProductVariant variant = item.getProductVariant();
+        Product product = variant != null ? variant.getProduct() : null;
+        String productName = product != null && product.getName() != null && !product.getName().isBlank()
+                ? product.getName()
+                : "Sản phẩm AgriShrimp";
+        String sku = variant != null && variant.getSku() != null && !variant.getSku().isBlank()
+                ? variant.getSku()
+                : "SKU đang cập nhật";
+        String imageUrl = firstImageUrl(variant, product);
+        String productUrl = productDetailUrl(product);
+        int quantity = item.getQuantity() != null ? item.getQuantity() : 0;
+        BigDecimal unitPrice = item.getPrice() != null ? item.getPrice() : BigDecimal.ZERO;
+        BigDecimal lineTotal = unitPrice.multiply(BigDecimal.valueOf(Math.max(quantity, 0L)));
+
+        return """
+                <table width="100%%" cellpadding="0" cellspacing="0" style="margin-bottom:14px;">
+                    <tr>
+                        <td width="92" valign="top" style="padding-right:12px;">
+                            <a href="%s" style="text-decoration:none;">
+                                <img src="%s" width="82" height="82" alt="%s" style="display:block;width:82px;height:82px;object-fit:cover;border-radius:6px;border:1px solid #eeeeee;background:#f4f4f4;"/>
+                            </a>
+                        </td>
+                        <td valign="top">
+                            <a href="%s" style="text-decoration:none;color:#111111;">
+                                <p style="margin:0 0 5px;font-size:14px;line-height:1.35;color:#111111;font-weight:700;">%s</p>
+                            </a>
+                            <p style="margin:0 0 12px;font-size:12px;line-height:1.4;color:#777777;">%s</p>
+                            <table width="100%%" cellpadding="0" cellspacing="0">
+                                <tr>
+                                    <td style="font-size:13px;color:#111111;font-weight:800;">%s</td>
+                                    <td align="right" style="font-size:13px;color:#111111;font-weight:700;">x %d</td>
+                                </tr>
+                            </table>
+                        </td>
+                    </tr>
+                </table>
+                """.formatted(
+                escapeEmailText(productUrl),
+                escapeEmailText(imageUrl),
+                escapeEmailText(productName),
+                escapeEmailText(productUrl),
+                escapeEmailText(productName),
+                escapeEmailText(sku),
+                formatCurrency(lineTotal),
+                quantity
+        );
+    }
+
+    private String firstImageUrl(ProductVariant variant, Product product) {
+        if (variant != null && variant.getImageUrl() != null && !variant.getImageUrl().isBlank()) {
+            return firstCommaSeparatedValue(variant.getImageUrl());
+        }
+        if (product != null && product.getProductImages() != null) {
+            return product.getProductImages().stream()
+                    .filter(image -> image.getImageUrl() != null && !image.getImageUrl().isBlank())
+                    .sorted(Comparator.comparing(ProductImage::getId, Comparator.nullsLast(Long::compareTo)))
+                    .map(ProductImage::getImageUrl)
+                    .findFirst()
+                    .orElse(LOGO_URL);
+        }
+        return LOGO_URL;
+    }
+
+    private String firstCommaSeparatedValue(String value) {
+        String first = value.split(",")[0].trim();
+        return first.isBlank() ? LOGO_URL : first;
+    }
+
+    private String productDetailUrl(Product product) {
+        if (product == null) {
+            return buildWebUrl("/san-pham");
+        }
+        if (product.getSlug() != null && !product.getSlug().isBlank()) {
+            return buildWebUrl("/san-pham/" + product.getSlug());
+        }
+        return product.getId() != null ? buildWebUrl("/product/" + product.getId()) : buildWebUrl("/san-pham");
+    }
+
+    private String buildWebUrl(String path) {
+        String base = webBaseUrl == null || webBaseUrl.isBlank() ? "https://agrishrimp.io.vn" : webBaseUrl.trim();
+        while (base.endsWith("/")) {
+            base = base.substring(0, base.length() - 1);
+        }
+        if (path == null || path.isBlank()) {
+            return base;
+        }
+        return path.startsWith("/") ? base + path : base + "/" + path;
+    }
+
+    private String orderStatusEmailTitle(OrderStatus status) {
+        if (status == null) {
+            return "Đơn hàng đã được cập nhật";
+        }
+        return switch (status) {
+            case PENDING -> "Đơn hàng đang chờ xác nhận";
+            case CONFIRMED -> "Đơn hàng đã được xác nhận";
+            case SHIPPING -> "Đơn hàng đang được vận chuyển";
+            case COMPLETED -> "Đơn hàng đã hoàn tất";
+            case CANCELLED -> "Đơn hàng đã được huỷ";
+            case RETURNED -> "Đơn hàng đã được hoàn trả";
+            default -> "Đơn hàng đã được cập nhật";
+        };
     }
 
     private String orderStatusLabel(OrderStatus status) {
