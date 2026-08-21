@@ -9,6 +9,7 @@ import com.zone.agri.entity.Voucher;
 import com.zone.agri.entity.enums.NotificationType;
 import com.zone.agri.entity.enums.OrderStatus;
 import com.zone.agri.repository.NotificationRepository;
+import com.zone.agri.repository.OrderRepository;
 import com.zone.agri.repository.UserRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -46,6 +47,8 @@ class NotificationServiceTest {
     @Mock
     private NotificationRepository notificationRepository;
     @Mock
+    private OrderRepository orderRepository;
+    @Mock
     private UserRepository userRepository;
     @Mock
     private SimpMessagingTemplate messagingTemplate;
@@ -61,7 +64,7 @@ class NotificationServiceTest {
 
     @BeforeEach
     void setUp() {
-        notificationService = new NotificationService(notificationRepository, userRepository, messagingTemplate,
+        notificationService = new NotificationService(notificationRepository, orderRepository, userRepository, messagingTemplate,
                 webPushService, emailService);
 
         customer = User.builder().id(1L).email("customer@example.com").fullName("Khach Hang").build();
