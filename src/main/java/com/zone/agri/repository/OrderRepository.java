@@ -40,6 +40,16 @@ public interface OrderRepository extends JpaRepository<Order, Long>, JpaSpecific
 
        java.util.Optional<Order> findByCode(String code);
 
+       @Query("""
+                     SELECT DISTINCT o
+                     FROM Order o
+                     LEFT JOIN FETCH o.branch
+                     LEFT JOIN FETCH o.subOrders subOrder
+                     LEFT JOIN FETCH subOrder.branch
+                     WHERE o.id = :orderId
+                     """)
+       java.util.Optional<Order> findByIdWithRealtimeContext(@Param("orderId") Long orderId);
+
        boolean existsByStatusIn(Collection<OrderStatus> statuses);
 
        @Query("SELECT COUNT(o) > 0 FROM Order o JOIN o.orderItems item WHERE o.status IN :statuses AND item.productVariant.product.id = :productId")

@@ -30,6 +30,7 @@ public class AdminOrderWorkflowService {
     private final OrderRepository orderRepository;
     private final OrderInventoryReservationService orderInventoryReservationService;
     private final NotificationService notificationService;
+    private final OrderRealtimePublisher orderRealtimePublisher;
 
     @Transactional
     public void approvePackingAndShip(Long orderId) {
@@ -63,5 +64,6 @@ public class AdminOrderWorkflowService {
         order.setStatus(OrderStatus.SHIPPING);
         orderRepository.save(order);
         notificationService.notifyOrderStatusChange(order, currentStatus, OrderStatus.SHIPPING);
+        orderRealtimePublisher.publishOrderChangedAfterCommit(order.getId(), "ORDER_UPDATED");
     }
 }
