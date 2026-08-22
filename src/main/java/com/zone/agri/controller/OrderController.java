@@ -15,6 +15,7 @@ import com.zone.agri.service.OrderService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -22,6 +23,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.web.PageableDefault;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -37,6 +39,10 @@ import java.util.Map;
 @SecurityRequirement(name = "bearerAuth")
 @Slf4j
 public class OrderController {
+
+    static final String LEGACY_CHECKOUT_DISABLED_CODE = "LEGACY_CHECKOUT_DISABLED";
+    static final String LEGACY_CHECKOUT_DISABLED_MESSAGE =
+            "Luồng checkout cũ đã ngừng hoạt động. Vui lòng dùng /orders/prepare rồi /orders/confirm.";
 
     private final OrderService orderService;
     private final UserRepository userRepository;
@@ -96,10 +102,23 @@ public class OrderController {
     @Operation(summary = "Đặt hàng (Checkout — legacy)", description = "Tạo đơn hàng COD tại 1 chi nhánh có đủ hàng. "
             + "Đã thay thế bởi /prepare + /confirm.")
     @PostMapping("/orders/checkout")
-    public ResponseEntity<?> placeOrder(@Valid @RequestBody CheckoutRequest request) {
+    public ResponseEntity<Map<String, String>> placeOrder(HttpServletRequest request) {
         Long userId = getCurrentUserId();
-        orderService.placeOrder(userId, request);
-        return ResponseEntity.ok(Map.of("message", "Đặt hàng thành công!"));
+        String path = request.getRequestURI();
+        String userAgent = request.getHeader("User-Agent");
+        log.warn("Blocked legacy checkout attempt for user {} via path={} userAgent={}",
+                userId,
+                path,
+                userAgent != null && !userAgent.isBlank() ? userAgent : "<unknown>");
+        if (path != null) {
+            return ResponseEntity.status(HttpStatus.GONE)
+                    .body(Map.of(
+                            "code", LEGACY_CHECKOUT_DISABLED_CODE,
+                            "message", LEGACY_CHECKOUT_DISABLED_MESSAGE));
+        }
+        return ResponseEntity.status(HttpStatus.GONE)
+                .body(Map.of("message",
+                        "Luồng checkout cũ đã ngừng hoạt động. Vui lòng dùng /orders/prepare rồi /orders/confirm."));
     }
 
     // ── NEW: Tách đơn thông minh ──────────────────────────────────
@@ -121,8 +140,8 @@ public class OrderController {
         return ResponseEntity.ok(orderService.getPreparedOrder(userId, prepareToken));
     }
 
-    @Operation(summary = "Xác nhận đơn hàng", description = "Bước 2 — Lưu đơn vào DB, trừ tồn kho (có lock tránh race condition), "
-            + "tạo SubOrder theo từng chi nhánh.")
+    @Operation(summary = "Xác nhận đơn hàng", description = "Bước 2 — Lưu đơn vào DB, giữ hàng (có lock tránh race condition) "
+            + "và tạo SubOrder theo từng chi nhánh. Chưa trừ tồn kho thật; tồn chỉ trừ khi chuyển sang giao hàng hoặc bàn giao.")
     @PostMapping("/orders/confirm")
     public ResponseEntity<ConfirmOrderResponse> confirmOrder(
             @Valid @RequestBody ConfirmOrderRequest request) {
@@ -134,7 +153,7 @@ public class OrderController {
     }
 
     @Operation(summary = "Lấy danh sách đơn hàng (Admin)", description = "Lấy toàn bộ đơn hàng, có thể lọc theo trạng thái và tìm kiếm mã đơn.")
-    @RequirePermission("ORDER_VIEW")
+    @RequirePermission("ORDER_VIEW_ALL_BRANCHES")
     @GetMapping("/admin/all")
     public ResponseEntity<Page<OrderResponse>> getAllOrders(
             @RequestParam(required = false) String status,
@@ -143,7 +162,6 @@ public class OrderController {
             @RequestParam(required = false) String startDate,
             @RequestParam(required = false) String endDate,
             @PageableDefault(size = 10, sort = "createdAt", direction = Sort.Direction.DESC) Pageable pageable) {
-        verifyAdminAccess();
         return ResponseEntity.ok(orderService.getAdminOrders(
                 status,
                 search,
@@ -158,7 +176,7 @@ public class OrderController {
     }
 
     @Operation(summary = "Tổng quan danh sách đơn hàng (Admin)", description = "Lấy số liệu tổng hợp theo đúng bộ lọc đang áp dụng ở màn quản lý đơn hàng.")
-    @RequirePermission("ORDER_VIEW")
+    @RequirePermission("ORDER_VIEW_ALL_BRANCHES")
     @GetMapping("/admin/all/summary")
     public ResponseEntity<AdminOrderSummaryResponse> getAllOrdersSummary(
             @RequestParam(required = false) String status,
@@ -166,7 +184,6 @@ public class OrderController {
             @RequestParam(required = false) PaymentStatus paymentStatus,
             @RequestParam(required = false) String startDate,
             @RequestParam(required = false) String endDate) {
-        verifyAdminAccess();
         return ResponseEntity.ok(orderService.getAdminOrderSummary(
                 status,
                 search,
@@ -176,19 +193,17 @@ public class OrderController {
     }
 
     @Operation(summary = "Láº¥y chi tiáº¿t Ä‘Æ¡n hĂ ng (Admin)", description = "Admin xem chi tiáº¿t toĂ n bá»™ thĂ´ng tin Ä‘Æ¡n hĂ ng")
-    @RequirePermission("ORDER_VIEW")
+    @RequirePermission("ORDER_VIEW_ALL_BRANCHES")
     @GetMapping("/admin/{id}")
     public ResponseEntity<OrderResponse> getAdminOrderDetail(@PathVariable Long id) {
-        verifyAdminAccess();
         return ResponseEntity.ok(orderService.getAdminOrderDetail(id));
     }
 
     @Operation(summary = "Báo cáo nợ đơn", description = "Tổng hợp các sản phẩm đang thiếu hàng trong các phần đơn chờ điều chuyển bổ sung.")
-    @RequirePermission("ORDER_VIEW")
+    @RequirePermission("ORDER_VIEW_ALL_BRANCHES")
     @GetMapping("/admin/backorders")
     public ResponseEntity<List<MissingItemReportDto>> getBackorderReport(
             @RequestParam(required = false) Long branchId) {
-        verifyAdminAccess();
         return ResponseEntity.ok(orderService.getBackorderReport(branchId));
     }
 

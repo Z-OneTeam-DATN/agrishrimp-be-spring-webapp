@@ -39,12 +39,24 @@ public class ApiExceptionHandler {
   }
 
   @ExceptionHandler({ BadRequestException.class, IllegalArgumentException.class })
-  public ResponseEntity<ErrorDetail> handleBadRequestException(Exception ex,
+  public ResponseEntity<Map<String, Object>> handleBadRequestException(Exception ex,
       WebRequest request) {
     String message = ex.getMessage();
-    ErrorDetail errorVm = new ErrorDetail(HttpStatus.BAD_REQUEST.toString(), "Bad Request",
-        message);
-    return ResponseEntity.badRequest().body(errorVm);
+    Map<String, Object> payload = new LinkedHashMap<>();
+    payload.put("statusCode", HttpStatus.BAD_REQUEST.toString());
+    payload.put("title", "Bad Request");
+    payload.put("detail", message);
+    payload.put("message", message);
+    if (ex instanceof BadRequestException badRequestException) {
+      if (badRequestException.getCode() != null && !badRequestException.getCode().isBlank()) {
+        payload.put("code", badRequestException.getCode());
+      }
+      if (badRequestException.getPayload() != null && !badRequestException.getPayload().isEmpty()) {
+        payload.putAll(badRequestException.getPayload());
+      }
+    }
+    log.warn(ERROR_LOG_FORMAT, this.getServletPath(request), 400, message);
+    return ResponseEntity.badRequest().body(payload);
   }
 
   @ExceptionHandler(ConflictException.class)

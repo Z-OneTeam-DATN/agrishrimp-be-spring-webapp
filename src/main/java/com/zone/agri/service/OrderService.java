@@ -747,7 +747,10 @@ public class OrderService {
 
     @Transactional(readOnly = true)
     public List<MissingItemReportDto> getBackorderReport(Long branchId) {
-        Long finalBranchId = AuthUtils.resolveRequestedOrUserBranch(branchId, "ORDER_VIEW");
+        Long finalBranchId = AuthUtils.resolveRequestedOrUserBranch(
+                branchId,
+                "ORDER_VIEW",
+                "ORDER_VIEW_ALL_BRANCHES");
         return subOrderItemRepository.getBackorderReport(finalBranchId).stream()
                 .map(row -> MissingItemReportDto.builder()
                         .productVariantId(row.getProductVariantId())
@@ -3387,10 +3390,22 @@ public class OrderService {
 
     private List<BranchWithRealDistance> requireCustomerFulfillmentBranches(List<BranchWithRealDistance> branches) {
         if (branches == null || branches.isEmpty()) {
+            throw new BadRequestException(
+                    "ORDER_PREPARE_NO_ACTIVE_BRANCHES",
+                    "Hiện chưa có chi nhánh hoạt động để phục vụ đơn hàng của bạn.",
+                    null);
+        }
+        if (branches == null || branches.isEmpty()) {
             throw new BadRequestException("Hiá»‡n chÆ°a cĂ³ chi nhĂ¡nh hoáº¡t Ä‘á»™ng Ä‘á»ƒ phá»¥c vá»¥ Ä‘Æ¡n hĂ ng cá»§a báº¡n.");
         }
 
         List<BranchWithRealDistance> sellableBranches = filterCustomerFulfillmentBranches(branches);
+        if (sellableBranches.isEmpty()) {
+            throw new BadRequestException(
+                    "ORDER_PREPARE_NO_DELIVERY_BRANCHES",
+                    "Hiện chưa có chi nhánh phù hợp cho địa chỉ giao hàng này.",
+                    null);
+        }
         if (sellableBranches.isEmpty()) {
             throw new BadRequestException("Hiá»‡n chÆ°a cĂ³ chi nhĂ¡nh phĂ¹ há»£p cho Ä‘á»‹a chá»‰ giao hĂ ng nĂ y.");
         }
