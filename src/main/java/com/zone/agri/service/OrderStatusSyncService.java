@@ -31,6 +31,7 @@ public class OrderStatusSyncService {
     private final VoucherService voucherService;
     private final PayOSService payOSService;
     private final NotificationService notificationService;
+    private final OrderRealtimePublisher orderRealtimePublisher;
 
     @Lazy
     private final CustomerService customerService;
@@ -97,6 +98,7 @@ public class OrderStatusSyncService {
             customerService.evaluateAndHandleCustomerReputation(order.getUser().getId());
         }
         notificationService.notifyOrderStatusChange(order, previousStatus, nextStatus);
+        orderRealtimePublisher.publishOrderChangedAfterCommit(orderId, "ORDER_UPDATED");
     }
 
     private void applyOrderStatus(Order order, OrderStatus status, LocalDateTime changedAt) {

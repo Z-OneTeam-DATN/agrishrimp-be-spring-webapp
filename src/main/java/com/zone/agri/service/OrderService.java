@@ -100,6 +100,7 @@ public class OrderService {
     private final OrderStatusSyncService orderStatusSyncService;
     private final OrderInventoryReservationService orderInventoryReservationService;
     private final NotificationService notificationService;
+    private final OrderRealtimePublisher orderRealtimePublisher;
     private final PublicSellingPriceService publicSellingPriceService;
 
     @Lazy
@@ -134,6 +135,10 @@ public class OrderService {
     private static final String REPLENISHMENT_DOCUMENT_TRANSFER = "TRANSFER";
     private static final String REPLENISHMENT_DOCUMENT_PURCHASE_REQUEST = "PURCHASE_REQUEST";
     private static final String REPLENISHMENT_DOCUMENT_BLOCKED = "BLOCKED";
+    private static final String ORDER_EVENT_CREATED = "ORDER_CREATED";
+    private static final String ORDER_EVENT_UPDATED = "ORDER_UPDATED";
+    private static final String ORDER_EVENT_PAYMENT_UPDATED = "ORDER_PAYMENT_UPDATED";
+    private static final String ORDER_EVENT_REPLENISHMENT_UPDATED = "ORDER_REPLENISHMENT_UPDATED";
     private static final List<PaymentStatus> ADMIN_UNPAID_PAYMENT_STATUSES = List.of(
             PaymentStatus.UNPAID,
             PaymentStatus.PENDING,
@@ -287,6 +292,7 @@ public class OrderService {
         }
 
         orderRepository.save(order);
+        orderRealtimePublisher.publishOrderChangedAfterCommit(order.getId(), ORDER_EVENT_PAYMENT_UPDATED);
         return buildConfirmOrderResponse(order, checkoutUrl);
     }
 
@@ -509,6 +515,7 @@ public class OrderService {
         orderRepository.save(order);
         customerService.evaluateAndHandleCustomerReputation(order.getUser().getId());
         notificationService.notifyOrderStatusChange(order, currentStatus, OrderStatus.CANCELLED);
+        orderRealtimePublisher.publishOrderChangedAfterCommit(order.getId(), ORDER_EVENT_UPDATED);
     }
 
     @Transactional
@@ -581,6 +588,7 @@ public class OrderService {
             customerService.evaluateAndHandleCustomerReputation(order.getUser().getId());
         }
         notificationService.notifyOrderStatusChange(order, currentStatus, newStatus);
+        orderRealtimePublisher.publishOrderChangedAfterCommit(order.getId(), ORDER_EVENT_UPDATED);
     }
 
     private void validateStatusTransition(OrderStatus current, OrderStatus next) {
@@ -824,13 +832,15 @@ public class OrderService {
             processReplenishmentRequest(subOrder, transferCodes, purchaseRequestCodes, planItems, blockedItems);
         }
 
-        return ReplenishmentRequestResponse.builder()
+        ReplenishmentRequestResponse response = ReplenishmentRequestResponse.builder()
                 .message("Da xu ly yeu cau bo sung cho don hang.")
                 .transferCodes(distinctList(transferCodes))
                 .purchaseRequestCodes(distinctList(purchaseRequestCodes))
                 .planItems(planItems)
                 .blockedItems(distinctList(blockedItems))
                 .build();
+        orderRealtimePublisher.publishOrderChangedAfterCommit(orderId, ORDER_EVENT_REPLENISHMENT_UPDATED);
+        return response;
     }
 
     @Transactional
@@ -848,13 +858,15 @@ public class OrderService {
         List<String> blockedItems = new ArrayList<>();
         processReplenishmentRequest(subOrder, transferCodes, purchaseRequestCodes, planItems, blockedItems);
 
-        return ReplenishmentRequestResponse.builder()
+        ReplenishmentRequestResponse response = ReplenishmentRequestResponse.builder()
                 .message("Da xu ly yeu cau bo sung cho phan don.")
                 .transferCodes(distinctList(transferCodes))
                 .purchaseRequestCodes(distinctList(purchaseRequestCodes))
                 .planItems(planItems)
                 .blockedItems(distinctList(blockedItems))
                 .build();
+        orderRealtimePublisher.publishOrderChangedAfterCommit(orderId, ORDER_EVENT_REPLENISHMENT_UPDATED);
+        return response;
     }
 
     private void processReplenishmentRequest(
@@ -1380,6 +1392,7 @@ public class OrderService {
                 subOrderRepository.saveAll(shippingSubOrders);
             }
         }
+        orderRealtimePublisher.publishOrderChangedAfterCommit(order.getId(), ORDER_EVENT_UPDATED);
     }
 
     private void completeReceivedOrder(Order order) {
@@ -1397,6 +1410,7 @@ public class OrderService {
                 subOrderRepository.saveAll(receivedSubOrders);
             }
         }
+        orderRealtimePublisher.publishOrderChangedAfterCommit(order.getId(), ORDER_EVENT_UPDATED);
     }
 
     private int statusWeight(OrderStatus s) {
@@ -2544,6 +2558,9 @@ public class OrderService {
             session.setOrderCode(createdOrder.order().getCode());
             savePayosSession(session);
             clearActivePayosSession(draft.getPrepareToken(), session.getSessionCode());
+            orderRealtimePublisher.publishOrderChangedAfterCommit(
+                    createdOrder.order().getId(),
+                    ORDER_EVENT_CREATED);
 
             return buildConfirmOrderResponse(
                     createdOrder.order(),
@@ -3041,6 +3058,7 @@ public class OrderService {
 
         orderRepository.save(order);
         notificationService.notifyOrderStatusChange(order, OrderStatus.PENDING, OrderStatus.CONFIRMED);
+        orderRealtimePublisher.publishOrderChangedAfterCommit(order.getId(), ORDER_EVENT_UPDATED);
     }
 
     private OrderItemResponse mapItemToResponse(OrderItem item) {
@@ -3688,6 +3706,7 @@ public class OrderService {
             saveConfirmResultToRedis(request.getPrepareToken(), response);
             saveConfirmResultByIdempotency(userId, normalizedIdempotencyKey, response);
             notificationService.notifyOrderPlaced(savedOrder);
+            orderRealtimePublisher.publishOrderChangedAfterCommit(savedOrder.getId(), ORDER_EVENT_CREATED);
             return response;
         } finally {
             redisTemplate.delete(confirmLockKey);
@@ -4629,6 +4648,7 @@ public class OrderService {
                         .ifPresent(cartItemRepository::delete));
 
         notificationService.notifyOrderPlaced(savedOrder);
+        orderRealtimePublisher.publishOrderChangedAfterCommit(savedOrder.getId(), ORDER_EVENT_CREATED);
         return savedOrder;
     }
 

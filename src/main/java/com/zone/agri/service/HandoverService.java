@@ -37,6 +37,7 @@ public class HandoverService {
     private final BranchRepository branchRepository;
     private final OrderStatusSyncService orderStatusSyncService;
     private final OrderInventoryReservationService orderInventoryReservationService;
+    private final OrderRealtimePublisher orderRealtimePublisher;
 
     @Transactional
     public Handover createHandover(Long userId, Long branchId, HandoverCreateRequest request) {
@@ -94,6 +95,7 @@ public class HandoverService {
                 .build();
 
         Handover savedHandover = handoverRepository.save(handover);
+        List<Long> affectedOrderIds = new java.util.ArrayList<>();
 
         for (SubOrder subOrder : subOrders) {
             orderInventoryReservationService.shipReservedInventory(
@@ -102,9 +104,17 @@ public class HandoverService {
             subOrder.setHandover(savedHandover);
             subOrder.setStatus(OrderStatus.SHIPPING);
             subOrderRepository.save(subOrder);
+            if (subOrder.getOrder() != null && subOrder.getOrder().getId() != null) {
+                affectedOrderIds.add(subOrder.getOrder().getId());
+            }
 
             orderStatusSyncService.syncMasterOrderStatus(subOrder.getOrder().getId());
         }
+
+        affectedOrderIds.stream()
+                .distinct()
+                .forEach(orderId ->
+                        orderRealtimePublisher.publishOrderChangedAfterCommit(orderId, "ORDER_UPDATED"));
 
         return savedHandover;
     }

@@ -50,6 +50,7 @@ public class PayOSService {
     private final OrderRepository orderRepository;
     private final SubOrderRepository subOrderRepository;
     private final ObjectMapper objectMapper;
+    private final OrderRealtimePublisher orderRealtimePublisher;
 
     @Value("${payos.client-id}")
     private String clientId;
@@ -305,6 +306,7 @@ public class PayOSService {
 
         orderRepository.save(order);
         subOrderRepository.saveAll(subOrders);
+        orderRealtimePublisher.publishOrderChangedAfterCommit(order.getId(), "ORDER_PAYMENT_UPDATED");
     }
 
     private long parseOrderCode(Order order) {
