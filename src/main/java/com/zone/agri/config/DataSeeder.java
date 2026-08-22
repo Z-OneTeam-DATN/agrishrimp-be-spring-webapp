@@ -677,7 +677,7 @@ public class DataSeeder implements CommandLineRunner {
                                 "REPORT_FINANCE_VIEW_ALL_BRANCHES",
                                 "STAFF", "STAFF_VIEW", "STAFF_CREATE", "STAFF_UPDATE", "STAFF_DELETE",
                                 "BRANCH", "BRANCH_VIEW", "BRANCH_CREATE", "BRANCH_UPDATE", "BRANCH_DELETE",
-                                "ORDER", "ORDER_VIEW", "ORDER_CREATE", "ORDER_UPDATE", "ORDER_CONFIRM",
+                                "ORDER", "ORDER_VIEW", "ORDER_VIEW_ALL_BRANCHES", "ORDER_CREATE", "ORDER_UPDATE", "ORDER_CONFIRM",
                                 "ORDER_SHIP", "ORDER_CANCEL", "ORDER_COMPLETE", "ORDER_EXPORT", "ORDER_REFUND",
                                 "ORDER_DELETE",
                                 "CUSTOMER", "CUSTOMER_VIEW", "CUSTOMER_CREATE", "CUSTOMER_UPDATE", "CUSTOMER_DELETE",
@@ -813,6 +813,7 @@ public class DataSeeder implements CommandLineRunner {
 
     private List<PermissionActionSeedSpec> systemPermissionActions() {
         return List.of(
+                action("Xem đơn hàng mọi chi nhánh", "ORDER_VIEW_ALL_BRANCHES", PermissionGroup.SALES, "ORDER"),
                 action("Xem tổng quan", "DASHBOARD_VIEW", PermissionGroup.SYSTEM, "DASHBOARD"),
                 action("Xem workspace", "WORKSPACE_VIEW", PermissionGroup.SYSTEM, "WORKSPACE"),
                 action("Xem nhật ký", ACTIVITY_LOG_VIEW_PERMISSION_CODE, PermissionGroup.SYSTEM, ACTIVITY_LOG_MODULE_CODE),

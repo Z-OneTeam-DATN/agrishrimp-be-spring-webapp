@@ -88,21 +88,19 @@ public class ReturnRequestController {
     }
 
     @Operation(summary = "Danh sách yêu cầu trả hàng toàn hệ thống")
-    @RequirePermission("ORDER_VIEW")
+    @RequirePermission("ORDER_VIEW_ALL_BRANCHES")
     @GetMapping("/admin/returns")
     public ResponseEntity<List<ReturnRequestResponse>> getAdminReturnRequests(
             @RequestParam(required = false) String status,
             @RequestParam(required = false) String search
     ) {
-        verifyAdminAccess();
         return ResponseEntity.ok(returnRequestService.getAdminReturnRequests(status, search));
     }
 
     @Operation(summary = "Chi tiết yêu cầu trả hàng toàn hệ thống")
-    @RequirePermission("ORDER_VIEW")
+    @RequirePermission("ORDER_VIEW_ALL_BRANCHES")
     @GetMapping("/admin/returns/{requestId}")
     public ResponseEntity<ReturnRequestResponse> getAdminReturnRequestDetail(@PathVariable Long requestId) {
-        verifyAdminAccess();
         return ResponseEntity.ok(returnRequestService.getAdminReturnRequestDetail(requestId));
     }
 
