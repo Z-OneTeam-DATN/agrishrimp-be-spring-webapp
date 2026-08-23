@@ -58,6 +58,9 @@ class BranchServiceMappingTest {
     void mapToDTO_exposesDistrictIdForCurrentAndLegacyClients() {
         Branch branch = Branch.builder()
                 .districtId(3695)
+                .wardId(10105)
+                .wardCode("550105")
+                .wardName("Phường An Khánh")
                 .build();
 
         BranchDTO dto = ReflectionTestUtils.invokeMethod(branchService, "mapToDTO", branch);
@@ -65,6 +68,24 @@ class BranchServiceMappingTest {
         assertThat(dto).isNotNull();
         assertThat(dto.getDistrictId()).isEqualTo(3695);
         assertThat(dto.getDistrictCode()).isEqualTo(3695);
+        assertThat(dto.getWardId()).isEqualTo(10105);
+        assertThat(dto.getWardCode()).isEqualTo("550105");
+        assertThat(dto.getWardName()).isEqualTo("Phường An Khánh");
+    }
+
+    @Test
+    void mapToEntity_persistsSelectedGhnWard() {
+        BranchDTO dto = new BranchDTO();
+        dto.setWardId(10105);
+        dto.setWardCode("550105");
+        dto.setWardName("Phường An Khánh");
+        Branch branch = Branch.builder().build();
+
+        ReflectionTestUtils.invokeMethod(branchService, "mapToEntity", branch, dto);
+
+        assertThat(branch.getWardId()).isEqualTo(10105);
+        assertThat(branch.getWardCode()).isEqualTo("550105");
+        assertThat(branch.getWardName()).isEqualTo("Phường An Khánh");
     }
 
     @Test
@@ -76,5 +97,20 @@ class BranchServiceMappingTest {
         assertThatThrownBy(() -> branchService.create(dto))
                 .isInstanceOf(BadRequestException.class)
                 .hasMessageContaining("District ID GHN");
+    }
+
+    @Test
+    void create_rejectsZeroCoordinatesInsteadOfPersistingOceanLocation() {
+        BranchDTO dto = new BranchDTO();
+        dto.setBranchCode("CN-TEST");
+        dto.setName("Chi nhanh test");
+        dto.setDistrictId(1572);
+        dto.setWardCode("550105");
+        dto.setLat(0D);
+        dto.setLng(0D);
+
+        assertThatThrownBy(() -> branchService.create(dto))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessageContaining("Toa do chi nhanh khong hop le");
     }
 }

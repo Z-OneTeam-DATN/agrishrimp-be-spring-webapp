@@ -162,12 +162,27 @@ public class BranchService {
     private void validateShippingAddress(BranchDTO dto) {
         Integer districtId = dto.getDistrictId() != null ? dto.getDistrictId() : dto.getDistrictCode();
         String wardCode = dto.getWardCode();
+        Double lat = dto.getLat() != null ? dto.getLat() : dto.getLatitude();
+        Double lng = dto.getLng() != null ? dto.getLng() : dto.getLongitude();
 
         if (districtId == null) {
             throw new BadRequestException("Chi nhanh bat buoc phai co District ID GHN de tinh phi giao hang");
         }
         if (wardCode == null || wardCode.isBlank()) {
             throw new BadRequestException("Chi nhanh bat buoc phai co Ward Code GHN de tinh phi giao hang");
+        }
+        if ((lat == null) != (lng == null)) {
+            throw new BadRequestException("Toa do chi nhanh phai co day du vi do va kinh do");
+        }
+        if (lat != null && (
+                !Double.isFinite(lat)
+                        || !Double.isFinite(lng)
+                        || lat < -90
+                        || lat > 90
+                        || lng < -180
+                        || lng > 180
+                        || (Math.abs(lat) < 0.000001 && Math.abs(lng) < 0.000001))) {
+            throw new BadRequestException("Toa do chi nhanh khong hop le");
         }
     }
 
