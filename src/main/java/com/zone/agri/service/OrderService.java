@@ -147,13 +147,6 @@ public class OrderService {
             PaymentStatus.FAILED,
             PaymentStatus.EXPIRED,
             PaymentStatus.REFUND_PENDING);
-    private static final List<PaymentStatus> ADMIN_INCOMPLETE_PAYMENT_STATUSES = List.of(
-            PaymentStatus.UNPAID,
-            PaymentStatus.PENDING,
-            PaymentStatus.PENDING_VERIFICATION,
-            PaymentStatus.PARTIALLY_PAID,
-            PaymentStatus.FAILED,
-            PaymentStatus.EXPIRED);
     private static final Set<OrderCancelReasonCode> CUSTOMER_CANCEL_REASON_CODES = EnumSet.of(
             OrderCancelReasonCode.CHANGE_PRODUCT,
             OrderCancelReasonCode.CHANGE_ADDRESS,
@@ -1808,10 +1801,23 @@ public class OrderService {
 
         String normalized = status.trim().toUpperCase(Locale.ROOT);
         if ("INCOMPLETE".equals(normalized)) {
-            return criteriaBuilder.or(
-                    criteriaBuilder.equal(root.get("status"), OrderStatus.AWAITING_PAYMENT),
-                    criteriaBuilder.equal(root.get("status"), OrderStatus.CANCELLED),
-                    root.get("paymentStatus").in(ADMIN_INCOMPLETE_PAYMENT_STATUSES));
+            return buildAdminIncompletePredicate(root, criteriaBuilder);
+        }
+
+        if ("INCOMPLETE_SHORTAGE".equals(normalized)) {
+            return criteriaBuilder.and(
+                    buildAdminIncompletePredicate(root, criteriaBuilder),
+                    buildAdminShortagePredicate(root, criteriaBuilder));
+        }
+
+        if ("INCOMPLETE_UNPAID".equals(normalized)) {
+            return criteriaBuilder.and(
+                    buildAdminIncompletePredicate(root, criteriaBuilder),
+                    buildAdminUnpaidPredicate(root, criteriaBuilder));
+        }
+
+        if ("INCOMPLETE_CANCELLED".equals(normalized)) {
+            return buildAdminCancelledIncompletePredicate(root, criteriaBuilder);
         }
 
         if (normalized.contains(",")) {
@@ -1829,6 +1835,52 @@ public class OrderService {
         }
 
         return buildSingleAdminStatusPredicate(normalized, root, query, criteriaBuilder);
+    }
+
+    private Predicate buildAdminIncompletePredicate(
+            Root<Order> root,
+            CriteriaBuilder criteriaBuilder) {
+        Predicate nonTerminalStatus = criteriaBuilder.not(
+                root.get("status").in(OrderStatus.COMPLETED, OrderStatus.RETURNED));
+        Predicate cancelledAndRefunded = criteriaBuilder.and(
+                criteriaBuilder.equal(root.get("status"), OrderStatus.CANCELLED),
+                criteriaBuilder.equal(root.get("paymentStatus"), PaymentStatus.REFUNDED));
+        return criteriaBuilder.and(
+                nonTerminalStatus,
+                criteriaBuilder.not(cancelledAndRefunded));
+    }
+
+    private Predicate buildAdminShortagePredicate(
+            Root<Order> root,
+            CriteriaBuilder criteriaBuilder) {
+        Predicate awaitingReplenishment = criteriaBuilder.equal(
+                root.get("status"),
+                OrderStatus.AWAITING_REPLENISHMENT);
+        Predicate stockStatusKnown = criteriaBuilder.isNotNull(root.get("stockStatus"));
+        Predicate stockStatusNotFull = criteriaBuilder.notEqual(
+                root.get("stockStatus"),
+                StockStatus.FULLY_AVAILABLE);
+        return criteriaBuilder.or(
+                awaitingReplenishment,
+                criteriaBuilder.and(stockStatusKnown, stockStatusNotFull));
+    }
+
+    private Predicate buildAdminUnpaidPredicate(
+            Root<Order> root,
+            CriteriaBuilder criteriaBuilder) {
+        return criteriaBuilder.or(
+                criteriaBuilder.isNull(root.get("paymentStatus")),
+                criteriaBuilder.notEqual(root.get("paymentStatus"), PaymentStatus.PAID));
+    }
+
+    private Predicate buildAdminCancelledIncompletePredicate(
+            Root<Order> root,
+            CriteriaBuilder criteriaBuilder) {
+        return criteriaBuilder.and(
+                criteriaBuilder.equal(root.get("status"), OrderStatus.CANCELLED),
+                criteriaBuilder.or(
+                        criteriaBuilder.isNull(root.get("paymentStatus")),
+                        criteriaBuilder.notEqual(root.get("paymentStatus"), PaymentStatus.REFUNDED)));
     }
 
     private Predicate buildSingleAdminStatusPredicate(
