@@ -34,6 +34,7 @@ public class OrderRealtimePublisher {
 
         Runnable publishAction = () -> publishOrderChangedNow(orderId, eventType);
         if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            log.debug("Queue order realtime event {} for order {} after transaction commit", eventType, orderId);
             TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
                 @Override
                 public void afterCommit() {
@@ -43,6 +44,7 @@ public class OrderRealtimePublisher {
             return;
         }
 
+        log.debug("Publish order realtime event {} for order {} immediately", eventType, orderId);
         publishAction.run();
     }
 
@@ -71,6 +73,32 @@ public class OrderRealtimePublisher {
         messagingTemplate.convertAndSend("/topic/orders/all", event);
         branchIds.forEach(branchId ->
                 messagingTemplate.convertAndSend("/topic/orders/branch/" + branchId, event));
+
+        if (shouldLogAtInfo(eventType)) {
+            log.info(
+                    "Published order realtime event type={} orderId={} orderCode={} orderStatus={} paymentStatus={} branchIds={}",
+                    eventType,
+                    order.getId(),
+                    order.getCode(),
+                    event.getOrderStatus(),
+                    event.getPaymentStatus(),
+                    branchIds);
+            return;
+        }
+
+        log.debug(
+                "Published order realtime event type={} orderId={} orderCode={} orderStatus={} paymentStatus={} branchIds={}",
+                eventType,
+                order.getId(),
+                order.getCode(),
+                event.getOrderStatus(),
+                event.getPaymentStatus(),
+                branchIds);
+    }
+
+    private boolean shouldLogAtInfo(String eventType) {
+        return "ORDER_CREATED".equalsIgnoreCase(eventType)
+                || "ORDER_PAYMENT_UPDATED".equalsIgnoreCase(eventType);
     }
 
     private Set<Long> resolveBranchIds(Order order) {
