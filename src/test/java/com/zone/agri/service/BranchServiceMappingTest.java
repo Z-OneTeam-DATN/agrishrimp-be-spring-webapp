@@ -2,6 +2,7 @@ package com.zone.agri.service;
 
 import com.zone.agri.dto.response.admin.BranchDTO;
 import com.zone.agri.entity.Branch;
+import com.zone.agri.exception.BadRequestException;
 import com.zone.agri.repository.BranchRepository;
 import com.zone.agri.repository.InventoryRepository;
 import com.zone.agri.repository.UserRepository;
@@ -13,6 +14,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @ExtendWith(MockitoExtension.class)
 class BranchServiceMappingTest {
@@ -63,5 +65,16 @@ class BranchServiceMappingTest {
         assertThat(dto).isNotNull();
         assertThat(dto.getDistrictId()).isEqualTo(3695);
         assertThat(dto.getDistrictCode()).isEqualTo(3695);
+    }
+
+    @Test
+    void create_rejectsBranchWithoutGhnShippingScope() {
+        BranchDTO dto = new BranchDTO();
+        dto.setBranchCode("CN-TEST");
+        dto.setName("Chi nhanh test");
+
+        assertThatThrownBy(() -> branchService.create(dto))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessageContaining("District ID GHN");
     }
 }
