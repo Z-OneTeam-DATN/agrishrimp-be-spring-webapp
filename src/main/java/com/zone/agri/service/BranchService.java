@@ -10,6 +10,7 @@ import com.zone.agri.entity.Branch;
 import com.zone.agri.entity.Inventory;
 import com.zone.agri.entity.User;
 import com.zone.agri.entity.enums.BranchStatus;
+import com.zone.agri.exception.BadRequestException;
 import com.zone.agri.exception.Forbidden;
 import com.zone.agri.exception.NotFoundException;
 import com.zone.agri.repository.BranchRepository;
@@ -94,6 +95,8 @@ public class BranchService {
 
     @Transactional
     public BranchDTO create(BranchDTO dto) {
+        validateShippingAddress(dto);
+
         if (branchRepository.existsByBranchCode(dto.getBranchCode())) {
             throw new RuntimeException("Lỗi: Mã chi nhánh [" + dto.getBranchCode() + "] đã tồn tại!");
         }
@@ -119,6 +122,8 @@ public class BranchService {
 
     @Transactional
     public BranchDTO update(Long id, BranchDTO dto) {
+        validateShippingAddress(dto);
+
         Branch branch = branchRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Chi nhánh không tồn tại"));
 
@@ -152,6 +157,18 @@ public class BranchService {
             return List.of(dto.getManagerId());
         }
         return List.of();
+    }
+
+    private void validateShippingAddress(BranchDTO dto) {
+        Integer districtId = dto.getDistrictId() != null ? dto.getDistrictId() : dto.getDistrictCode();
+        String wardCode = dto.getWardCode();
+
+        if (districtId == null) {
+            throw new BadRequestException("Chi nhanh bat buoc phai co District ID GHN de tinh phi giao hang");
+        }
+        if (wardCode == null || wardCode.isBlank()) {
+            throw new BadRequestException("Chi nhanh bat buoc phai co Ward Code GHN de tinh phi giao hang");
+        }
     }
 
     private void mapToEntity(Branch entity, BranchDTO dto) {
