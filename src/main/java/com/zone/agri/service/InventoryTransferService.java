@@ -43,6 +43,7 @@ import com.zone.agri.entity.enums.OrderStatus;
 import com.zone.agri.entity.enums.TransactionType;
 import com.zone.agri.entity.enums.TransferBusinessType;
 import com.zone.agri.entity.enums.TransferSettlementStatus;
+import com.zone.agri.entity.enums.VietnamRegion;
 import com.zone.agri.exception.BadRequestException;
 import com.zone.agri.exception.Forbidden;
 import com.zone.agri.exception.NotFoundException;
@@ -109,6 +110,7 @@ public class InventoryTransferService {
     private final com.zone.agri.repository.InventoryTransferDetailRepository transferDetailRepo;
     private final com.zone.agri.common.WarehouseContext warehouseContext;
     private final InventoryCheckGuardService inventoryCheckGuardService;
+    private final VietnamRegionResolver vietnamRegionResolver;
     private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(InventoryTransferService.class);
 
     private boolean hasAuthority(String authority) {
@@ -737,9 +739,7 @@ public class InventoryTransferService {
             Branch toBranch,
             Branch warehouse) {
         Map<Long, Map<String, Integer>> transferPlanBySourceBranch = new LinkedHashMap<>();
-        Long toBranchId = toBranch != null ? toBranch.getId() : null;
-        Long warehouseId = warehouse != null ? warehouse.getId() : null;
-        boolean includeWarehouseSources = shouldIncludeWarehouseSources(toBranch);
+        VietnamRegion preferredAdjacentRegion = resolvePreferredAdjacentRegion(toBranch, requirements);
 
         for (MissingItemRequirement requirement : requirements != null ? requirements : List.<MissingItemRequirement>of()) {
             int remainingMissing = requirement.quantity();
@@ -748,7 +748,10 @@ public class InventoryTransferService {
                 continue;
             }
 
-            for (SourceBranchCandidate candidate : loadNearestSellableSourceCandidates(toBranch, requirement.variantId())) {
+            for (SourceBranchCandidate candidate : loadNearestSellableSourceCandidates(
+                    toBranch,
+                    requirement.variantId(),
+                    preferredAdjacentRegion)) {
                 if (remainingMissing <= 0) {
                     break;
                 }
@@ -764,26 +767,6 @@ public class InventoryTransferService {
                         requirement.sku(),
                         quantityToMove);
                 remainingMissing -= quantityToMove;
-            }
-
-            if (!includeWarehouseSources
-                    && remainingMissing > 0
-                    && warehouseId != null
-                    && !Objects.equals(warehouseId, toBranchId)) {
-                int warehouseAvailable = resolveTransferableQuantityAtBranch(requirement.variantId(), warehouseId);
-                if (ENFORCE_SOURCE_STOCK_CHECK_ON_CREATE && warehouseAvailable < remainingMissing) {
-                    throw new RuntimeException("Kho tong khong du hang de dieu chuyen bo sung cho SKU: "
-                            + requirement.sku());
-                }
-
-                int quantityToMove = Math.min(remainingMissing, warehouseAvailable);
-                if (quantityToMove > 0) {
-                    addTransferPlanQuantity(
-                            transferPlanBySourceBranch,
-                            warehouseId,
-                            requirement.sku(),
-                            quantityToMove);
-                }
             }
         }
 
@@ -897,14 +880,24 @@ public class InventoryTransferService {
     }
 
     private List<SourceBranchCandidate> loadNearestSellableSourceCandidates(Branch toBranch, Long variantId) {
+        return loadNearestSellableSourceCandidates(
+                toBranch,
+                variantId,
+                resolvePreferredAdjacentRegion(toBranch, List.of()));
+    }
+
+    private List<SourceBranchCandidate> loadNearestSellableSourceCandidates(
+            Branch toBranch,
+            Long variantId,
+            VietnamRegion preferredAdjacentRegion) {
         if (toBranch == null || toBranch.getId() == null || variantId == null) {
             return List.of();
         }
 
+        VietnamRegion destinationRegion = resolveBranchRegion(toBranch);
         Map<Long, Integer> availableByBranch = new LinkedHashMap<>();
         Map<Long, Integer> safetyThresholdByBranch = new LinkedHashMap<>();
         Map<Long, Branch> branchById = new LinkedHashMap<>();
-        boolean includeWarehouseSources = shouldIncludeWarehouseSources(toBranch);
 
         for (Inventory inventory : inventoryRepo.findByProductVariantId(variantId)) {
             Branch sourceBranch = inventory.getBranch();
@@ -918,8 +911,8 @@ public class InventoryTransferService {
                     || sourceBranch == null
                     || Objects.equals(sourceBranchId, toBranch.getId())
                     || sourceBranch.getStatus() != BranchStatus.ACTIVE
-                    || (!includeWarehouseSources && isWarehouseBranch(sourceBranch))
-                    || availableQty <= 0) {
+                    || availableQty <= 0
+                    || !isAllowedRegionalSource(toBranch, sourceBranch, destinationRegion, preferredAdjacentRegion)) {
                 continue;
             }
 
@@ -996,11 +989,194 @@ public class InventoryTransferService {
     }
 
     private boolean shouldIncludeWarehouseSources(Branch destinationBranch) {
-        return isWarehouseBranch(destinationBranch);
+        return true;
     }
 
     private boolean canUseSingleSourceReplenishmentRule() {
         return true;
+    }
+
+    public Branch resolveProcurementWarehouseForDestinationBranch(Branch destinationBranch) {
+        return resolveProcurementWarehouseForDestinationBranch(
+                destinationBranch,
+                resolvePreferredAdjacentRegion(destinationBranch, List.of()));
+    }
+
+    private Branch resolveProcurementWarehouseForDestinationBranch(
+            Branch destinationBranch,
+            VietnamRegion preferredAdjacentRegion) {
+        if (destinationBranch == null) {
+            return resolveMainWarehouse();
+        }
+
+        if (isWarehouseBranch(destinationBranch)) {
+            return destinationBranch;
+        }
+
+        List<Branch> activeWarehouses = branchRepo.findAll().stream()
+                .filter(branch -> branch != null
+                        && branch.getId() != null
+                        && branch.getStatus() == BranchStatus.ACTIVE
+                        && isWarehouseBranch(branch))
+                .toList();
+        if (activeWarehouses.isEmpty()) {
+            return resolveMainWarehouse();
+        }
+
+        VietnamRegion destinationRegion = resolveBranchRegion(destinationBranch);
+        Branch sameRegionWarehouse = selectNearestBranchByRegion(destinationBranch, activeWarehouses, destinationRegion);
+        if (sameRegionWarehouse != null) {
+            return sameRegionWarehouse;
+        }
+
+        Branch adjacentWarehouse = selectNearestBranchByRegion(destinationBranch, activeWarehouses, preferredAdjacentRegion);
+        if (adjacentWarehouse != null) {
+            return adjacentWarehouse;
+        }
+
+        return activeWarehouses.stream()
+                .min(Comparator
+                        .comparingDouble((Branch branch) -> calculateHaversineDistance(
+                                destinationBranch.getLat(),
+                                destinationBranch.getLng(),
+                                branch.getLat(),
+                                branch.getLng()))
+                        .thenComparing(Branch::getId))
+                .orElseGet(this::resolveMainWarehouse);
+    }
+
+    private VietnamRegion resolvePreferredAdjacentRegion(
+            Branch destinationBranch,
+            List<MissingItemRequirement> requirements) {
+        VietnamRegion destinationRegion = resolveBranchRegion(destinationBranch);
+        if (destinationRegion == null) {
+            return null;
+        }
+
+        if (destinationRegion == VietnamRegion.NORTH || destinationRegion == VietnamRegion.SOUTH) {
+            return hasRegionalSourceCandidates(destinationBranch, VietnamRegion.CENTRAL, requirements)
+                    ? VietnamRegion.CENTRAL
+                    : null;
+        }
+
+        List<Branch> northCandidates = findRegionalSourceBranches(destinationBranch, VietnamRegion.NORTH, requirements);
+        List<Branch> southCandidates = findRegionalSourceBranches(destinationBranch, VietnamRegion.SOUTH, requirements);
+        Branch nearestNorth = findNearestBranch(destinationBranch, northCandidates);
+        Branch nearestSouth = findNearestBranch(destinationBranch, southCandidates);
+        if (nearestNorth == null) {
+            return nearestSouth != null ? VietnamRegion.SOUTH : null;
+        }
+        if (nearestSouth == null) {
+            return VietnamRegion.NORTH;
+        }
+
+        double northDistance = calculateHaversineDistance(
+                destinationBranch.getLat(),
+                destinationBranch.getLng(),
+                nearestNorth.getLat(),
+                nearestNorth.getLng());
+        double southDistance = calculateHaversineDistance(
+                destinationBranch.getLat(),
+                destinationBranch.getLng(),
+                nearestSouth.getLat(),
+                nearestSouth.getLng());
+        return northDistance <= southDistance ? VietnamRegion.NORTH : VietnamRegion.SOUTH;
+    }
+
+    private List<Branch> findRegionalSourceBranches(
+            Branch destinationBranch,
+            VietnamRegion region,
+            List<MissingItemRequirement> requirements) {
+        if (destinationBranch == null || region == null) {
+            return List.of();
+        }
+
+        return branchRepo.findAll().stream()
+                .filter(branch -> branch != null
+                        && branch.getId() != null
+                        && !Objects.equals(branch.getId(), destinationBranch.getId())
+                        && branch.getStatus() == BranchStatus.ACTIVE
+                        && region == resolveBranchRegion(branch)
+                        && branchCanSupplyAnyRequirement(branch, requirements))
+                .toList();
+    }
+
+    private boolean hasRegionalSourceCandidates(
+            Branch destinationBranch,
+            VietnamRegion region,
+            List<MissingItemRequirement> requirements) {
+        return !findRegionalSourceBranches(destinationBranch, region, requirements).isEmpty();
+    }
+
+    private Branch findNearestBranch(Branch destinationBranch, List<Branch> candidates) {
+        if (destinationBranch == null || candidates == null || candidates.isEmpty()) {
+            return null;
+        }
+
+        return candidates.stream()
+                .min(Comparator
+                        .comparingDouble((Branch branch) -> calculateHaversineDistance(
+                                destinationBranch.getLat(),
+                                destinationBranch.getLng(),
+                                branch.getLat(),
+                                branch.getLng()))
+                        .thenComparing(Branch::getId))
+                .orElse(null);
+    }
+
+    private Branch selectNearestBranchByRegion(
+            Branch destinationBranch,
+            List<Branch> candidates,
+            VietnamRegion region) {
+        if (region == null || candidates == null || candidates.isEmpty()) {
+            return null;
+        }
+
+        return findNearestBranch(
+                destinationBranch,
+                candidates.stream()
+                        .filter(branch -> region == resolveBranchRegion(branch))
+                        .toList());
+    }
+
+    private boolean branchCanSupplyAnyRequirement(Branch branch, List<MissingItemRequirement> requirements) {
+        if (branch == null || branch.getId() == null) {
+            return false;
+        }
+        if (requirements == null || requirements.isEmpty()) {
+            return true;
+        }
+
+        return requirements.stream()
+                .anyMatch(requirement -> resolveTransferableQuantityAtBranch(
+                        requirement.variantId(),
+                        branch.getId()) > 0);
+    }
+
+    private boolean isAllowedRegionalSource(
+            Branch destinationBranch,
+            Branch sourceBranch,
+            VietnamRegion destinationRegion,
+            VietnamRegion preferredAdjacentRegion) {
+        if (destinationBranch == null || sourceBranch == null) {
+            return false;
+        }
+
+        if (destinationRegion == null) {
+            return true;
+        }
+
+        VietnamRegion sourceRegion = resolveBranchRegion(sourceBranch);
+        if (sourceRegion == null) {
+            return false;
+        }
+
+        return sourceRegion == destinationRegion
+                || (preferredAdjacentRegion != null && sourceRegion == preferredAdjacentRegion);
+    }
+
+    private VietnamRegion resolveBranchRegion(Branch branch) {
+        return vietnamRegionResolver.resolveBranchRegion(branch).orElse(null);
     }
 
     @Transactional(readOnly = true)
@@ -1025,11 +1201,14 @@ public class InventoryTransferService {
             SubOrder replenishmentSubOrder,
             List<MissingItemRequirement> requirements) {
         Branch destinationBranch = replenishmentSubOrder.getBranch();
-        Branch mainWarehouse = resolveMainWarehouse();
         Map<String, Integer> itemQuantities = buildItemQuantities(requirements);
         String referenceCode = buildReplenishmentReferenceCode(replenishmentSubOrder);
+        VietnamRegion preferredAdjacentRegion = resolvePreferredAdjacentRegion(destinationBranch, requirements);
 
-        Branch regularSourceBranch = findNearestRegularSourceBranch(destinationBranch, requirements);
+        Branch regularSourceBranch = findNearestRegularSourceBranch(
+                destinationBranch,
+                requirements,
+                preferredAdjacentRegion);
         if (regularSourceBranch != null) {
             return new ReplenishmentDecision(
                     ReplenishmentDecisionType.REGULAR_BRANCH_TRANSFER,
@@ -1039,19 +1218,9 @@ public class InventoryTransferService {
                     itemQuantities);
         }
 
-        if (!Objects.equals(mainWarehouse.getId(), destinationBranch.getId())
-                && canBranchFullySupplyRequirements(mainWarehouse.getId(), requirements)) {
-            return new ReplenishmentDecision(
-                    ReplenishmentDecisionType.MAIN_WAREHOUSE_TRANSFER,
-                    mainWarehouse,
-                    destinationBranch,
-                    referenceCode,
-                    itemQuantities);
-        }
-
         return new ReplenishmentDecision(
                 ReplenishmentDecisionType.PURCHASE_REQUEST,
-                mainWarehouse,
+                resolveProcurementWarehouseForDestinationBranch(destinationBranch, preferredAdjacentRegion),
                 destinationBranch,
                 referenceCode,
                 itemQuantities);
@@ -1072,8 +1241,8 @@ public class InventoryTransferService {
             return transfers;
         }
 
-        Branch mainWarehouse = resolveMainWarehouse();
-        if (Objects.equals(mainWarehouse.getId(), subOrder.getBranch().getId())) {
+        Branch mainWarehouse = resolveProcurementWarehouseForDestinationBranch(subOrder.getBranch());
+        if (mainWarehouse == null || Objects.equals(mainWarehouse.getId(), subOrder.getBranch().getId())) {
             return transfers;
         }
 
@@ -1173,18 +1342,19 @@ public class InventoryTransferService {
 
     private Branch findNearestRegularSourceBranch(
             Branch destinationBranch,
-            List<MissingItemRequirement> requirements) {
+            List<MissingItemRequirement> requirements,
+            VietnamRegion preferredAdjacentRegion) {
         if (destinationBranch == null || destinationBranch.getId() == null || requirements.isEmpty()) {
             return null;
         }
 
-        boolean includeWarehouseSources = shouldIncludeWarehouseSources(destinationBranch);
+        VietnamRegion destinationRegion = resolveBranchRegion(destinationBranch);
         return branchRepo.findAll().stream()
                 .filter(branch -> branch != null
                         && branch.getId() != null
                         && !Objects.equals(branch.getId(), destinationBranch.getId())
                         && branch.getStatus() == BranchStatus.ACTIVE
-                        && (includeWarehouseSources || !isWarehouseBranch(branch))
+                        && isAllowedRegionalSource(destinationBranch, branch, destinationRegion, preferredAdjacentRegion)
                         && canBranchFullySupplyRequirements(branch.getId(), requirements))
                 .min(Comparator
                         .<Branch>comparingDouble(branch -> calculateHaversineDistance(

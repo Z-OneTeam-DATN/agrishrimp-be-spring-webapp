@@ -262,7 +262,8 @@ public class PurchaseRequestService {
             return new AutomaticReplenishmentRequestResult(existingRequests, Map.of(), Map.of());
         }
 
-        Branch mainWarehouse = resolveMainWarehouseBranch();
+        Branch mainWarehouse = inventoryTransferService.resolveProcurementWarehouseForDestinationBranch(
+                replenishmentSubOrder.getBranch());
         String referenceCode = buildReplenishmentReferenceCode(replenishmentSubOrder);
         List<Long> variantIds = missingQuantities.keySet().stream()
                 .map(ProductVariant::getId)

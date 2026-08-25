@@ -61,6 +61,7 @@ public class SchemaUpdateConfig implements BeanPostProcessor {
 
             patchBranches(conn, stmt);
             patchUsers(conn, stmt);
+            patchUserAddresses(conn, stmt);
             patchCustomers(conn, stmt);
             patchProductVariants(conn, stmt);
             patchAiDoctorChatTables(stmt);
@@ -603,6 +604,17 @@ public class SchemaUpdateConfig implements BeanPostProcessor {
         ensureColumnWithLegacyBackfill(conn, stmt, tableName, "branch_id", "BIGINT NULL", List.of("assigned_branch_id"));
         ensureColumnWithLegacyBackfill(conn, stmt, tableName, "staff_assigned_id", "BIGINT NULL", List.of("assigned_staff_id"));
         ensureColumnWithLegacyBackfill(conn, stmt, tableName, "internal_notes", "TEXT NULL", List.of());
+    }
+
+    private void patchUserAddresses(Connection conn, Statement stmt) {
+        String tableName = "user_addresses";
+        if (!tableExists(conn, tableName)) {
+            log.info("Skip user_addresses schema patch because table '{}' does not exist yet.", tableName);
+            return;
+        }
+
+        ensureColumnWithLegacyBackfill(conn, stmt, tableName, "lat", "DOUBLE NULL", List.of());
+        ensureColumnWithLegacyBackfill(conn, stmt, tableName, "lng", "DOUBLE NULL", List.of());
     }
 
     private void patchProductVariants(Connection conn, Statement stmt) {

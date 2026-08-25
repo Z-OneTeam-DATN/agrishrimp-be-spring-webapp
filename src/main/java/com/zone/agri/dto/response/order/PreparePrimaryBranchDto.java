@@ -13,4 +13,6 @@ public class PreparePrimaryBranchDto {
     private Long id;
     private String name;
     private Double distanceKm;
+    private String distanceSource;
+    private String region;
 }

@@ -400,6 +400,8 @@ public class CustomerService {
                         .receiverName(addr.getReceiverName())
                         .receiverPhone(addr.getReceiverPhone())
                         .addressDetail(addr.getAddressDetail())
+                        .lat(addr.getLat())
+                        .lng(addr.getLng())
                         .isDefault(Boolean.TRUE.equals(addr.getIsDefault()))
                         .createdAt(addr.getCreatedAt())
                         .build())

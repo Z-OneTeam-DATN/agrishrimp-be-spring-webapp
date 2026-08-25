@@ -15,6 +15,7 @@ import com.zone.agri.entity.enums.PaymentMethod;
 import com.zone.agri.entity.enums.PaymentStatus;
 import com.zone.agri.entity.enums.StockStatus;
 import com.zone.agri.entity.enums.TransactionType;
+import com.zone.agri.entity.enums.VietnamRegion;
 import com.zone.agri.entity.enums.VoucherStatus;
 import com.zone.agri.entity.enums.VoucherDiscountType; // ThĂªm Enum nĂ y Ä‘á»ƒ kiá»ƒm tra loáº¡i Voucher
 import com.zone.agri.exception.BadRequestException;
@@ -88,6 +89,7 @@ public class OrderService {
 
     private final BranchSearchService branchSearchService;
     private final InventoryAllocationService allocationService;
+    private final VietnamRegionResolver vietnamRegionResolver;
     private final ShippingService shippingService;
     private final PayOSService payOSService;
     private final SettingService settingService;
@@ -171,10 +173,15 @@ public class OrderService {
             List<CartItemDto> cartItems,
             List<SubOrderDraftDto> subOrders,
             List<OutOfStockItemDto> outOfStockItems,
+            List<SuggestedTransferDto> suggestedTransfers,
             BigDecimal totalSubtotal,
             BigDecimal discountAmount,
             BigDecimal totalShippingFee,
-            BigDecimal totalAmount) {
+            BigDecimal totalAmount,
+            String customerRegion,
+            String servingBranchRegion,
+            String adjacentRegionUsed,
+            String distanceSource) {
     }
 
     private record VoucherValidation(
@@ -2347,11 +2354,16 @@ public class OrderService {
                 .canPlaceOrder(canPlaceOrder)
                 .requiresManualApproval(!"FULLY_AVAILABLE".equalsIgnoreCase(String.valueOf(draft.getStockStatus())))
                 .stockStatus(draft.getStockStatus())
+                .customerRegion(draft.getCustomerRegion())
+                .servingBranchRegion(draft.getServingBranchRegion())
+                .adjacentRegionUsed(draft.getAdjacentRegionUsed())
                 .primaryBranch(primarySubOrder != null
                         ? PreparePrimaryBranchDto.builder()
                                 .id(primarySubOrder.getBranchId())
                                 .name(primarySubOrder.getBranchName())
                                 .distanceKm(primarySubOrder.getDistanceKm())
+                                .distanceSource(primarySubOrder.getDistanceSource())
+                                .region(primarySubOrder.getBranchRegion())
                                 .build()
                         : null)
                 .suggestedTransfers(draft.getSuggestedTransfers())
@@ -2825,9 +2837,15 @@ public class OrderService {
                 .stockStatus(draft.getStockStatus())
                 .createdAt(draft.getCreatedAt())
                 .expiresAt(draft.getExpiresAt())
-                .branchId(draft.getBranchId())
+                .branchId(liveQuote.subOrders() != null && !liveQuote.subOrders().isEmpty()
+                        ? liveQuote.subOrders().get(0).getBranchId()
+                        : draft.getBranchId())
+                .customerRegion(liveQuote.customerRegion())
+                .servingBranchRegion(liveQuote.servingBranchRegion())
+                .adjacentRegionUsed(liveQuote.adjacentRegionUsed())
+                .distanceSource(liveQuote.distanceSource())
                 .finalItems(draft.getFinalItems())
-                .suggestedTransfers(draft.getSuggestedTransfers())
+                .suggestedTransfers(liveQuote.suggestedTransfers())
                 .cartItems(draft.getCartItems())
                 .receiverName(draft.getReceiverName())
                 .receiverPhone(draft.getReceiverPhone())
@@ -2843,6 +2861,10 @@ public class OrderService {
                 .discountAmount(liveQuote.discountAmount())
                 .totalShippingFee(liveQuote.totalShippingFee())
                 .totalAmount(liveQuote.totalAmount())
+                .stockStatus(determinePrepareStockStatus(
+                        liveQuote.subOrders(),
+                        liveQuote.outOfStockItems(),
+                        liveQuote.suggestedTransfers()))
                 .build();
     }
 
@@ -3303,8 +3325,9 @@ public class OrderService {
         Integer deliveryDistrictId = addr.getDistrictId() != null ? parseIntSafe(addr.getDistrictId()) : null;
         Integer deliveryProvinceId = addr.getProvinceId() != null ? parseIntSafe(addr.getProvinceId()) : null;
         String deliveryWardCode = normalizeWardCode(addr.getWardId());
-        Double userLat = request.getUserLat();
-        Double userLng = request.getUserLng();
+        Double userLat = request.getUserLat() != null ? request.getUserLat() : addr.getLat();
+        Double userLng = request.getUserLng() != null ? request.getUserLng() : addr.getLng();
+        VietnamRegion customerRegion = resolveCustomerRegionOrThrow(deliveryProvinceId, deliveryAddress);
 
         List<CartItemDto> finalCart = request.getCart();
         if (finalCart == null || finalCart.isEmpty()) {
@@ -3336,13 +3359,14 @@ public class OrderService {
                         deliveryWardCode,
                         userLat,
                         userLng));
+        requireCustomerRegionBranches(nearestBranches, customerRegion);
 
         List<Long> branchIds = nearestBranches.stream().map(bwr -> bwr.branch().getId()).toList();
 
         Map<Long, Map<Long, List<Inventory>>> inventoryMatrix = allocationService.buildInventoryMatrix(branchIds,
                 variantIds);
         AllocationResult allocation = allocationService.allocate(finalCart, variantMap, nearestBranches,
-                inventoryMatrix);
+                inventoryMatrix, customerRegion);
 
         DeliveryInfo deliveryInfo = DeliveryInfo.builder()
                 .toDistrictId(deliveryDistrictId).toWardCode(deliveryWardCode)
@@ -3378,10 +3402,7 @@ public class OrderService {
         }
 
         SubOrderDraftDto primarySubOrder = enrichedSubOrders.isEmpty() ? null : enrichedSubOrders.get(0);
-        List<SuggestedTransferDto> suggestedTransfers = inferSuggestedTransfers(
-                primarySubOrder,
-                nearestBranches,
-                inventoryMatrix);
+        List<SuggestedTransferDto> suggestedTransfers = allocation.suggestedTransfers();
         String stockStatus = determinePrepareStockStatus(
                 enrichedSubOrders,
                 allocation.outOfStockItems(),
@@ -3399,7 +3420,12 @@ public class OrderService {
         PrepareOrderDraft draft = PrepareOrderDraft.builder()
                 .prepareToken(token).userId(userId).addressId(request.getUserAddressId()).voucherCode(voucherCode)
                 .stockStatus(stockStatus).createdAt(createdAt).expiresAt(expiresAt)
-                .branchId(mainBranchId).finalItems(allFinalItems).suggestedTransfers(suggestedTransfers).cartItems(finalCart)
+                .branchId(mainBranchId)
+                .customerRegion(allocation.customerRegion())
+                .servingBranchRegion(allocation.servingBranchRegion())
+                .adjacentRegionUsed(allocation.adjacentRegionUsed())
+                .distanceSource(allocation.distanceSource())
+                .finalItems(allFinalItems).suggestedTransfers(suggestedTransfers).cartItems(finalCart)
                 .receiverName(receiverName).receiverPhone(receiverPhone)
                 .userLat(userLat).userLng(userLng).deliveryAddress(deliveryAddress)
                 .deliveryDistrictId(deliveryDistrictId).deliveryProvinceId(deliveryProvinceId)
@@ -3424,11 +3450,16 @@ public class OrderService {
                 .canPlaceOrder(canPlaceOrder)
                 .requiresManualApproval(requiresManualApproval)
                 .stockStatus(stockStatus)
+                .customerRegion(allocation.customerRegion())
+                .servingBranchRegion(allocation.servingBranchRegion())
+                .adjacentRegionUsed(allocation.adjacentRegionUsed())
                 .primaryBranch(primarySubOrder != null
                         ? PreparePrimaryBranchDto.builder()
                                 .id(primarySubOrder.getBranchId())
                                 .name(primarySubOrder.getBranchName())
                                 .distanceKm(primarySubOrder.getDistanceKm())
+                                .distanceSource(primarySubOrder.getDistanceSource())
+                                .region(primarySubOrder.getBranchRegion())
                                 .build()
                         : null)
                 .suggestedTransfers(suggestedTransfers)
@@ -3481,6 +3512,33 @@ public class OrderService {
         }
 
         return sellableBranches;
+    }
+
+    private VietnamRegion resolveCustomerRegionOrThrow(Integer deliveryProvinceId, String deliveryAddress) {
+        return vietnamRegionResolver.resolveDeliveryRegion(deliveryProvinceId, deliveryAddress)
+                .orElseThrow(() -> new BadRequestException(
+                        "ORDER_PREPARE_UNSUPPORTED_REGION",
+                        "KhĂ´ng thá»ƒ xĂ¡c Ä‘á»‹nh vĂ¹ng giao hĂ ng tá»« Ä‘á»‹a chá»‰ nháº­n hĂ ng.",
+                        null));
+    }
+
+    private void requireCustomerRegionBranches(
+            List<BranchWithRealDistance> branches,
+            VietnamRegion customerRegion) {
+        if (customerRegion == null) {
+            return;
+        }
+
+        boolean hasBranchInRegion = branches != null && branches.stream()
+                .filter(Objects::nonNull)
+                .map(BranchWithRealDistance::branch)
+                .anyMatch(branch -> vietnamRegionResolver.isSameRegion(branch, customerRegion));
+        if (!hasBranchInRegion) {
+            throw new BadRequestException(
+                    "ORDER_PREPARE_NO_BRANCH_IN_REGION",
+                    "KhĂ´ng cĂ³ chi nhĂ¡nh Ä‘ang hoáº¡t Ä‘á»™ng trong vĂ¹ng giao hĂ ng cá»§a báº¡n.",
+                    Map.of("customerRegion", customerRegion.name()));
+        }
     }
 
     @Transactional
@@ -3859,6 +3917,7 @@ public class OrderService {
                 .collect(Collectors.toMap(ProductVariant::getId, Function.identity()));
 
         String normalizedWardCode = normalizeWardCode(deliveryWardCode);
+        VietnamRegion customerRegion = resolveCustomerRegionOrThrow(deliveryProvinceId, deliveryAddress);
 
         List<BranchWithRealDistance> nearestBranches = requireCustomerFulfillmentBranches(
                 branchSearchService.findBranchesForDelivery(
@@ -3867,22 +3926,28 @@ public class OrderService {
                         normalizedWardCode,
                         userLat,
                         userLng));
+        requireCustomerRegionBranches(nearestBranches, customerRegion);
 
         List<Long> branchIds = nearestBranches.stream().map(bwr -> bwr.branch().getId()).toList();
         Map<Long, Map<Long, List<Inventory>>> inventoryMatrix = allocationService.buildInventoryMatrix(branchIds,
                 variantIds);
         AllocationResult allocation = allocationService.allocate(normalizedCart, variantMap, nearestBranches,
-                inventoryMatrix);
+                inventoryMatrix, customerRegion);
 
         if (!allocation.outOfStockItems().isEmpty() && allocation.subOrders().isEmpty()) {
             return new PreparedQuote(
                     normalizedCart,
                     Collections.emptyList(),
                     allocation.outOfStockItems(),
+                    allocation.suggestedTransfers(),
                     BigDecimal.ZERO,
                     BigDecimal.ZERO,
                     BigDecimal.ZERO,
-                    BigDecimal.ZERO);
+                    BigDecimal.ZERO,
+                    allocation.customerRegion(),
+                    allocation.servingBranchRegion(),
+                    allocation.adjacentRegionUsed(),
+                    allocation.distanceSource());
         }
 
         DeliveryInfo deliveryInfo = DeliveryInfo.builder()
@@ -3927,10 +3992,15 @@ public class OrderService {
                 normalizedCart,
                 enrichedSubOrders,
                 allocation.outOfStockItems(),
+                allocation.suggestedTransfers(),
                 totalSubtotal,
                 discountAmount,
                 totalShippingFee,
-                totalAmount);
+                totalAmount,
+                allocation.customerRegion(),
+                allocation.servingBranchRegion(),
+                allocation.adjacentRegionUsed(),
+                allocation.distanceSource());
     }
 
     private void ensurePreparedQuoteStillValid(PrepareOrderDraft draft, PreparedQuote liveQuote) {

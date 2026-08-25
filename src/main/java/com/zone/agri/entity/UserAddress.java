@@ -41,6 +41,12 @@ public class UserAddress {
     @Column(name = "address_detail", columnDefinition = "TEXT")
     String addressDetail;
 
+    @Column(name = "lat")
+    Double lat;
+
+    @Column(name = "lng")
+    Double lng;
+
     @Column(name = "is_default")
     Boolean isDefault;
 

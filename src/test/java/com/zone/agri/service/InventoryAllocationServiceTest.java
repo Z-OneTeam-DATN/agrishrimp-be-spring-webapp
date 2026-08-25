@@ -3,10 +3,12 @@ package com.zone.agri.service;
 import com.zone.agri.dto.response.order.CartItemDto;
 import com.zone.agri.dto.response.order.OrderItemDto;
 import com.zone.agri.dto.response.order.OutOfStockItemDto;
+import com.zone.agri.dto.response.order.SuggestedTransferDto;
 import com.zone.agri.dto.response.order.SubOrderDraftDto;
 import com.zone.agri.entity.Branch;
 import com.zone.agri.entity.Inventory;
 import com.zone.agri.entity.ProductVariant;
+import com.zone.agri.entity.enums.VietnamRegion;
 import com.zone.agri.repository.InventoryRepository;
 import com.zone.agri.repository.InventoryTransactionRepository;
 import com.zone.agri.service.BranchSearchService.BranchWithRealDistance;
@@ -17,6 +19,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
@@ -41,6 +44,9 @@ class InventoryAllocationServiceTest {
 
     @Mock
     private PublicSellingPriceService publicSellingPriceService;
+
+    @Spy
+    private VietnamRegionResolver vietnamRegionResolver = new VietnamRegionResolver();
 
     @InjectMocks
     private InventoryAllocationService allocationService;
@@ -446,11 +452,199 @@ class InventoryAllocationServiceTest {
         assertThat(result.subOrders().get(0).getBranchId()).isEqualTo(1L);
     }
 
+    @Test
+    void allocate_regionSelectsSouthServingBranchInsteadOfFarNorthFullStockBranch() {
+        Branch caMauStore = branch(11L, "Chi nhanh Ca Mau", "STORE", "Tỉnh Cà Mau", 9.18, 105.15);
+        Branch haNoiStore = branch(12L, "Chi nhanh Ha Noi", "STORE", "Thành phố Hà Nội", 21.03, 105.85);
+        List<CartItemDto> cart = List.of(new CartItemDto(101L, 5));
+
+        Map<Long, Map<Long, List<Inventory>>> matrix = new HashMap<>();
+        matrix.put(11L, Map.of(101L, new ArrayList<>(List.of(createBatch(10L, caMauStore, varA, 2, 100000)))));
+        matrix.put(12L, Map.of(101L, new ArrayList<>(List.of(createBatch(11L, haNoiStore, varA, 5, 100000)))));
+
+        List<BranchWithRealDistance> branches = List.of(
+                new BranchWithRealDistance(caMauStore, 2.0, 240, 4.0),
+                new BranchWithRealDistance(haNoiStore, 1800.0, 86400, 1440.0)
+        );
+
+        AllocationResult result = allocationService.allocate(
+                cart,
+                Map.of(101L, varA),
+                branches,
+                matrix,
+                VietnamRegion.SOUTH);
+
+        assertThat(result.subOrders()).hasSize(1);
+        assertThat(result.subOrders().get(0).getBranchId()).isEqualTo(11L);
+        assertThat(result.customerRegion()).isEqualTo("SOUTH");
+        assertThat(result.servingBranchRegion()).isEqualTo("SOUTH");
+        assertThat(result.outOfStockItems()).singleElement().satisfies(outOfStock -> {
+            assertThat(outOfStock.getProductVariantId()).isEqualTo(101L);
+            assertThat(outOfStock.getRequestedQty()).isEqualTo(3);
+        });
+        assertThat(result.suggestedTransfers()).isEmpty();
+    }
+
+    @Test
+    void allocate_regionUsesCentralAdjacentOnlyForSouthCustomer() {
+        Branch caMauStore = branch(21L, "Chi nhanh Ca Mau", "STORE", "Tỉnh Cà Mau", 9.18, 105.15);
+        Branch daNangWarehouse = branch(22L, "Kho Da Nang", "WAREHOUSE", "Thành phố Đà Nẵng", 16.05, 108.20);
+        Branch haNoiStore = branch(23L, "Chi nhanh Ha Noi", "STORE", "Thành phố Hà Nội", 21.03, 105.85);
+        List<CartItemDto> cart = List.of(new CartItemDto(101L, 5));
+
+        Map<Long, Map<Long, List<Inventory>>> matrix = new HashMap<>();
+        matrix.put(21L, Map.of(101L, new ArrayList<>(List.of(createBatch(20L, caMauStore, varA, 1, 100000)))));
+        matrix.put(22L, Map.of(101L, new ArrayList<>(List.of(createBatch(21L, daNangWarehouse, varA, 4, 100000)))));
+        matrix.put(23L, Map.of(101L, new ArrayList<>(List.of(createBatch(22L, haNoiStore, varA, 10, 100000)))));
+
+        List<BranchWithRealDistance> branches = List.of(
+                new BranchWithRealDistance(caMauStore, 1.0, 120, 2.0),
+                new BranchWithRealDistance(daNangWarehouse, 900.0, 36000, 600.0),
+                new BranchWithRealDistance(haNoiStore, 1800.0, 86400, 1440.0)
+        );
+
+        AllocationResult result = allocationService.allocate(
+                cart,
+                Map.of(101L, varA),
+                branches,
+                matrix,
+                VietnamRegion.SOUTH);
+
+        assertThat(result.subOrders()).hasSize(1);
+        assertThat(result.subOrders().get(0).getBranchId()).isEqualTo(21L);
+        assertThat(result.adjacentRegionUsed()).isEqualTo("CENTRAL");
+        assertThat(result.outOfStockItems()).isEmpty();
+        assertThat(result.suggestedTransfers()).singleElement().satisfies(transfer -> {
+            assertThat(transfer.getFromBranchId()).isEqualTo(22L);
+            assertThat(transfer.getQuantity()).isEqualTo(4);
+            assertThat(transfer.getFromRegion()).isEqualTo("CENTRAL");
+            assertThat(transfer.getToRegion()).isEqualTo("SOUTH");
+        });
+    }
+
+    @Test
+    void allocate_regionAllowsWarehouseServingBranchWhenNearestInCustomerRegion() {
+        Branch southWarehouse = branch(31L, "Kho Can Tho", "WAREHOUSE", "Thành phố Cần Thơ", 10.02, 105.78);
+        Branch southStore = branch(32L, "Chi nhanh Bac Lieu", "STORE", "Tỉnh Bạc Liêu", 9.29, 105.72);
+        List<CartItemDto> cart = List.of(new CartItemDto(101L, 3));
+
+        Map<Long, Map<Long, List<Inventory>>> matrix = new HashMap<>();
+        matrix.put(31L, Map.of(101L, new ArrayList<>(List.of(createBatch(30L, southWarehouse, varA, 3, 100000)))));
+        matrix.put(32L, Map.of(101L, new ArrayList<>(List.of(createBatch(31L, southStore, varA, 3, 100000)))));
+
+        List<BranchWithRealDistance> branches = List.of(
+                new BranchWithRealDistance(southWarehouse, 1.0, 120, 2.0),
+                new BranchWithRealDistance(southStore, 3.0, 360, 6.0)
+        );
+
+        AllocationResult result = allocationService.allocate(
+                cart,
+                Map.of(101L, varA),
+                branches,
+                matrix,
+                VietnamRegion.SOUTH);
+
+        assertThat(result.subOrders()).hasSize(1);
+        assertThat(result.subOrders().get(0).getBranchId()).isEqualTo(31L);
+        assertThat(result.subOrders().get(0).getBranchRegion()).isEqualTo("SOUTH");
+        assertThat(result.outOfStockItems()).isEmpty();
+    }
+
+    @Test
+    void allocate_regionChoosesCloserAdjacentRegionForCentralCustomer() {
+        Branch hueStore = branch(41L, "Chi nhanh Hue", "STORE", "Thừa Thiên Huế", 16.46, 107.59);
+        Branch daNangWarehouse = branch(42L, "Kho Da Nang", "WAREHOUSE", "Thành phố Đà Nẵng", 16.05, 108.20);
+        Branch haNoiStore = branch(43L, "Chi nhanh Ha Noi", "STORE", "Thành phố Hà Nội", 21.03, 105.85);
+        Branch hcmStore = branch(44L, "Chi nhanh HCM", "STORE", "Thành phố Hồ Chí Minh", 10.78, 106.70);
+        List<CartItemDto> cart = List.of(new CartItemDto(101L, 5));
+
+        Map<Long, Map<Long, List<Inventory>>> matrix = new HashMap<>();
+        matrix.put(42L, Map.of(101L, new ArrayList<>(List.of(createBatch(40L, daNangWarehouse, varA, 1, 100000)))));
+        matrix.put(43L, Map.of(101L, new ArrayList<>(List.of(createBatch(41L, haNoiStore, varA, 4, 100000)))));
+        matrix.put(44L, Map.of(101L, new ArrayList<>(List.of(createBatch(42L, hcmStore, varA, 4, 100000)))));
+
+        List<BranchWithRealDistance> branches = List.of(
+                new BranchWithRealDistance(hueStore, 1.0, 120, 2.0),
+                new BranchWithRealDistance(daNangWarehouse, 2.0, 240, 4.0),
+                new BranchWithRealDistance(haNoiStore, 700.0, 36000, 600.0),
+                new BranchWithRealDistance(hcmStore, 1050.0, 54000, 900.0)
+        );
+
+        AllocationResult result = allocationService.allocate(
+                cart,
+                Map.of(101L, varA),
+                branches,
+                matrix,
+                VietnamRegion.CENTRAL);
+
+        assertThat(result.subOrders()).hasSize(1);
+        assertThat(result.subOrders().get(0).getBranchId()).isEqualTo(41L);
+        assertThat(result.adjacentRegionUsed()).isEqualTo("NORTH");
+        assertThat(result.outOfStockItems()).isEmpty();
+        assertThat(result.suggestedTransfers()).hasSize(2);
+        assertThat(result.suggestedTransfers())
+                .extracting(SuggestedTransferDto::getFromBranchId)
+                .containsExactlyInAnyOrder(42L, 43L);
+        assertThat(result.suggestedTransfers())
+                .extracting(SuggestedTransferDto::getFromRegion)
+                .containsExactlyInAnyOrder("CENTRAL", "NORTH");
+    }
+
+    @Test
+    void allocate_regionUsesPartialAdjacentSupplyAndLeavesRemainingShortageForPr() {
+        Branch caMauStore = branch(51L, "Chi nhanh Ca Mau", "STORE", "Tỉnh Cà Mau", 9.18, 105.15);
+        Branch canThoWarehouse = branch(52L, "Kho Can Tho", "WAREHOUSE", "Thành phố Cần Thơ", 10.02, 105.78);
+        Branch daNangWarehouse = branch(53L, "Kho Da Nang", "WAREHOUSE", "Thành phố Đà Nẵng", 16.05, 108.20);
+        Branch haNoiStore = branch(54L, "Chi nhanh Ha Noi", "STORE", "Thành phố Hà Nội", 21.03, 105.85);
+        List<CartItemDto> cart = List.of(new CartItemDto(101L, 6));
+
+        Map<Long, Map<Long, List<Inventory>>> matrix = new HashMap<>();
+        matrix.put(52L, Map.of(101L, new ArrayList<>(List.of(createBatch(50L, canThoWarehouse, varA, 1, 100000)))));
+        matrix.put(53L, Map.of(101L, new ArrayList<>(List.of(createBatch(51L, daNangWarehouse, varA, 2, 100000)))));
+        matrix.put(54L, Map.of(101L, new ArrayList<>(List.of(createBatch(52L, haNoiStore, varA, 10, 100000)))));
+
+        List<BranchWithRealDistance> branches = List.of(
+                new BranchWithRealDistance(caMauStore, 1.0, 120, 2.0),
+                new BranchWithRealDistance(canThoWarehouse, 180.0, 7200, 120.0),
+                new BranchWithRealDistance(daNangWarehouse, 900.0, 36000, 600.0),
+                new BranchWithRealDistance(haNoiStore, 1800.0, 86400, 1440.0)
+        );
+
+        AllocationResult result = allocationService.allocate(
+                cart,
+                Map.of(101L, varA),
+                branches,
+                matrix,
+                VietnamRegion.SOUTH);
+
+        assertThat(result.subOrders()).hasSize(1);
+        assertThat(result.subOrders().get(0).getBranchId()).isEqualTo(51L);
+        assertThat(result.adjacentRegionUsed()).isEqualTo("CENTRAL");
+        assertThat(result.suggestedTransfers()).extracting(SuggestedTransferDto::getFromBranchId)
+                .containsExactly(52L, 53L);
+        assertThat(result.outOfStockItems()).singleElement().satisfies(outOfStock -> {
+            assertThat(outOfStock.getProductVariantId()).isEqualTo(101L);
+            assertThat(outOfStock.getRequestedQty()).isEqualTo(3);
+        });
+    }
+
     private OrderItemDto findItem(SubOrderDraftDto subOrder, Long variantId) {
         return subOrder.getItems().stream()
                 .filter(item -> variantId.equals(item.getProductVariantId()))
                 .findFirst()
                 .orElseThrow();
+    }
+
+    private Branch branch(Long id, String name, String branchType, String provinceName, Double lat, Double lng) {
+        Branch branch = Branch.builder()
+                .name(name)
+                .branchType(branchType)
+                .provinceName(provinceName)
+                .lat(lat)
+                .lng(lng)
+                .build();
+        setId(branch, id, "id");
+        return branch;
     }
 
     @SuppressWarnings("SameParameterValue")

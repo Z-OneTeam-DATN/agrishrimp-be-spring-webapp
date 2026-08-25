@@ -27,6 +27,10 @@ public class PrepareOrderDraft {
     private LocalDateTime expiresAt;
 
     private Long branchId;
+    private String customerRegion;
+    private String servingBranchRegion;
+    private String adjacentRegionUsed;
+    private String distanceSource;
     private List<OrderItemDto> finalItems;
     private List<SuggestedTransferDto> suggestedTransfers;
 

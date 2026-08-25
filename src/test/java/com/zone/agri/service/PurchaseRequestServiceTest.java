@@ -257,7 +257,6 @@ class PurchaseRequestServiceTest {
         when(subOrderRepository.findByIdWithItems(34L)).thenReturn(Optional.of(subOrder));
         when(purchaseRequestRepository.findAutoReplenishmentRequestsByLinkedSubOrderIdExcludingStatuses(any(), any()))
                 .thenReturn(List.of());
-        when(branchRepository.findAll()).thenReturn(List.of(warehouse, destinationBranch));
         when(supplierProductCatalogRepository.findByProductVariantIdInAndStatus(any(), any()))
                 .thenReturn(List.of());
 
@@ -284,6 +283,7 @@ class PurchaseRequestServiceTest {
         SupplierProductCatalog catalog = SupplierProductCatalog.builder()
                 .productVariant(variant)
                 .supplier(supplier)
+                .price(new BigDecimal("100000"))
                 .status(SupplierProductCatalogStatus.AVAILABLE)
                 .build();
         Order order = Order.builder().id(1000L).code("ORD-WH-001").status(OrderStatus.AWAITING_REPLENISHMENT).build();
@@ -303,7 +303,8 @@ class PurchaseRequestServiceTest {
         when(subOrderRepository.findByIdWithItems(34L)).thenReturn(Optional.of(subOrder));
         when(purchaseRequestRepository.findAutoReplenishmentRequestsByLinkedSubOrderIdExcludingStatuses(any(), any()))
                 .thenReturn(List.of());
-        when(branchRepository.findAll()).thenReturn(List.of(warehouse));
+        when(inventoryTransferService.resolveProcurementWarehouseForDestinationBranch(warehouse))
+                .thenReturn(warehouse);
         when(supplierProductCatalogRepository.findByProductVariantIdInAndStatus(any(), any()))
                 .thenReturn(List.of(catalog));
         when(purchaseRequestRepository.save(any(PurchaseRequest.class)))

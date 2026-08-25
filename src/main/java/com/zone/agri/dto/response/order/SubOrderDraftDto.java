@@ -20,6 +20,8 @@ public class SubOrderDraftDto {
     private Integer fromDistrictId;
     private double durationMinutes;
     private double distanceKm;
+    private String distanceSource;
+    private String branchRegion;
     private List<OrderItemDto> items;
     private BigDecimal subtotal;
     private BigDecimal shippingFee;
