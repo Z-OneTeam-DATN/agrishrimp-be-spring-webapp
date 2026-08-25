@@ -56,6 +56,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.MockedStatic;
+import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
@@ -100,6 +101,9 @@ class InventoryTransferServiceTest {
     @Mock
     private SettingService settingService;
 
+    @Spy
+    private VietnamRegionResolver vietnamRegionResolver = new VietnamRegionResolver();
+
     @InjectMocks
     private InventoryTransferService inventoryTransferService;
 
@@ -123,9 +127,11 @@ class InventoryTransferServiceTest {
                 .branchCode("MAIN_WH")
                 .branchType("WAREHOUSE")
                 .name("Kho Tong")
+                .provinceName("Tỉnh Sóc Trăng")
                 .build();
         setId(warehouse, 1L, "id");
         warehouse.setStatus(BranchStatus.ACTIVE);
+        warehouse.setProvinceName("Soc Trang");
         warehouse.setLat(10.10);
         warehouse.setLng(105.70);
 
@@ -133,9 +139,11 @@ class InventoryTransferServiceTest {
                 .branchCode("CN-HCM")
                 .branchType("STORE")
                 .name("Chi Nhanh HCM")
+                .provinceName("Thành phố Hồ Chí Minh")
                 .build();
         setId(sourceBranch, 2L, "id");
         sourceBranch.setStatus(BranchStatus.ACTIVE);
+        sourceBranch.setProvinceName("Ho Chi Minh");
         sourceBranch.setLat(10.76);
         sourceBranch.setLng(106.67);
 
@@ -143,9 +151,11 @@ class InventoryTransferServiceTest {
                 .branchCode("CN-CT")
                 .branchType("STORE")
                 .name("Chi Nhanh Can Tho")
+                .provinceName("Thành phố Cần Thơ")
                 .build();
         setId(destinationBranch, 3L, "id");
         destinationBranch.setStatus(BranchStatus.ACTIVE);
+        destinationBranch.setProvinceName("Can Tho");
         destinationBranch.setLat(10.03);
         destinationBranch.setLng(105.78);
 
@@ -307,9 +317,11 @@ class InventoryTransferServiceTest {
                 .branchCode("WH-SECONDARY")
                 .branchType("WAREHOUSE")
                 .name("Kho Phu")
+                .provinceName("Tá»‰nh SĂ³c TrÄƒng")
                 .build();
         setId(warehouseSource, 4L, "id");
         warehouseSource.setStatus(BranchStatus.ACTIVE);
+        warehouseSource.setProvinceName("Soc Trang");
         warehouseSource.setLat(10.30);
         warehouseSource.setLng(105.90);
 
@@ -317,9 +329,11 @@ class InventoryTransferServiceTest {
                 .branchCode("CN-NEAR")
                 .branchType("STORE")
                 .name("Chi Nhanh Gan")
+                .provinceName("ThĂ nh phá»‘ Cáº§n ThÆ¡")
                 .build();
         setId(storeSource, 5L, "id");
         storeSource.setStatus(BranchStatus.ACTIVE);
+        storeSource.setProvinceName("Can Tho");
         storeSource.setLat(10.30);
         storeSource.setLng(105.90);
 
@@ -373,9 +387,11 @@ class InventoryTransferServiceTest {
                 .branchCode("WH-SUPPORT")
                 .branchType("WAREHOUSE")
                 .name("Kho Ho Tro")
+                .provinceName("Tá»‰nh SĂ³c TrÄƒng")
                 .build();
         setId(warehouseSource, 4L, "id");
         warehouseSource.setStatus(BranchStatus.ACTIVE);
+        warehouseSource.setProvinceName("Soc Trang");
         warehouseSource.setLat(10.50);
         warehouseSource.setLng(105.95);
 
@@ -478,6 +494,63 @@ class InventoryTransferServiceTest {
                 .findFirst()
                 .orElseThrow();
         assertThat(warehouseTransfer.getTotalQuantity()).isEqualTo(2);
+    }
+
+    @Test
+    void resolveProcurementWarehouseForDestinationBranch_prefersSameRegionWarehouseBeforeFartherRegions() {
+        Branch southWarehouse = Branch.builder()
+                .branchCode("WH-SOUTH")
+                .branchType("WAREHOUSE")
+                .name("Kho Bac Lieu")
+                .provinceName("Tỉnh Bạc Liêu")
+                .lat(9.28)
+                .lng(105.73)
+                .status(BranchStatus.ACTIVE)
+                .build();
+        setId(southWarehouse, 70L, "id");
+
+        Branch centralWarehouse = Branch.builder()
+                .branchCode("WH-CENTRAL")
+                .branchType("WAREHOUSE")
+                .name("Kho Da Nang")
+                .provinceName("Thành phố Đà Nẵng")
+                .lat(16.05)
+                .lng(108.20)
+                .status(BranchStatus.ACTIVE)
+                .build();
+        setId(centralWarehouse, 71L, "id");
+
+        Branch northWarehouse = Branch.builder()
+                .branchCode("WH-NORTH")
+                .branchType("WAREHOUSE")
+                .name("Kho Ha Noi")
+                .provinceName("Thành phố Hà Nội")
+                .lat(21.03)
+                .lng(105.85)
+                .status(BranchStatus.ACTIVE)
+                .build();
+        setId(northWarehouse, 72L, "id");
+
+        Branch servingStore = Branch.builder()
+                .branchCode("CN-CM")
+                .branchType("STORE")
+                .name("Chi nhanh Ca Mau")
+                .provinceName("Tỉnh Cà Mau")
+                .lat(9.18)
+                .lng(105.15)
+                .status(BranchStatus.ACTIVE)
+                .build();
+        setId(servingStore, 73L, "id");
+
+        when(branchRepo.findAll()).thenReturn(List.of(
+                southWarehouse,
+                centralWarehouse,
+                northWarehouse,
+                servingStore));
+
+        Branch selectedWarehouse = inventoryTransferService.resolveProcurementWarehouseForDestinationBranch(servingStore);
+
+        assertThat(selectedWarehouse).isEqualTo(southWarehouse);
     }
 
     @Test
@@ -695,6 +768,7 @@ class InventoryTransferServiceTest {
 
     @Test
     void createTransfer_rejectsManualStockTransferIntoWarehouse() {
+        requesterUser.setBranch(warehouse);
         defectBranch.setStatus(BranchStatus.ACTIVE);
         when(branchRepo.findById(defectBranch.getId())).thenReturn(Optional.of(defectBranch));
 

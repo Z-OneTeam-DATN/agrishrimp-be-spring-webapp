@@ -16,6 +16,8 @@ public class CustomerAddressResponse {
     private String receiverName;
     private String receiverPhone;
     private String addressDetail;
+    private Double lat;
+    private Double lng;
     private Boolean isDefault;
     private LocalDateTime createdAt;
 }

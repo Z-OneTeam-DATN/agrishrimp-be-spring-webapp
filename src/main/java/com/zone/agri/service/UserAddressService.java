@@ -66,6 +66,8 @@ public class UserAddressService {
                 .districtId(request.getDistrictId() != null ? String.valueOf(request.getDistrictId()) : null)
                 .wardId(request.getWardCode())   // wardId column lưu GHN WardCode (string "550113")
                 .addressDetail(request.getAddressDetail())
+                .lat(request.getLat())
+                .lng(request.getLng())
                 .isDefault(isDefault)
                 .createdAt(LocalDateTime.now())
                 .build();
@@ -94,6 +96,8 @@ public class UserAddressService {
         existingAddress.setDistrictId(request.getDistrictId() != null ? String.valueOf(request.getDistrictId()) : null);
         existingAddress.setWardId(request.getWardCode());   // wardId column lưu GHN WardCode
         existingAddress.setAddressDetail(request.getAddressDetail());
+        existingAddress.setLat(request.getLat());
+        existingAddress.setLng(request.getLng());
         existingAddress.setIsDefault(isDefault);
 
         return addressRepo.save(existingAddress);
@@ -146,6 +150,7 @@ public class UserAddressService {
             throw new BadRequestException("Tỉnh/Thành phố và Quận/Huyện không được để trống");
         }
 
+        normalizeCoordinates(request);
         validateAdministrativeScope(request.getProvinceId(), request.getDistrictId(), request.getWardCode());
     }
 
@@ -160,6 +165,22 @@ public class UserAddressService {
         }
 
         return normalized;
+    }
+
+    private void normalizeCoordinates(UserAddressRequest request) {
+        if ((request.getLat() == null) != (request.getLng() == null)) {
+            throw new BadRequestException("Tá»a Ä‘á»™ Ä‘á»‹a chá»‰ pháº£i cĂ³ Ä‘á»§ cáº·p lat/lng hoáº·c bá» trá»‘ng cáº£ hai");
+        }
+
+        if (request.getLat() == null) {
+            return;
+        }
+
+        Double lat = request.getLat();
+        Double lng = request.getLng();
+        if (!Double.isFinite(lat) || !Double.isFinite(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+            throw new BadRequestException("Tá»a Ä‘á»™ Ä‘á»‹a chá»‰ khĂ´ng há»£p lá»‡");
+        }
     }
 
     private void validateAdministrativeScope(Long provinceId, Long districtId, String wardCode) {

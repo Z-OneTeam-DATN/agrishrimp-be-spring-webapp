@@ -15,4 +15,6 @@ public class SuggestedTransferDto {
     private Long toBranchId;
     private Long productVariantId;
     private Integer quantity;
+    private String fromRegion;
+    private String toRegion;
 }

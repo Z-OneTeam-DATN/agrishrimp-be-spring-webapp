@@ -26,6 +26,9 @@ public class PrepareOrderResponse {
     private Boolean requiresManualApproval;
     private String voucherCode;
     private String stockStatus;
+    private String customerRegion;
+    private String servingBranchRegion;
+    private String adjacentRegionUsed;
     private PreparePrimaryBranchDto primaryBranch;
     private List<SuggestedTransferDto> suggestedTransfers;
     private List<SubOrderDraftDto> subOrders;

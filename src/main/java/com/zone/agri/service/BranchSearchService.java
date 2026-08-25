@@ -31,6 +31,9 @@ import java.util.List;
 @Slf4j
 public class BranchSearchService {
 
+    public static final String DISTANCE_SOURCE_REAL = "REAL_DISTANCE";
+    public static final String DISTANCE_SOURCE_ADMIN_FALLBACK = "ADMINISTRATIVE_FALLBACK";
+
     private final BranchRepository branchRepository;
     private final OpenRouteServiceProvider routingProvider;
 
@@ -48,8 +51,22 @@ public class BranchSearchService {
             Branch branch,
             double distanceKm,
             double durationSeconds,
-            double durationMinutes
-    ) {}
+            double durationMinutes,
+            String distanceSource
+    ) {
+        public BranchWithRealDistance(
+                Branch branch,
+                double distanceKm,
+                double durationSeconds,
+                double durationMinutes) {
+            this(
+                    branch,
+                    distanceKm,
+                    durationSeconds,
+                    durationMinutes,
+                    hasCoordinates(branch) ? DISTANCE_SOURCE_REAL : DISTANCE_SOURCE_ADMIN_FALLBACK);
+        }
+    }
 
     // ──────────────────────────────────────────────────────────────
     // Public API
@@ -179,19 +196,19 @@ public class BranchSearchService {
                 double durationSec = (durations != null && i < durations.size() && durations.get(i) >= 0)
                         ? durations.get(i)
                         : estimateDuration(bwd.distanceKm());
-                result.add(createRealDistance(bwd, durationSec));
+                result.add(createRealDistance(bwd, durationSec, DISTANCE_SOURCE_REAL));
             }
 
             // Process fallback candidates
             for (BranchWithDistance bwd : fallbackCandidates) {
-                result.add(createRealDistance(bwd, estimateDuration(bwd.distanceKm())));
+                result.add(createRealDistance(bwd, estimateDuration(bwd.distanceKm()), DISTANCE_SOURCE_REAL));
             }
         }
 
         // Branches chưa geocode — sort về cuối
         for (BranchWithDistance bwd : withoutCoords) {
             log.debug("Branch '{}' (id={}) chưa geocode, sort về cuối", bwd.branch().getName(), bwd.branch().getId());
-            result.add(createRealDistance(bwd, 999_999));
+            result.add(createRealDistance(bwd, 999_999, DISTANCE_SOURCE_ADMIN_FALLBACK));
         }
 
         result.sort(Comparator.comparingDouble(BranchWithRealDistance::durationSeconds)
@@ -214,8 +231,16 @@ public class BranchSearchService {
         return distanceKm * 120; // 120s/km estimate
     }
 
-    private BranchWithRealDistance createRealDistance(BranchWithDistance bwd, double durationSec) {
-        return new BranchWithRealDistance(bwd.branch(), bwd.distanceKm(), durationSec, durationSec / 60.0);
+    private BranchWithRealDistance createRealDistance(
+            BranchWithDistance bwd,
+            double durationSec,
+            String distanceSource) {
+        return new BranchWithRealDistance(
+                bwd.branch(),
+                bwd.distanceKm(),
+                durationSec,
+                durationSec / 60.0,
+                distanceSource);
     }
 
     private List<BranchWithRealDistance> buildAdministrativeRanking(
@@ -230,7 +255,12 @@ public class BranchSearchService {
             int score = administrativeMatchScore(branch, provinceId, districtId, wardCode);
             double distanceKm = administrativeDistanceForScore(score) + (index * 0.1);
             double durationSec = estimateDuration(distanceKm);
-            ranked.add(new BranchWithRealDistance(branch, distanceKm, durationSec, durationSec / 60.0));
+            ranked.add(new BranchWithRealDistance(
+                    branch,
+                    distanceKm,
+                    durationSec,
+                    durationSec / 60.0,
+                    DISTANCE_SOURCE_ADMIN_FALLBACK));
         }
 
         return ranked;
@@ -264,10 +294,15 @@ public class BranchSearchService {
         int score = administrativeMatchScore(candidate.branch(), provinceId, districtId, wardCode);
         double distanceKm = administrativeDistanceForScore(score);
         double durationSec = estimateDuration(distanceKm);
-        return new BranchWithRealDistance(candidate.branch(), distanceKm, durationSec, durationSec / 60.0);
+        return new BranchWithRealDistance(
+                candidate.branch(),
+                distanceKm,
+                durationSec,
+                durationSec / 60.0,
+                DISTANCE_SOURCE_ADMIN_FALLBACK);
     }
 
-    private boolean hasCoordinates(Branch branch) {
+    private static boolean hasCoordinates(Branch branch) {
         return branch != null && branch.getLat() != null && branch.getLng() != null;
     }
 

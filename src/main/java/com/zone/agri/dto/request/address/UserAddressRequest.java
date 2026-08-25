@@ -27,5 +27,9 @@ public class UserAddressRequest {
     @NotBlank(message = "Phường/Xã không được để trống")
     private String wardCode;
 
+    private Double lat;
+
+    private Double lng;
+
     private Boolean isDefault;
 }
