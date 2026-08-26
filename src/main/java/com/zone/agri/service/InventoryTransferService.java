@@ -1,6 +1,7 @@
 package com.zone.agri.service;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.text.Normalizer;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -111,6 +112,7 @@ public class InventoryTransferService {
     private final com.zone.agri.common.WarehouseContext warehouseContext;
     private final InventoryCheckGuardService inventoryCheckGuardService;
     private final VietnamRegionResolver vietnamRegionResolver;
+    private final SettingService settingService;
     private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(InventoryTransferService.class);
 
     private boolean hasAuthority(String authority) {
@@ -285,13 +287,42 @@ public class InventoryTransferService {
         }
     }
 
-    private void validateInternalSalePricesForRequest(List<TransferItemRequest> items) {
+    private void validateInternalSalePricesForRequest(List<TransferItemRequest> items, Branch fromBranch) {
         for (TransferItemRequest itemReq : items) {
             if (itemReq.getUnitTransferPrice() == null
                     || itemReq.getUnitTransferPrice().compareTo(BigDecimal.ZERO) <= 0) {
                 throw new BadRequestException(
                         "Phiếu bán nội bộ yêu cầu đơn giá điều chuyển > 0 cho từng mặt hàng (SKU: "
                                 + itemReq.getSku() + ")");
+            }
+
+            ProductVariant variant = variantRepo.findBySku(itemReq.getSku())
+                    .orElseThrow(() -> new BadRequestException(
+                            "Sản phẩm với SKU " + itemReq.getSku() + " không tồn tại"));
+            BigDecimal importPrice = resolveFifoAverageImportPrice(
+                    fromBranch.getId(),
+                    variant.getId(),
+                    itemReq.getQuantity());
+            if (importPrice.compareTo(BigDecimal.ZERO) <= 0) {
+                throw new BadRequestException(
+                        "SKU " + itemReq.getSku() + " chưa có giá nhập hợp lệ tại chi nhánh xuất.");
+            }
+
+            BigDecimal customerSellingPrice = settingService.calculateSellingPrice(importPrice);
+            if (customerSellingPrice.compareTo(importPrice) <= 0) {
+                throw new BadRequestException(
+                        "Giá bán khách hàng của SKU " + itemReq.getSku() + " phải cao hơn giá nhập.");
+            }
+            if (itemReq.getUnitTransferPrice().compareTo(importPrice) <= 0) {
+                throw new BadRequestException(
+                        "Đơn giá nội bộ của SKU " + itemReq.getSku() + " phải cao hơn giá nhập "
+                                + importPrice.stripTrailingZeros().toPlainString() + ".");
+            }
+            if (itemReq.getUnitTransferPrice().compareTo(customerSellingPrice) >= 0) {
+                throw new BadRequestException(
+                        "Đơn giá nội bộ của SKU " + itemReq.getSku()
+                                + " phải thấp hơn giá bán khách hàng "
+                                + customerSellingPrice.stripTrailingZeros().toPlainString() + ".");
             }
         }
     }
@@ -426,7 +457,7 @@ public class InventoryTransferService {
         assertTransferRequestActor(createdByUser, fromBranch, toBranch, "tao");
         validateTransferRequestBasics(req, fromBranch, toBranch, businessType);
         if (businessType == TransferBusinessType.INTERNAL_SALE) {
-            validateInternalSalePricesForRequest(req.getItems());
+            validateInternalSalePricesForRequest(req.getItems(), fromBranch);
         }
 
         Branch createdByBranch = createdByBranchOverride != null
@@ -494,7 +525,7 @@ public class InventoryTransferService {
         assertTransferRequestActor(currentUser, fromBranch, toBranch, "sua");
         validateTransferRequestBasics(req, fromBranch, toBranch, businessType);
         if (businessType == TransferBusinessType.INTERNAL_SALE) {
-            validateInternalSalePricesForRequest(req.getItems());
+            validateInternalSalePricesForRequest(req.getItems(), fromBranch);
         }
 
         transfer.setStatus(InventoryTransferStatus.PENDING);
@@ -2178,6 +2209,45 @@ public class InventoryTransferService {
             remaining -= take;
         }
         return value;
+    }
+
+    private BigDecimal resolveFifoAverageImportPrice(Long fromBranchId, Long variantId, int qty) {
+        if (fromBranchId == null || variantId == null || qty <= 0) {
+            return BigDecimal.ZERO;
+        }
+
+        List<Inventory> batches = inventoryRepo.findByProductVariantId(variantId).stream()
+                .filter(inv -> inv.getBranch() != null
+                        && Objects.equals(inv.getBranch().getId(), fromBranchId)
+                        && Objects.requireNonNullElse(inv.getQuantity(), 0) > 0)
+                .sorted(Comparator.comparing(Inventory::getId))
+                .collect(Collectors.toList());
+        int remaining = qty;
+        int taken = 0;
+        BigDecimal totalValue = BigDecimal.ZERO;
+
+        for (Inventory batch : batches) {
+            if (remaining <= 0) {
+                break;
+            }
+
+            int availableQuantity = Math.max(0, Objects.requireNonNullElse(batch.getQuantity(), 0));
+            if (availableQuantity <= 0) {
+                continue;
+            }
+
+            int takeQuantity = Math.min(remaining, availableQuantity);
+            BigDecimal importPrice = batch.getImportPrice() != null ? batch.getImportPrice() : BigDecimal.ZERO;
+            totalValue = totalValue.add(importPrice.multiply(BigDecimal.valueOf(takeQuantity)));
+            taken += takeQuantity;
+            remaining -= takeQuantity;
+        }
+
+        if (taken <= 0) {
+            return BigDecimal.ZERO;
+        }
+
+        return totalValue.divide(BigDecimal.valueOf(taken), 4, RoundingMode.HALF_UP);
     }
 
     // ==========================================
