@@ -28,6 +28,7 @@ public class ProductVariantService {
     private final ProductVariantRepository variantRepo;
     private final InventoryRepository inventoryRepo;
     private final com.zone.agri.repository.BranchRepository branchRepo;
+    private final SettingService settingService;
 
     /**
      * BÁO CÁO SẢN PHẨM DƯỚI ĐỊNH MỨC (LOW STOCK REPORT)
@@ -127,6 +128,13 @@ public class ProductVariantService {
         return rowsByVariantId.values().stream()
                 .map(rows -> {
                     InventorySearchResponse firstRow = rows.get(0);
+                    ProductVariant variant = variantRepo.findById(firstRow.getVariantId())
+                            .orElse(null);
+                    Long categoryId = variant != null
+                            && variant.getProduct() != null
+                            && variant.getProduct().getCategory() != null
+                                    ? variant.getProduct().getCategory().getId()
+                                    : null;
 
                     int totalStock = rows.stream()
                             .map(InventorySearchResponse::getQuantity)
@@ -136,15 +144,25 @@ public class ProductVariantService {
 
                     List<ProductVariantResponse.BatchInfoDto> batches = rows.stream()
                             .filter(row -> Objects.requireNonNullElse(row.getQuantity(), 0) > 0)
-                            .map(row -> ProductVariantResponse.BatchInfoDto.builder()
-                                    .inventoryId(null)
-                                    .branchName(row.getBranchName())
-                                    .batchNumber(row.getBatchNumber())
-                                    .quantity(row.getQuantity())
-                                    .importPrice(row.getImportPrice() != null ? row.getImportPrice() : BigDecimal.ZERO)
-                                    .sellingPrice(null)
-                                    .expiryDate(row.getExpiryDate() != null ? row.getExpiryDate().toLocalDate().toString() : null)
-                                    .build())
+                            .map(row -> {
+                                BigDecimal importPrice = row.getImportPrice() != null
+                                        ? row.getImportPrice()
+                                        : BigDecimal.ZERO;
+                                BigDecimal sellingPrice = settingService.calculateSellingPrice(
+                                        importPrice,
+                                        categoryId,
+                                        row.getExpiryDate());
+
+                                return ProductVariantResponse.BatchInfoDto.builder()
+                                        .inventoryId(null)
+                                        .branchName(row.getBranchName())
+                                        .batchNumber(row.getBatchNumber())
+                                        .quantity(row.getQuantity())
+                                        .importPrice(importPrice)
+                                        .sellingPrice(sellingPrice)
+                                        .expiryDate(row.getExpiryDate() != null ? row.getExpiryDate().toLocalDate().toString() : null)
+                                        .build();
+                            })
                             .collect(Collectors.toList());
 
                     BigDecimal firstImportPrice = batches.stream()
@@ -152,13 +170,16 @@ public class ProductVariantService {
                             .filter(Objects::nonNull)
                             .findFirst()
                             .orElse(BigDecimal.ZERO);
+                    BigDecimal sellingPrice = firstImportPrice.compareTo(BigDecimal.ZERO) > 0
+                            ? settingService.calculateSellingPrice(firstImportPrice, categoryId, null)
+                            : null;
 
                     return ProductVariantResponse.builder()
                             .id(firstRow.getVariantId())
                             .sku(firstRow.getSku())
                             .barcode(firstRow.getBarcode())
                             .productName(firstRow.getProductName() != null ? firstRow.getProductName() : "Sản phẩm không xác định")
-                            .price(null)
+                            .price(sellingPrice)
                             .importPrice(firstImportPrice)
                             .imageUrl(firstRow.getImageUrl())
                             .status(null)

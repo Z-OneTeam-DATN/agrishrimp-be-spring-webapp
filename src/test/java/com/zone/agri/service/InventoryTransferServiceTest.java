@@ -639,7 +639,7 @@ class InventoryTransferServiceTest {
                 destinationBranch.getId(),
                 TransferBusinessType.INTERNAL_SALE,
                 5,
-                new BigDecimal("140"));
+                new BigDecimal("120"));
 
         when(transferRepo.countTotalTransfers()).thenReturn(20L);
         when(inventoryRepo.findByProductVariantId(variant.getId())).thenReturn(List.of(sourceBatch));
@@ -651,7 +651,7 @@ class InventoryTransferServiceTest {
                 .thenReturn(Optional.empty());
 
         assertThat(transfer.getTransferBusinessType()).isEqualTo(TransferBusinessType.INTERNAL_SALE);
-        assertThat(transfer.getTransferAmount()).isEqualByComparingTo("700");
+        assertThat(transfer.getTransferAmount()).isEqualByComparingTo("600");
         assertThat(transfer.getSettlementStatus()).isEqualTo(TransferSettlementStatus.UNPAID);
 
         runAs(sourceUser, () -> inventoryTransferService.sourceConfirm(transfer.getId()));
@@ -682,39 +682,39 @@ class InventoryTransferServiceTest {
                         .build())));
 
         assertThat(transfer.getStatus()).isEqualTo(InventoryTransferStatus.COMPLETED);
-        assertThat(transfer.getTransferAmount()).isEqualByComparingTo("420");
-        assertThat(transfer.getSourceReceivableAmount()).isEqualByComparingTo("420");
-        assertThat(transfer.getDestPayableAmount()).isEqualByComparingTo("420");
+        assertThat(transfer.getTransferAmount()).isEqualByComparingTo("360");
+        assertThat(transfer.getSourceReceivableAmount()).isEqualByComparingTo("360");
+        assertThat(transfer.getDestPayableAmount()).isEqualByComparingTo("360");
         assertThat(transfer.getPaidAmount()).isEqualByComparingTo("0");
         assertThat(transfer.getSettlementStatus()).isEqualTo(TransferSettlementStatus.UNPAID);
         assertThat(savedInventories)
                 .anyMatch(inv -> inv.getBranch() == destinationBranch
                         && inv.getProductVariant() == variant
                         && inv.getQuantity() == 3
-                        && inv.getImportPrice().compareTo(new BigDecimal("140")) == 0);
+                        && inv.getImportPrice().compareTo(new BigDecimal("120")) == 0);
         assertThat(savedInventories)
                 .anyMatch(inv -> inv.getBranch() == defectBranch
                         && inv.getProductVariant() == variant
                         && inv.getDefectiveQuantity() == 2
-                        && inv.getImportPrice().compareTo(new BigDecimal("140")) == 0);
+                        && inv.getImportPrice().compareTo(new BigDecimal("120")) == 0);
 
         TransferSettlementRequest partialSettlement = new TransferSettlementRequest();
-        partialSettlement.setAmount(new BigDecimal("140"));
+        partialSettlement.setAmount(new BigDecimal("120"));
         TransferDetailResponse partialResponse = callAs(
                 approverUser,
                 () -> inventoryTransferService.settleInternalPayment(transfer.getId(), partialSettlement));
 
-        assertThat(partialResponse.getPaidAmount()).isEqualByComparingTo("140");
-        assertThat(partialResponse.getOutstandingAmount()).isEqualByComparingTo("280");
+        assertThat(partialResponse.getPaidAmount()).isEqualByComparingTo("120");
+        assertThat(partialResponse.getOutstandingAmount()).isEqualByComparingTo("240");
         assertThat(partialResponse.getSettlementStatus()).isEqualTo(TransferSettlementStatus.PARTIAL);
 
         TransferSettlementRequest finalSettlement = new TransferSettlementRequest();
-        finalSettlement.setAmount(new BigDecimal("280"));
+        finalSettlement.setAmount(new BigDecimal("240"));
         TransferDetailResponse finalResponse = callAs(
                 approverUser,
                 () -> inventoryTransferService.settleInternalPayment(transfer.getId(), finalSettlement));
 
-        assertThat(finalResponse.getPaidAmount()).isEqualByComparingTo("420");
+        assertThat(finalResponse.getPaidAmount()).isEqualByComparingTo("360");
         assertThat(finalResponse.getOutstandingAmount()).isEqualByComparingTo("0");
         assertThat(finalResponse.getSettlementStatus()).isEqualTo(TransferSettlementStatus.PAID);
     }
