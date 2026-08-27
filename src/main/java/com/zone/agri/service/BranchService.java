@@ -160,16 +160,17 @@ public class BranchService {
     }
 
     private void validateShippingAddress(BranchDTO dto) {
+        Integer provinceId = dto.getProvinceId() != null ? dto.getProvinceId() : dto.getProvinceCode();
         Integer districtId = dto.getDistrictId() != null ? dto.getDistrictId() : dto.getDistrictCode();
         String wardCode = dto.getWardCode();
         Double lat = dto.getLat() != null ? dto.getLat() : dto.getLatitude();
         Double lng = dto.getLng() != null ? dto.getLng() : dto.getLongitude();
 
-        if (districtId == null) {
-            throw new BadRequestException("Chi nhanh bat buoc phai co District ID GHN de tinh phi giao hang");
+        if (provinceId == null) {
+            throw new BadRequestException("Chi nhanh bat buoc phai co tinh/thanh pho");
         }
         if (wardCode == null || wardCode.isBlank()) {
-            throw new BadRequestException("Chi nhanh bat buoc phai co Ward Code GHN de tinh phi giao hang");
+            throw new BadRequestException("Chi nhanh bat buoc phai co phuong/xa");
         }
         if ((lat == null) != (lng == null)) {
             throw new BadRequestException("Toa do chi nhanh phai co day du vi do va kinh do");
@@ -183,6 +184,9 @@ public class BranchService {
                         || lng > 180
                         || (Math.abs(lat) < 0.000001 && Math.abs(lng) < 0.000001))) {
             throw new BadRequestException("Toa do chi nhanh khong hop le");
+        }
+        if (districtId == null && lat == null) {
+            throw new BadRequestException("Chi nhanh theo dia chi sap nhap bat buoc phai co toa do ban do");
         }
     }
 
