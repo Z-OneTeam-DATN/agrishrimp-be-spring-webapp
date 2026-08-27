@@ -169,7 +169,8 @@ public class UserAddressService {
 
     private void normalizeCoordinates(UserAddressRequest request) {
         if ((request.getLat() == null) != (request.getLng() == null)) {
-            throw new BadRequestException("Tá»a Ä‘á»™ Ä‘á»‹a chá»‰ pháº£i cĂ³ Ä‘á»§ cáº·p lat/lng hoáº·c bá» trá»‘ng cáº£ hai");
+            throw new BadRequestException(
+                    "T\u1ecda \u0111\u1ed9 \u0111\u1ecba ch\u1ec9 ph\u1ea3i c\u00f3 \u0111\u1ee7 c\u1eb7p lat/lng ho\u1eb7c b\u1ecf tr\u1ed1ng c\u1ea3 hai");
         }
 
         if (request.getLat() == null) {
@@ -179,7 +180,7 @@ public class UserAddressService {
         Double lat = request.getLat();
         Double lng = request.getLng();
         if (!Double.isFinite(lat) || !Double.isFinite(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
-            throw new BadRequestException("Tá»a Ä‘á»™ Ä‘á»‹a chá»‰ khĂ´ng há»£p lá»‡");
+            throw new BadRequestException("T\u1ecda \u0111\u1ed9 \u0111\u1ecba ch\u1ec9 kh\u00f4ng h\u1ee3p l\u1ec7");
         }
     }
 

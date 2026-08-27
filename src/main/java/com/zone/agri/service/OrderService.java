@@ -3359,7 +3359,7 @@ public class OrderService {
                         deliveryWardCode,
                         userLat,
                         userLng));
-        requireCustomerRegionBranches(nearestBranches, customerRegion);
+        requireCustomerRegionBranches(nearestBranches, customerRegion, deliveryProvinceId, deliveryAddress);
 
         List<Long> branchIds = nearestBranches.stream().map(bwr -> bwr.branch().getId()).toList();
 
@@ -3493,6 +3493,12 @@ public class OrderService {
         if (branches == null || branches.isEmpty()) {
             throw new BadRequestException(
                     "ORDER_PREPARE_NO_ACTIVE_BRANCHES",
+                    "Hi\u1ec7n ch\u01b0a c\u00f3 chi nh\u00e1nh ho\u1ea1t \u0111\u1ed9ng \u0111\u1ec3 ph\u1ee5c v\u1ee5 \u0111\u01a1n h\u00e0ng c\u1ee7a b\u1ea1n.",
+                    null);
+        }
+        if (branches == null || branches.isEmpty()) {
+            throw new BadRequestException(
+                    "ORDER_PREPARE_NO_ACTIVE_BRANCHES",
                     "Hiện chưa có chi nhánh hoạt động để phục vụ đơn hàng của bạn.",
                     null);
         }
@@ -3501,6 +3507,12 @@ public class OrderService {
         }
 
         List<BranchWithRealDistance> sellableBranches = filterCustomerFulfillmentBranches(branches);
+        if (sellableBranches.isEmpty()) {
+            throw new BadRequestException(
+                    "ORDER_PREPARE_NO_DELIVERY_BRANCHES",
+                    "Hi\u1ec7n ch\u01b0a c\u00f3 chi nh\u00e1nh ph\u00f9 h\u1ee3p cho \u0111\u1ecba ch\u1ec9 giao h\u00e0ng n\u00e0y.",
+                    null);
+        }
         if (sellableBranches.isEmpty()) {
             throw new BadRequestException(
                     "ORDER_PREPARE_NO_DELIVERY_BRANCHES",
@@ -3539,6 +3551,74 @@ public class OrderService {
                     "KhĂ´ng cĂ³ chi nhĂ¡nh Ä‘ang hoáº¡t Ä‘á»™ng trong vĂ¹ng giao hĂ ng cá»§a báº¡n.",
                     Map.of("customerRegion", customerRegion.name()));
         }
+    }
+
+    private void requireCustomerRegionBranches(
+            List<BranchWithRealDistance> branches,
+            VietnamRegion customerRegion,
+            Integer deliveryProvinceId,
+            String deliveryProvinceText) {
+        if (customerRegion == null) {
+            return;
+        }
+
+        boolean hasBranchInRegion = branches != null && branches.stream()
+                .filter(Objects::nonNull)
+                .map(BranchWithRealDistance::branch)
+                .filter(Objects::nonNull)
+                .anyMatch(branch -> vietnamRegionResolver.isSameRegion(branch, customerRegion));
+        if (hasBranchInRegion) {
+            return;
+        }
+
+        Map<String, Object> payload = buildNoBranchInRegionPayload(
+                customerRegion,
+                deliveryProvinceId,
+                deliveryProvinceText);
+        log.warn(
+                "No active branch found in customer region during prepare order. customerRegion={}, deliveryProvinceId={}, deliveryProvinceText={}, availableBranchRegions={}",
+                customerRegion,
+                deliveryProvinceId,
+                deliveryProvinceText,
+                resolveAvailableBranchRegions(branches));
+        throw new BadRequestException(
+                "ORDER_PREPARE_NO_BRANCH_IN_REGION",
+                "Kh\u00f4ng c\u00f3 chi nh\u00e1nh \u0111ang ho\u1ea1t \u0111\u1ed9ng trong v\u00f9ng giao h\u00e0ng c\u1ee7a b\u1ea1n.",
+                payload);
+    }
+
+    private Map<String, Object> buildNoBranchInRegionPayload(
+            VietnamRegion customerRegion,
+            Integer deliveryProvinceId,
+            String deliveryProvinceText) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("customerRegion", customerRegion.name());
+        if (deliveryProvinceId != null) {
+            payload.put("deliveryProvinceId", deliveryProvinceId);
+        }
+        if (deliveryProvinceText != null) {
+            String normalizedDeliveryProvinceText = deliveryProvinceText.trim();
+            if (!normalizedDeliveryProvinceText.isEmpty()) {
+                payload.put("deliveryProvinceText", normalizedDeliveryProvinceText);
+            }
+        }
+        return payload;
+    }
+
+    private List<String> resolveAvailableBranchRegions(List<BranchWithRealDistance> branches) {
+        if (branches == null || branches.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        return branches.stream()
+                .filter(Objects::nonNull)
+                .map(BranchWithRealDistance::branch)
+                .filter(Objects::nonNull)
+                .map(branch -> vietnamRegionResolver.resolveBranchRegion(branch)
+                        .map(Enum::name)
+                        .orElse("UNKNOWN"))
+                .distinct()
+                .toList();
     }
 
     @Transactional
@@ -3926,7 +4006,7 @@ public class OrderService {
                         normalizedWardCode,
                         userLat,
                         userLng));
-        requireCustomerRegionBranches(nearestBranches, customerRegion);
+        requireCustomerRegionBranches(nearestBranches, customerRegion, deliveryProvinceId, deliveryAddress);
 
         List<Long> branchIds = nearestBranches.stream().map(bwr -> bwr.branch().getId()).toList();
         Map<Long, Map<Long, List<Inventory>>> inventoryMatrix = allocationService.buildInventoryMatrix(branchIds,

@@ -10,8 +10,8 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.security.core.AuthenticationException;
 import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.security.core.AuthenticationException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ControllerAdvice;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -29,7 +29,8 @@ public class ApiExceptionHandler {
   private String maxUploadFileSize;
 
   @ExceptionHandler(NotFoundException.class)
-  public ResponseEntity<ErrorDetail> handleNotFoundException(NotFoundException ex,
+  public ResponseEntity<ErrorDetail> handleNotFoundException(
+      NotFoundException ex,
       WebRequest request) {
     String message = ex.getMessage();
     ErrorDetail errorVm = new ErrorDetail(HttpStatus.NOT_FOUND.toString(), "Not Found", message);
@@ -38,8 +39,9 @@ public class ApiExceptionHandler {
     return new ResponseEntity<>(errorVm, HttpStatus.NOT_FOUND);
   }
 
-  @ExceptionHandler({ BadRequestException.class, IllegalArgumentException.class })
-  public ResponseEntity<Map<String, Object>> handleBadRequestException(Exception ex,
+  @ExceptionHandler({BadRequestException.class, IllegalArgumentException.class})
+  public ResponseEntity<Map<String, Object>> handleBadRequestException(
+      Exception ex,
       WebRequest request) {
     String message = ex.getMessage();
     Map<String, Object> payload = new LinkedHashMap<>();
@@ -60,7 +62,8 @@ public class ApiExceptionHandler {
   }
 
   @ExceptionHandler(ConflictException.class)
-  public ResponseEntity<Map<String, Object>> handleConflictException(ConflictException ex,
+  public ResponseEntity<Map<String, Object>> handleConflictException(
+      ConflictException ex,
       WebRequest request) {
     String message = ex.getMessage();
     Map<String, Object> payload = new LinkedHashMap<>();
@@ -78,7 +81,8 @@ public class ApiExceptionHandler {
   }
 
   @ExceptionHandler(RateLimitException.class)
-  public ResponseEntity<Map<String, Object>> handleRateLimitException(RateLimitException ex,
+  public ResponseEntity<Map<String, Object>> handleRateLimitException(
+      RateLimitException ex,
       WebRequest request) {
     Map<String, Object> payload = new HashMap<>();
     payload.put("message", ex.getMessage());
@@ -90,8 +94,11 @@ public class ApiExceptionHandler {
 
   @ExceptionHandler(HttpMessageNotReadableException.class)
   public ResponseEntity<ErrorDetail> handleHttpMessageNotReadable(
-      HttpMessageNotReadableException ex, WebRequest request) {
-    String message = "Dữ liệu gửi lên không hợp lệ: " + ex.getMostSpecificCause().getMessage();
+      HttpMessageNotReadableException ex,
+      WebRequest request) {
+    String message =
+        "D\u1eef li\u1ec7u g\u1eedi l\u00ean kh\u00f4ng h\u1ee3p l\u1ec7: "
+            + ex.getMostSpecificCause().getMessage();
     ErrorDetail errorVm = new ErrorDetail("400", "Bad Request", message);
     log.warn(ERROR_LOG_FORMAT, this.getServletPath(request), 400, message);
     return ResponseEntity.badRequest().body(errorVm);
@@ -100,42 +107,51 @@ public class ApiExceptionHandler {
   @ExceptionHandler(MethodArgumentNotValidException.class)
   protected ResponseEntity<ErrorDetail> handleMethodArgumentNotValid(
       MethodArgumentNotValidException ex) {
-    List<String> errors = ex.getBindingResult().getFieldErrors().stream()
-        .map(error -> error.getDefaultMessage() != null
-            ? error.getDefaultMessage()
-            : error.getField() + " không hợp lệ")
-        .distinct()
-        .toList();
+    List<String> errors =
+        ex.getBindingResult().getFieldErrors().stream()
+            .map(
+                error ->
+                    error.getDefaultMessage() != null
+                        ? error.getDefaultMessage()
+                        : error.getField() + " kh\u00f4ng h\u1ee3p l\u1ec7")
+            .distinct()
+            .toList();
 
-    String detail = errors.isEmpty()
-        ? "Dữ liệu gửi lên không hợp lệ"
-        : String.join(". ", errors);
+    String detail =
+        errors.isEmpty()
+            ? "D\u1eef li\u1ec7u g\u1eedi l\u00ean kh\u00f4ng h\u1ee3p l\u1ec7"
+            : String.join(". ", errors);
 
-    ErrorDetail errorVm = new ErrorDetail("400", "Bad Request", detail,
-        errors);
+    ErrorDetail errorVm = new ErrorDetail("400", "Bad Request", detail, errors);
     return ResponseEntity.badRequest().body(errorVm);
   }
 
   @ExceptionHandler(ConstraintViolationException.class)
   public ResponseEntity<ErrorDetail> handleConstraintViolationException(
-      ConstraintViolationException ex, WebRequest request) {
-    String detail = ex.getConstraintViolations().stream()
-        .map(violation -> violation.getPropertyPath() + ": " + violation.getMessage())
-        .collect(java.util.stream.Collectors.joining(", "));
-    ErrorDetail errorVm = new ErrorDetail(HttpStatus.BAD_REQUEST.toString(), "Bad Request",
-        "Dữ liệu không hợp lệ: " + detail);
+      ConstraintViolationException ex,
+      WebRequest request) {
+    String detail =
+        ex.getConstraintViolations().stream()
+            .map(violation -> violation.getPropertyPath() + ": " + violation.getMessage())
+            .collect(java.util.stream.Collectors.joining(", "));
+    ErrorDetail errorVm =
+        new ErrorDetail(
+            HttpStatus.BAD_REQUEST.toString(),
+            "Bad Request",
+            "D\u1eef li\u1ec7u kh\u00f4ng h\u1ee3p l\u1ec7: " + detail);
     log.warn(ERROR_LOG_FORMAT, this.getServletPath(request), 400, detail);
     return ResponseEntity.badRequest().body(errorVm);
   }
 
-  @ExceptionHandler({ SignInRequiredException.class })
+  @ExceptionHandler({SignInRequiredException.class})
   public ResponseEntity<ErrorDetail> handleSignInRequired(SignInRequiredException ex) {
     String message = ex.getMessage();
-    ErrorDetail errorVm = new ErrorDetail(HttpStatus.UNAUTHORIZED.toString(), "Authentication required", message);
+    ErrorDetail errorVm =
+        new ErrorDetail(HttpStatus.UNAUTHORIZED.toString(), "Authentication required", message);
     return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(errorVm);
   }
 
-  @ExceptionHandler({ Forbidden.class })
+  @ExceptionHandler({Forbidden.class})
   public ResponseEntity<ErrorDetail> handleForbidden(Forbidden ex, WebRequest request) {
     String message = ex.getMessage();
     ErrorDetail errorVm = new ErrorDetail(HttpStatus.FORBIDDEN.toString(), "Forbidden", message);
@@ -144,12 +160,13 @@ public class ApiExceptionHandler {
     return new ResponseEntity<>(errorVm, HttpStatus.FORBIDDEN);
   }
 
-  @ExceptionHandler({ AuthenticationException.class })
-  public ResponseEntity<ErrorDetail> handleAuthenticationException(AuthenticationException ex,
+  @ExceptionHandler({AuthenticationException.class})
+  public ResponseEntity<ErrorDetail> handleAuthenticationException(
+      AuthenticationException ex,
       WebRequest request) {
     String message = ex.getMessage();
-    ErrorDetail errorVm = new ErrorDetail(HttpStatus.UNAUTHORIZED.toString(),
-        "Authentication failed", message);
+    ErrorDetail errorVm =
+        new ErrorDetail(HttpStatus.UNAUTHORIZED.toString(), "Authentication failed", message);
     log.warn(ERROR_LOG_FORMAT, this.getServletPath(request), 401, message);
     log.debug(ex.toString());
     return new ResponseEntity<>(errorVm, HttpStatus.UNAUTHORIZED);
@@ -157,33 +174,42 @@ public class ApiExceptionHandler {
 
   @ExceptionHandler(DataIntegrityViolationException.class)
   public ResponseEntity<ErrorDetail> handleDataIntegrityViolation(
-      DataIntegrityViolationException ex, WebRequest request) {
-    String detail = "Dữ liệu vi phạm ràng buộc cơ sở dữ liệu.";
+      DataIntegrityViolationException ex,
+      WebRequest request) {
+    String detail = "D\u1eef li\u1ec7u vi ph\u1ea1m r\u00e0ng bu\u1ed9c c\u01a1 s\u1edf d\u1eef li\u1ec7u.";
     Throwable cause = ex.getRootCause();
     if (cause != null && cause.getMessage() != null) {
       String rootMessage = cause.getMessage();
       if (rootMessage.contains("Duplicate entry")) {
-        detail = "Dữ liệu bị trùng lặp. Vui lòng kiểm tra lại thông tin đã nhập.";
+        detail =
+            "D\u1eef li\u1ec7u b\u1ecb tr\u00f9ng l\u1eb7p. Vui l\u00f2ng ki\u1ec3m tra l\u1ea1i th\u00f4ng tin \u0111\u00e3 nh\u1eadp.";
       } else if (rootMessage.contains("Data too long for column 'slug'")) {
-        detail = "Mã vai trò vượt quá giới hạn 50 ký tự. Vui lòng rút gọn tên vai trò.";
+        detail =
+            "M\u00e3 vai tr\u00f2 v\u01b0\u1ee3t qu\u00e1 gi\u1edbi h\u1ea1n 50 k\u00fd t\u1ef1. Vui l\u00f2ng r\u00fat g\u1ecdn t\u00ean vai tr\u00f2.";
       } else if (rootMessage.contains("Data too long for column 'display_name'")) {
-        detail = "Tên vai trò tối đa 100 ký tự.";
+        detail = "T\u00ean vai tr\u00f2 t\u1ed1i \u0111a 100 k\u00fd t\u1ef1.";
       } else if (rootMessage.contains("Data too long for column 'description'")) {
-        detail = "Mô tả vai trò tối đa 255 ký tự.";
+        detail = "M\u00f4 t\u1ea3 vai tr\u00f2 t\u1ed1i \u0111a 255 k\u00fd t\u1ef1.";
       }
     }
-    ErrorDetail errorVm = new ErrorDetail(HttpStatus.CONFLICT.toString(), "Xung đột dữ liệu", detail);
+    ErrorDetail errorVm =
+        new ErrorDetail(HttpStatus.CONFLICT.toString(), "Xung \u0111\u1ed9t d\u1eef li\u1ec7u", detail);
     log.warn(ERROR_LOG_FORMAT, this.getServletPath(request), 409, detail);
     return ResponseEntity.status(HttpStatus.CONFLICT).body(errorVm);
   }
 
   @ExceptionHandler(MaxUploadSizeExceededException.class)
-  public ResponseEntity<ErrorDetail> handleMaxSizeException(MaxUploadSizeExceededException exc,
+  public ResponseEntity<ErrorDetail> handleMaxSizeException(
+      MaxUploadSizeExceededException exc,
       WebRequest request) {
     String message = exc.getMessage();
-    ErrorDetail errorVm = new ErrorDetail(HttpStatus.PAYLOAD_TOO_LARGE.toString(),
-        "Payload Too Large",
-        "File tải lên vượt quá dung lượng cho phép (tối đa " + maxUploadFileSize + "). Vui lòng chọn file nhỏ hơn.");
+    ErrorDetail errorVm =
+        new ErrorDetail(
+            HttpStatus.PAYLOAD_TOO_LARGE.toString(),
+            "Payload Too Large",
+            "File t\u1ea3i l\u00ean v\u01b0\u1ee3t qu\u00e1 dung l\u01b0\u1ee3ng cho ph\u00e9p (t\u1ed1i \u0111a "
+                + maxUploadFileSize
+                + "). Vui l\u00f2ng ch\u1ecdn file nh\u1ecf h\u01a1n.");
     log.warn(ERROR_LOG_FORMAT, this.getServletPath(request), 413, message);
     log.debug(exc.toString());
     return new ResponseEntity<>(errorVm, HttpStatus.PAYLOAD_TOO_LARGE);
@@ -191,10 +217,12 @@ public class ApiExceptionHandler {
 
   @ExceptionHandler(org.springframework.web.server.ResponseStatusException.class)
   public ResponseEntity<ErrorDetail> handleResponseStatusException(
-      org.springframework.web.server.ResponseStatusException ex, WebRequest request) {
-    String detail = ex.getReason() != null && !ex.getReason().isBlank()
-        ? ex.getReason()
-        : "Yêu cầu không thể được xử lý.";
+      org.springframework.web.server.ResponseStatusException ex,
+      WebRequest request) {
+    String detail =
+        ex.getReason() != null && !ex.getReason().isBlank()
+            ? ex.getReason()
+            : "Y\u00eau c\u1ea7u kh\u00f4ng th\u1ec3 \u0111\u01b0\u1ee3c x\u1eed l\u00fd.";
     ErrorDetail errorVm = new ErrorDetail(ex.getStatusCode().toString(), ex.getReason(), detail);
     log.warn(ERROR_LOG_FORMAT, this.getServletPath(request), ex.getStatusCode().value(), ex.getReason());
     return new ResponseEntity<>(errorVm, ex.getStatusCode());
@@ -203,11 +231,15 @@ public class ApiExceptionHandler {
   @ExceptionHandler(Exception.class)
   protected ResponseEntity<ErrorDetail> handleOtherException(Exception ex, WebRequest request) {
     String message = ex.getMessage();
-    String detail = message != null && !message.isBlank()
-        ? message
-        : "Có lỗi hệ thống xảy ra, vui lòng thử lại sau.";
-    ErrorDetail errorVm = new ErrorDetail(HttpStatus.INTERNAL_SERVER_ERROR.toString(),
-        HttpStatus.INTERNAL_SERVER_ERROR.getReasonPhrase(), detail);
+    String detail =
+        message != null && !message.isBlank()
+            ? message
+            : "C\u00f3 l\u1ed7i h\u1ec7 th\u1ed1ng x\u1ea3y ra, vui l\u00f2ng th\u1eed l\u1ea1i sau.";
+    ErrorDetail errorVm =
+        new ErrorDetail(
+            HttpStatus.INTERNAL_SERVER_ERROR.toString(),
+            HttpStatus.INTERNAL_SERVER_ERROR.getReasonPhrase(),
+            detail);
     log.warn(ERROR_LOG_FORMAT, this.getServletPath(request), 500, message);
     log.debug(ex.toString());
     return new ResponseEntity<>(errorVm, HttpStatus.INTERNAL_SERVER_ERROR);
