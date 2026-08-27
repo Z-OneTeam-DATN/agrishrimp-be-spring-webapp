@@ -266,25 +266,25 @@ public class InventoryNoteService {
             throw new BadRequestException("Phiếu nhập không có hàng lỗi nào để tạo phiếu xuất trả.");
         }
 
+        record ReturnCandidate(InventoryNoteDetail detail, int returnQty) {}
+        List<ReturnCandidate> returnCandidates = new ArrayList<>();
+
         for (InventoryNoteDetail d : defectiveDetails) {
             if (d.getBatchNumber() == null || d.getBatchNumber().isBlank()) {
-                d.setQuantityRejected(0);
                 continue;
             }
+            int originalRejectedQty = Objects.requireNonNullElse(d.getQuantityRejected(), 0);
             Long defectiveStock = inventoryRepository.sumDefectiveQuantityByBranchAndVariantAndBatch(
                     gr.getBranch().getId(), d.getProductVariant().getId(), d.getBatchNumber());
-            if (defectiveStock == null || defectiveStock < d.getQuantityRejected()) {
-
-                d.setQuantityRejected(defectiveStock != null ? defectiveStock.intValue() : 0);
+            int availableDefectiveQty = defectiveStock != null ? defectiveStock.intValue() : 0;
+            int returnQty = Math.min(originalRejectedQty, availableDefectiveQty);
+            if (returnQty > 0) {
+                returnCandidates.add(new ReturnCandidate(d, returnQty));
             }
         }
 
-        defectiveDetails = defectiveDetails.stream()
-                .filter(d -> d.getQuantityRejected() != null && d.getQuantityRejected() > 0)
-                .collect(java.util.stream.Collectors.toList());
-
-        if (defectiveDetails.isEmpty()) {
-            throw new BadRequestException("Tồn kho lỗi của NCC này đã hết hoặc đã xuất trả hết trước đó.");
+        if (returnCandidates.isEmpty()) {
+            throw new BadRequestException("Ton kho loi cua NCC nay da het hoac da xuat tra het truoc do.");
         }
 
         String returnCode = "PXT-" + System.currentTimeMillis();
@@ -304,11 +304,10 @@ public class InventoryNoteService {
         BigDecimal totalReturn = BigDecimal.ZERO;
         List<InventoryNoteDetail> returnDetails = new ArrayList<>();
 
-        for (InventoryNoteDetail grDetail : defectiveDetails) {
-
+        for (ReturnCandidate candidate : returnCandidates) {
+            InventoryNoteDetail grDetail = candidate.detail();
             BigDecimal lockedPrice = Objects.requireNonNullElse(grDetail.getPrice(), BigDecimal.ZERO);
-            int returnQty = grDetail.getQuantityRejected();
-
+            int returnQty = candidate.returnQty();
             InventoryNoteDetail returnDetail = InventoryNoteDetail.builder()
                     .inventoryNote(returnNote)
                     .productVariant(grDetail.getProductVariant())

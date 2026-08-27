@@ -16,6 +16,8 @@ import com.zone.agri.entity.InventoryNote;
 import com.zone.agri.entity.InventoryNoteDetail;
 import com.zone.agri.entity.InventoryTransaction;
 import com.zone.agri.entity.ProductVariant;
+import com.zone.agri.entity.Supplier;
+import com.zone.agri.entity.User;
 import com.zone.agri.entity.enums.InventoryNoteStatus;
 import com.zone.agri.entity.enums.InventoryNoteType;
 import com.zone.agri.entity.enums.TransactionType;
@@ -33,6 +35,8 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.context.SecurityContextHolder;
 
 @ExtendWith(MockitoExtension.class)
 class InventoryNoteServiceTest {
@@ -62,6 +66,11 @@ class InventoryNoteServiceTest {
 
     @InjectMocks
     private InventoryNoteService inventoryNoteService;
+
+    @org.junit.jupiter.api.AfterEach
+    void tearDown() {
+        SecurityContextHolder.clearContext();
+    }
 
     @Test
     void completeExportCommand_disposal_shouldDeductDefectiveStockAndWriteDamagedLedger() {
@@ -113,5 +122,56 @@ class InventoryNoteServiceTest {
         assertThat(transaction.getQuantityChange()).isEqualTo(-3);
         assertThat(transaction.getNewBalance()).isEqualTo(6);
         assertThat(transaction.getReferenceCode()).isEqualTo("LXH-99");
+    }
+
+    @Test
+    void createReturnFromGR_shouldNotOverwriteHistoricalReceiptRejectedQuantity() {
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken("warehouse@test.local", null, List.of()));
+
+        Branch warehouse = Branch.builder()
+                .id(1L)
+                .name("Kho Tong")
+                .branchType("WAREHOUSE")
+                .build();
+        Supplier supplier = Supplier.builder()
+                .id(2L)
+                .name("NCC A")
+                .build();
+        ProductVariant variant = ProductVariant.builder()
+                .id(10L)
+                .sku("SKU-10")
+                .build();
+        InventoryNoteDetail originalDetail = InventoryNoteDetail.builder()
+                .productVariant(variant)
+                .quantityRejected(5)
+                .batchNumber("LOT-1")
+                .price(new BigDecimal("100"))
+                .build();
+        InventoryNote goodsReceipt = InventoryNote.builder()
+                .id(55L)
+                .code("PNK-55")
+                .type(InventoryNoteType.IMPORT)
+                .status(InventoryNoteStatus.COMPLETED)
+                .branch(warehouse)
+                .supplier(supplier)
+                .details(List.of(originalDetail))
+                .build();
+
+        when(inventoryNoteRepository.findByIdWithDetails(55L)).thenReturn(Optional.of(goodsReceipt));
+        when(inventoryRepository.sumDefectiveQuantityByBranchAndVariantAndBatch(1L, 10L, "LOT-1")).thenReturn(2L);
+        when(userRepository.findByEmail("warehouse@test.local"))
+                .thenReturn(Optional.of(User.builder().id(9L).fullName("Thu kho").email("warehouse@test.local").build()));
+        when(inventoryNoteRepository.save(any(InventoryNote.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        inventoryNoteService.createReturnFromGR(55L);
+
+        assertThat(originalDetail.getQuantityRejected()).isEqualTo(5);
+
+        ArgumentCaptor<InventoryNote> noteCaptor = ArgumentCaptor.forClass(InventoryNote.class);
+        verify(inventoryNoteRepository).save(noteCaptor.capture());
+        InventoryNote returnNote = noteCaptor.getValue();
+        assertThat(returnNote.getDetails()).hasSize(1);
+        assertThat(returnNote.getDetails().get(0).getQuantityRequested()).isEqualTo(2);
     }
 }
