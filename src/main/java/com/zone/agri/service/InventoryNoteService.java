@@ -33,6 +33,10 @@ import java.util.stream.Collectors;
 @Service
 @RequiredArgsConstructor
 public class InventoryNoteService {
+    private static final String EXPORT_TYPE_RETURN = "RETURN";
+    private static final String EXPORT_TYPE_DISPOSAL = "DISPOSAL";
+    private static final String EXPORT_TYPE_DAMAGED = "DAMAGED";
+
     private final InventoryNoteRepository inventoryNoteRepository;
     private final InventoryNoteDetailRepository inventoryNoteDetailRepository;
     private final BranchRepository branchRepository;
@@ -94,7 +98,7 @@ public class InventoryNoteService {
 
     @Transactional
     public InventoryNoteResponse createExportCommand(ExportNoteRequest request) {
-        assertReturnExportRequest(request);
+        assertDefectiveExportRequest(request);
         InventoryNote note = new InventoryNote();
         note.setCode(request.getCode() != null ? request.getCode() : "LXK-" + System.currentTimeMillis());
         note.setType(InventoryNoteType.EXPORT);
@@ -128,7 +132,7 @@ public class InventoryNoteService {
         note.setStatus(InventoryNoteStatus.APPROVED);
         note = inventoryNoteRepository.save(note);
 
-        assertReturnExportNote(note);
+        assertDefectiveExportNote(note);
         return completeExportCommand(id);
     }
 
@@ -145,14 +149,16 @@ public class InventoryNoteService {
         );
 
         if (note.getStatus() == InventoryNoteStatus.COMPLETED) {
-            throw new BadRequestException("Lenh xuat tra nay da hoan thanh truoc do.");
+            throw new BadRequestException("Lenh xuat hang loi nay da hoan thanh truoc do.");
         }
 
         if (note.getStatus() != InventoryNoteStatus.APPROVED && note.getStatus() != InventoryNoteStatus.PENDING) {
-            throw new BadRequestException("Phieu phai o trang thai Da duyet hoac Cho duyet moi co the hoan thanh xuat tra NCC.");
+            throw new BadRequestException("Phieu phai o trang thai Da duyet hoac Cho duyet moi co the hoan thanh xuat hang loi.");
         }
 
-        assertReturnExportNote(note);
+        assertDefectiveExportNote(note);
+        String exportType = resolveExportType(note);
+        boolean disposal = isDisposalExportType(exportType);
         Branch sourceBranch = note.getBranch();
 
         for (InventoryNoteDetail detail : note.getDetails()) {
@@ -162,7 +168,7 @@ public class InventoryNoteService {
             ProductVariant variant = detail.getProductVariant();
             String targetBatch = detail.getBatchNumber();
             if (targetBatch == null || targetBatch.isBlank()) {
-                throw new BadRequestException("Xuat tra NCC bat buoc chi dinh dung so lo hang loi.");
+                throw new BadRequestException("Xuat hang loi bat buoc chi dinh dung so lo hang loi.");
             }
 
             List<Inventory> exactBatches = inventoryRepository.findExactBatchListByNumber(
@@ -171,7 +177,7 @@ public class InventoryNoteService {
                     targetBatch);
             for (Inventory batch : exactBatches) {
                 if (remainingToDeduct <= 0) break;
-                remainingToDeduct = deductDefectiveFromBatch(batch, remainingToDeduct, note);
+                remainingToDeduct = deductDefectiveFromBatch(batch, remainingToDeduct, note, exportType);
             }
 
             if (remainingToDeduct > 0) {
@@ -182,7 +188,7 @@ public class InventoryNoteService {
                 long available = defectiveStock != null ? defectiveStock : 0;
 
                 throw new BadRequestException(String.format(
-                        "San pham %s lo %s khong du hang loi de tra NCC. Yeu cau: %d, hang loi hien co: %d, con thieu: %d.",
+                        "San pham %s lo %s khong du hang loi de xuat. Yeu cau: %d, hang loi hien co: %d, con thieu: %d.",
                         variant.getSku(),
                         targetBatch,
                         detail.getQuantityRequested(),
@@ -199,18 +205,24 @@ public class InventoryNoteService {
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
         note.setTotalAmount(totalReturnAmount);
         note.setPaymentAmount(BigDecimal.ZERO);
-        note.setDebtAmount(totalReturnAmount.negate());
+        note.setDebtAmount(disposal ? BigDecimal.ZERO : totalReturnAmount.negate());
         note.setStatus(InventoryNoteStatus.COMPLETED);
         return mapToResponse(inventoryNoteRepository.save(note));
     }
 
-    private int deductDefectiveFromBatch(Inventory batch, int amount, InventoryNote note) {
+    private int deductDefectiveFromBatch(Inventory batch, int amount, InventoryNote note, String exportType) {
         int availableDefective = Objects.requireNonNullElse(batch.getDefectiveQuantity(), 0);
         int deductDefective = Math.min(availableDefective, amount);
         if (deductDefective > 0) {
             batch.setDefectiveQuantity(availableDefective - deductDefective);
             inventoryRepository.save(batch);
-            saveTransaction(batch, note, TransactionType.RETURN, -deductDefective, "Xuat tra NCC: " + note.getCode());
+            TransactionType transactionType = isDisposalExportType(exportType)
+                    ? TransactionType.DAMAGED
+                    : TransactionType.RETURN;
+            String reason = isDisposalExportType(exportType)
+                    ? "Xuat huy hang loi: " + note.getCode()
+                    : "Xuat tra NCC: " + note.getCode();
+            saveTransaction(batch, note, transactionType, -deductDefective, reason);
             amount -= deductDefective;
         }
         return amount;
@@ -509,7 +521,7 @@ public class InventoryNoteService {
 
     @Transactional
     public InventoryNoteResponse updateExportCommand(Long id, ExportNoteRequest request) {
-        assertReturnExportRequest(request);
+        assertDefectiveExportRequest(request);
         InventoryNote note = inventoryNoteRepository.findById(id)
                 .orElseThrow(() -> new NotFoundException("Không tìm thấy lệnh xuất."));
 
@@ -528,36 +540,99 @@ public class InventoryNoteService {
         return mapToResponse(inventoryNoteRepository.save(note));
     }
 
-    private void assertReturnExportRequest(ExportNoteRequest request) {
-        if (!"RETURN".equalsIgnoreCase(Objects.requireNonNullElse(request.getExportType(), ""))) {
-            throw new BadRequestException("Module xuat kho hien chi ho tro xuat tra nha cung cap (RETURN).");
+    private void assertDefectiveExportRequest(ExportNoteRequest request) {
+        String exportType = normalizeDefectiveExportType(request.getExportType());
+        request.setExportType(exportType);
+
+        if (request.getTargetBranchId() != null) {
+            throw new BadRequestException("Xuat hang loi khong su dung kho nhan noi bo.");
         }
-        if (request.getSupplierId() == null) {
+        if (EXPORT_TYPE_RETURN.equals(exportType) && request.getSupplierId() == null) {
             throw new BadRequestException("Xuat tra NCC bat buoc chon nha cung cap.");
         }
-        if (request.getTargetBranchId() != null) {
-            throw new BadRequestException("Xuat tra NCC khong su dung kho nhan noi bo.");
+        if (EXPORT_TYPE_RETURN.equals(exportType)
+                && (request.getSpecificReceiver() == null || request.getSpecificReceiver().isBlank())) {
+            throw new BadRequestException("Xuat tra NCC bat buoc nhap nguoi nhan.");
+        }
+        if (EXPORT_TYPE_RETURN.equals(exportType)
+                && (request.getShippingAddress() == null || request.getShippingAddress().isBlank())) {
+            throw new BadRequestException("Xuat tra NCC bat buoc nhap dia chi giao hang.");
+        }
+        if (EXPORT_TYPE_DISPOSAL.equals(exportType) && request.getSupplierId() != null) {
+            throw new BadRequestException("Xuat huy hang loi khong gan voi nha cung cap.");
+        }
+        if (EXPORT_TYPE_DISPOSAL.equals(exportType)
+                && (request.getNote() == null || request.getNote().isBlank())) {
+            throw new BadRequestException("Xuat huy hang loi bat buoc nhap ly do tieu huy.");
+        }
+        if (EXPORT_TYPE_DISPOSAL.equals(exportType)) {
+            if (request.getSpecificReceiver() == null || request.getSpecificReceiver().isBlank()) {
+                request.setSpecificReceiver("Bo phan tieu huy");
+            }
+            if (request.getShippingAddress() == null || request.getShippingAddress().isBlank()) {
+                request.setShippingAddress("Tieu huy hang loi tai kho");
+            }
         }
         if (request.getDetails() == null || request.getDetails().isEmpty()) {
-            throw new BadRequestException("Lenh xuat tra phai co it nhat mot dong hang loi.");
+            throw new BadRequestException("Lenh xuat hang loi phai co it nhat mot dong hang loi.");
         }
         for (ExportNoteRequest.ExportNoteDetailRequest detail : request.getDetails()) {
             if (detail.getBatchNumber() == null || detail.getBatchNumber().isBlank()) {
-                throw new BadRequestException("Moi dong xuat tra NCC bat buoc co so lo hang loi.");
+                throw new BadRequestException("Moi dong xuat hang loi bat buoc co so lo hang loi.");
             }
         }
     }
 
-    private void assertReturnExportNote(InventoryNote note) {
-        if (note.getType() != InventoryNoteType.EXPORT || note.getSupplier() == null) {
-            throw new BadRequestException("Module xuat kho hien chi cho phep xuat tra nha cung cap.");
+    private void assertDefectiveExportNote(InventoryNote note) {
+        if (note.getType() != InventoryNoteType.EXPORT || !isDefectiveExportType(resolveExportType(note))) {
+            throw new BadRequestException("Module xuat kho hien chi cho phep xuat hang loi.");
         }
         if (note.getDetails() == null || note.getDetails().isEmpty()) {
-            throw new BadRequestException("Phieu xuat tra NCC chua co hang loi.");
+            throw new BadRequestException("Phieu xuat hang loi chua co hang loi.");
         }
     }
 
+    private String normalizeDefectiveExportType(String exportType) {
+        String normalized = Objects.requireNonNullElse(exportType, "").trim().toUpperCase(Locale.ROOT);
+        if (EXPORT_TYPE_DAMAGED.equals(normalized)) {
+            return EXPORT_TYPE_DISPOSAL;
+        }
+        if (EXPORT_TYPE_RETURN.equals(normalized) || EXPORT_TYPE_DISPOSAL.equals(normalized)) {
+            return normalized;
+        }
+        throw new BadRequestException("Module xuat kho chi ho tro RETURN hoac DISPOSAL cho hang loi.");
+    }
+
+    private boolean isDisposalExportType(String exportType) {
+        String normalized = Objects.requireNonNullElse(exportType, "").trim().toUpperCase(Locale.ROOT);
+        return EXPORT_TYPE_DISPOSAL.equals(normalized) || EXPORT_TYPE_DAMAGED.equals(normalized);
+    }
+
+    private boolean isDefectiveExportType(String exportType) {
+        return EXPORT_TYPE_RETURN.equals(exportType) || isDisposalExportType(exportType);
+    }
+
+    private String resolveExportType(InventoryNote note) {
+        if (note == null) {
+            return "EXPORT";
+        }
+        String reason = Objects.requireNonNullElse(note.getReason(), "").toUpperCase(Locale.ROOT);
+        if (reason.contains("DISPOSAL") || reason.contains("DAMAGED")) {
+            return EXPORT_TYPE_DISPOSAL;
+        }
+        if (note.getPartnerBranch() != null) {
+            return "INTERNAL";
+        }
+        if (note.getSupplier() != null || reason.contains("RETURN")) {
+            return EXPORT_TYPE_RETURN;
+        }
+        return "EXPORT";
+    }
+
     private void updateNoteMetadata(InventoryNote note, ExportNoteRequest request) {
+        String exportType = normalizeDefectiveExportType(request.getExportType());
+        request.setExportType(exportType);
+
         note.setDeliverer(request.getSpecificReceiver());
         note.setNote(request.getNote());
         note.setShippingAddress(request.getShippingAddress());
@@ -578,29 +653,24 @@ public class InventoryNoteService {
             userRepository.findById(request.getCreatedById()).ifPresent(note::setCreatedBy);
         }
 
-        if (request.getSupplierId() != null || "RETURN".equals(request.getExportType())) {
+        if (isDefectiveExportType(exportType) && !isWarehouseBranch(sourceBranch)) {
+            throw new BadRequestException("Chi cac chi nhanh loai kho moi duoc phep thuc hien nghiep vu xuat hang loi.");
+        }
+
+        if (EXPORT_TYPE_DISPOSAL.equals(exportType)) {
+            note.setSupplier(null);
+            note.setPartnerBranch(null);
+        }
+
+        if (EXPORT_TYPE_RETURN.equals(exportType)) {
             if (!isWarehouseBranch(sourceBranch)) {
                 throw new BadRequestException(
                         "Chỉ các chi nhánh loại kho mới được phép thực hiện nghiệp vụ xuất trả nhà cung cấp.");
             }
 
-            if (request.getSupplierId() != null) {
-                Supplier supplier = supplierRepository.findById(request.getSupplierId())
-                        .orElseThrow(() -> new NotFoundException("Khong tim thay nha cung cap ID: " + request.getSupplierId()));
-                note.setSupplier(supplier);
-            } else if (request.getDetails() != null && !request.getDetails().isEmpty()) {
-
-                String firstBatch = request.getDetails().get(0).getBatchNumber();
-                String firstSku = productVariantRepository.findById(request.getDetails().get(0).getProductVariantId())
-                        .map(ProductVariant::getSku).orElse(null);
-
-                if (firstBatch != null && firstSku != null) {
-                    List<InventoryNoteDetail> importDetails = inventoryNoteDetailRepository.findOriginalImportDetailBySkuAndBatch(firstSku, firstBatch);
-                    if (!importDetails.isEmpty()) {
-                        note.setSupplier(importDetails.get(0).getInventoryNote().getSupplier());
-                    }
-                }
-            }
+            Supplier supplier = supplierRepository.findById(request.getSupplierId())
+                    .orElseThrow(() -> new NotFoundException("Khong tim thay nha cung cap ID: " + request.getSupplierId()));
+            note.setSupplier(supplier);
 
             note.setPartnerBranch(null);
         } else if (request.getTargetBranchId() != null) {
@@ -623,19 +693,21 @@ public class InventoryNoteService {
             ProductVariant variant = productVariantRepository.findById(reqDetail.getProductVariantId())
                     .orElseThrow(() -> new NotFoundException("Sản phẩm không tồn tại ID: " + reqDetail.getProductVariantId()));
 
-            boolean isReturn = note.getSupplier() != null ||
-                              (note.getReason() != null && (note.getReason().contains("RETURN") || note.getReason().contains("Trả NCC")));
+            String exportType = resolveExportType(note);
+            boolean isReturn = EXPORT_TYPE_RETURN.equals(exportType);
+            boolean isDefectiveExport = isDefectiveExportType(exportType);
 
             int checkStock;
             String errorPool;
             String batchNum = reqDetail.getBatchNumber();
             List<InventoryNoteDetail> originalImportDetails = Collections.emptyList();
 
-            if (isReturn) {
+            if (isDefectiveExport) {
                 if (batchNum == null || batchNum.isBlank()) {
                     throw new BadRequestException("Xuất trả nhà cung cấp bắt buộc chọn đúng lô hàng lỗi.");
                 }
 
+                if (isReturn) {
                 if (note.getSupplier() == null) {
                     throw new BadRequestException("Phiếu xuất trả nhà cung cấp thiếu thông tin nhà cung cấp.");
                 }
@@ -657,6 +729,8 @@ public class InventoryNoteService {
                             batchNum,
                             variant.getSku()
                     ));
+                }
+
                 }
 
                 Long defectiveStockLong;
@@ -1130,8 +1204,11 @@ public class InventoryNoteService {
         if (entity == null) return null;
 
         String partnerName = "N/A";
+        String exportType = resolveExportType(entity);
         if (entity.getPartnerBranch() != null) {
             partnerName = "[Nội bộ] " + entity.getPartnerBranch().getName();
+        } else if (EXPORT_TYPE_DISPOSAL.equals(exportType)) {
+            partnerName = "[Xuat huy] " + Objects.requireNonNullElse(entity.getDeliverer(), "Tieu huy hang loi");
         } else if (entity.getSupplier() != null) {
             partnerName = "[Trả NCC] " + entity.getSupplier().getName();
         } else if (entity.getDeliverer() != null && !entity.getDeliverer().isEmpty()) {
@@ -1144,8 +1221,7 @@ public class InventoryNoteService {
                 .id(entity.getId())
                 .code(entity.getCode())
                 .noteType(entity.getType() != null ? entity.getType().name() : "EXPORT")
-                .exportType(entity.getPartnerBranch() != null ? "INTERNAL" :
-                           entity.getSupplier() != null ? "RETURN" : "EXPORT")
+                .exportType(exportType)
                 .status(entity.getStatus() != null ? entity.getStatus().name() : "PENDING")
                 .reason(entity.getReason())
                 .note(entity.getNote())

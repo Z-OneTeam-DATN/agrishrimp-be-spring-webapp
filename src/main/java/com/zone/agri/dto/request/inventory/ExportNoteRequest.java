@@ -28,10 +28,8 @@ public class ExportNoteRequest {
     private Long supplierId; // Dành cho xuất trả nhà cung cấp
     private Long customerId; // Dành cho xuất bán (nếu có)
 
-    @NotBlank(message = "Vui lòng nhập tên người nhận")
     private String specificReceiver;
 
-    @NotBlank(message = "Vui lòng nhập địa chỉ giao hàng")
     private String shippingAddress;
     private String creatorName; // FE sends "creatorName"
     private Long createdById;
