@@ -2,8 +2,10 @@ package com.zone.agri.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -14,6 +16,7 @@ import java.util.Optional;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -32,6 +35,7 @@ import com.zone.agri.entity.ProductVariant;
 import com.zone.agri.entity.Supplier;
 import com.zone.agri.entity.enums.InventoryNoteStatus;
 import com.zone.agri.entity.enums.InventoryNoteType;
+import com.zone.agri.entity.enums.TransactionType;
 import com.zone.agri.repository.BranchRepository;
 import com.zone.agri.repository.InventoryNoteDetailRepository;
 import com.zone.agri.repository.InventoryNoteRepository;
@@ -137,7 +141,74 @@ class InventoryServiceTest {
         assertThat(inventory.getQuantity()).isEqualTo(12);
         assertThat(inventory.getDefectiveQuantity()).isEqualTo(4);
         verify(backorderService).fulfillBackordersOnStockReceive(1L, 100L, 7);
-        verify(transactionRepository).save(any(InventoryTransaction.class));
+
+        ArgumentCaptor<InventoryTransaction> transactionCaptor = ArgumentCaptor.forClass(InventoryTransaction.class);
+        verify(transactionRepository, times(2)).save(transactionCaptor.capture());
+        assertThat(transactionCaptor.getAllValues())
+                .extracting(InventoryTransaction::getType, InventoryTransaction::getQuantityChange,
+                        InventoryTransaction::getNewBalance, InventoryTransaction::getReason)
+                .containsExactly(
+                        org.assertj.core.groups.Tuple.tuple(TransactionType.IMPORT, 7, 13,
+                                "Nhap kho hang dat QC (Phieu: PN-10)"),
+                        org.assertj.core.groups.Tuple.tuple(TransactionType.IMPORT, 3, 16,
+                                "Nhap kho hang loi QC (Phieu: PN-10)"));
+    }
+
+    @Test
+    void completeReceipt_shouldLogRejectedStockWhenAllItemsFailQc() {
+        ProductVariant variant = variant();
+        InventoryNoteDetail detail = InventoryNoteDetail.builder()
+                .productVariant(variant)
+                .quantity(10)
+                .quantityRequested(10)
+                .price(new BigDecimal("100"))
+                .batchNumber("LOT-1")
+                .inventoryNote(null)
+                .build();
+        InventoryNote note = receipt(InventoryNoteStatus.APPROVED, new ArrayList<>(List.of(detail)));
+        detail.setInventoryNote(note);
+
+        Inventory inventory = Inventory.builder()
+                .branch(note.getBranch())
+                .productVariant(variant)
+                .batchNumber("LOT-1")
+                .importPrice(new BigDecimal("100"))
+                .quantity(5)
+                .defectiveQuantity(1)
+                .build();
+
+        InventoryQCRequest request = InventoryQCRequest.builder()
+                .items(List.of(InventoryQCRequest.ItemQCRequest.builder()
+                        .productCode("SKU-1")
+                        .quantityDelivered(10)
+                        .quantityReal(0)
+                        .quantityRejected(10)
+                        .lotNumber("LOT-1")
+                        .build()))
+                .build();
+
+        when(noteRepository.findById(10L)).thenReturn(Optional.of(note));
+        when(inventoryRepository.findExactBatchWithLock(eq(note.getBranch()), eq(variant), eq("LOT-1"), eq(new BigDecimal("100"))))
+                .thenReturn(Optional.of(inventory));
+        when(inventoryRepository.save(any(Inventory.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(noteRepository.save(any(InventoryNote.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        InventoryReceiptResponse response = inventoryService.completeReceipt(10L, request);
+
+        assertThat(response.getStatus()).isEqualTo("COMPLETED");
+        assertThat(response.getTotalAmount()).isEqualByComparingTo("0");
+        assertThat(inventory.getQuantity()).isEqualTo(5);
+        assertThat(inventory.getDefectiveQuantity()).isEqualTo(11);
+        verify(backorderService, never()).fulfillBackordersOnStockReceive(any(), any(), anyInt());
+
+        ArgumentCaptor<InventoryTransaction> transactionCaptor = ArgumentCaptor.forClass(InventoryTransaction.class);
+        verify(transactionRepository).save(transactionCaptor.capture());
+        InventoryTransaction transaction = transactionCaptor.getValue();
+        assertThat(transaction.getType()).isEqualTo(TransactionType.IMPORT);
+        assertThat(transaction.getQuantityChange()).isEqualTo(10);
+        assertThat(transaction.getNewBalance()).isEqualTo(16);
+        assertThat(transaction.getReferenceCode()).isEqualTo("PN-10");
+        assertThat(transaction.getReason()).isEqualTo("Nhap kho hang loi QC (Phieu: PN-10)");
     }
 
     private InventoryNote receipt(InventoryNoteStatus status, List<InventoryNoteDetail> details) {

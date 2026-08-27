@@ -4447,7 +4447,7 @@ public class OrderService {
             transactionRepository.save(InventoryTransaction.builder()
                     .type(TransactionType.CANCEL_RELEASE)
                     .quantityChange(quantityToRelease)
-                    .newBalance(newQty)
+                    .newBalance(physicalBalance(inventory))
                     .referenceCode(referenceCode)
                     .reason(reason)
                     .createdAt(LocalDateTime.now())
@@ -4774,7 +4774,7 @@ public class OrderService {
                 transactionRepository.save(InventoryTransaction.builder()
                         .type(TransactionType.SALE)
                         .quantityChange(-deduct)
-                        .newBalance(newQty)
+                        .newBalance(physicalBalance(batch))
                         .referenceCode(savedOrder.getCode())
                         .reason("BĂ¡n hĂ ng trá»±c tiáº¿p (ÄÆ¡n: " + savedOrder.getCode() + ")")
                         .createdAt(LocalDateTime.now())
@@ -4852,6 +4852,11 @@ public class OrderService {
         notificationService.notifyOrderPlaced(savedOrder);
         orderRealtimePublisher.publishOrderChangedAfterCommit(savedOrder.getId(), ORDER_EVENT_CREATED);
         return savedOrder;
+    }
+
+    private int physicalBalance(Inventory inventory) {
+        return Objects.requireNonNullElse(inventory.getQuantity(), 0)
+                + Objects.requireNonNullElse(inventory.getDefectiveQuantity(), 0);
     }
 
     private Branch findBranchWithEnoughStock(List<CheckoutItemRequest> itemsToBuy) {

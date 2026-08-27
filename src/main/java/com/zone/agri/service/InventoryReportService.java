@@ -39,6 +39,7 @@ public class InventoryReportService {
             TransactionType.TRANSFER_OUT,
             TransactionType.ADJUSTMENT,
             TransactionType.RETURN,
+            TransactionType.CANCEL_RELEASE,
             TransactionType.DAMAGED);
 
     @Transactional(readOnly = true)
@@ -107,10 +108,12 @@ public class InventoryReportService {
             return true;
         }
         if ("import".equalsIgnoreCase(direction)) {
-            return tx.getType() == TransactionType.IMPORT;
+            return tx.getType() == TransactionType.IMPORT || tx.getType() == TransactionType.CANCEL_RELEASE;
         }
         if ("export".equalsIgnoreCase(direction)) {
-            return tx.getType() == TransactionType.SALE || tx.getType() == TransactionType.DAMAGED;
+            return tx.getType() == TransactionType.SALE
+                    || tx.getType() == TransactionType.RETURN
+                    || tx.getType() == TransactionType.DAMAGED;
         }
         if ("transfer".equalsIgnoreCase(direction)) {
             return tx.getType() == TransactionType.TRANSFER_IN || tx.getType() == TransactionType.TRANSFER_OUT;

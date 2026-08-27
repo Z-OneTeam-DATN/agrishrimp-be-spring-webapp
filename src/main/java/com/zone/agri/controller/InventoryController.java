@@ -157,6 +157,15 @@ public class InventoryController {
         return ResponseEntity.ok(inventoryService.getDefectiveItemsBySupplier(supplierId, finalBranchId));
     }
 
+    @SecurityRequirement(name = "bearerAuth")
+    @RequirePermission("EXPORT_CREATE")
+    @GetMapping("/defective-items/all")
+    public ResponseEntity<List<com.zone.agri.dto.response.inventory.InventorySearchResponse>> getAllDefectiveItems(
+            @RequestParam(required = false) Long branchId) {
+        Long finalBranchId = com.zone.agri.common.AuthUtils.resolveRequestedOrUserBranch(branchId, "EXPORT_CREATE");
+        return ResponseEntity.ok(inventoryService.getAllDefectiveItemsWithSuppliers(finalBranchId));
+    }
+
     // ==============================
     // LỆNH XUẤT KHO (EXPORT)
     // ==============================

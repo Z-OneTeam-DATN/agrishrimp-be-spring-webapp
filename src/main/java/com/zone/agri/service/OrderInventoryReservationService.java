@@ -154,7 +154,7 @@ public class OrderInventoryReservationService {
             transactionRepository.save(InventoryTransaction.builder()
                     .type(TransactionType.SALE)
                     .quantityChange(-shipAmount)
-                    .newBalance(newQty)
+                    .newBalance(physicalBalance(inventory))
                     .referenceCode(referenceCode)
                     .reason(reason)
                     .createdAt(LocalDateTime.now())
@@ -168,5 +168,10 @@ public class OrderInventoryReservationService {
                 .sorted(Comparator.comparing(InventoryTransaction::getCreatedAt, Comparator.nullsLast(LocalDateTime::compareTo))
                         .thenComparing(InventoryTransaction::getId, Comparator.nullsLast(Long::compareTo)))
                 .toList();
+    }
+
+    private int physicalBalance(Inventory inventory) {
+        return Objects.requireNonNullElse(inventory.getQuantity(), 0)
+                + Objects.requireNonNullElse(inventory.getDefectiveQuantity(), 0);
     }
 }

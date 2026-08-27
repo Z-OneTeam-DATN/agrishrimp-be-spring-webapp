@@ -346,13 +346,26 @@ public class InventoryService {
         inv.setLastReceiptDate(LocalDateTime.now());
         inv = inventoryRepository.save(inv);
 
+        int balanceAfterAccepted = physicalBalance(inv) - rQty;
         if (aQty > 0) {
             transactionRepository.save(InventoryTransaction.builder()
                     .type(type)
                     .quantityChange(aQty)
-                    .newBalance(Objects.requireNonNullElse(inv.getQuantity(), 0))
+                    .newBalance(balanceAfterAccepted)
                     .referenceCode(note != null ? note.getCode() : null)
                     .reason(note != null ? "Nhap kho hang dat QC (Phieu: " + note.getCode() + ")" : "Nhap kho hang dat QC")
+                    .createdAt(LocalDateTime.now())
+                    .inventory(inv)
+                    .inventoryNote(note)
+                    .build());
+        }
+        if (rQty > 0) {
+            transactionRepository.save(InventoryTransaction.builder()
+                    .type(type)
+                    .quantityChange(rQty)
+                    .newBalance(physicalBalance(inv))
+                    .referenceCode(note != null ? note.getCode() : null)
+                    .reason(note != null ? "Nhap kho hang loi QC (Phieu: " + note.getCode() + ")" : "Nhap kho hang loi QC")
                     .createdAt(LocalDateTime.now())
                     .inventory(inv)
                     .inventoryNote(note)
@@ -483,7 +496,7 @@ public class InventoryService {
             InventoryTransaction tx = InventoryTransaction.builder()
                     .type(TransactionType.TRANSFER_OUT)
                     .quantityChange(-deduct)
-                    .newBalance(newQty)
+                    .newBalance(physicalBalance(batch))
                     .referenceCode(note != null ? note.getCode() : null)
                     .reason(note != null ? "Xuất kho FIFO từ phiếu: " + note.getCode() : "Xuất kho FIFO")
                     .createdAt(LocalDateTime.now())
@@ -498,6 +511,11 @@ public class InventoryService {
         if (remaining > 0) {
             throw new BadRequestException("Lỗi hụt hàng trong lúc xử lý tại kho " + branch.getName());
         }
+    }
+
+    private int physicalBalance(Inventory inventory) {
+        return Objects.requireNonNullElse(inventory.getQuantity(), 0)
+                + Objects.requireNonNullElse(inventory.getDefectiveQuantity(), 0);
     }
 
     // --- 4 & 5. LẤY DANH SÁCH & CHI TIẾT ---
@@ -592,7 +610,12 @@ public class InventoryService {
 
     @Transactional(readOnly = true)
     public List<com.zone.agri.dto.response.inventory.InventorySearchResponse> getAllDefectiveItemsWithSuppliers() {
-        Long branchId = warehouseContext.resolveWarehouseId();
+        return getAllDefectiveItemsWithSuppliers(null);
+    }
+
+    @Transactional(readOnly = true)
+    public List<com.zone.agri.dto.response.inventory.InventorySearchResponse> getAllDefectiveItemsWithSuppliers(Long explicitBranchId) {
+        Long branchId = explicitBranchId != null ? explicitBranchId : warehouseContext.resolveWarehouseId();
         List<Inventory> defectiveInventories;
         
         if (branchId == null) {
