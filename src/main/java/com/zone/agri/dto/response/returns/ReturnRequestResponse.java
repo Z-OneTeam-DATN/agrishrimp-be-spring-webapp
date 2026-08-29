@@ -1,5 +1,6 @@
 package com.zone.agri.dto.response.returns;
 
+import com.zone.agri.entity.enums.ReturnHandlingOption;
 import com.zone.agri.entity.enums.ReturnIssueType;
 import com.zone.agri.entity.enums.ReturnRefundMethod;
 import com.zone.agri.entity.enums.ReturnRequestStatus;
@@ -17,6 +18,7 @@ public class ReturnRequestResponse {
     private String code;
     private ReturnRequestStatus status;
     private ReturnIssueType issueType;
+    private ReturnHandlingOption handlingOption;
     private ReturnRefundMethod refundMethod;
     private Boolean requiresPhysicalReturn;
     private Long orderId;

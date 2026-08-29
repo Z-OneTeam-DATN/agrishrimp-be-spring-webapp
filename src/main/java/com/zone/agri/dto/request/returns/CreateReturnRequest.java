@@ -1,5 +1,6 @@
 package com.zone.agri.dto.request.returns;
 
+import com.zone.agri.entity.enums.ReturnHandlingOption;
 import com.zone.agri.entity.enums.ReturnIssueType;
 import com.zone.agri.entity.enums.ReturnRefundMethod;
 import jakarta.validation.Valid;
@@ -40,6 +41,8 @@ public class CreateReturnRequest {
 
     @NotNull
     ReturnRefundMethod refundMethod;
+
+    ReturnHandlingOption handlingOption;
 
     @NotBlank
     String reason;

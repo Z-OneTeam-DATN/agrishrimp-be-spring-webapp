@@ -100,7 +100,7 @@ public class ReturnRequestService {
                 .customerName(firstNonBlank(order.getReceiverName(), order.getUser() != null ? order.getUser().getFullName() : null))
                 .customerPhone(firstNonBlank(order.getReceiverPhone(), order.getUser() != null ? order.getUser().getPhoneNumber() : null))
                 .singleBranchOnly(Boolean.TRUE)
-                .message("Các sản phẩm chọn trả phải cùng chi nhánh phục vụ. Nếu đơn có nhiều chi nhánh, vui lòng tách thành nhiều yêu cầu.")
+                .message("Các sản phẩm đã chọn hiện chưa thể gửi chung trong một yêu cầu. Vui lòng tách thành các yêu cầu riêng nếu cần.")
                 .items(items)
                 .build();
     }
@@ -142,10 +142,11 @@ public class ReturnRequestService {
         }
 
         if (branchIds.size() > 1) {
-            throw new BadRequestException("Các sản phẩm trả hàng phải thuộc cùng một chi nhánh phục vụ. Vui lòng tách thành các yêu cầu riêng.");
+            throw new BadRequestException("Các sản phẩm đã chọn hiện chưa thể gửi chung trong một yêu cầu. Vui lòng tách thành các yêu cầu riêng nếu cần.");
         }
 
-        boolean requiresPhysicalReturn = request.getIssueType() != ReturnIssueType.MISSING_ITEM;
+        ReturnHandlingOption handlingOption = resolveHandlingOption(request);
+        boolean requiresPhysicalReturn = handlingOption == ReturnHandlingOption.RETURN_AND_REFUND;
 
         ReturnRequest entity = ReturnRequest.builder()
                 .code(generateReturnRequestCode())
@@ -529,6 +530,7 @@ public class ReturnRequestService {
                 .code(entity.getCode())
                 .status(entity.getStatus())
                 .issueType(entity.getIssueType())
+                .handlingOption(resolveHandlingOption(entity))
                 .refundMethod(entity.getRefundMethod())
                 .requiresPhysicalReturn(entity.getRequiresPhysicalReturn())
                 .orderId(entity.getOrder() != null ? entity.getOrder().getId() : null)
@@ -555,6 +557,30 @@ public class ReturnRequestService {
                 .items(itemResponses)
                 .evidences(evidenceResponses)
                 .build();
+    }
+
+    private ReturnHandlingOption resolveHandlingOption(CreateReturnRequest request) {
+        ReturnHandlingOption requestedHandlingOption = request.getHandlingOption();
+        ReturnIssueType issueType = request.getIssueType();
+
+        if (requestedHandlingOption == null) {
+            return issueType == ReturnIssueType.MISSING_ITEM
+                    ? ReturnHandlingOption.REFUND_ONLY
+                    : ReturnHandlingOption.RETURN_AND_REFUND;
+        }
+
+        if (issueType == ReturnIssueType.MISSING_ITEM
+                && requestedHandlingOption == ReturnHandlingOption.RETURN_AND_REFUND) {
+            throw new BadRequestException("Trường hợp thiếu hàng chỉ hỗ trợ phương án chỉ hoàn tiền.");
+        }
+
+        return requestedHandlingOption;
+    }
+
+    private ReturnHandlingOption resolveHandlingOption(ReturnRequest entity) {
+        return Boolean.TRUE.equals(entity.getRequiresPhysicalReturn())
+                ? ReturnHandlingOption.RETURN_AND_REFUND
+                : ReturnHandlingOption.REFUND_ONLY;
     }
 
     private String resolveProductName(ProductVariant variant) {
