@@ -42,6 +42,9 @@ public class OrderResponse {
     private String branchAddress;
     @JsonFormat(pattern = "yyyy-MM-dd'T'HH:mm:ss")
     private LocalDateTime createdAt;
+    @JsonFormat(pattern = "yyyy-MM-dd'T'HH:mm:ss")
+    private LocalDateTime statusUpdatedAt;
+    private Boolean canConfirmReceived;
     private String shippingAddress;
     private String note;
     private String cancelReasonCode;
