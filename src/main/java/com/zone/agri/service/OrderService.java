@@ -13,6 +13,7 @@ import com.zone.agri.entity.enums.OrderCancelReasonCode;
 import com.zone.agri.entity.enums.OrderStatus;
 import com.zone.agri.entity.enums.PaymentMethod;
 import com.zone.agri.entity.enums.PaymentStatus;
+import com.zone.agri.entity.enums.PurchaseRequestStatus;
 import com.zone.agri.entity.enums.StockStatus;
 import com.zone.agri.entity.enums.TransactionType;
 import com.zone.agri.entity.enums.VietnamRegion;
@@ -926,9 +927,12 @@ public class OrderService {
                         .destinationBranchName(branchName(transfer.getToBranch()))
                         .documentId(transfer.getId())
                         .documentType(REPLENISHMENT_DOCUMENT_TRANSFER)
+                        .documentStatus(transfer.getStatus() != null ? transfer.getStatus().name() : null)
                         .documentCode(transfer.getTransferCode())
                         .documentPath(transfer.getId() != null ? "/admin/transfers/" + transfer.getId() : null)
                         .documentLabel(buildTransferDocumentLabel(transfer))
+                        .approvalRequired(Boolean.FALSE)
+                        .approvalMessage(null)
                         .message("Da tao hoac giu phieu dieu chuyen " + transfer.getTransferCode())
                         .build());
             }
@@ -963,9 +967,14 @@ public class OrderService {
                         .destinationBranchName(branchName(request.getBranch()))
                         .documentId(request.getId())
                         .documentType(REPLENISHMENT_DOCUMENT_PURCHASE_REQUEST)
+                        .documentStatus(request.getStatus() != null ? request.getStatus().name() : null)
                         .documentCode(request.getCode())
                         .documentPath(request.getId() != null ? "/admin/purchase-requests/" + request.getId() : null)
                         .documentLabel(buildPurchaseRequestDocumentLabel(request))
+                        .approvalRequired(request.getStatus() == PurchaseRequestStatus.PENDING_APPROVAL)
+                        .approvalMessage(request.getStatus() == PurchaseRequestStatus.PENDING_APPROVAL
+                                ? "Phiếu yêu cầu nhập NCC đang chờ admin duyệt trước khi tiếp tục xử lý."
+                                : null)
                         .message("Da tao hoac giu yeu cau mua " + request.getCode())
                         .build());
             }
@@ -994,9 +1003,12 @@ public class OrderService {
                     .destinationBranchName(branchName(subOrder != null ? subOrder.getBranch() : null))
                     .documentId(null)
                     .documentType(REPLENISHMENT_DOCUMENT_BLOCKED)
+                    .documentStatus(null)
                     .documentCode(null)
                     .documentPath(null)
                     .documentLabel(null)
+                    .approvalRequired(Boolean.FALSE)
+                    .approvalMessage(null)
                     .message(message)
                     .build());
         });
@@ -1547,6 +1559,9 @@ public class OrderService {
 
     private BranchOrderResponse mapSubOrderToBranchOrderResponse(SubOrder subOrder) {
         Order order = subOrder.getOrder();
+        Branch branch = subOrder.getBranch();
+        List<ReplenishmentPlanItem> replenishmentDocuments =
+                findActiveReplenishmentDocumentsForSubOrder(subOrder);
 
         List<OrderItemResponse> items = subOrder.getItems() != null
                 ? subOrder.getItems().stream().map(this::mapSubItemToResponse).collect(Collectors.toList())
@@ -1557,6 +1572,8 @@ public class OrderService {
                 .orderCode(order.getCode())
                 .customerName(order.getUser() != null ? order.getUser().getFullName() : "")
                 .customerPhone(order.getUser() != null ? order.getUser().getPhoneNumber() : "")
+                .receiverName(order.getReceiverName())
+                .receiverPhone(order.getReceiverPhone())
                 .shippingAddress(
                         order.getShippingAddress() != null ? order.getShippingAddress() : order.getDeliveryAddress())
                 .createdAt(order.getCreatedAt())
@@ -1573,12 +1590,20 @@ public class OrderService {
                 .shippingFee(subOrder.getShippingFee() != null ? subOrder.getShippingFee() : BigDecimal.ZERO)
                 .estimatedDays(subOrder.getEstimatedDays())
                 .carrier(subOrder.getCarrier())
+                .branchId(branch != null ? branch.getId() : null)
+                .branchName(branchName(branch))
+                .branchPhone(branch != null ? branch.getPhone() : null)
+                .branchAddress(branch != null ? branch.getAddressDetail() : null)
+                .note(order.getNote())
+                .cancelReasonDisplay(resolveCancelReasonDisplay(order))
                 .statusUpdatedAt(resolveStatusUpdatedAt(subOrder))
                 .shippingOverdue(subOrder.getStatus() == OrderStatus.SHIPPING
                         && canManuallyConfirmReceived(resolveStatusUpdatedAt(subOrder)))
                 .canMarkReceived(subOrder.getStatus() == OrderStatus.SHIPPING
                         && canManuallyConfirmReceived(resolveStatusUpdatedAt(subOrder)))
                 .overdueShippingDays(calculateOverdueShippingDays(resolveStatusUpdatedAt(subOrder)))
+                .replenishmentRequested(!replenishmentDocuments.isEmpty())
+                .replenishmentDocuments(replenishmentDocuments)
                 .items(items)
                 .build();
     }
@@ -2167,20 +2192,29 @@ public class OrderService {
 
         List<ReplenishmentPlanItem> documents = new ArrayList<>();
         for (SubOrder subOrder : order.getSubOrders()) {
-            if (subOrder == null || subOrder.getId() == null) {
-                continue;
-            }
-
-            List<InventoryTransfer> transfers = inventoryTransferRepository
-                    .findByReferenceCodeAndStatusInOrderByCreatedAtDesc(
-                            buildSubOrderReferenceCode(subOrder),
-                            ACTIVE_TRANSFER_STATUSES);
-            appendTransferPlanItems(transfers, documents);
-
-            List<PurchaseRequest> purchaseRequests = purchaseRequestService
-                    .findActiveAutoReplenishmentRequestsForSubOrder(subOrder.getId());
-            appendPurchasePlanItems(purchaseRequests, documents);
+            documents.addAll(findActiveReplenishmentDocumentsForSubOrder(subOrder));
         }
+
+        return documents.stream()
+                .filter(item -> item.getDocumentId() != null)
+                .toList();
+    }
+
+    private List<ReplenishmentPlanItem> findActiveReplenishmentDocumentsForSubOrder(SubOrder subOrder) {
+        if (subOrder == null || subOrder.getId() == null) {
+            return List.of();
+        }
+
+        List<ReplenishmentPlanItem> documents = new ArrayList<>();
+        List<InventoryTransfer> transfers = inventoryTransferRepository
+                .findByReferenceCodeAndStatusInOrderByCreatedAtDesc(
+                        buildSubOrderReferenceCode(subOrder),
+                        ACTIVE_TRANSFER_STATUSES);
+        appendTransferPlanItems(transfers, documents);
+
+        List<PurchaseRequest> purchaseRequests = purchaseRequestService
+                .findActiveAutoReplenishmentRequestsForSubOrder(subOrder.getId());
+        appendPurchasePlanItems(purchaseRequests, documents);
 
         return documents.stream()
                 .filter(item -> item.getDocumentId() != null)
