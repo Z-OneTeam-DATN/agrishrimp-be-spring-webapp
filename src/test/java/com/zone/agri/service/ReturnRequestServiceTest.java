@@ -1,12 +1,15 @@
 package com.zone.agri.service;
 
 import com.zone.agri.dto.request.returns.CreateReturnRequest;
+import com.zone.agri.dto.request.returns.CreateReturnRequestEvidence;
 import com.zone.agri.dto.request.returns.ReturnRequestRefundRequest;
 import com.zone.agri.dto.response.returns.ReturnRequestResponse;
 import com.zone.agri.entity.Order;
 import com.zone.agri.entity.ReturnRequest;
 import com.zone.agri.entity.User;
 import com.zone.agri.entity.enums.OrderStatus;
+import com.zone.agri.entity.enums.ReturnEvidenceType;
+import com.zone.agri.entity.enums.ReturnHandlingOption;
 import com.zone.agri.entity.enums.ReturnIssueType;
 import com.zone.agri.entity.enums.ReturnRefundMethod;
 import com.zone.agri.entity.enums.ReturnRequestStatus;
@@ -148,6 +151,45 @@ class ReturnRequestServiceTest {
         assertThat(entity.getStatus()).isEqualTo(ReturnRequestStatus.REFUNDED);
         assertThat(entity.getRefundedAt()).isNotNull();
         assertThat(response.getRefundMethod()).isEqualTo(ReturnRefundMethod.BANK_TRANSFER);
+        assertThat(response.getHandlingOption()).isEqualTo(ReturnHandlingOption.REFUND_ONLY);
         assertThat(response.getTotalRefundAmount()).isEqualByComparingTo("125000");
+    }
+
+    @Test
+    void createReturnRequest_shouldRejectMissingItemWithReturnAndRefundHandling() {
+        User user = User.builder()
+                .id(7L)
+                .fullName("Tester")
+                .build();
+        Order order = Order.builder()
+                .id(11L)
+                .user(user)
+                .status(OrderStatus.COMPLETED)
+                .build();
+        when(orderRepository.findById(11L)).thenReturn(Optional.of(order));
+
+        CreateReturnRequest request = new CreateReturnRequest();
+        request.setOrderId(11L);
+        request.setFullName("Nguyen Van A");
+        request.setPhoneNumber("0900000000");
+        request.setBankAccountName("NGUYEN VAN A");
+        request.setBankAccountNumber("123456789");
+        request.setBankName("VCB");
+        request.setIssueType(ReturnIssueType.MISSING_ITEM);
+        request.setHandlingOption(ReturnHandlingOption.RETURN_AND_REFUND);
+        request.setRefundMethod(ReturnRefundMethod.BANK_TRANSFER);
+        request.setReason("Thieu hang");
+        request.setDescription("Mo ta loi");
+        request.setItems(List.of());
+        CreateReturnRequestEvidence imageEvidence = new CreateReturnRequestEvidence();
+        imageEvidence.setMediaType(ReturnEvidenceType.IMAGE);
+        imageEvidence.setFileUrl("https://example.com/image.jpg");
+        CreateReturnRequestEvidence videoEvidence = new CreateReturnRequestEvidence();
+        videoEvidence.setMediaType(ReturnEvidenceType.VIDEO);
+        videoEvidence.setFileUrl("https://example.com/video.mp4");
+        request.setEvidences(List.of(imageEvidence, videoEvidence));
+
+        assertThatThrownBy(() -> returnRequestService.createReturnRequest(7L, request))
+                .isInstanceOf(BadRequestException.class);
     }
 }
