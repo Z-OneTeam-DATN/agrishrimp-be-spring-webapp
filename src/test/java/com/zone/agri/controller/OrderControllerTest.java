@@ -59,4 +59,19 @@ class OrderControllerTest {
         verify(userRepository).findByEmail("customer@example.com");
         verifyNoInteractions(orderService);
     }
+
+    @Test
+    void confirmReceivedByCustomer_shouldDelegateToServiceForAuthenticatedUser() {
+        User user = mock(User.class);
+        when(user.getId()).thenReturn(88L);
+        when(userRepository.findByEmail("customer@example.com")).thenReturn(Optional.of(user));
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken("customer@example.com", "secret", List.of()));
+
+        ResponseEntity<?> response = orderController.confirmReceivedByCustomer(123L);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(response.getBody()).isInstanceOf(Map.class);
+        verify(orderService).confirmReceivedByCustomer(88L, 123L);
+    }
 }
