@@ -25,6 +25,8 @@ public class BranchOrderResponse {
     private String orderCode;
     private String customerName;
     private String customerPhone;
+    private String receiverName;
+    private String receiverPhone;
     private String shippingAddress;
     @JsonFormat(pattern = "yyyy-MM-dd'T'HH:mm:ss")
     private LocalDateTime createdAt;
@@ -46,11 +48,19 @@ public class BranchOrderResponse {
     private BigDecimal shippingFee;
     private String estimatedDays;
     private String carrier;
+    private Long branchId;
+    private String branchName;
+    private String branchPhone;
+    private String branchAddress;
+    private String note;
+    private String cancelReasonDisplay;
     @JsonFormat(pattern = "yyyy-MM-dd'T'HH:mm:ss")
     private LocalDateTime statusUpdatedAt;
     private boolean shippingOverdue;
     private boolean canMarkReceived;
     private Long overdueShippingDays;
+    private boolean replenishmentRequested;
+    private List<ReplenishmentPlanItem> replenishmentDocuments;
 
     /** Danh sách sản phẩm trong phần đơn của chi nhánh */
     private List<OrderItemResponse> items;
