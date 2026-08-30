@@ -402,8 +402,12 @@ public class OrderService {
             throw new Forbidden("Báº¡n khĂ´ng cĂ³ quyá»n thao tĂ¡c trĂªn Ä‘Æ¡n hĂ ng nĂ y");
         }
 
-        if (order.getStatus() != OrderStatus.SHIPPING) {
-            throw new BadRequestException("Chá»‰ cĂ³ thá»ƒ xĂ¡c nháº­n khi Ä‘Æ¡n hĂ ng Ä‘ang giao.");
+        if (order.getReceivedAt() != null) {
+            return;
+        }
+
+        if (order.getStatus() != OrderStatus.SHIPPING && order.getStatus() != OrderStatus.COMPLETED) {
+            throw new BadRequestException("Chá»‰ cĂ³ thá»ƒ xĂ¡c nháº­n khi Ä‘Æ¡n hĂ ng Ä‘ang giao hoáº·c vá»«a hoĂ n táº¥t ná»™i bá»™.");
         }
 
         if (!canCustomerConfirmReceived(order)) {
@@ -413,12 +417,20 @@ public class OrderService {
                     null);
         }
 
-        OrderStatus currentStatus = order.getStatus();
-        completeOrderDelivery(order);
-        if (order.getUser() != null) {
-            customerService.evaluateAndHandleCustomerReputation(order.getUser().getId());
+        if (order.getStatus() == OrderStatus.SHIPPING) {
+            OrderStatus currentStatus = order.getStatus();
+            completeOrderDelivery(order);
+            acknowledgeCustomerReceipt(order, false);
+            if (order.getUser() != null) {
+                customerService.evaluateAndHandleCustomerReputation(order.getUser().getId());
+            }
+            notificationService.notifyOrderStatusChange(order, currentStatus, OrderStatus.COMPLETED, true);
+            return;
         }
-        notificationService.notifyOrderStatusChange(order, currentStatus, OrderStatus.COMPLETED);
+
+        if (acknowledgeCustomerReceipt(order, true)) {
+            notificationService.notifyCustomerReceiptConfirmed(order);
+        }
     }
 
     // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
@@ -550,17 +562,17 @@ public class OrderService {
                     "Don hang dang thieu hang. Vui long xin lenh dieu chuyen truoc khi duyet sang buoc tiep theo.");
         }
 
-        validateStatusTransition(currentStatus, newStatus);
-
-        if (currentStatus == OrderStatus.SHIPPING
-                && (newStatus == OrderStatus.RECEIVED || newStatus == OrderStatus.COMPLETED)) {
-            completeOrderDelivery(order);
-            if (order.getUser() != null) {
-                customerService.evaluateAndHandleCustomerReputation(order.getUser().getId());
-            }
-            notificationService.notifyOrderStatusChange(order, currentStatus, OrderStatus.COMPLETED);
+        if (currentStatus == OrderStatus.SHIPPING && newStatus == OrderStatus.COMPLETED) {
+            completeDeliveredOrder(order, currentStatus, false);
             return;
         }
+
+        if (currentStatus == OrderStatus.SHIPPING && newStatus == OrderStatus.RECEIVED) {
+            markOrderAsReceived(order, true);
+            return;
+        }
+
+        validateStatusTransition(currentStatus, newStatus);
 
         if (newStatus == OrderStatus.RECEIVED) {
             markOrderAsReceived(order, true);
@@ -571,7 +583,7 @@ public class OrderService {
             if (order.getUser() != null) {
                 customerService.evaluateAndHandleCustomerReputation(order.getUser().getId());
             }
-            notificationService.notifyOrderStatusChange(order, currentStatus, OrderStatus.COMPLETED);
+            notificationService.notifyOrderStatusChange(order, currentStatus, OrderStatus.COMPLETED, false);
             return;
         }
         LocalDateTime statusChangedAt = LocalDateTime.now();
@@ -1367,7 +1379,7 @@ public class OrderService {
             if (order.getUser() != null) {
                 customerService.evaluateAndHandleCustomerReputation(order.getUser().getId());
             }
-            notificationService.notifyOrderStatusChange(order, previousStatus, OrderStatus.COMPLETED);
+            notificationService.notifyOrderStatusChange(order, previousStatus, OrderStatus.COMPLETED, false);
         }
 
         log.info("Da tu dong hoan tat {} phan don va {} don legacy SHIPPING qua {} ngay.",
@@ -1396,7 +1408,7 @@ public class OrderService {
     }
 
     private void markOrderAsReceived(Order order, boolean force) {
-        if (!force && !canManuallyConfirmReceived(resolveStatusUpdatedAt(order))) {
+        if (!force && !canManuallyConfirmReceived(resolveShippingStartedAt(order))) {
             throw new BadRequestException("ChĂ¡Â»â€° Ă„â€˜Ă†Â°Ă¡Â»Â£c xĂƒÂ¡c nhĂ¡ÂºÂ­n 'Ă„ÂĂƒÂ£ nhĂ¡ÂºÂ­n hĂƒÂ ng' sau khi Ă„â€˜Ă†Â¡n Ă„â€˜ang giao quĂƒÂ¡ 7 ngĂƒÂ y.");
         }
 
@@ -1453,6 +1465,14 @@ public class OrderService {
         orderRealtimePublisher.publishOrderChangedAfterCommit(order.getId(), ORDER_EVENT_UPDATED);
     }
 
+    private void completeDeliveredOrder(Order order, OrderStatus previousStatus, boolean sendCustomerEmail) {
+        completeOrderDelivery(order);
+        if (order.getUser() != null) {
+            customerService.evaluateAndHandleCustomerReputation(order.getUser().getId());
+        }
+        notificationService.notifyOrderStatusChange(order, previousStatus, OrderStatus.COMPLETED, sendCustomerEmail);
+    }
+
     private void completeReceivedOrder(Order order) {
         LocalDateTime completedAt = LocalDateTime.now();
         applyOrderStatus(order, OrderStatus.COMPLETED, completedAt);
@@ -1471,6 +1491,36 @@ public class OrderService {
         orderRealtimePublisher.publishOrderChangedAfterCommit(order.getId(), ORDER_EVENT_UPDATED);
     }
 
+    private boolean acknowledgeCustomerReceipt(Order order, boolean publishRealtime) {
+        if (order == null || order.getReceivedAt() != null) {
+            return false;
+        }
+
+        LocalDateTime receivedAt = LocalDateTime.now();
+        order.setReceivedAt(receivedAt);
+        if (PaymentMethod.COD.equals(order.getPaymentMethod())) {
+            order.setPaymentStatus(PaymentStatus.PAID);
+        }
+        orderRepository.save(order);
+
+        if (order.getSubOrders() != null) {
+            List<SubOrder> subOrdersAwaitingReceipt = order.getSubOrders().stream()
+                    .filter(subOrder -> subOrder.getStatus() != OrderStatus.CANCELLED
+                            && subOrder.getStatus() != OrderStatus.RETURNED
+                            && subOrder.getReceivedAt() == null)
+                    .peek(subOrder -> subOrder.setReceivedAt(receivedAt))
+                    .toList();
+            if (!subOrdersAwaitingReceipt.isEmpty()) {
+                subOrderRepository.saveAll(subOrdersAwaitingReceipt);
+            }
+        }
+
+        if (publishRealtime) {
+            orderRealtimePublisher.publishOrderChangedAfterCommit(order.getId(), ORDER_EVENT_UPDATED);
+        }
+        return true;
+    }
+
     private void completeSubOrderDelivery(SubOrder subOrder) {
         LocalDateTime completedAt = LocalDateTime.now();
         applySubOrderStatus(subOrder, OrderStatus.COMPLETED, completedAt);
@@ -1483,7 +1533,7 @@ public class OrderService {
         }
 
         if (masterOrder != null && masterOrder.getId() != null) {
-            orderStatusSyncService.syncMasterOrderStatus(masterOrder.getId());
+            orderStatusSyncService.syncMasterOrderStatus(masterOrder.getId(), false);
         }
     }
 
@@ -1508,29 +1558,60 @@ public class OrderService {
         };
     }
 
-    private boolean canManuallyConfirmReceived(LocalDateTime statusUpdatedAt) {
-        return statusUpdatedAt != null
-                && !statusUpdatedAt.isAfter(LocalDateTime.now().minusDays(SHIPPING_RECEIVED_CONFIRM_AFTER_DAYS));
+    private boolean canManuallyConfirmReceived(LocalDateTime shippingStartedAt) {
+        return shippingStartedAt != null
+                && !shippingStartedAt.isAfter(LocalDateTime.now().minusDays(SHIPPING_RECEIVED_CONFIRM_AFTER_DAYS));
     }
 
     private boolean canCustomerConfirmReceived(Order order) {
-        if (order == null || order.getStatus() != OrderStatus.SHIPPING) {
+        if (order == null || order.getReceivedAt() != null) {
             return false;
         }
 
-        LocalDateTime statusUpdatedAt = resolveStatusUpdatedAt(order);
-        if (statusUpdatedAt == null) {
+        if (order.getStatus() != OrderStatus.SHIPPING && order.getStatus() != OrderStatus.COMPLETED) {
+            return false;
+        }
+
+        LocalDateTime shippingStartedAt = resolveShippingStartedAt(order);
+        if (shippingStartedAt == null) {
             return true;
         }
 
-        return !statusUpdatedAt.isBefore(LocalDateTime.now().minusHours(CUSTOMER_CONFIRM_RECEIVED_WINDOW_HOURS));
+        return !shippingStartedAt.isBefore(LocalDateTime.now().minusHours(CUSTOMER_CONFIRM_RECEIVED_WINDOW_HOURS));
     }
 
-    private Long calculateOverdueShippingDays(LocalDateTime statusUpdatedAt) {
-        if (statusUpdatedAt == null) {
+    private Long calculateOverdueShippingDays(LocalDateTime shippingStartedAt) {
+        if (shippingStartedAt == null) {
             return 0L;
         }
-        return Math.max(0, ChronoUnit.DAYS.between(statusUpdatedAt, LocalDateTime.now()));
+        return Math.max(0, ChronoUnit.DAYS.between(shippingStartedAt, LocalDateTime.now()));
+    }
+
+    private LocalDateTime resolveShippingStartedAt(Order order) {
+        if (order == null) {
+            return null;
+        }
+        if (order.getShippingStartedAt() != null) {
+            return order.getShippingStartedAt();
+        }
+        if (order.getSubOrders() != null && !order.getSubOrders().isEmpty()) {
+            return order.getSubOrders().stream()
+                    .map(this::resolveShippingStartedAt)
+                    .filter(Objects::nonNull)
+                    .max(LocalDateTime::compareTo)
+                    .orElseGet(() -> resolveStatusUpdatedAt(order));
+        }
+        return resolveStatusUpdatedAt(order);
+    }
+
+    private LocalDateTime resolveShippingStartedAt(SubOrder subOrder) {
+        if (subOrder == null) {
+            return null;
+        }
+        if (subOrder.getShippingStartedAt() != null) {
+            return subOrder.getShippingStartedAt();
+        }
+        return resolveStatusUpdatedAt(subOrder);
     }
 
     private LocalDateTime resolveStatusUpdatedAt(Order order) {
@@ -1556,7 +1637,12 @@ public class OrderService {
         switch (status) {
             case PROCESSING -> order.setFulfillmentStatus(FulfillmentStatus.PREPARING);
             case READY_FOR_PICKUP -> order.setFulfillmentStatus(FulfillmentStatus.READY_TO_SHIP);
-            case SHIPPING -> order.setFulfillmentStatus(FulfillmentStatus.SHIPPING);
+            case SHIPPING -> {
+                order.setFulfillmentStatus(FulfillmentStatus.SHIPPING);
+                if (order.getShippingStartedAt() == null) {
+                    order.setShippingStartedAt(changedAt);
+                }
+            }
             case RECEIVED, COMPLETED -> order.setFulfillmentStatus(FulfillmentStatus.DELIVERED);
             case RETURNED -> order.setFulfillmentStatus(FulfillmentStatus.RETURNED);
             default -> {
@@ -1574,9 +1660,6 @@ public class OrderService {
             order.setReceivedAt(changedAt);
         }
         if (status == OrderStatus.COMPLETED) {
-            if (order.getReceivedAt() == null) {
-                order.setReceivedAt(changedAt);
-            }
             if (order.getCompletedAt() == null) {
                 order.setCompletedAt(changedAt);
             }
@@ -1591,13 +1674,13 @@ public class OrderService {
 
     private void applySubOrderStatus(SubOrder subOrder, OrderStatus status, LocalDateTime changedAt) {
         subOrder.setStatus(status);
+        if (status == OrderStatus.SHIPPING && subOrder.getShippingStartedAt() == null) {
+            subOrder.setShippingStartedAt(changedAt);
+        }
         if (status == OrderStatus.RECEIVED && subOrder.getReceivedAt() == null) {
             subOrder.setReceivedAt(changedAt);
         }
         if (status == OrderStatus.COMPLETED) {
-            if (subOrder.getReceivedAt() == null) {
-                subOrder.setReceivedAt(changedAt);
-            }
             if (subOrder.getCompletedAt() == null) {
                 subOrder.setCompletedAt(changedAt);
             }
@@ -1673,10 +1756,10 @@ public class OrderService {
                 .cancelReasonDisplay(resolveCancelReasonDisplay(order))
                 .statusUpdatedAt(resolveStatusUpdatedAt(subOrder))
                 .shippingOverdue(subOrder.getStatus() == OrderStatus.SHIPPING
-                        && canManuallyConfirmReceived(resolveStatusUpdatedAt(subOrder)))
+                        && canManuallyConfirmReceived(resolveShippingStartedAt(subOrder)))
                 .canMarkReceived(subOrder.getStatus() == OrderStatus.SHIPPING
-                        && canManuallyConfirmReceived(resolveStatusUpdatedAt(subOrder)))
-                .overdueShippingDays(calculateOverdueShippingDays(resolveStatusUpdatedAt(subOrder)))
+                        && canManuallyConfirmReceived(resolveShippingStartedAt(subOrder)))
+                .overdueShippingDays(calculateOverdueShippingDays(resolveShippingStartedAt(subOrder)))
                 .replenishmentRequested(!replenishmentDocuments.isEmpty())
                 .replenishmentDocuments(replenishmentDocuments)
                 .items(items)

@@ -84,6 +84,9 @@ public class Order {
     @Column(name = "received_at")
     LocalDateTime receivedAt;
 
+    @Column(name = "shipping_started_at")
+    LocalDateTime shippingStartedAt;
+
     @Column(name = "completed_at")
     LocalDateTime completedAt;
 

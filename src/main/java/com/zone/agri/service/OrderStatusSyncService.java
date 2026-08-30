@@ -38,6 +38,11 @@ public class OrderStatusSyncService {
 
     @Transactional
     public void syncMasterOrderStatus(Long orderId) {
+        syncMasterOrderStatus(orderId, true);
+    }
+
+    @Transactional
+    public void syncMasterOrderStatus(Long orderId, boolean sendCustomerEmail) {
         Order order = orderRepository.findById(orderId)
                 .orElseThrow(() -> new NotFoundException("Khong tim thay don hang tong"));
         OrderStatus previousStatus = order.getStatus();
@@ -97,7 +102,7 @@ public class OrderStatusSyncService {
                 && order.getUser() != null) {
             customerService.evaluateAndHandleCustomerReputation(order.getUser().getId());
         }
-        notificationService.notifyOrderStatusChange(order, previousStatus, nextStatus);
+        notificationService.notifyOrderStatusChange(order, previousStatus, nextStatus, sendCustomerEmail);
         orderRealtimePublisher.publishOrderChangedAfterCommit(orderId, "ORDER_UPDATED");
     }
 
@@ -106,7 +111,12 @@ public class OrderStatusSyncService {
         switch (status) {
             case PROCESSING -> order.setFulfillmentStatus(FulfillmentStatus.PREPARING);
             case READY_FOR_PICKUP -> order.setFulfillmentStatus(FulfillmentStatus.READY_TO_SHIP);
-            case SHIPPING -> order.setFulfillmentStatus(FulfillmentStatus.SHIPPING);
+            case SHIPPING -> {
+                order.setFulfillmentStatus(FulfillmentStatus.SHIPPING);
+                if (order.getShippingStartedAt() == null) {
+                    order.setShippingStartedAt(changedAt);
+                }
+            }
             case RECEIVED, COMPLETED -> order.setFulfillmentStatus(FulfillmentStatus.DELIVERED);
             case RETURNED -> order.setFulfillmentStatus(FulfillmentStatus.RETURNED);
             default -> order.setFulfillmentStatus(FulfillmentStatus.NOT_STARTED);
@@ -115,9 +125,6 @@ public class OrderStatusSyncService {
             order.setReceivedAt(changedAt);
         }
         if (status == OrderStatus.COMPLETED) {
-            if (order.getReceivedAt() == null) {
-                order.setReceivedAt(changedAt);
-            }
             if (order.getCompletedAt() == null) {
                 order.setCompletedAt(changedAt);
             }

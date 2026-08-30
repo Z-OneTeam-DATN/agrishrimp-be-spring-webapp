@@ -83,7 +83,7 @@ class OrderStatusSyncServiceTest {
         assertThat(order.getPaymentStatus()).isEqualTo(PaymentStatus.PAID);
         verify(orderRepository).saveAndFlush(order);
         verify(customerService).evaluateAndHandleCustomerReputation(25L);
-        verify(notificationService).notifyOrderStatusChange(order, OrderStatus.SHIPPING, OrderStatus.COMPLETED);
+        verify(notificationService).notifyOrderStatusChange(order, OrderStatus.SHIPPING, OrderStatus.COMPLETED, true);
         verify(orderRealtimePublisher).publishOrderChangedAfterCommit(101L, "ORDER_UPDATED");
     }
 }
