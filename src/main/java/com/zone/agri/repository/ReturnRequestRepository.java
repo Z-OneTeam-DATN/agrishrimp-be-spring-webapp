@@ -9,6 +9,7 @@ import org.springframework.stereotype.Repository;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 @Repository
 public interface ReturnRequestRepository extends JpaRepository<ReturnRequest, Long> {
@@ -22,6 +23,29 @@ public interface ReturnRequestRepository extends JpaRepository<ReturnRequest, Lo
             ORDER BY r.createdAt DESC
             """)
     List<ReturnRequest> findAllForUser(@Param("userId") Long userId);
+
+    @Query("""
+            SELECT DISTINCT r
+            FROM ReturnRequest r
+            LEFT JOIN FETCH r.order o
+            LEFT JOIN FETCH r.branch b
+            LEFT JOIN FETCH r.items items
+            LEFT JOIN FETCH r.evidences evidences
+            WHERE r.user.id = :userId
+            ORDER BY r.createdAt DESC
+            """)
+    List<ReturnRequest> findAllDetailedForUser(@Param("userId") Long userId);
+
+    Optional<ReturnRequest> findTopByUserIdAndOrderIdOrderByCreatedAtDesc(Long userId, Long orderId);
+
+    boolean existsByOrderId(Long orderId);
+
+    @Query("""
+            SELECT DISTINCT r.order.id
+            FROM ReturnRequest r
+            WHERE r.order.id IN :orderIds
+            """)
+    Set<Long> findOrderIdsWithRequests(@Param("orderIds") List<Long> orderIds);
 
     @Query("""
             SELECT DISTINCT r

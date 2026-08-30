@@ -45,6 +45,7 @@ public class OrderResponse {
     @JsonFormat(pattern = "yyyy-MM-dd'T'HH:mm:ss")
     private LocalDateTime statusUpdatedAt;
     private Boolean canConfirmReceived;
+    private Boolean hasReturnRequest;
     private String shippingAddress;
     private String note;
     private String cancelReasonCode;

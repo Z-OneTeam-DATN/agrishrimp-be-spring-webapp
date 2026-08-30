@@ -44,7 +44,26 @@ public class ReturnRequestService {
             throw new Forbidden("Bạn không có quyền tạo yêu cầu cho đơn hàng này");
         }
 
-        if (order.getStatus() != OrderStatus.COMPLETED) {
+        Optional<ReturnRequest> existingRequest = returnRequestRepository
+                .findTopByUserIdAndOrderIdOrderByCreatedAtDesc(userId, orderId);
+        if (existingRequest.isPresent()) {
+            ReturnRequest request = existingRequest.get();
+            return ReturnOrderDraftResponse.builder()
+                    .orderId(order.getId())
+                    .orderCode(order.getCode())
+                    .orderStatus(order.getStatus() != null ? order.getStatus().name() : null)
+                    .customerName(firstNonBlank(order.getReceiverName(), order.getUser() != null ? order.getUser().getFullName() : null))
+                    .customerPhone(firstNonBlank(order.getReceiverPhone(), order.getUser() != null ? order.getUser().getPhoneNumber() : null))
+                    .singleBranchOnly(Boolean.TRUE)
+                    .canCreateRequest(Boolean.FALSE)
+                    .existingRequestId(request.getId())
+                    .existingRequestCode(request.getCode())
+                    .message("Đơn hàng này đã có yêu cầu trả hàng. Bạn có thể theo dõi phiếu đã gửi trong tab Trả hàng.")
+                    .items(List.of())
+                    .build();
+        }
+
+        if (!isEligibleForCustomerReturn(order)) {
             throw new BadRequestException("Chỉ hỗ trợ trả hàng với đơn đã giao hoàn tất");
         }
 
@@ -112,6 +131,9 @@ public class ReturnRequestService {
                 .customerName(firstNonBlank(order.getReceiverName(), order.getUser() != null ? order.getUser().getFullName() : null))
                 .customerPhone(firstNonBlank(order.getReceiverPhone(), order.getUser() != null ? order.getUser().getPhoneNumber() : null))
                 .singleBranchOnly(Boolean.TRUE)
+                .canCreateRequest(Boolean.TRUE)
+                .existingRequestId(null)
+                .existingRequestCode(null)
                 .message("Các sản phẩm đã chọn hiện chưa thể gửi chung trong một yêu cầu. Vui lòng tách thành các yêu cầu riêng nếu cần.")
                 .items(items)
                 .build();
@@ -126,7 +148,11 @@ public class ReturnRequestService {
             throw new Forbidden("Bạn không có quyền tạo yêu cầu cho đơn hàng này");
         }
 
-        if (order.getStatus() != OrderStatus.COMPLETED) {
+        if (returnRequestRepository.findTopByUserIdAndOrderIdOrderByCreatedAtDesc(userId, request.getOrderId()).isPresent()) {
+            throw new BadRequestException("Đơn hàng này đã có yêu cầu trả hàng. Vui lòng theo dõi phiếu đã gửi trong tab Trả hàng.");
+        }
+
+        if (!isEligibleForCustomerReturn(order)) {
             throw new BadRequestException("Chỉ hỗ trợ trả hàng với đơn đã giao hoàn tất");
         }
 
@@ -231,7 +257,7 @@ public class ReturnRequestService {
 
     @Transactional(readOnly = true)
     public List<ReturnRequestResponse> getMyReturnRequests(Long userId) {
-        return returnRequestRepository.findAllForUser(userId).stream()
+        return returnRequestRepository.findAllDetailedForUser(userId).stream()
                 .map(this::mapResponse)
                 .toList();
     }
@@ -503,6 +529,70 @@ public class ReturnRequestService {
         if (!hasImage || !hasVideo) {
             throw new BadRequestException("Yêu cầu trả hàng phải có ít nhất 1 hình ảnh và 1 video làm bằng chứng");
         }
+    }
+
+    private boolean isEligibleForCustomerReturn(Order order) {
+        if (order == null) {
+            return false;
+        }
+
+        if (order.getReceivedAt() != null || order.getStatus() == OrderStatus.RECEIVED) {
+            return true;
+        }
+
+        if (order.getStatus() != OrderStatus.COMPLETED) {
+            return false;
+        }
+
+        return !canCustomerStillConfirmReceived(order);
+    }
+
+    private boolean canCustomerStillConfirmReceived(Order order) {
+        if (order == null || order.getReceivedAt() != null) {
+            return false;
+        }
+
+        if (order.getStatus() != OrderStatus.SHIPPING && order.getStatus() != OrderStatus.COMPLETED) {
+            return false;
+        }
+
+        LocalDateTime shippingStartedAt = resolveShippingStartedAt(order);
+        if (shippingStartedAt == null) {
+            return order.getStatus() == OrderStatus.SHIPPING;
+        }
+
+        return !shippingStartedAt.isBefore(LocalDateTime.now().minusHours(72));
+    }
+
+    private LocalDateTime resolveShippingStartedAt(Order order) {
+        if (order == null) {
+            return null;
+        }
+
+        if (order.getShippingStartedAt() != null) {
+            return order.getShippingStartedAt();
+        }
+
+        if (order.getSubOrders() != null && !order.getSubOrders().isEmpty()) {
+            LocalDateTime subOrderShippingStartedAt = order.getSubOrders().stream()
+                    .map(SubOrder::getShippingStartedAt)
+                    .filter(Objects::nonNull)
+                    .max(LocalDateTime::compareTo)
+                    .orElse(null);
+            if (subOrderShippingStartedAt != null) {
+                return subOrderShippingStartedAt;
+            }
+        }
+
+        if (order.getCompletedAt() != null) {
+            return order.getCompletedAt();
+        }
+
+        if (order.getUpdatedAt() != null) {
+            return order.getUpdatedAt();
+        }
+
+        return order.getCreatedAt();
     }
 
     private ReturnRequestStatus parseStatus(String status) {

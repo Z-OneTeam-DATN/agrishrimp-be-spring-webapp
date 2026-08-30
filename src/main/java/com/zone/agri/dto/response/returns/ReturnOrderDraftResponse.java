@@ -14,6 +14,9 @@ public class ReturnOrderDraftResponse {
     private String customerName;
     private String customerPhone;
     private Boolean singleBranchOnly;
+    private Boolean canCreateRequest;
+    private Long existingRequestId;
+    private String existingRequestCode;
     private String message;
     private List<ReturnDraftItemResponse> items;
 }

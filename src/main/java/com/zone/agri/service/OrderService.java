@@ -72,6 +72,7 @@ public class OrderService {
 
     private final OrderRepository orderRepository;
     private final OrderItemRepository orderItemRepository;
+    private final ReturnRequestRepository returnRequestRepository;
     private final InventoryRepository inventoryRepository;
     private final BranchRepository branchRepository;
     private final ProductVariantRepository variantRepository;
@@ -216,7 +217,16 @@ public class OrderService {
         } else {
             orders = orderRepository.findByUserIdOrderByCreatedAtDesc(userId);
         }
-        return orders.stream().map(o -> mapToOrderResponse(o, true)).collect(Collectors.toList());
+        if (orders.isEmpty()) {
+            return List.of();
+        }
+
+        Set<Long> orderIdsWithReturnRequests = returnRequestRepository.findOrderIdsWithRequests(
+                orders.stream().map(Order::getId).toList());
+
+        return orders.stream()
+                .map(order -> mapToOrderResponse(order, true, orderIdsWithReturnRequests.contains(order.getId())))
+                .collect(Collectors.toList());
     }
 
     @Transactional
@@ -224,7 +234,10 @@ public class OrderService {
         if (userId != null) {
             Order ownedOrder = getOwnedOrderForUser(userId, orderId);
             refreshPendingPayOSPayment(ownedOrder);
-            return mapToOrderResponse(ownedOrder, true);
+            return mapToOrderResponse(
+                    ownedOrder,
+                    true,
+                    returnRequestRepository.existsByOrderId(ownedOrder.getId()));
         }
         Order order = orderRepository.findById(orderId)
                 .orElseThrow(() -> new NotFoundException("KhĂ´ng tĂ¬m tháº¥y Ä‘Æ¡n hĂ ng ID: " + orderId));
@@ -233,7 +246,7 @@ public class OrderService {
             throw new BadRequestException("Báº¡n khĂ´ng cĂ³ quyá»n xem Ä‘Æ¡n hĂ ng nĂ y!");
         }
 
-        return mapToOrderResponse(order, true);
+        return mapToOrderResponse(order, true, returnRequestRepository.existsByOrderId(order.getId()));
     }
 
     @Transactional
@@ -1826,6 +1839,10 @@ public class OrderService {
     }
 
     private OrderResponse mapToOrderResponse(Order order, boolean isUserView) {
+        return mapToOrderResponse(order, isUserView, null);
+    }
+
+    private OrderResponse mapToOrderResponse(Order order, boolean isUserView, Boolean hasReturnRequest) {
         List<OrderItemResponse> itemResponses = new ArrayList<>();
         List<SubOrderSummaryDto> subOrderSummaries = order.getSubOrders() != null
                 ? order.getSubOrders().stream()
@@ -1896,6 +1913,7 @@ public class OrderService {
                 .createdAt(order.getCreatedAt())
                 .statusUpdatedAt(resolveStatusUpdatedAt(order))
                 .canConfirmReceived(isUserView ? canCustomerConfirmReceived(order) : null)
+                .hasReturnRequest(isUserView ? Boolean.TRUE.equals(hasReturnRequest) : null)
                 .shippingAddress(order.getShippingAddress())
                 .note(order.getNote())
                 .cancelReasonCode(order.getCancelReasonCode() != null ? order.getCancelReasonCode().name() : null)
