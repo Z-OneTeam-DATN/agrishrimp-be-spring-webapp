@@ -55,13 +55,13 @@ public class ReturnRequest extends BaseEntity {
     @Column(name = "customer_email", length = 150)
     String customerEmail;
 
-    @Column(name = "bank_account_name", length = 150, nullable = false)
+    @Column(name = "bank_account_name", length = 150)
     String bankAccountName;
 
-    @Column(name = "bank_account_number", length = 50, nullable = false)
+    @Column(name = "bank_account_number", length = 50)
     String bankAccountNumber;
 
-    @Column(name = "bank_name", length = 150, nullable = false)
+    @Column(name = "bank_name", length = 150)
     String bankName;
 
     @Column(name = "bank_branch", length = 150)
