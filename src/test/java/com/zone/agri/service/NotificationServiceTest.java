@@ -146,6 +146,22 @@ class NotificationServiceTest {
     }
 
     @Test
+    void notifyOrderStatusChange_completionWithoutEmailFlag_keepsBellButSkipsEmail() {
+        notificationService.notifyOrderStatusChange(order, OrderStatus.SHIPPING, OrderStatus.COMPLETED, false);
+
+        verify(notificationRepository).save(any(Notification.class));
+        verify(emailService, never()).sendOrderStatusChangeEmail(any(), any());
+    }
+
+    @Test
+    void notifyCustomerReceiptConfirmed_sendsCompletionEmail() {
+        notificationService.notifyCustomerReceiptConfirmed(order);
+
+        verify(notificationRepository).save(any(Notification.class));
+        verify(emailService).sendOrderStatusChangeEmail(order, OrderStatus.COMPLETED);
+    }
+
+    @Test
     void notifyPurchaseRequestNeedsApproval_resolvesApproversAndNotifiesEach() {
         User approver = User.builder().id(3L).email("approver@example.com").fullName("Nguoi Duyet").build();
         when(userRepository.findUsersByPermissionCodeAndBranch("PURCHASE_REQUEST_APPROVE", null))

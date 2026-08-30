@@ -76,6 +76,9 @@ public class SubOrder extends BaseEntity {
     @Column(name = "received_at")
     java.time.LocalDateTime receivedAt;
 
+    @Column(name = "shipping_started_at")
+    java.time.LocalDateTime shippingStartedAt;
+
     @Column(name = "completed_at")
     java.time.LocalDateTime completedAt;
 

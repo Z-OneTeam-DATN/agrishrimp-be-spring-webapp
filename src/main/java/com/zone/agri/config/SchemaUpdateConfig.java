@@ -108,7 +108,7 @@ public class SchemaUpdateConfig implements BeanPostProcessor {
 
             executeSql(stmt,
                     "Patch orders adds financial lifecycle timestamps",
-                    "ALTER TABLE orders ADD COLUMN received_at DATETIME NULL, ADD COLUMN completed_at DATETIME NULL, ADD COLUMN returned_at DATETIME NULL, ADD COLUMN cancelled_at DATETIME NULL");
+                    "ALTER TABLE orders ADD COLUMN received_at DATETIME NULL, ADD COLUMN shipping_started_at DATETIME NULL, ADD COLUMN completed_at DATETIME NULL, ADD COLUMN returned_at DATETIME NULL, ADD COLUMN cancelled_at DATETIME NULL");
 
             ensureColumnWithLegacyBackfill(conn, stmt,
                     "orders",
@@ -130,7 +130,7 @@ public class SchemaUpdateConfig implements BeanPostProcessor {
 
             executeSql(stmt,
                     "Patch sub_orders adds financial lifecycle timestamps",
-                    "ALTER TABLE sub_orders ADD COLUMN received_at DATETIME NULL, ADD COLUMN completed_at DATETIME NULL, ADD COLUMN returned_at DATETIME NULL, ADD COLUMN cancelled_at DATETIME NULL");
+                    "ALTER TABLE sub_orders ADD COLUMN received_at DATETIME NULL, ADD COLUMN shipping_started_at DATETIME NULL, ADD COLUMN completed_at DATETIME NULL, ADD COLUMN returned_at DATETIME NULL, ADD COLUMN cancelled_at DATETIME NULL");
 
             executeSql(stmt,
                     "Patch purchase_requests adds auto replenishment tracking columns",
@@ -150,6 +150,18 @@ public class SchemaUpdateConfig implements BeanPostProcessor {
                     """
                             UPDATE orders
                             SET received_at = COALESCE(received_at, CASE WHEN status IN ('RECEIVED', 'COMPLETED') THEN created_at END),
+                                shipping_started_at = COALESCE(
+                                    shipping_started_at,
+                                    CASE
+                                        WHEN status IN ('SHIPPING', 'RECEIVED', 'COMPLETED', 'RETURNED') THEN
+                                            CASE
+                                                WHEN received_at IS NULL THEN COALESCE(completed_at, updated_at, created_at)
+                                                WHEN completed_at IS NULL THEN received_at
+                                                WHEN received_at <= completed_at THEN received_at
+                                                ELSE completed_at
+                                            END
+                                    END
+                                ),
                                 completed_at = COALESCE(completed_at, CASE WHEN status = 'COMPLETED' THEN created_at END),
                                 returned_at = COALESCE(returned_at, CASE WHEN status = 'RETURNED' THEN created_at END),
                                 cancelled_at = COALESCE(cancelled_at, CASE WHEN status = 'CANCELLED' THEN created_at END)
@@ -160,6 +172,18 @@ public class SchemaUpdateConfig implements BeanPostProcessor {
                     """
                             UPDATE sub_orders
                             SET received_at = COALESCE(received_at, CASE WHEN status IN ('RECEIVED', 'COMPLETED') THEN COALESCE(updated_at, created_at) END),
+                                shipping_started_at = COALESCE(
+                                    shipping_started_at,
+                                    CASE
+                                        WHEN status IN ('SHIPPING', 'RECEIVED', 'COMPLETED', 'RETURNED') THEN
+                                            CASE
+                                                WHEN received_at IS NULL THEN COALESCE(completed_at, updated_at, created_at)
+                                                WHEN completed_at IS NULL THEN received_at
+                                                WHEN received_at <= completed_at THEN received_at
+                                                ELSE completed_at
+                                            END
+                                    END
+                                ),
                                 completed_at = COALESCE(completed_at, CASE WHEN status = 'COMPLETED' THEN COALESCE(updated_at, created_at) END),
                                 returned_at = COALESCE(returned_at, CASE WHEN status = 'RETURNED' THEN COALESCE(updated_at, created_at) END),
                                 cancelled_at = COALESCE(cancelled_at, CASE WHEN status = 'CANCELLED' THEN COALESCE(updated_at, created_at) END)

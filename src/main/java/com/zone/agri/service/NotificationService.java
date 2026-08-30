@@ -114,17 +114,31 @@ public class NotificationService {
 
     @Transactional
     public void notifyOrderStatusChange(Order order, OrderStatus previousStatus, OrderStatus newStatus) {
+        notifyOrderStatusChange(order, previousStatus, newStatus, true);
+    }
+
+    @Transactional
+    public void notifyOrderStatusChange(
+            Order order,
+            OrderStatus previousStatus,
+            OrderStatus newStatus,
+            boolean sendCustomerEmail) {
         if (newStatus == null || newStatus == previousStatus) return;
 
         if (CUSTOMER_NOTIFIABLE_STATUSES.contains(newStatus)) {
-            notifyCustomerOrderStatusChanged(order, newStatus);
+            notifyCustomerOrderStatusChanged(order, newStatus, sendCustomerEmail);
         }
         if (newStatus == OrderStatus.AWAITING_REPLENISHMENT) {
             notifyAdminsOrderNeedsReplenishment(order);
         }
     }
 
-    private void notifyCustomerOrderStatusChanged(Order order, OrderStatus newStatus) {
+    @Transactional
+    public void notifyCustomerReceiptConfirmed(Order order) {
+        notifyCustomerOrderStatusChanged(order, OrderStatus.COMPLETED, true);
+    }
+
+    private void notifyCustomerOrderStatusChanged(Order order, OrderStatus newStatus, boolean sendCustomerEmail) {
         User customer = order.getUser();
         if (customer == null) return;
 
@@ -132,7 +146,7 @@ public class NotificationService {
         String content = "Đơn hàng của bạn vừa chuyển sang trạng thái mới.";
         sendNotification(customer.getId(), title, content, NotificationType.ORDER, order.getId());
 
-        if (customer.getEmail() != null && !customer.getEmail().isBlank()) {
+        if (sendCustomerEmail && customer.getEmail() != null && !customer.getEmail().isBlank()) {
             try {
                 emailService.sendOrderStatusChangeEmail(order, newStatus);
             } catch (Exception e) {
