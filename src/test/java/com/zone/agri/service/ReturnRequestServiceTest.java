@@ -2,15 +2,22 @@ package com.zone.agri.service;
 
 import com.zone.agri.dto.request.returns.CreateReturnRequest;
 import com.zone.agri.dto.request.returns.CreateReturnRequestEvidence;
+import com.zone.agri.dto.request.returns.CreateReturnRequestItem;
 import com.zone.agri.dto.request.returns.ReturnRequestRefundRequest;
+import com.zone.agri.dto.response.returns.ReturnOrderDraftResponse;
 import com.zone.agri.dto.response.returns.ReturnRequestResponse;
+import com.zone.agri.entity.Branch;
 import com.zone.agri.entity.Order;
+import com.zone.agri.entity.OrderItem;
+import com.zone.agri.entity.Product;
+import com.zone.agri.entity.ProductVariant;
 import com.zone.agri.entity.ReturnRequest;
 import com.zone.agri.entity.User;
 import com.zone.agri.entity.enums.OrderStatus;
 import com.zone.agri.entity.enums.ReturnEvidenceType;
 import com.zone.agri.entity.enums.ReturnHandlingOption;
 import com.zone.agri.entity.enums.ReturnIssueType;
+import com.zone.agri.entity.enums.ReturnItemSourceType;
 import com.zone.agri.entity.enums.ReturnRefundMethod;
 import com.zone.agri.entity.enums.ReturnRequestStatus;
 import com.zone.agri.exception.BadRequestException;
@@ -32,6 +39,7 @@ import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -59,137 +67,239 @@ class ReturnRequestServiceTest {
     private ReturnRequestService returnRequestService;
 
     @Test
-    void createReturnRequest_shouldRejectCashRefundMethod() {
-        User user = User.builder()
-                .id(7L)
-                .fullName("Tester")
-                .build();
-        Order order = Order.builder()
-                .id(11L)
-                .user(user)
-                .status(OrderStatus.COMPLETED)
-                .build();
+    void getReturnDraft_shouldExposeCashRefundMethodWhenOrderIsNearServingBranch() {
+        Order order = buildCompletedOrder(10.7627, 106.6602, 10.7681, 106.6665);
         when(orderRepository.findById(11L)).thenReturn(Optional.of(order));
 
-        CreateReturnRequest request = new CreateReturnRequest();
-        request.setOrderId(11L);
-        request.setFullName("Nguyen Van A");
-        request.setPhoneNumber("0900000000");
-        request.setBankAccountName("NGUYEN VAN A");
-        request.setBankAccountNumber("123456789");
-        request.setBankName("VCB");
-        request.setIssueType(ReturnIssueType.DAMAGED);
-        request.setRefundMethod(ReturnRefundMethod.CASH);
-        request.setReason("San pham bi hu");
-        request.setDescription("Mo ta loi");
-        request.setItems(List.of());
-        request.setEvidences(List.of());
+        ReturnOrderDraftResponse response = returnRequestService.getReturnDraft(7L, 11L);
+
+        assertThat(response.getItems()).hasSize(1);
+        assertThat(response.getItems().get(0).getAllowedRefundMethods())
+                .containsExactly(ReturnRefundMethod.BANK_TRANSFER, ReturnRefundMethod.CASH);
+        assertThat(response.getItems().get(0).getCashRefundEligible()).isTrue();
+        assertThat(response.getItems().get(0).getCashRefundDistanceKm()).isNotNull();
+        assertThat(response.getItems().get(0).getCashRefundDistanceKm()).isLessThanOrEqualTo(15d);
+    }
+
+    @Test
+    void getReturnDraft_shouldLimitToBankTransferWhenOrderIsFarFromServingBranch() {
+        Order order = buildCompletedOrder(10.7627, 106.6602, 21.0285, 105.8542);
+        when(orderRepository.findById(11L)).thenReturn(Optional.of(order));
+
+        ReturnOrderDraftResponse response = returnRequestService.getReturnDraft(7L, 11L);
+
+        assertThat(response.getItems()).hasSize(1);
+        assertThat(response.getItems().get(0).getAllowedRefundMethods())
+                .containsExactly(ReturnRefundMethod.BANK_TRANSFER);
+        assertThat(response.getItems().get(0).getCashRefundEligible()).isFalse();
+        assertThat(response.getItems().get(0).getCashRefundDistanceKm()).isGreaterThan(15d);
+    }
+
+    @Test
+    void createReturnRequest_shouldAllowCashRefundMethodWhenNearServingBranch() {
+        Order order = buildCompletedOrder(10.7627, 106.6602, 10.7681, 106.6665);
+        OrderItem orderItem = order.getOrderItems().get(0);
+
+        when(orderRepository.findById(11L)).thenReturn(Optional.of(order));
+        when(orderItemRepository.findAllById(List.of(orderItem.getId()))).thenReturn(List.of(orderItem));
+        when(returnRequestRepository.save(any(ReturnRequest.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        ReturnRequestResponse response = returnRequestService.createReturnRequest(
+                7L,
+                buildCreateRequest(ReturnRefundMethod.CASH, order.getId(), orderItem.getId(), true)
+        );
+
+        assertThat(response.getRefundMethod()).isEqualTo(ReturnRefundMethod.CASH);
+        assertThat(response.getBankAccountName()).isNull();
+        assertThat(response.getBankAccountNumber()).isNull();
+        assertThat(response.getBankName()).isNull();
+        assertThat(response.getHandlingOption()).isEqualTo(ReturnHandlingOption.RETURN_AND_REFUND);
+    }
+
+    @Test
+    void createReturnRequest_shouldRejectCashRefundMethodWhenOrderIsFarFromServingBranch() {
+        Order order = buildCompletedOrder(10.7627, 106.6602, 21.0285, 105.8542);
+        OrderItem orderItem = order.getOrderItems().get(0);
+
+        when(orderRepository.findById(11L)).thenReturn(Optional.of(order));
+        when(orderItemRepository.findAllById(List.of(orderItem.getId()))).thenReturn(List.of(orderItem));
+
+        assertThatThrownBy(() -> returnRequestService.createReturnRequest(
+                7L,
+                buildCreateRequest(ReturnRefundMethod.CASH, order.getId(), orderItem.getId(), true)
+        )).isInstanceOf(BadRequestException.class);
+    }
+
+    @Test
+    void createReturnRequest_shouldRequireBankInfoForBankTransfer() {
+        Order order = buildCompletedOrder(10.7627, 106.6602, 10.7681, 106.6665);
+        OrderItem orderItem = order.getOrderItems().get(0);
+
+        when(orderRepository.findById(11L)).thenReturn(Optional.of(order));
+        when(orderItemRepository.findAllById(List.of(orderItem.getId()))).thenReturn(List.of(orderItem));
+
+        CreateReturnRequest request = buildCreateRequest(
+                ReturnRefundMethod.BANK_TRANSFER,
+                order.getId(),
+                orderItem.getId(),
+                false
+        );
+        request.setBankName(" ");
 
         assertThatThrownBy(() -> returnRequestService.createReturnRequest(7L, request))
                 .isInstanceOf(BadRequestException.class);
     }
 
     @Test
-    void refundForAdmin_shouldRejectCashRefundMethod() {
+    void refundForAdmin_shouldKeepCashRefundMethodWhenRequestWasCreatedForCash() {
+        Order order = buildCompletedOrder(10.7627, 106.6602, 10.7681, 106.6665);
+        Branch branch = order.getBranch();
+
         ReturnRequest entity = ReturnRequest.builder()
                 .id(55L)
-                .status(ReturnRequestStatus.APPROVED)
-                .issueType(ReturnIssueType.DAMAGED)
-                .refundMethod(ReturnRefundMethod.BANK_TRANSFER)
-                .requiresPhysicalReturn(false)
-                .customerName("Nguyen Van A")
-                .customerPhone("0900000000")
-                .bankAccountName("NGUYEN VAN A")
-                .bankAccountNumber("123456789")
-                .bankName("VCB")
-                .reason("Ly do")
-                .description("Mo ta")
-                .totalRefundAmount(BigDecimal.ZERO)
-                .build();
-        when(returnRequestRepository.findDetailedById(55L)).thenReturn(Optional.of(entity));
-
-        ReturnRequestRefundRequest request = new ReturnRequestRefundRequest();
-        request.setRefundAmount(new BigDecimal("100000"));
-        request.setRefundMethod(ReturnRefundMethod.CASH);
-
-        assertThatThrownBy(() -> returnRequestService.refundForAdmin(55L, request))
-                .isInstanceOf(BadRequestException.class);
-    }
-
-    @Test
-    void refundForAdmin_shouldNormalizeLegacyCashRefundMethodToBankTransfer() {
-        Order order = Order.builder()
-                .id(21L)
-                .code("ORD-21")
-                .build();
-        ReturnRequest entity = ReturnRequest.builder()
-                .id(56L)
-                .code("RET-56")
+                .code("RET-55")
                 .status(ReturnRequestStatus.APPROVED)
                 .issueType(ReturnIssueType.DAMAGED)
                 .refundMethod(ReturnRefundMethod.CASH)
                 .requiresPhysicalReturn(false)
                 .customerName("Nguyen Van A")
                 .customerPhone("0900000000")
-                .bankAccountName("NGUYEN VAN A")
-                .bankAccountNumber("123456789")
-                .bankName("VCB")
                 .reason("Ly do")
                 .description("Mo ta")
                 .totalRefundAmount(BigDecimal.ZERO)
                 .order(order)
+                .branch(branch)
                 .build();
-        when(returnRequestRepository.findDetailedById(56L)).thenReturn(Optional.of(entity));
+        when(returnRequestRepository.findDetailedById(55L)).thenReturn(Optional.of(entity));
 
         ReturnRequestRefundRequest request = new ReturnRequestRefundRequest();
         request.setRefundAmount(new BigDecimal("125000"));
-        request.setInternalNote("Da chuyen khoan");
+        request.setRefundMethod(ReturnRefundMethod.CASH);
+        request.setInternalNote("Da hoan tien mat");
 
-        ReturnRequestResponse response = returnRequestService.refundForAdmin(56L, request);
+        ReturnRequestResponse response = returnRequestService.refundForAdmin(55L, request);
 
-        assertThat(entity.getRefundMethod()).isEqualTo(ReturnRefundMethod.BANK_TRANSFER);
+        assertThat(entity.getRefundMethod()).isEqualTo(ReturnRefundMethod.CASH);
         assertThat(entity.getStatus()).isEqualTo(ReturnRequestStatus.REFUNDED);
         assertThat(entity.getRefundedAt()).isNotNull();
-        assertThat(response.getRefundMethod()).isEqualTo(ReturnRefundMethod.BANK_TRANSFER);
-        assertThat(response.getHandlingOption()).isEqualTo(ReturnHandlingOption.REFUND_ONLY);
+        assertThat(response.getRefundMethod()).isEqualTo(ReturnRefundMethod.CASH);
         assertThat(response.getTotalRefundAmount()).isEqualByComparingTo("125000");
     }
 
     @Test
     void createReturnRequest_shouldRejectMissingItemWithReturnAndRefundHandling() {
-        User user = User.builder()
-                .id(7L)
-                .fullName("Tester")
-                .build();
-        Order order = Order.builder()
-                .id(11L)
-                .user(user)
-                .status(OrderStatus.COMPLETED)
-                .build();
-        when(orderRepository.findById(11L)).thenReturn(Optional.of(order));
+        Order order = buildCompletedOrder(10.7627, 106.6602, 10.7681, 106.6665);
+        OrderItem orderItem = order.getOrderItems().get(0);
 
-        CreateReturnRequest request = new CreateReturnRequest();
-        request.setOrderId(11L);
-        request.setFullName("Nguyen Van A");
-        request.setPhoneNumber("0900000000");
-        request.setBankAccountName("NGUYEN VAN A");
-        request.setBankAccountNumber("123456789");
-        request.setBankName("VCB");
+        when(orderRepository.findById(11L)).thenReturn(Optional.of(order));
+        when(orderItemRepository.findAllById(List.of(orderItem.getId()))).thenReturn(List.of(orderItem));
+
+        CreateReturnRequest request = buildCreateRequest(
+                ReturnRefundMethod.BANK_TRANSFER,
+                order.getId(),
+                orderItem.getId(),
+                true
+        );
         request.setIssueType(ReturnIssueType.MISSING_ITEM);
         request.setHandlingOption(ReturnHandlingOption.RETURN_AND_REFUND);
-        request.setRefundMethod(ReturnRefundMethod.BANK_TRANSFER);
-        request.setReason("Thieu hang");
-        request.setDescription("Mo ta loi");
-        request.setItems(List.of());
-        CreateReturnRequestEvidence imageEvidence = new CreateReturnRequestEvidence();
-        imageEvidence.setMediaType(ReturnEvidenceType.IMAGE);
-        imageEvidence.setFileUrl("https://example.com/image.jpg");
-        CreateReturnRequestEvidence videoEvidence = new CreateReturnRequestEvidence();
-        videoEvidence.setMediaType(ReturnEvidenceType.VIDEO);
-        videoEvidence.setFileUrl("https://example.com/video.mp4");
-        request.setEvidences(List.of(imageEvidence, videoEvidence));
 
         assertThatThrownBy(() -> returnRequestService.createReturnRequest(7L, request))
                 .isInstanceOf(BadRequestException.class);
+    }
+
+    private Order buildCompletedOrder(
+            double branchLat,
+            double branchLng,
+            double userLat,
+            double userLng
+    ) {
+        User user = User.builder()
+                .id(7L)
+                .fullName("Tester")
+                .phoneNumber("0900000000")
+                .build();
+        Branch branch = Branch.builder()
+                .id(3L)
+                .name("Chi Nhanh Gan")
+                .lat(branchLat)
+                .lng(branchLng)
+                .build();
+        Product product = Product.builder()
+                .id(21L)
+                .name("Men vi sinh")
+                .build();
+        ProductVariant variant = ProductVariant.builder()
+                .id(31L)
+                .sku("SKU-31")
+                .customSpecs("Goi 1kg")
+                .product(product)
+                .build();
+        Order order = Order.builder()
+                .id(11L)
+                .code("ORD-11")
+                .user(user)
+                .status(OrderStatus.COMPLETED)
+                .branch(branch)
+                .userLat(userLat)
+                .userLng(userLng)
+                .build();
+        OrderItem orderItem = OrderItem.builder()
+                .id(101L)
+                .quantity(2)
+                .price(new BigDecimal("125000"))
+                .order(order)
+                .productVariant(variant)
+                .build();
+        order.setOrderItems(List.of(orderItem));
+        return order;
+    }
+
+    private CreateReturnRequest buildCreateRequest(
+            ReturnRefundMethod refundMethod,
+            Long orderId,
+            Long orderItemId,
+            boolean includeBankInfo
+    ) {
+        CreateReturnRequest request = new CreateReturnRequest();
+        request.setOrderId(orderId);
+        request.setFullName("Nguyen Van A");
+        request.setPhoneNumber("0900000000");
+        request.setEmail("test@example.com");
+        request.setIssueType(ReturnIssueType.DAMAGED);
+        request.setHandlingOption(ReturnHandlingOption.RETURN_AND_REFUND);
+        request.setRefundMethod(refundMethod);
+        request.setReason("San pham bi hu");
+        request.setDescription("Mo ta loi");
+        request.setItems(List.of(buildRequestItem(orderItemId)));
+        request.setEvidences(List.of(buildEvidence(ReturnEvidenceType.IMAGE), buildEvidence(ReturnEvidenceType.VIDEO)));
+
+        if (includeBankInfo) {
+            request.setBankAccountName("NGUYEN VAN A");
+            request.setBankAccountNumber("123456789");
+            request.setBankName("VCB");
+            request.setBankBranch("Can Tho");
+        }
+
+        return request;
+    }
+
+    private CreateReturnRequestItem buildRequestItem(Long orderItemId) {
+        CreateReturnRequestItem item = new CreateReturnRequestItem();
+        item.setSourceType(ReturnItemSourceType.ORDER_ITEM);
+        item.setSourceItemId(orderItemId);
+        item.setQuantity(1);
+        return item;
+    }
+
+    private CreateReturnRequestEvidence buildEvidence(ReturnEvidenceType mediaType) {
+        CreateReturnRequestEvidence evidence = new CreateReturnRequestEvidence();
+        evidence.setMediaType(mediaType);
+        evidence.setFileUrl(
+                mediaType == ReturnEvidenceType.IMAGE
+                        ? "https://example.com/image.jpg"
+                        : "https://example.com/video.mp4"
+        );
+        return evidence;
     }
 }

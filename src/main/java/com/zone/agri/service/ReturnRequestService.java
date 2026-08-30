@@ -8,12 +8,14 @@ import com.zone.agri.exception.BadRequestException;
 import com.zone.agri.exception.Forbidden;
 import com.zone.agri.exception.NotFoundException;
 import com.zone.agri.repository.*;
+import com.zone.agri.utils.HaversineUtils;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDateTime;
 import java.util.*;
 import java.util.function.Function;
@@ -23,6 +25,8 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 @Slf4j
 public class ReturnRequestService {
+
+    private static final double MAX_CASH_REFUND_DISTANCE_KM = 15d;
 
     private final OrderRepository orderRepository;
     private final OrderItemRepository orderItemRepository;
@@ -50,6 +54,7 @@ public class ReturnRequestService {
             for (SubOrder subOrder : order.getSubOrders()) {
                 Long branchId = subOrder.getBranch() != null ? subOrder.getBranch().getId() : null;
                 String branchName = subOrder.getBranch() != null ? subOrder.getBranch().getName() : null;
+                CashRefundEligibility cashRefundEligibility = resolveCashRefundEligibility(order, subOrder.getBranch());
                 for (SubOrderItem item : Optional.ofNullable(subOrder.getItems()).orElse(List.of())) {
                     items.add(ReturnDraftItemResponse.builder()
                             .sourceType(ReturnItemSourceType.SUB_ORDER_ITEM)
@@ -66,6 +71,9 @@ public class ReturnRequestService {
                             .maxReturnQuantity(defaultQuantity(item.getQuantity()))
                             .unitPrice(safeAmount(item.getUnitPrice()))
                             .totalPrice(safeAmount(item.getUnitPrice()).multiply(BigDecimal.valueOf(defaultQuantity(item.getQuantity()))))
+                            .allowedRefundMethods(cashRefundEligibility.allowedRefundMethods())
+                            .cashRefundEligible(cashRefundEligibility.cashRefundEligible())
+                            .cashRefundDistanceKm(cashRefundEligibility.cashRefundDistanceKm())
                             .build());
                 }
             }
@@ -73,6 +81,7 @@ public class ReturnRequestService {
             Branch orderBranch = order.getBranch();
             Long branchId = orderBranch != null ? orderBranch.getId() : null;
             String branchName = orderBranch != null ? orderBranch.getName() : null;
+            CashRefundEligibility cashRefundEligibility = resolveCashRefundEligibility(order, orderBranch);
             for (OrderItem item : Optional.ofNullable(order.getOrderItems()).orElse(List.of())) {
                 items.add(ReturnDraftItemResponse.builder()
                         .sourceType(ReturnItemSourceType.ORDER_ITEM)
@@ -89,6 +98,9 @@ public class ReturnRequestService {
                         .maxReturnQuantity(defaultQuantity(item.getQuantity()))
                         .unitPrice(safeAmount(item.getPrice()))
                         .totalPrice(safeAmount(item.getPrice()).multiply(BigDecimal.valueOf(defaultQuantity(item.getQuantity()))))
+                        .allowedRefundMethods(cashRefundEligibility.allowedRefundMethods())
+                        .cashRefundEligible(cashRefundEligibility.cashRefundEligible())
+                        .cashRefundDistanceKm(cashRefundEligibility.cashRefundDistanceKm())
                         .build());
             }
         }
@@ -118,7 +130,6 @@ public class ReturnRequestService {
             throw new BadRequestException("Chỉ hỗ trợ trả hàng với đơn đã giao hoàn tất");
         }
 
-        validateBankTransferRefundMethod(request.getRefundMethod());
         validateEvidenceRequirements(request.getEvidences());
 
         Map<Long, SubOrderItem> subOrderItemMap = loadSubOrderItems(request.getItems());
@@ -145,22 +156,34 @@ public class ReturnRequestService {
             throw new BadRequestException("Các sản phẩm đã chọn hiện chưa thể gửi chung trong một yêu cầu. Vui lòng tách thành các yêu cầu riêng nếu cần.");
         }
 
+        if (resolvedLines.isEmpty()) {
+            throw new BadRequestException("Yêu cầu trả hàng phải có ít nhất 1 sản phẩm.");
+        }
+
         ReturnHandlingOption handlingOption = resolveHandlingOption(request);
         boolean requiresPhysicalReturn = handlingOption == ReturnHandlingOption.RETURN_AND_REFUND;
+        RefundPreference refundPreference = resolveRefundPreference(
+                order,
+                resolvedBranch != null ? resolvedBranch : order.getBranch(),
+                request.getRefundMethod(),
+                request.getBankAccountName(),
+                request.getBankAccountNumber(),
+                request.getBankName(),
+                request.getBankBranch());
 
         ReturnRequest entity = ReturnRequest.builder()
                 .code(generateReturnRequestCode())
                 .status(ReturnRequestStatus.PENDING)
                 .issueType(request.getIssueType())
-                .refundMethod(ReturnRefundMethod.BANK_TRANSFER)
+                .refundMethod(refundPreference.refundMethod())
                 .requiresPhysicalReturn(requiresPhysicalReturn)
                 .customerName(request.getFullName().trim())
                 .customerPhone(request.getPhoneNumber().trim())
                 .customerEmail(trimToNull(request.getEmail()))
-                .bankAccountName(request.getBankAccountName().trim())
-                .bankAccountNumber(request.getBankAccountNumber().trim())
-                .bankName(request.getBankName().trim())
-                .bankBranch(trimToNull(request.getBankBranch()))
+                .bankAccountName(refundPreference.bankAccountName())
+                .bankAccountNumber(refundPreference.bankAccountNumber())
+                .bankName(refundPreference.bankName())
+                .bankBranch(refundPreference.bankBranch())
                 .reason(request.getReason().trim())
                 .description(request.getDescription().trim())
                 .totalRefundAmount(totalRefundAmount)
@@ -363,10 +386,8 @@ public class ReturnRequestService {
         if (Boolean.FALSE.equals(entity.getRequiresPhysicalReturn()) && entity.getStatus() != ReturnRequestStatus.APPROVED) {
             throw new BadRequestException("Yêu cầu thiếu hàng phải được duyệt trước khi hoàn tiền");
         }
-        if (request.getRefundMethod() != null) {
-            validateBankTransferRefundMethod(request.getRefundMethod());
-        }
-        entity.setRefundMethod(ReturnRefundMethod.BANK_TRANSFER);
+        ReturnRefundMethod refundMethod = resolveRefundMethodForSettlement(entity, request.getRefundMethod());
+        entity.setRefundMethod(refundMethod);
         entity.setTotalRefundAmount(safeAmount(request.getRefundAmount()));
         entity.setStatus(ReturnRequestStatus.REFUNDED);
         entity.setRefundedAt(LocalDateTime.now());
@@ -605,10 +626,106 @@ public class ReturnRequestService {
         return amount != null ? amount : BigDecimal.ZERO;
     }
 
-    private void validateBankTransferRefundMethod(ReturnRefundMethod refundMethod) {
-        if (refundMethod != ReturnRefundMethod.BANK_TRANSFER) {
-            throw new BadRequestException("Yêu cầu trả hàng chỉ hỗ trợ hoàn tiền qua chuyển khoản ngân hàng");
+    private RefundPreference resolveRefundPreference(
+            Order order,
+            Branch branch,
+            ReturnRefundMethod requestedMethod,
+            String bankAccountName,
+            String bankAccountNumber,
+            String bankName,
+            String bankBranch
+    ) {
+        ReturnRefundMethod refundMethod = requestedMethod != null
+                ? requestedMethod
+                : ReturnRefundMethod.BANK_TRANSFER;
+        validateRefundMethodAllowed(order, branch, refundMethod);
+
+        if (refundMethod == ReturnRefundMethod.CASH) {
+            return new RefundPreference(refundMethod, null, null, null, null);
         }
+
+        return new RefundPreference(
+                refundMethod,
+                requiredTrimmed(bankAccountName, "Vui lòng nhập tên chủ tài khoản."),
+                requiredTrimmed(bankAccountNumber, "Vui lòng nhập số tài khoản."),
+                requiredTrimmed(bankName, "Vui lòng nhập tên ngân hàng."),
+                trimToNull(bankBranch)
+        );
+    }
+
+    private ReturnRefundMethod resolveRefundMethodForSettlement(
+            ReturnRequest entity,
+            ReturnRefundMethod requestedMethod
+    ) {
+        ReturnRefundMethod persistedRefundMethod = entity.getRefundMethod();
+        if (persistedRefundMethod != null) {
+            if (requestedMethod != null && requestedMethod != persistedRefundMethod) {
+                throw new BadRequestException("Phương thức hoàn tiền phải khớp với phiếu trả hàng đã tạo.");
+            }
+            return persistedRefundMethod;
+        }
+
+        ReturnRefundMethod refundMethod = requestedMethod != null
+                ? requestedMethod
+                : ReturnRefundMethod.BANK_TRANSFER;
+        validateRefundMethodAllowed(entity.getOrder(), entity.getBranch(), refundMethod);
+        return refundMethod;
+    }
+
+    private void validateRefundMethodAllowed(
+            Order order,
+            Branch branch,
+            ReturnRefundMethod refundMethod
+    ) {
+        if (refundMethod != ReturnRefundMethod.CASH) {
+            return;
+        }
+
+        CashRefundEligibility cashRefundEligibility = resolveCashRefundEligibility(order, branch);
+        if (!cashRefundEligibility.cashRefundEligible()) {
+            throw new BadRequestException("Đơn trả hàng này chưa đủ điều kiện hoàn tiền mặt tại điểm xử lý gần bạn.");
+        }
+    }
+
+    private CashRefundEligibility resolveCashRefundEligibility(Order order, Branch branch) {
+        Double distanceKm = calculateCashRefundDistanceKm(order, branch);
+        boolean eligible = distanceKm != null && distanceKm <= MAX_CASH_REFUND_DISTANCE_KM;
+        List<ReturnRefundMethod> allowedRefundMethods = eligible
+                ? List.of(ReturnRefundMethod.BANK_TRANSFER, ReturnRefundMethod.CASH)
+                : List.of(ReturnRefundMethod.BANK_TRANSFER);
+
+        return new CashRefundEligibility(allowedRefundMethods, eligible, distanceKm);
+    }
+
+    private Double calculateCashRefundDistanceKm(Order order, Branch branch) {
+        if (order == null
+                || branch == null
+                || order.getUserLat() == null
+                || order.getUserLng() == null
+                || branch.getLat() == null
+                || branch.getLng() == null) {
+            return null;
+        }
+
+        return roundDistance(HaversineUtils.distanceKm(
+                order.getUserLat(),
+                order.getUserLng(),
+                branch.getLat(),
+                branch.getLng()));
+    }
+
+    private double roundDistance(double value) {
+        return BigDecimal.valueOf(value)
+                .setScale(2, RoundingMode.HALF_UP)
+                .doubleValue();
+    }
+
+    private String requiredTrimmed(String value, String message) {
+        String trimmed = trimToNull(value);
+        if (trimmed == null) {
+            throw new BadRequestException(message);
+        }
+        return trimmed;
     }
 
     private String firstNonBlank(String... values) {
@@ -652,6 +769,22 @@ public class ReturnRequestService {
             Integer orderedQuantity,
             BigDecimal unitPrice,
             BigDecimal refundAmount
+    ) {
+    }
+
+    private record RefundPreference(
+            ReturnRefundMethod refundMethod,
+            String bankAccountName,
+            String bankAccountNumber,
+            String bankName,
+            String bankBranch
+    ) {
+    }
+
+    private record CashRefundEligibility(
+            List<ReturnRefundMethod> allowedRefundMethods,
+            boolean cashRefundEligible,
+            Double cashRefundDistanceKm
     ) {
     }
 }

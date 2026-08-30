@@ -269,9 +269,9 @@ public class SchemaUpdateConfig implements BeanPostProcessor {
                                 customer_name VARCHAR(150) NOT NULL,
                                 customer_phone VARCHAR(20) NOT NULL,
                                 customer_email VARCHAR(150) NULL,
-                                bank_account_name VARCHAR(150) NOT NULL,
-                                bank_account_number VARCHAR(50) NOT NULL,
-                                bank_name VARCHAR(150) NOT NULL,
+                                bank_account_name VARCHAR(150) NULL,
+                                bank_account_number VARCHAR(50) NULL,
+                                bank_name VARCHAR(150) NULL,
                                 bank_branch VARCHAR(150) NULL,
                                 reason VARCHAR(255) NOT NULL,
                                 description TEXT NOT NULL,
@@ -291,6 +291,16 @@ public class SchemaUpdateConfig implements BeanPostProcessor {
                                 INDEX idx_return_requests_branch (branch_id),
                                 INDEX idx_return_requests_status (status)
                             )
+                            """);
+
+            executeSql(stmt,
+                    "Patch return_requests bank columns nullable for cash refund flow",
+                    """
+                            ALTER TABLE return_requests
+                            MODIFY COLUMN bank_account_name VARCHAR(150) NULL,
+                            MODIFY COLUMN bank_account_number VARCHAR(50) NULL,
+                            MODIFY COLUMN bank_name VARCHAR(150) NULL,
+                            MODIFY COLUMN bank_branch VARCHAR(150) NULL
                             """);
 
             executeSql(stmt,

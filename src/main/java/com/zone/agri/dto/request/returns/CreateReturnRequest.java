@@ -25,13 +25,10 @@ public class CreateReturnRequest {
 
     String email;
 
-    @NotBlank
     String bankAccountName;
 
-    @NotBlank
     String bankAccountNumber;
 
-    @NotBlank
     String bankName;
 
     String bankBranch;
