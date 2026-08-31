@@ -13,10 +13,9 @@ spring:
 
   servlet:
     multipart:
-      # File Excel import tri thức AI không cần lớn — 10MB đủ cho vài nghìn dòng.
-      # application-prod.yml override lên 50MB cho các loại upload khác (ảnh, ...).
-      max-file-size: ${SPRING_SERVLET_MULTIPART_MAX_FILE_SIZE:10MB}
-      max-request-size: ${SPRING_SERVLET_MULTIPART_MAX_REQUEST_SIZE:10MB}
+      # Giữ đồng bộ giới hạn upload local/dev với production để QA được video bằng chứng.
+      max-file-size: ${SPRING_SERVLET_MULTIPART_MAX_FILE_SIZE:50MB}
+      max-request-size: ${SPRING_SERVLET_MULTIPART_MAX_REQUEST_SIZE:50MB}
 
   datasource:
     url: ${SPRING_DATASOURCE_URL:jdbc:mysql://localhost:3307/agri_shrimp_db?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Ho_Chi_Minh}

@@ -9,6 +9,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.HashMap;
+import java.util.Locale;
 import java.util.Map;
 
 @Service
@@ -16,45 +20,89 @@ import java.util.Map;
 @Slf4j
 public class CloudinaryService {
 
+    private static final int VIDEO_CHUNK_SIZE_BYTES = 6 * 1024 * 1024;
+
     private final Cloudinary cloudinary;
 
     @Value("${cloudinary.folder:agrishrimp/products}")
     private String defaultFolder;
 
-    /**
-     * Upload một file lên Cloudinary và trả về kết quả gồm secureUrl + publicId.
-     *
-     * @param file   MultipartFile cần upload
-     * @param folder Folder con bên trong defaultFolder (VD: "variants")
-     * @return {@link UploadResult} chứa secureUrl và publicId
-     */
     public UploadResult upload(MultipartFile file, String folder) {
+        return upload(file, folder, UploadMediaType.resolve(null, file.getContentType()));
+    }
+
+    public UploadResult upload(MultipartFile file, String folder, UploadMediaType mediaType) {
         try {
             String fullFolder = defaultFolder + (folder != null ? "/" + folder : "");
-            Map<?, ?> result = cloudinary.uploader().upload(
-                file.getBytes(),
-                ObjectUtils.asMap(
-                    "folder",        fullFolder,
-                    "resource_type", "auto"
-                )
-            );
+            UploadMediaType resolvedType = mediaType != null
+                ? mediaType
+                : UploadMediaType.resolve(null, file.getContentType());
+
+            Map<?, ?> result = resolvedType == UploadMediaType.VIDEO
+                ? uploadLargeVideo(file, fullFolder)
+                : uploadStandard(file, fullFolder, resolvedType);
+
             String secureUrl = (String) result.get("secure_url");
-            String publicId  = (String) result.get("public_id");
-            log.info("Uploaded image to Cloudinary: publicId={}", publicId);
+            String publicId = (String) result.get("public_id");
+            log.info("Uploaded file to Cloudinary: publicId={}, mediaType={}", publicId, resolvedType);
             return new UploadResult(secureUrl, publicId);
-        } catch (IOException e) {
+        } catch (IOException | IllegalStateException e) {
             log.error("Cloudinary upload failed: {}", e.getMessage());
-            throw new RuntimeException("Không thể upload ảnh lên Cloudinary: " + e.getMessage(), e);
+            throw new RuntimeException("Không thể tải tập tin lên Cloudinary: " + e.getMessage(), e);
         }
     }
 
-    /**
-     * Xóa ảnh khỏi Cloudinary theo publicId.
-     *
-     * @param publicId Public ID của ảnh cần xóa
-     */
+    private Map<?, ?> uploadStandard(
+        MultipartFile file,
+        String fullFolder,
+        UploadMediaType mediaType
+    ) throws IOException {
+        String resourceType = mediaType == UploadMediaType.IMAGE ? "image" : "auto";
+        return cloudinary.uploader().upload(
+            file.getBytes(),
+            ObjectUtils.asMap(
+                "folder", fullFolder,
+                "resource_type", resourceType
+            )
+        );
+    }
+
+    private Map<?, ?> uploadLargeVideo(MultipartFile file, String fullFolder) throws IOException {
+        Path tempFile = Files.createTempFile(
+            "cloudinary-video-",
+            resolveTempFileSuffix(file.getOriginalFilename())
+        );
+        try {
+            file.transferTo(tempFile.toFile());
+            Map<String, Object> options = new HashMap<>();
+            options.put("folder", fullFolder);
+            options.put("resource_type", "video");
+            return cloudinary.uploader().uploadLarge(
+                tempFile.toFile(),
+                options,
+                VIDEO_CHUNK_SIZE_BYTES
+            );
+        } finally {
+            Files.deleteIfExists(tempFile);
+        }
+    }
+
+    private String resolveTempFileSuffix(String originalFilename) {
+        if (originalFilename == null || originalFilename.isBlank()) {
+            return ".tmp";
+        }
+
+        int dotIndex = originalFilename.lastIndexOf('.');
+        if (dotIndex < 0 || dotIndex == originalFilename.length() - 1) {
+            return ".tmp";
+        }
+        return originalFilename.substring(dotIndex);
+    }
+
     public void delete(String publicId) {
-        if (publicId == null || publicId.isBlank()) return;
+        if (publicId == null || publicId.isBlank()) {
+            return;
+        }
         try {
             cloudinary.uploader().destroy(publicId, ObjectUtils.emptyMap());
             log.info("Deleted image from Cloudinary: publicId={}", publicId);
@@ -63,40 +111,18 @@ public class CloudinaryService {
         }
     }
 
-    /**
-     * Upload ảnh từ URL hoặc chuỗi base64 lên Cloudinary.
-     * Dùng cho CategoryService (legacy – ảnh từ FE gửi dưới dạng data URI hoặc URL).
-     *
-     * @param imageData URL hoặc chuỗi base64 (data:image/...)
-     * @return secure_url của ảnh sau khi upload
-     */
     public String uploadImage(String imageData) {
         return uploadImage(imageData, "categories");
     }
 
-    /**
-     * Upload ảnh từ URL hoặc chuỗi base64 lên Cloudinary vào folder chỉ định.
-     *
-     * @param imageData URL hoặc chuỗi base64 (data:image/...)
-     * @param folder Folder con bên trong defaultFolder
-     * @return secure_url của ảnh sau khi upload
-     */
     public String uploadImage(String imageData, String folder) {
         return uploadImage(imageData, folder, null);
     }
 
-    /**
-     * Upload ảnh từ URL hoặc chuỗi base64 lên Cloudinary với tên định danh cụ thể.
-     *
-     * @param imageData URL hoặc chuỗi base64 (data:image/...)
-     * @param folder Folder con bên trong defaultFolder
-     * @param publicId Tên định danh của file ảnh (nếu có)
-     * @return secure_url của ảnh sau khi upload
-     */
     public String uploadImage(String imageData, String folder, String publicId) {
         try {
             String fullFolder = defaultFolder + (folder != null ? "/" + folder : "");
-            java.util.Map<String, Object> options = new java.util.HashMap<>();
+            Map<String, Object> options = new HashMap<>();
             options.put("folder", fullFolder);
             options.put("resource_type", "image");
             if (publicId != null && !publicId.isBlank()) {
@@ -108,9 +134,37 @@ public class CloudinaryService {
             return secureUrl;
         } catch (IOException e) {
             log.error("Cloudinary uploadImage failed: {}", e.getMessage());
-            throw new RuntimeException("Không thể upload ảnh lên Cloudinary: " + e.getMessage(), e);
+            throw new RuntimeException("Không thể tải ảnh lên Cloudinary: " + e.getMessage(), e);
         }
     }
 
     public record UploadResult(String secureUrl, String publicId) {}
+
+    public enum UploadMediaType {
+        AUTO,
+        IMAGE,
+        VIDEO;
+
+        public static UploadMediaType resolve(String requestValue, String contentType) {
+            if (requestValue != null && !requestValue.isBlank()) {
+                try {
+                    return UploadMediaType.valueOf(requestValue.trim().toUpperCase(Locale.ROOT));
+                } catch (IllegalArgumentException ignored) {
+                    // Fall back to content type detection for backward compatibility.
+                }
+            }
+
+            if (contentType != null) {
+                String normalized = contentType.toLowerCase(Locale.ROOT);
+                if (normalized.startsWith("video/")) {
+                    return VIDEO;
+                }
+                if (normalized.startsWith("image/")) {
+                    return IMAGE;
+                }
+            }
+
+            return AUTO;
+        }
+    }
 }
