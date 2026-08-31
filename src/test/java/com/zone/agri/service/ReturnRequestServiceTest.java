@@ -3,16 +3,24 @@ package com.zone.agri.service;
 import com.zone.agri.dto.request.returns.CreateReturnRequest;
 import com.zone.agri.dto.request.returns.CreateReturnRequestEvidence;
 import com.zone.agri.dto.request.returns.CreateReturnRequestItem;
+import com.zone.agri.dto.request.returns.ReturnRequestReceiveItemRequest;
+import com.zone.agri.dto.request.returns.ReturnRequestReceiveRequest;
 import com.zone.agri.dto.request.returns.ReturnRequestRefundRequest;
 import com.zone.agri.dto.response.returns.ReturnOrderDraftResponse;
 import com.zone.agri.dto.response.returns.ReturnRequestResponse;
 import com.zone.agri.entity.Branch;
+import com.zone.agri.entity.Inventory;
+import com.zone.agri.entity.InventoryNote;
+import com.zone.agri.entity.InventoryTransaction;
 import com.zone.agri.entity.Order;
 import com.zone.agri.entity.OrderItem;
 import com.zone.agri.entity.Product;
 import com.zone.agri.entity.ProductVariant;
 import com.zone.agri.entity.ReturnRequest;
+import com.zone.agri.entity.ReturnRequestItem;
 import com.zone.agri.entity.User;
+import com.zone.agri.entity.enums.InventoryNoteStatus;
+import com.zone.agri.entity.enums.InventoryNoteType;
 import com.zone.agri.entity.enums.OrderStatus;
 import com.zone.agri.entity.enums.ReturnEvidenceType;
 import com.zone.agri.entity.enums.ReturnHandlingOption;
@@ -20,13 +28,20 @@ import com.zone.agri.entity.enums.ReturnIssueType;
 import com.zone.agri.entity.enums.ReturnItemSourceType;
 import com.zone.agri.entity.enums.ReturnRefundMethod;
 import com.zone.agri.entity.enums.ReturnRequestStatus;
+import com.zone.agri.entity.enums.TransactionType;
 import com.zone.agri.exception.BadRequestException;
+import com.zone.agri.repository.InventoryNoteDetailRepository;
+import com.zone.agri.repository.InventoryNoteRepository;
+import com.zone.agri.repository.InventoryRepository;
+import com.zone.agri.repository.InventoryTransactionRepository;
 import com.zone.agri.repository.OrderItemRepository;
 import com.zone.agri.repository.OrderRepository;
+import com.zone.agri.repository.ProductVariantRepository;
 import com.zone.agri.repository.ReturnRequestEvidenceRepository;
 import com.zone.agri.repository.ReturnRequestItemRepository;
 import com.zone.agri.repository.ReturnRequestRepository;
 import com.zone.agri.repository.SubOrderItemRepository;
+import com.zone.agri.repository.UserRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -40,6 +55,9 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -62,6 +80,24 @@ class ReturnRequestServiceTest {
 
     @Mock
     private SubOrderItemRepository subOrderItemRepository;
+
+    @Mock
+    private ProductVariantRepository productVariantRepository;
+
+    @Mock
+    private InventoryRepository inventoryRepository;
+
+    @Mock
+    private InventoryNoteRepository inventoryNoteRepository;
+
+    @Mock
+    private InventoryNoteDetailRepository inventoryNoteDetailRepository;
+
+    @Mock
+    private InventoryTransactionRepository inventoryTransactionRepository;
+
+    @Mock
+    private UserRepository userRepository;
 
     @InjectMocks
     private ReturnRequestService returnRequestService;
@@ -206,6 +242,154 @@ class ReturnRequestServiceTest {
 
         assertThatThrownBy(() -> returnRequestService.createReturnRequest(7L, request))
                 .isInstanceOf(BadRequestException.class);
+    }
+
+    @Test
+    void receiveForAdmin_shouldImportReturnedGoodsIntoSaleableAndDefectiveStock() {
+        Order order = buildCompletedOrder(10.7627, 106.6602, 10.7681, 106.6665);
+        Branch branch = order.getBranch();
+        ProductVariant variant = order.getOrderItems().get(0).getProductVariant();
+
+        ReturnRequestItem returnItem = ReturnRequestItem.builder()
+                .id(801L)
+                .sourceType(ReturnItemSourceType.ORDER_ITEM)
+                .sourceItemId(order.getOrderItems().get(0).getId())
+                .productVariantId(variant.getId())
+                .productName("Men vi sinh")
+                .variantName("Gói 1kg")
+                .sku(variant.getSku())
+                .quantity(2)
+                .orderedQuantity(2)
+                .unitPrice(new BigDecimal("125000"))
+                .refundAmount(new BigDecimal("250000"))
+                .restockQuantity(0)
+                .defectiveQuantity(0)
+                .build();
+
+        ReturnRequest entity = ReturnRequest.builder()
+                .id(55L)
+                .code("RET-55")
+                .status(ReturnRequestStatus.APPROVED)
+                .issueType(ReturnIssueType.DAMAGED)
+                .refundMethod(ReturnRefundMethod.BANK_TRANSFER)
+                .requiresPhysicalReturn(true)
+                .customerName("Nguyen Van A")
+                .customerPhone("0900000000")
+                .reason("Ly do")
+                .description("Mo ta")
+                .totalRefundAmount(new BigDecimal("250000"))
+                .order(order)
+                .branch(branch)
+                .items(new java.util.LinkedHashSet<>(List.of(returnItem)))
+                .build();
+        returnItem.setReturnRequest(entity);
+
+        ReturnRequestReceiveRequest request = new ReturnRequestReceiveRequest();
+        request.setInternalNote("Nhận hàng trả và nhập kho");
+        ReturnRequestReceiveItemRequest receiveItem = new ReturnRequestReceiveItemRequest();
+        receiveItem.setReturnRequestItemId(returnItem.getId());
+        receiveItem.setRestockQuantity(1);
+        receiveItem.setDefectiveQuantity(1);
+        receiveItem.setItemNote("1 cái còn tốt, 1 cái lỗi");
+        request.setItems(List.of(receiveItem));
+
+        when(returnRequestRepository.findDetailedById(55L)).thenReturn(Optional.of(entity));
+        when(productVariantRepository.findAllById(List.of(variant.getId()))).thenReturn(List.of(variant));
+        when(inventoryTransactionRepository.findByReferenceCodeAndType(order.getCode(), TransactionType.SALE))
+                .thenReturn(List.of());
+        when(inventoryRepository.findExactBatchWithLock(
+                any(Branch.class),
+                any(ProductVariant.class),
+                any(),
+                any(BigDecimal.class)))
+                .thenReturn(Optional.empty());
+        when(inventoryRepository.save(any(Inventory.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(inventoryNoteRepository.save(any(InventoryNote.class))).thenAnswer(invocation -> {
+            InventoryNote note = invocation.getArgument(0);
+            if (note.getId() == null) {
+                note.setId(901L);
+            }
+            if (note.getStatus() == null) {
+                note.setStatus(InventoryNoteStatus.COMPLETED);
+            }
+            if (note.getType() == null) {
+                note.setType(InventoryNoteType.IMPORT);
+            }
+            return note;
+        });
+
+        ReturnRequestResponse response = returnRequestService.receiveForAdmin(55L, request);
+
+        assertThat(response.getStatus()).isEqualTo(ReturnRequestStatus.RECEIVED);
+        assertThat(response.getReceivedAt()).isNotNull();
+        assertThat(response.getReceivedInventoryNoteId()).isEqualTo(901L);
+        assertThat(response.getItems()).singleElement().satisfies(item -> {
+            assertThat(item.getRestockQuantity()).isEqualTo(1);
+            assertThat(item.getDefectiveQuantity()).isEqualTo(1);
+        });
+        assertThat(entity.getReceivedInventoryNote()).isNotNull();
+        assertThat(entity.getReceivedInventoryNote().getId()).isEqualTo(901L);
+        assertThat(returnItem.getRestockQuantity()).isEqualTo(1);
+        assertThat(returnItem.getDefectiveQuantity()).isEqualTo(1);
+
+        verify(inventoryNoteDetailRepository).saveAll(any());
+        verify(inventoryTransactionRepository, times(2)).save(any(InventoryTransaction.class));
+    }
+
+    @Test
+    void receiveForAdmin_shouldRejectReceiveBreakdownWhenQuantitiesDoNotMatchReturnedQuantity() {
+        Order order = buildCompletedOrder(10.7627, 106.6602, 10.7681, 106.6665);
+        Branch branch = order.getBranch();
+        ProductVariant variant = order.getOrderItems().get(0).getProductVariant();
+
+        ReturnRequestItem returnItem = ReturnRequestItem.builder()
+                .id(802L)
+                .sourceType(ReturnItemSourceType.ORDER_ITEM)
+                .sourceItemId(order.getOrderItems().get(0).getId())
+                .productVariantId(variant.getId())
+                .productName("Men vi sinh")
+                .quantity(2)
+                .orderedQuantity(2)
+                .unitPrice(new BigDecimal("125000"))
+                .refundAmount(new BigDecimal("250000"))
+                .restockQuantity(0)
+                .defectiveQuantity(0)
+                .build();
+
+        ReturnRequest entity = ReturnRequest.builder()
+                .id(56L)
+                .code("RET-56")
+                .status(ReturnRequestStatus.APPROVED)
+                .issueType(ReturnIssueType.DAMAGED)
+                .refundMethod(ReturnRefundMethod.BANK_TRANSFER)
+                .requiresPhysicalReturn(true)
+                .customerName("Nguyen Van A")
+                .customerPhone("0900000000")
+                .reason("Ly do")
+                .description("Mo ta")
+                .totalRefundAmount(new BigDecimal("250000"))
+                .order(order)
+                .branch(branch)
+                .items(new java.util.LinkedHashSet<>(List.of(returnItem)))
+                .build();
+        returnItem.setReturnRequest(entity);
+
+        ReturnRequestReceiveRequest request = new ReturnRequestReceiveRequest();
+        ReturnRequestReceiveItemRequest receiveItem = new ReturnRequestReceiveItemRequest();
+        receiveItem.setReturnRequestItemId(returnItem.getId());
+        receiveItem.setRestockQuantity(1);
+        receiveItem.setDefectiveQuantity(0);
+        request.setItems(List.of(receiveItem));
+
+        when(returnRequestRepository.findDetailedById(56L)).thenReturn(Optional.of(entity));
+        when(productVariantRepository.findAllById(List.of(variant.getId()))).thenReturn(List.of(variant));
+
+        assertThatThrownBy(() -> returnRequestService.receiveForAdmin(56L, request))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessageContaining("tổng số lượng");
+
+        verify(inventoryNoteRepository, never()).save(any(InventoryNote.class));
+        verify(inventoryRepository, never()).save(any(Inventory.class));
     }
 
     private Order buildCompletedOrder(

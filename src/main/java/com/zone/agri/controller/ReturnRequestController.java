@@ -131,7 +131,7 @@ public class ReturnRequestController {
     @PutMapping("/admin/returns/{requestId}/receive")
     public ResponseEntity<ReturnRequestResponse> receiveReturnRequestForAdmin(
             @PathVariable Long requestId,
-            @RequestBody(required = false) ReturnRequestReceiveRequest request
+            @Valid @RequestBody(required = false) ReturnRequestReceiveRequest request
     ) {
         verifyAdminAccess();
         return ResponseEntity.ok(returnRequestService.receiveForAdmin(requestId, request));
@@ -190,7 +190,7 @@ public class ReturnRequestController {
     @PutMapping("/branch/returns/{requestId}/receive")
     public ResponseEntity<ReturnRequestResponse> receiveReturnRequestForBranch(
             @PathVariable Long requestId,
-            @RequestBody(required = false) ReturnRequestReceiveRequest request
+            @Valid @RequestBody(required = false) ReturnRequestReceiveRequest request
     ) {
         return ResponseEntity.ok(returnRequestService.receiveForBranch(getCurrentBranchId(), requestId, request));
     }

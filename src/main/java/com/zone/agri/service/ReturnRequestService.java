@@ -1,5 +1,6 @@
 package com.zone.agri.service;
 
+import com.zone.agri.common.AuthUtils;
 import com.zone.agri.dto.request.returns.*;
 import com.zone.agri.dto.response.returns.*;
 import com.zone.agri.entity.*;
@@ -27,6 +28,7 @@ import java.util.stream.Collectors;
 public class ReturnRequestService {
 
     private static final double MAX_CASH_REFUND_DISTANCE_KM = 15d;
+    private static final String CUSTOMER_RETURN_TAG = "CUSTOMER_RETURN";
 
     private final OrderRepository orderRepository;
     private final OrderItemRepository orderItemRepository;
@@ -34,6 +36,12 @@ public class ReturnRequestService {
     private final ReturnRequestItemRepository returnRequestItemRepository;
     private final ReturnRequestEvidenceRepository returnRequestEvidenceRepository;
     private final SubOrderItemRepository subOrderItemRepository;
+    private final ProductVariantRepository productVariantRepository;
+    private final InventoryRepository inventoryRepository;
+    private final InventoryNoteRepository inventoryNoteRepository;
+    private final InventoryNoteDetailRepository inventoryNoteDetailRepository;
+    private final InventoryTransactionRepository inventoryTransactionRepository;
+    private final UserRepository userRepository;
 
     @Transactional(readOnly = true)
     public ReturnOrderDraftResponse getReturnDraft(Long userId, Long orderId) {
@@ -235,6 +243,8 @@ public class ReturnRequestService {
                         .orderedQuantity(line.orderedQuantity())
                         .unitPrice(line.unitPrice())
                         .refundAmount(line.refundAmount())
+                        .restockQuantity(0)
+                        .defectiveQuantity(0)
                         .build())
                 .collect(Collectors.toList());
         returnRequestItemRepository.saveAll(savedItems);
@@ -323,14 +333,14 @@ public class ReturnRequestService {
     @Transactional
     public ReturnRequestResponse receiveForAdmin(Long requestId, ReturnRequestReceiveRequest request) {
         ReturnRequest entity = getDetailed(requestId);
-        applyReceive(entity, request != null ? request.getInternalNote() : null);
+        applyReceive(entity, request);
         return mapResponse(entity);
     }
 
     @Transactional
     public ReturnRequestResponse receiveForBranch(Long branchId, Long requestId, ReturnRequestReceiveRequest request) {
         ReturnRequest entity = getDetailedAndCheckBranch(requestId, branchId);
-        applyReceive(entity, request != null ? request.getInternalNote() : null);
+        applyReceive(entity, request);
         return mapResponse(entity);
     }
 
@@ -390,16 +400,25 @@ public class ReturnRequestService {
         entity.setInternalNote(trimToNull(request.getInternalNote()));
     }
 
-    private void applyReceive(ReturnRequest entity, String internalNote) {
+    private void applyReceive(ReturnRequest entity, ReturnRequestReceiveRequest request) {
         if (Boolean.FALSE.equals(entity.getRequiresPhysicalReturn())) {
             throw new BadRequestException("Yêu cầu thiếu hàng không cần bước nhận lại hàng");
         }
         if (entity.getStatus() != ReturnRequestStatus.APPROVED) {
             throw new BadRequestException("Chỉ nhận lại hàng sau khi yêu cầu đã được duyệt");
         }
+        ReceiveDecision receiveDecision = buildReceiveDecision(entity, request);
+        InventoryNote receivedInventoryNote = createReceivedInventoryNote(entity, receiveDecision);
+
+        for (ReceiveItemDecision itemDecision : receiveDecision.items()) {
+            itemDecision.returnItem().setRestockQuantity(itemDecision.restockQuantity());
+            itemDecision.returnItem().setDefectiveQuantity(itemDecision.defectiveQuantity());
+        }
+
         entity.setStatus(ReturnRequestStatus.RECEIVED);
         entity.setReceivedAt(LocalDateTime.now());
-        entity.setInternalNote(trimToNull(internalNote));
+        entity.setInternalNote(receiveDecision.internalNote());
+        entity.setReceivedInventoryNote(receivedInventoryNote);
     }
 
     private void applyRefund(ReturnRequest entity, ReturnRequestRefundRequest request) {
@@ -595,6 +614,372 @@ public class ReturnRequestService {
         return order.getCreatedAt();
     }
 
+    private ReceiveDecision buildReceiveDecision(ReturnRequest entity, ReturnRequestReceiveRequest request) {
+        List<ReturnRequestItem> returnItems = Optional.ofNullable(entity.getItems())
+                .orElse(Collections.emptySet())
+                .stream()
+                .sorted(Comparator.comparing(ReturnRequestItem::getId, Comparator.nullsLast(Long::compareTo)))
+                .toList();
+        if (returnItems.isEmpty()) {
+            throw new BadRequestException("Yêu cầu trả hàng này chưa có sản phẩm để xác nhận nhận lại.");
+        }
+
+        List<ReturnRequestReceiveItemRequest> payloadItems = request != null ? request.getItems() : null;
+        if (payloadItems == null || payloadItems.isEmpty()) {
+            throw new BadRequestException("Vui lòng nhập số lượng nhập lại và số lượng vào tồn lỗi cho từng sản phẩm.");
+        }
+
+        Map<Long, ReturnRequestReceiveItemRequest> payloadByItemId = new LinkedHashMap<>();
+        for (ReturnRequestReceiveItemRequest payloadItem : payloadItems) {
+            if (payloadItem == null || payloadItem.getReturnRequestItemId() == null) {
+                throw new BadRequestException("Thiếu thông tin dòng sản phẩm khi xác nhận nhận lại hàng.");
+            }
+            if (payloadByItemId.put(payloadItem.getReturnRequestItemId(), payloadItem) != null) {
+                throw new BadRequestException("Có sản phẩm bị gửi lặp trong xác nhận nhận lại hàng.");
+            }
+        }
+
+        if (payloadByItemId.size() != returnItems.size()) {
+            throw new BadRequestException("Cần nhập đủ kết quả xử lý kho cho toàn bộ sản phẩm của phiếu trả hàng.");
+        }
+
+        Branch receivingBranch = entity.getBranch() != null ? entity.getBranch() : entity.getOrder() != null
+                ? entity.getOrder().getBranch()
+                : null;
+        if (receivingBranch == null) {
+            throw new BadRequestException("Không xác định được điểm xử lý để nhập lại hàng trả về.");
+        }
+
+        Map<Long, ProductVariant> variantsById = productVariantRepository.findAllById(
+                        returnItems.stream()
+                                .map(ReturnRequestItem::getProductVariantId)
+                                .filter(Objects::nonNull)
+                                .distinct()
+                                .toList())
+                .stream()
+                .collect(Collectors.toMap(ProductVariant::getId, Function.identity()));
+
+        Map<LineagePoolKey, Deque<SourceBatchState>> lineagePools = new HashMap<>();
+        List<ReceiveItemDecision> decisions = new ArrayList<>();
+        for (ReturnRequestItem returnItem : returnItems) {
+            ReturnRequestReceiveItemRequest payloadItem = payloadByItemId.get(returnItem.getId());
+            if (payloadItem == null) {
+                throw new BadRequestException("Thiếu kết quả xử lý kho cho sản phẩm " + firstNonBlank(returnItem.getProductName(), "đã chọn") + ".");
+            }
+
+            int expectedQuantity = defaultQuantity(returnItem.getQuantity());
+            int restockQuantity = defaultQuantity(payloadItem.getRestockQuantity());
+            int defectiveQuantity = defaultQuantity(payloadItem.getDefectiveQuantity());
+            if (restockQuantity + defectiveQuantity != expectedQuantity) {
+                throw new BadRequestException("Sản phẩm " + firstNonBlank(returnItem.getProductName(), "đã chọn")
+                        + " phải có tổng số lượng nhập lại và tồn lỗi đúng bằng số lượng trả.");
+            }
+
+            ProductVariant variant = variantsById.get(returnItem.getProductVariantId());
+            if (variant == null) {
+                throw new BadRequestException("Không tìm thấy biến thể sản phẩm để nhập kho cho SKU "
+                        + firstNonBlank(returnItem.getSku(), "không xác định") + ".");
+            }
+
+            String referenceCode = resolveReturnReferenceCode(entity, returnItem);
+            List<InboundReturnAllocation> allocations = resolveInboundReturnAllocations(
+                    entity,
+                    returnItem,
+                    variant,
+                    expectedQuantity,
+                    referenceCode,
+                    lineagePools);
+
+            decisions.add(new ReceiveItemDecision(
+                    returnItem,
+                    variant,
+                    restockQuantity,
+                    defectiveQuantity,
+                    trimToNull(payloadItem.getItemNote()),
+                    allocations
+            ));
+        }
+
+        return new ReceiveDecision(receivingBranch, trimToNull(request != null ? request.getInternalNote() : null), decisions);
+    }
+
+    private InventoryNote createReceivedInventoryNote(ReturnRequest entity, ReceiveDecision receiveDecision) {
+        LocalDateTime now = LocalDateTime.now();
+        User actor = resolveCurrentActor();
+
+        InventoryNote note = InventoryNote.builder()
+                .code(generateCustomerReturnReceiptCode())
+                .type(InventoryNoteType.IMPORT)
+                .reason("Nhập lại hàng khách trả từ phiếu " + entity.getCode())
+                .status(InventoryNoteStatus.COMPLETED)
+                .totalAmount(BigDecimal.ZERO)
+                .createdAt(now)
+                .note(buildCustomerReturnNote(entity, receiveDecision.internalNote()))
+                .tags(CUSTOMER_RETURN_TAG)
+                .deliverer(firstNonBlank(entity.getCustomerName(), "Khách trả hàng"))
+                .entryDate(now)
+                .paymentAmount(BigDecimal.ZERO)
+                .debtAmount(BigDecimal.ZERO)
+                .branch(receiveDecision.receivingBranch())
+                .createdBy(actor)
+                .build();
+        InventoryNote savedNote = inventoryNoteRepository.save(note);
+
+        List<InventoryNoteDetail> noteDetails = new ArrayList<>();
+        BigDecimal totalAmount = BigDecimal.ZERO;
+        for (ReceiveItemDecision itemDecision : receiveDecision.items()) {
+            int remainingRestock = itemDecision.restockQuantity();
+            int remainingDefective = itemDecision.defectiveQuantity();
+
+            for (InboundReturnAllocation allocation : itemDecision.allocations()) {
+                int availableInAllocation = allocation.quantity();
+
+                int acceptedQuantity = Math.min(remainingRestock, availableInAllocation);
+                remainingRestock -= acceptedQuantity;
+                availableInAllocation -= acceptedQuantity;
+
+                int defectiveQuantity = Math.min(remainingDefective, availableInAllocation);
+                remainingDefective -= defectiveQuantity;
+
+                if (acceptedQuantity + defectiveQuantity <= 0) {
+                    continue;
+                }
+
+                BigDecimal linePrice = resolveAllocationImportPrice(allocation.importPrice(), itemDecision.returnItem().getUnitPrice());
+                noteDetails.add(InventoryNoteDetail.builder()
+                        .inventoryNote(savedNote)
+                        .productVariant(itemDecision.variant())
+                        .quantity(acceptedQuantity + defectiveQuantity)
+                        .price(linePrice)
+                        .quantityRequested(acceptedQuantity + defectiveQuantity)
+                        .quantityReal(acceptedQuantity + defectiveQuantity)
+                        .quantityAccepted(acceptedQuantity)
+                        .quantityRejected(defectiveQuantity)
+                        .batchNumber(allocation.batchNumber())
+                        .expiryDate(allocation.expiryDate())
+                        .note(firstNonBlank(itemDecision.itemNote(), receiveDecision.internalNote()))
+                        .build());
+
+                totalAmount = totalAmount.add(linePrice.multiply(BigDecimal.valueOf(acceptedQuantity + defectiveQuantity)));
+                applyInboundReturnAllocation(
+                        savedNote,
+                        receiveDecision.receivingBranch(),
+                        itemDecision.variant(),
+                        allocation,
+                        acceptedQuantity,
+                        defectiveQuantity,
+                        actor,
+                        entity.getCode());
+            }
+        }
+
+        if (!noteDetails.isEmpty()) {
+            inventoryNoteDetailRepository.saveAll(noteDetails);
+        }
+        savedNote.setDetails(noteDetails);
+        savedNote.setTotalAmount(totalAmount);
+        return inventoryNoteRepository.save(savedNote);
+    }
+
+    private void applyInboundReturnAllocation(
+            InventoryNote note,
+            Branch branch,
+            ProductVariant variant,
+            InboundReturnAllocation allocation,
+            int acceptedQuantity,
+            int defectiveQuantity,
+            User actor,
+            String returnRequestCode
+    ) {
+        if (acceptedQuantity <= 0 && defectiveQuantity <= 0) {
+            return;
+        }
+
+        BigDecimal importPrice = resolveAllocationImportPrice(allocation.importPrice(), BigDecimal.ZERO);
+        String batchNumber = trimToNull(allocation.batchNumber());
+        Inventory inventory = inventoryRepository.findExactBatchWithLock(branch, variant, batchNumber, importPrice)
+                .orElseGet(() -> inventoryRepository.save(Inventory.builder()
+                        .branch(branch)
+                        .productVariant(variant)
+                        .batchNumber(batchNumber)
+                        .importPrice(importPrice)
+                        .expiryDate(allocation.expiryDate())
+                        .quantity(0)
+                        .defectiveQuantity(0)
+                        .build()));
+
+        if (acceptedQuantity > 0) {
+            inventory.setQuantity(Objects.requireNonNullElse(inventory.getQuantity(), 0) + acceptedQuantity);
+        }
+        if (defectiveQuantity > 0) {
+            inventory.setDefectiveQuantity(Objects.requireNonNullElse(inventory.getDefectiveQuantity(), 0) + defectiveQuantity);
+        }
+        if (inventory.getExpiryDate() == null && allocation.expiryDate() != null) {
+            inventory.setExpiryDate(allocation.expiryDate());
+        }
+        inventory.setLastReceiptDate(LocalDateTime.now());
+        inventory = inventoryRepository.save(inventory);
+
+        int balanceAfterAccepted = physicalBalance(inventory) - defectiveQuantity;
+        if (acceptedQuantity > 0) {
+            inventoryTransactionRepository.save(InventoryTransaction.builder()
+                    .type(TransactionType.IMPORT)
+                    .quantityChange(acceptedQuantity)
+                    .newBalance(balanceAfterAccepted)
+                    .referenceCode(note.getCode())
+                    .reason("Nhập lại hàng khách trả đạt điều kiện (" + returnRequestCode + ")")
+                    .createdAt(LocalDateTime.now())
+                    .inventory(inventory)
+                    .inventoryNote(note)
+                    .createdBy(actor)
+                    .build());
+        }
+        if (defectiveQuantity > 0) {
+            inventoryTransactionRepository.save(InventoryTransaction.builder()
+                    .type(TransactionType.IMPORT)
+                    .quantityChange(defectiveQuantity)
+                    .newBalance(physicalBalance(inventory))
+                    .referenceCode(note.getCode())
+                    .reason("Nhập lại hàng khách trả vào tồn lỗi (" + returnRequestCode + ")")
+                    .createdAt(LocalDateTime.now())
+                    .inventory(inventory)
+                    .inventoryNote(note)
+                    .createdBy(actor)
+                    .build());
+        }
+    }
+
+    private List<InboundReturnAllocation> resolveInboundReturnAllocations(
+            ReturnRequest entity,
+            ReturnRequestItem returnItem,
+            ProductVariant variant,
+            int quantity,
+            String referenceCode,
+            Map<LineagePoolKey, Deque<SourceBatchState>> lineagePools
+    ) {
+        LineagePoolKey key = new LineagePoolKey(referenceCode, variant.getId());
+        Deque<SourceBatchState> sourcePool = lineagePools.computeIfAbsent(
+                key,
+                ignored -> loadSaleLineagePool(entity, returnItem, variant, referenceCode));
+
+        List<InboundReturnAllocation> allocations = new ArrayList<>();
+        int remaining = quantity;
+        while (remaining > 0 && sourcePool != null && !sourcePool.isEmpty()) {
+            SourceBatchState state = sourcePool.peekFirst();
+            if (state == null || state.remainingQuantity() <= 0) {
+                sourcePool.pollFirst();
+                continue;
+            }
+
+            int allocatedQuantity = Math.min(remaining, state.remainingQuantity());
+            allocations.add(new InboundReturnAllocation(
+                    state.batchNumber(),
+                    state.importPrice(),
+                    state.expiryDate(),
+                    allocatedQuantity));
+            state.consume(allocatedQuantity);
+            if (state.remainingQuantity() <= 0) {
+                sourcePool.pollFirst();
+            }
+            remaining -= allocatedQuantity;
+        }
+
+        if (remaining > 0) {
+            allocations.add(new InboundReturnAllocation(
+                    buildFallbackReturnBatchNumber(entity),
+                    safeAmount(returnItem.getUnitPrice()),
+                    null,
+                    remaining));
+        }
+
+        return allocations;
+    }
+
+    private Deque<SourceBatchState> loadSaleLineagePool(
+            ReturnRequest entity,
+            ReturnRequestItem returnItem,
+            ProductVariant variant,
+            String referenceCode
+    ) {
+        Deque<SourceBatchState> pool = new ArrayDeque<>();
+        List<InventoryTransaction> saleTransactions = inventoryTransactionRepository.findByReferenceCodeAndType(
+                        referenceCode,
+                        TransactionType.SALE)
+                .stream()
+                .filter(transaction -> transaction.getInventory() != null
+                        && transaction.getInventory().getProductVariant() != null
+                        && Objects.equals(transaction.getInventory().getProductVariant().getId(), variant.getId()))
+                .sorted(Comparator
+                        .comparing(InventoryTransaction::getCreatedAt, Comparator.nullsLast(LocalDateTime::compareTo))
+                        .thenComparing(InventoryTransaction::getId, Comparator.nullsLast(Long::compareTo)))
+                .toList();
+
+        for (InventoryTransaction transaction : saleTransactions) {
+            int soldQuantity = Math.abs(Objects.requireNonNullElse(transaction.getQuantityChange(), 0));
+            if (soldQuantity <= 0 || transaction.getInventory() == null) {
+                continue;
+            }
+
+            Inventory sourceInventory = transaction.getInventory();
+            pool.addLast(new SourceBatchState(
+                    firstNonBlank(trimToNull(sourceInventory.getBatchNumber()), buildFallbackReturnBatchNumber(entity)),
+                    sourceInventory.getImportPrice(),
+                    sourceInventory.getExpiryDate(),
+                    soldQuantity));
+        }
+
+        return pool;
+    }
+
+    private String resolveReturnReferenceCode(ReturnRequest entity, ReturnRequestItem item) {
+        if (entity.getOrder() == null || entity.getOrder().getCode() == null) {
+            throw new BadRequestException("Không xác định được đơn hàng nguồn cho phiếu trả hàng này.");
+        }
+        return item.getSubOrderId() != null
+                ? entity.getOrder().getCode() + "-SUB-" + item.getSubOrderId()
+                : entity.getOrder().getCode();
+    }
+
+    private String buildFallbackReturnBatchNumber(ReturnRequest entity) {
+        return "RETURN-" + entity.getCode();
+    }
+
+    private BigDecimal resolveAllocationImportPrice(BigDecimal preferredPrice, BigDecimal fallbackPrice) {
+        if (preferredPrice != null) {
+            return preferredPrice;
+        }
+        if (fallbackPrice != null) {
+            return fallbackPrice;
+        }
+        return BigDecimal.ZERO;
+    }
+
+    private String buildCustomerReturnNote(ReturnRequest entity, String internalNote) {
+        return firstNonBlank(
+                internalNote,
+                "Nhập lại hàng khách trả từ phiếu " + entity.getCode() + " cho đơn " + (entity.getOrder() != null ? entity.getOrder().getCode() : "")
+        );
+    }
+
+    private User resolveCurrentActor() {
+        com.zone.agri.dto.response.user.UserDetail currentUser = AuthUtils.getUserDetail();
+        if (currentUser == null || currentUser.getId() == null) {
+            return null;
+        }
+        return userRepository.findById(currentUser.getId()).orElse(null);
+    }
+
+    private int physicalBalance(Inventory inventory) {
+        return Objects.requireNonNullElse(inventory.getQuantity(), 0)
+                + Objects.requireNonNullElse(inventory.getDefectiveQuantity(), 0);
+    }
+
+    private String generateCustomerReturnReceiptCode() {
+        return "RIN"
+                + LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("yyMMddHHmmss"))
+                + UUID.randomUUID().toString().substring(0, 4).toUpperCase(Locale.ROOT);
+    }
+
     private ReturnRequestStatus parseStatus(String status) {
         String normalized = trimToNull(status);
         if (normalized == null || "ALL".equalsIgnoreCase(normalized)) {
@@ -623,6 +1008,8 @@ public class ReturnRequestService {
                         .orderedQuantity(item.getOrderedQuantity())
                         .unitPrice(item.getUnitPrice())
                         .refundAmount(item.getRefundAmount())
+                        .restockQuantity(item.getRestockQuantity())
+                        .defectiveQuantity(item.getDefectiveQuantity())
                         .build())
                 .toList();
 
@@ -648,6 +1035,8 @@ public class ReturnRequestService {
                 .orderCode(entity.getOrder() != null ? entity.getOrder().getCode() : null)
                 .branchId(entity.getBranch() != null ? entity.getBranch().getId() : null)
                 .branchName(entity.getBranch() != null ? entity.getBranch().getName() : null)
+                .receivedInventoryNoteId(entity.getReceivedInventoryNote() != null ? entity.getReceivedInventoryNote().getId() : null)
+                .receivedInventoryNoteCode(entity.getReceivedInventoryNote() != null ? entity.getReceivedInventoryNote().getCode() : null)
                 .customerName(entity.getCustomerName())
                 .customerPhone(entity.getCustomerPhone())
                 .customerEmail(entity.getCustomerEmail())
@@ -842,6 +1231,79 @@ public class ReturnRequestService {
         return "RET-" + LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("yyMMddHHmmss"))
                 + "-"
                 + UUID.randomUUID().toString().substring(0, 4).toUpperCase(Locale.ROOT);
+    }
+
+    private record ReceiveDecision(
+            Branch receivingBranch,
+            String internalNote,
+            List<ReceiveItemDecision> items
+    ) {
+    }
+
+    private record ReceiveItemDecision(
+            ReturnRequestItem returnItem,
+            ProductVariant variant,
+            Integer restockQuantity,
+            Integer defectiveQuantity,
+            String itemNote,
+            List<InboundReturnAllocation> allocations
+    ) {
+    }
+
+    private record InboundReturnAllocation(
+            String batchNumber,
+            BigDecimal importPrice,
+            LocalDateTime expiryDate,
+            Integer quantity
+    ) {
+    }
+
+    private record LineagePoolKey(
+            String referenceCode,
+            Long productVariantId
+    ) {
+    }
+
+    private static final class SourceBatchState {
+        private final String batchNumber;
+        private final BigDecimal importPrice;
+        private final LocalDateTime expiryDate;
+        private int remainingQuantity;
+
+        private SourceBatchState(
+                String batchNumber,
+                BigDecimal importPrice,
+                LocalDateTime expiryDate,
+                int remainingQuantity
+        ) {
+            this.batchNumber = batchNumber;
+            this.importPrice = importPrice;
+            this.expiryDate = expiryDate;
+            this.remainingQuantity = remainingQuantity;
+        }
+
+        private String batchNumber() {
+            return batchNumber;
+        }
+
+        private BigDecimal importPrice() {
+            return importPrice;
+        }
+
+        private LocalDateTime expiryDate() {
+            return expiryDate;
+        }
+
+        private int remainingQuantity() {
+            return remainingQuantity;
+        }
+
+        private void consume(int quantity) {
+            if (quantity <= 0) {
+                return;
+            }
+            remainingQuantity = Math.max(0, remainingQuantity - quantity);
+        }
     }
 
     private record ResolvedReturnLine(
