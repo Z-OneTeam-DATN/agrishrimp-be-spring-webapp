@@ -25,6 +25,8 @@ public class ReturnRequestResponse {
     private String orderCode;
     private Long branchId;
     private String branchName;
+    private Long receivedInventoryNoteId;
+    private String receivedInventoryNoteCode;
     private String customerName;
     private String customerPhone;
     private String customerEmail;

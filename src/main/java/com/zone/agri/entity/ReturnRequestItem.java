@@ -60,6 +60,12 @@ public class ReturnRequestItem extends BaseEntity {
     @Column(name = "refund_amount", precision = 38, scale = 2, nullable = false)
     BigDecimal refundAmount;
 
+    @Column(name = "restock_quantity", nullable = false)
+    Integer restockQuantity;
+
+    @Column(name = "defective_quantity", nullable = false)
+    Integer defectiveQuantity;
+
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "return_request_id", nullable = false)
     @ToString.Exclude

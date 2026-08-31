@@ -22,4 +22,6 @@ public class ReturnItemResponse {
     private Integer orderedQuantity;
     private BigDecimal unitPrice;
     private BigDecimal refundAmount;
+    private Integer restockQuantity;
+    private Integer defectiveQuantity;
 }

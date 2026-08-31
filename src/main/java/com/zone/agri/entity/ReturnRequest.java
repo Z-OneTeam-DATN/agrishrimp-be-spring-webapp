@@ -112,6 +112,12 @@ public class ReturnRequest extends BaseEntity {
     @EqualsAndHashCode.Exclude
     Branch branch;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "received_inventory_note_id")
+    @ToString.Exclude
+    @EqualsAndHashCode.Exclude
+    InventoryNote receivedInventoryNote;
+
     @OneToMany(mappedBy = "returnRequest", cascade = CascadeType.ALL, orphanRemoval = true)
     @Builder.Default
     @ToString.Exclude

@@ -19,6 +19,7 @@ public interface ReturnRequestRepository extends JpaRepository<ReturnRequest, Lo
             FROM ReturnRequest r
             LEFT JOIN FETCH r.order o
             LEFT JOIN FETCH r.branch b
+            LEFT JOIN FETCH r.receivedInventoryNote rin
             WHERE r.user.id = :userId
             ORDER BY r.createdAt DESC
             """)
@@ -29,6 +30,7 @@ public interface ReturnRequestRepository extends JpaRepository<ReturnRequest, Lo
             FROM ReturnRequest r
             LEFT JOIN FETCH r.order o
             LEFT JOIN FETCH r.branch b
+            LEFT JOIN FETCH r.receivedInventoryNote rin
             LEFT JOIN FETCH r.items items
             LEFT JOIN FETCH r.evidences evidences
             WHERE r.user.id = :userId
@@ -52,6 +54,7 @@ public interface ReturnRequestRepository extends JpaRepository<ReturnRequest, Lo
             FROM ReturnRequest r
             LEFT JOIN FETCH r.order o
             LEFT JOIN FETCH r.branch b
+            LEFT JOIN FETCH r.receivedInventoryNote rin
             LEFT JOIN FETCH r.items items
             LEFT JOIN FETCH r.evidences evidences
             WHERE r.id = :id
@@ -63,6 +66,7 @@ public interface ReturnRequestRepository extends JpaRepository<ReturnRequest, Lo
             FROM ReturnRequest r
             LEFT JOIN FETCH r.order o
             LEFT JOIN FETCH r.branch b
+            LEFT JOIN FETCH r.receivedInventoryNote rin
             LEFT JOIN FETCH r.items items
             LEFT JOIN FETCH r.evidences evidences
             WHERE r.id = :id
@@ -75,6 +79,7 @@ public interface ReturnRequestRepository extends JpaRepository<ReturnRequest, Lo
             FROM ReturnRequest r
             LEFT JOIN FETCH r.order o
             LEFT JOIN FETCH r.branch b
+            LEFT JOIN FETCH r.receivedInventoryNote rin
             WHERE (:branchId IS NULL OR b.id = :branchId)
               AND (:status IS NULL OR r.status = :status)
               AND (

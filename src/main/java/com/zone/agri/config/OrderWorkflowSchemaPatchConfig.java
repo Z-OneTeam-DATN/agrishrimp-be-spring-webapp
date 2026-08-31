@@ -234,13 +234,20 @@ public class OrderWorkflowSchemaPatchConfig implements BeanPostProcessor {
                                 user_id BIGINT NOT NULL,
                                 order_id BIGINT NOT NULL,
                                 branch_id BIGINT NULL,
+                                received_inventory_note_id BIGINT NULL,
                                 UNIQUE KEY uq_return_requests_code (code),
                                 INDEX idx_return_requests_user (user_id),
                                 INDEX idx_return_requests_order (order_id),
                                 INDEX idx_return_requests_branch (branch_id),
-                                INDEX idx_return_requests_status (status)
+                                INDEX idx_return_requests_status (status),
+                                INDEX idx_return_requests_received_inventory_note (received_inventory_note_id)
                             )
                             """);
+
+            addColumnIfMissing(conn, stmt,
+                    "return_requests",
+                    "received_inventory_note_id",
+                    "ALTER TABLE return_requests ADD COLUMN received_inventory_note_id BIGINT NULL");
 
             executeSql(stmt,
                     "Create return_request_items when missing",
@@ -263,11 +270,22 @@ public class OrderWorkflowSchemaPatchConfig implements BeanPostProcessor {
                                 ordered_quantity INT NOT NULL,
                                 unit_price DECIMAL(38,2) NOT NULL DEFAULT 0,
                                 refund_amount DECIMAL(38,2) NOT NULL DEFAULT 0,
+                                restock_quantity INT NOT NULL DEFAULT 0,
+                                defective_quantity INT NOT NULL DEFAULT 0,
                                 return_request_id BIGINT NOT NULL,
                                 INDEX idx_return_request_items_request (return_request_id),
                                 INDEX idx_return_request_items_variant (product_variant_id)
                             )
                             """);
+
+            addColumnIfMissing(conn, stmt,
+                    "return_request_items",
+                    "restock_quantity",
+                    "ALTER TABLE return_request_items ADD COLUMN restock_quantity INT NOT NULL DEFAULT 0");
+            addColumnIfMissing(conn, stmt,
+                    "return_request_items",
+                    "defective_quantity",
+                    "ALTER TABLE return_request_items ADD COLUMN defective_quantity INT NOT NULL DEFAULT 0");
 
             executeSql(stmt,
                     "Create return_request_evidences when missing",
