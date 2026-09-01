@@ -498,8 +498,8 @@ public class EmployeeService {
                   AND (
                     column_name IN ('created_by_user_id', 'updated_by_user_id', 'sender_id', 'receiver_id', 'assigned_staff_id', 'staff_assigned_id', 'author_id')
                     OR column_name = 'user_id'
-                    OR column_name LIKE '%\\_user_id' ESCAPE '\\'
-                    OR column_name LIKE '%\\_staff_id' ESCAPE '\\'
+                    OR column_name LIKE '%\\_user_id' ESCAPE '\\\\'
+                    OR column_name LIKE '%\\_staff_id' ESCAPE '\\\\'
                   )
                 """, schemaName);
 
