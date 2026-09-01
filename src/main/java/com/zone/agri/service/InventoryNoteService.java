@@ -5,6 +5,7 @@ import com.zone.agri.dto.request.inventory.ExportNoteRequest;
 import com.zone.agri.dto.response.inventory.InventoryNoteDetailResponse;
 import com.zone.agri.dto.response.inventory.InventoryNoteResponse;
 import com.zone.agri.common.AuthUtils;
+import com.zone.agri.common.InventoryExpiryPolicy;
 import com.zone.agri.common.RoleUtils;
 import com.zone.agri.entity.*;
 import com.zone.agri.entity.enums.InventoryCheckScopeType;
@@ -942,11 +943,13 @@ public class InventoryNoteService {
             ProductVariant variant = detail.getProductVariant();
             String batchNum = detail.getBatchNumber();
             BigDecimal importPrice = detail.getPrice();
+            LocalDateTime expiryDate = detail.getExpiryDate();
+            InventoryExpiryPolicy.assertRequiredForInventoryCheck(variant, batchNum, expiryDate);
             int actualQty = Math.max(0, Objects.requireNonNullElse(detail.getQuantityReal(), 0)
                     - Objects.requireNonNullElse(detail.getQuantityRejected(), 0));
             int actualDefectiveQty = Objects.requireNonNullElse(detail.getQuantityRejected(), 0);
 
-            Optional<Inventory> batchOpt = inventoryRepository.findExactBatchWithLock(branch, variant, batchNum, importPrice);
+            Optional<Inventory> batchOpt = resolveCheckBatchForApproval(branch, variant, batchNum, importPrice, detail);
 
             if (batchOpt.isEmpty()) {
                 Inventory newBatch = Inventory.builder()
@@ -956,6 +959,7 @@ public class InventoryNoteService {
                         .quantity(actualQty)
                         .defectiveQuantity(actualDefectiveQty)
                         .importPrice(importPrice != null ? importPrice : BigDecimal.ZERO)
+                        .expiryDate(expiryDate)
                         .lastReceiptDate(LocalDateTime.now())
                         .build();
                 newBatch = inventoryRepository.save(newBatch);
@@ -978,13 +982,15 @@ public class InventoryNoteService {
                 Inventory batch = batchOpt.get();
                 int systemQty = Objects.requireNonNullElse(batch.getQuantity(), 0);
                 int systemDefectiveQty = Objects.requireNonNullElse(batch.getDefectiveQuantity(), 0);
+                boolean expiryChanged = !sameExpiryDate(batch.getExpiryDate(), expiryDate);
 
                 int discrepancyNormal = actualQty - systemQty;
                 int discrepancyDefective = actualDefectiveQty - systemDefectiveQty;
 
-                if (discrepancyNormal != 0 || discrepancyDefective != 0) {
+                if (discrepancyNormal != 0 || discrepancyDefective != 0 || expiryChanged) {
                     batch.setQuantity(actualQty);
                     batch.setDefectiveQuantity(actualDefectiveQty);
+                    batch.setExpiryDate(expiryDate);
                     inventoryRepository.save(batch);
 
                     transactionRepository.save(InventoryTransaction.builder()
@@ -1010,6 +1016,54 @@ public class InventoryNoteService {
         note.setCheckApprovedAt(LocalDateTime.now());
         note.setCheckApprovedBy(approver);
         return mapToResponse(inventoryNoteRepository.save(note));
+    }
+
+    private Optional<Inventory> resolveCheckBatchForApproval(
+            Branch branch,
+            ProductVariant variant,
+            String batchNumber,
+            BigDecimal importPrice,
+            InventoryNoteDetail detail
+    ) {
+        LocalDateTime targetExpiryDate = detail.getExpiryDate();
+        LocalDateTime originalExpiryDate = detail.getOriginalExpiryDate() != null
+                ? detail.getOriginalExpiryDate()
+                : targetExpiryDate;
+
+        Optional<Inventory> originalBatch = inventoryRepository.findExactBatchWithLock(
+                branch,
+                variant,
+                batchNumber,
+                importPrice,
+                originalExpiryDate);
+
+        if (originalBatch.isEmpty()) {
+            originalBatch = inventoryRepository.findExactBatchWithLock(
+                    branch,
+                    variant,
+                    batchNumber,
+                    importPrice,
+                    targetExpiryDate);
+        }
+
+        Optional<Inventory> resolvedBatch = originalBatch;
+        if (resolvedBatch.isPresent()
+                && !sameExpiryDate(originalExpiryDate, targetExpiryDate)
+                && inventoryRepository.findExactBatchWithLock(branch, variant, batchNumber, importPrice, targetExpiryDate)
+                        .filter(existing -> !Objects.equals(existing.getId(), resolvedBatch.get().getId()))
+                        .isPresent()) {
+            throw new BadRequestException("SKU " + variant.getSku()
+                    + ": đã tồn tại lô khác với cùng số lô, giá nhập và hạn sử dụng mới. Vui lòng kiểm kê tách dòng lô.");
+        }
+
+        return resolvedBatch;
+    }
+
+    private boolean sameExpiryDate(LocalDateTime left, LocalDateTime right) {
+        if (left == null || right == null) {
+            return left == right;
+        }
+        return left.toLocalDate().equals(right.toLocalDate());
     }
 
     private InventoryCheckScopeType resolveScopeType(CheckNoteRequest request) {
@@ -1051,11 +1105,17 @@ public class InventoryNoteService {
             ProductVariant variant = productVariantRepository.findById(detailReq.getProductVariantId())
                     .orElseThrow(() -> new NotFoundException("Sản phẩm không tồn tại: " + detailReq.getProductVariantId()));
 
+            LocalDateTime expiryDate = parseExpiryDate(detailReq.getExpiryDate());
+            InventoryExpiryPolicy.assertRequiredForInventoryCheck(
+                    variant,
+                    detailReq.getBatchNumber(),
+                    expiryDate);
+
             Integer systemQty = detailReq.getSystemQuantity() != null
                     ? detailReq.getSystemQuantity()
                     : detailReq.getQuantity();
             if (systemQty == null && preserveCountResult) {
-                systemQty = resolveSystemQuantity(branch, variant, detailReq.getBatchNumber(), detailReq.getImportPrice());
+                systemQty = resolveSystemQuantity(branch, variant, detailReq.getBatchNumber(), detailReq.getImportPrice(), expiryDate);
             }
 
             details.add(InventoryNoteDetail.builder()
@@ -1065,7 +1125,8 @@ public class InventoryNoteService {
                     .quantityReal(preserveCountResult ? detailReq.getQuantityReal() : null)
                     .quantityRejected(preserveCountResult ? detailReq.getQuantityRejected() : null)
                     .batchNumber(detailReq.getBatchNumber())
-                    .expiryDate(parseExpiryDate(detailReq.getExpiryDate()))
+                    .expiryDate(expiryDate)
+                    .originalExpiryDate(expiryDate)
                     .price(detailReq.getImportPrice())
                     .note(detailReq.getNote())
                     .build());
@@ -1075,7 +1136,15 @@ public class InventoryNoteService {
     }
 
     private Integer resolveSystemQuantity(Branch branch, ProductVariant variant, String batchNumber, BigDecimal importPrice) {
-        return inventoryRepository.findExactBatch(branch, variant, batchNumber, importPrice)
+        return resolveSystemQuantity(branch, variant, batchNumber, importPrice, null);
+    }
+
+    private Integer resolveSystemQuantity(Branch branch, ProductVariant variant, String batchNumber, BigDecimal importPrice,
+            LocalDateTime expiryDate) {
+        Optional<Inventory> exactBatch = expiryDate != null
+                ? inventoryRepository.findExactBatch(branch, variant, batchNumber, importPrice, expiryDate)
+                : inventoryRepository.findExactBatch(branch, variant, batchNumber, importPrice);
+        return exactBatch
                 .map(Inventory::getQuantity)
                 .orElse(0);
     }
@@ -1143,21 +1212,29 @@ public class InventoryNoteService {
         for (Map.Entry<String, InventoryNoteDetail> entry : existingByKey.entrySet()) {
             InventoryNoteDetail detail = entry.getValue();
             CheckNoteRequest.CheckNoteDetailRequest requestDetail = requestByKey.get(entry.getKey());
+            LocalDateTime expiryDate = parseExpiryDate(requestDetail.getExpiryDate());
+            InventoryExpiryPolicy.assertRequiredForInventoryCheck(
+                    detail.getProductVariant(),
+                    detail.getBatchNumber(),
+                    expiryDate);
             detail.setQuantityReal(requestDetail.getQuantityReal());
             detail.setQuantityRejected(requestDetail.getQuantityRejected());
+            detail.setExpiryDate(expiryDate);
             detail.setNote(requestDetail.getNote());
         }
     }
 
     private String detailKey(CheckNoteRequest.CheckNoteDetailRequest detail) {
         return detail.getProductVariantId() + "|" + Objects.toString(detail.getBatchNumber(), "") + "|"
-                + normalizePriceKey(detail.getImportPrice());
+                + normalizePriceKey(detail.getImportPrice()) + "|"
+                + normalizeDateKey(detail.getOriginalExpiryDate() != null ? detail.getOriginalExpiryDate() : detail.getExpiryDate());
     }
 
     private String detailKey(InventoryNoteDetail detail) {
         Long variantId = detail.getProductVariant() != null ? detail.getProductVariant().getId() : null;
         return variantId + "|" + Objects.toString(detail.getBatchNumber(), "") + "|"
-                + normalizePriceKey(detail.getPrice());
+                + normalizePriceKey(detail.getPrice()) + "|"
+                + normalizeDateKey(detail.getExpiryDate());
     }
 
     private String normalizePriceKey(BigDecimal price) {
@@ -1171,6 +1248,15 @@ public class InventoryNoteService {
         }
 
         return normalized.toPlainString();
+    }
+
+    private String normalizeDateKey(String expiryDate) {
+        LocalDateTime parsed = parseExpiryDate(expiryDate);
+        return normalizeDateKey(parsed);
+    }
+
+    private String normalizeDateKey(LocalDateTime expiryDate) {
+        return expiryDate == null ? "" : expiryDate.toLocalDate().toString();
     }
 
     private void validateCheckSubmission(InventoryNote note) {
@@ -1191,6 +1277,11 @@ public class InventoryNoteService {
             if (rejectedQty > realQty) {
                 throw new BadRequestException("Số lượng hư hỏng không được lớn hơn số lượng thực tế.");
             }
+
+            InventoryExpiryPolicy.assertRequiredForInventoryCheck(
+                    detail.getProductVariant(),
+                    detail.getBatchNumber(),
+                    detail.getExpiryDate());
 
             int diffQty = realQty - snapshotQty;
             if ((diffQty != 0 || rejectedQty > 0) && (detail.getNote() == null || detail.getNote().isBlank())) {
@@ -1277,6 +1368,9 @@ public class InventoryNoteService {
                 .quantityRejected(d.getQuantityRejected())
                 .batchNumber(d.getBatchNumber())
                 .expiryDate(d.getExpiryDate() != null ? d.getExpiryDate().format(DateTimeFormatter.ISO_LOCAL_DATE) : null)
+                .originalExpiryDate(d.getOriginalExpiryDate() != null
+                        ? d.getOriginalExpiryDate().format(DateTimeFormatter.ISO_LOCAL_DATE)
+                        : (d.getExpiryDate() != null ? d.getExpiryDate().format(DateTimeFormatter.ISO_LOCAL_DATE) : null))
                 .price(Objects.requireNonNullElse(d.getPrice(), BigDecimal.ZERO))
                 .imageUrl(variant != null ? variant.getImageUrl() : null)
                 .note(d.getNote())

@@ -44,6 +44,9 @@ public class InventoryNoteDetail {
     @Column(name = "expiry_date")
     LocalDateTime expiryDate;
 
+    @Column(name = "original_expiry_date")
+    LocalDateTime originalExpiryDate;
+
     // Thêm thuộc tính note vào đây
     @Column(name = "note",  columnDefinition = "TEXT")
     String note;

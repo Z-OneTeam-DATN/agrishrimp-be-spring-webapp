@@ -8,6 +8,7 @@ public enum TransactionType {
     CANCEL_RELEASE,
     TRANSFER_OUT,
     TRANSFER_IN,
+    TRANSFER_LOSS,
     ADJUSTMENT,
     RETURN,
     DAMAGED

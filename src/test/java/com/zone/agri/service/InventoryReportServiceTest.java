@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.time.LocalDate;
 import java.util.Collection;
 import java.util.List;
 
@@ -48,10 +49,30 @@ class InventoryReportServiceTest {
                         TransactionType.SALE,
                         TransactionType.TRANSFER_IN,
                         TransactionType.TRANSFER_OUT,
+                        TransactionType.TRANSFER_LOSS,
                         TransactionType.ADJUSTMENT,
                         TransactionType.RETURN,
                         TransactionType.CANCEL_RELEASE,
                         TransactionType.DAMAGED)
                 .doesNotContain(TransactionType.ORDER_RESERVE, TransactionType.ORDER_RELEASE);
+    }
+
+    @Test
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    void getIOSummary_shouldExcludeTransferLossFromStockMovementTotals() {
+        when(inventoryTransactionRepository.findMovementSummary(any(), isNull(), any(), any()))
+                .thenReturn(List.of());
+        when(inventoryTransactionRepository.findMovementAfterDate(any(), isNull(), any()))
+                .thenReturn(List.of());
+        when(inventoryRepository.findCurrentStockByBranch(isNull())).thenReturn(List.of());
+
+        inventoryReportService.getIOSummary(null, LocalDate.now().minusDays(1), LocalDate.now());
+
+        ArgumentCaptor<Collection<TransactionType>> typesCaptor = ArgumentCaptor.forClass(Collection.class);
+        verify(inventoryTransactionRepository).findMovementSummary(typesCaptor.capture(), isNull(), any(), any());
+
+        assertThat(typesCaptor.getValue())
+                .contains(TransactionType.TRANSFER_IN, TransactionType.TRANSFER_OUT)
+                .doesNotContain(TransactionType.TRANSFER_LOSS);
     }
 }

@@ -13,6 +13,7 @@ import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -31,6 +32,17 @@ public interface InventoryRepository extends JpaRepository<Inventory, Long> {
                         @Param("batchNumber") String batchNumber,
                         @Param("importPrice") BigDecimal importPrice);
 
+        @Query("SELECT i FROM Inventory i WHERE i.branch = :branch AND i.productVariant = :variant " +
+                        "AND (i.batchNumber = :batchNumber OR (i.batchNumber IS NULL AND :batchNumber IS NULL)) " +
+                        "AND (i.importPrice = :importPrice OR (i.importPrice IS NULL AND :importPrice IS NULL)) " +
+                        "AND (i.expiryDate = :expiryDate OR (i.expiryDate IS NULL AND :expiryDate IS NULL))")
+        Optional<Inventory> findExactBatch(
+                        @Param("branch") Branch branch,
+                        @Param("variant") ProductVariant variant,
+                        @Param("batchNumber") String batchNumber,
+                        @Param("importPrice") BigDecimal importPrice,
+                        @Param("expiryDate") LocalDateTime expiryDate);
+
         @Lock(LockModeType.PESSIMISTIC_WRITE)
         @Query("SELECT i FROM Inventory i WHERE i.branch = :branch AND i.productVariant = :variant " +
                         "AND (i.batchNumber = :batchNumber OR (i.batchNumber IS NULL AND :batchNumber IS NULL)) " +
@@ -40,6 +52,18 @@ public interface InventoryRepository extends JpaRepository<Inventory, Long> {
                         @Param("variant") ProductVariant variant,
                         @Param("batchNumber") String batchNumber,
                         @Param("importPrice") BigDecimal importPrice);
+
+        @Lock(LockModeType.PESSIMISTIC_WRITE)
+        @Query("SELECT i FROM Inventory i WHERE i.branch = :branch AND i.productVariant = :variant " +
+                        "AND (i.batchNumber = :batchNumber OR (i.batchNumber IS NULL AND :batchNumber IS NULL)) " +
+                        "AND (i.importPrice = :importPrice OR (i.importPrice IS NULL AND :importPrice IS NULL)) " +
+                        "AND (i.expiryDate = :expiryDate OR (i.expiryDate IS NULL AND :expiryDate IS NULL))")
+        Optional<Inventory> findExactBatchWithLock(
+                        @Param("branch") Branch branch,
+                        @Param("variant") ProductVariant variant,
+                        @Param("batchNumber") String batchNumber,
+                        @Param("importPrice") BigDecimal importPrice,
+                        @Param("expiryDate") LocalDateTime expiryDate);
 
         @Query("SELECT i FROM Inventory i LEFT JOIN FETCH i.branch LEFT JOIN FETCH i.productVariant")
         List<Inventory> findAllWithBranchAndVariant();

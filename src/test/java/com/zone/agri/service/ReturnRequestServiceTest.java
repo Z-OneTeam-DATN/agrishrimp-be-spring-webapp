@@ -55,6 +55,7 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -301,7 +302,8 @@ class ReturnRequestServiceTest {
                 any(Branch.class),
                 any(ProductVariant.class),
                 any(),
-                any(BigDecimal.class)))
+                any(BigDecimal.class),
+                nullable(java.time.LocalDateTime.class)))
                 .thenReturn(Optional.empty());
         when(inventoryRepository.save(any(Inventory.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(inventoryNoteRepository.save(any(InventoryNote.class))).thenAnswer(invocation -> {

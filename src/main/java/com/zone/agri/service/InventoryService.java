@@ -4,6 +4,7 @@ import com.zone.agri.dto.request.inventory.InventoryQCRequest;
 import com.zone.agri.dto.request.inventory.InventoryReceiptRequest;
 import com.zone.agri.dto.response.inventory.InventoryReceiptResponse;
 import com.zone.agri.common.AuthUtils;
+import com.zone.agri.common.InventoryExpiryPolicy;
 import com.zone.agri.common.RoleUtils;
 import com.zone.agri.entity.*;
 import com.zone.agri.entity.enums.InventoryNoteStatus;
@@ -248,11 +249,15 @@ public class InventoryService {
                 detail.setBatchNumber(qcItem.getLotNumber());
             }
             if (qcItem.getExpiryDate() != null && !qcItem.getExpiryDate().isBlank()) {
-                detail.setExpiryDate(LocalDate.parse(qcItem.getExpiryDate()).atStartOfDay());
+                detail.setExpiryDate(parseExpiryDate(qcItem.getExpiryDate()));
             }
             if (qcItem.getNote() != null) {
                 detail.setNote(qcItem.getNote());
             }
+            InventoryExpiryPolicy.assertRequiredForReceipt(
+                    detail.getProductVariant(),
+                    detail.getBatchNumber(),
+                    detail.getExpiryDate());
         }
 
         return mapToResponse(finalizeReceiptCompletion(note));
@@ -319,7 +324,7 @@ public class InventoryService {
     private void updateStockBalanceExactBatch(InventoryNote note, Branch branch, ProductVariant variant, String batchNumber, 
                                             BigDecimal importPrice, LocalDateTime expiryDate, 
                                             Integer acceptedQty, Integer rejectedQty, TransactionType type) {
-        Inventory inv = inventoryRepository.findExactBatchWithLock(branch, variant, batchNumber, importPrice)
+        Inventory inv = inventoryRepository.findExactBatchWithLock(branch, variant, batchNumber, importPrice, expiryDate)
                 .orElseGet(() -> {
                     Inventory newInv = Inventory.builder()
                         .branch(branch)
@@ -435,10 +440,10 @@ public class InventoryService {
             BigDecimal itemSubtotal = importPrice.multiply(BigDecimal.valueOf(acceptedQty));
             totalAmount = totalAmount.add(itemSubtotal);
 
-            LocalDateTime expiry = (itemDTO.getExpiryDate() != null && !itemDTO.getExpiryDate().isBlank())
-                    ? LocalDate.parse(itemDTO.getExpiryDate()).atStartOfDay() : null;
-
-            String batch = (itemDTO.getLotNumber() == null || itemDTO.getLotNumber().isBlank()) ? "DEFAULT" : itemDTO.getLotNumber();
+            LocalDateTime expiry = parseExpiryDate(itemDTO.getExpiryDate());
+            String requestedBatch = normalizeBatchNumber(itemDTO.getLotNumber());
+            InventoryExpiryPolicy.assertRequiredForReceipt(variant, requestedBatch, expiry);
+            String batch = requestedBatch != null ? requestedBatch : "DEFAULT";
 
             InventoryNoteDetail detailEntity = InventoryNoteDetail.builder()
                     .inventoryNote(note)
@@ -516,6 +521,24 @@ public class InventoryService {
     private int physicalBalance(Inventory inventory) {
         return Objects.requireNonNullElse(inventory.getQuantity(), 0)
                 + Objects.requireNonNullElse(inventory.getDefectiveQuantity(), 0);
+    }
+
+    private String normalizeBatchNumber(String batchNumber) {
+        if (batchNumber == null || batchNumber.isBlank()) {
+            return null;
+        }
+        return batchNumber.trim();
+    }
+
+    private LocalDateTime parseExpiryDate(String expiryDate) {
+        if (expiryDate == null || expiryDate.isBlank()) {
+            return null;
+        }
+        try {
+            return LocalDate.parse(expiryDate.trim()).atStartOfDay();
+        } catch (Exception ex) {
+            throw new BadRequestException("Hạn sử dụng không hợp lệ: " + expiryDate);
+        }
     }
 
     // --- 4 & 5. LẤY DANH SÁCH & CHI TIẾT ---
