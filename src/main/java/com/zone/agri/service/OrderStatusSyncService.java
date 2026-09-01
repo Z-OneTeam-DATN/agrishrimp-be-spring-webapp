@@ -87,6 +87,10 @@ public class OrderStatusSyncService {
                     && PaymentStatus.UNPAID.equals(order.getPaymentStatus())) {
                 payOSService.cancelPaymentLink(order);
             }
+            if (PaymentStatus.PAID.equals(order.getPaymentStatus())
+                    || PaymentStatus.PARTIALLY_PAID.equals(order.getPaymentStatus())) {
+                order.setPaymentStatus(PaymentStatus.REFUND_PENDING);
+            }
             if (order.getCancelReasonCode() == null) {
                 order.setCancelReasonCode(OrderCancelReasonCode.SUB_ORDERS_CANCELLED);
             }

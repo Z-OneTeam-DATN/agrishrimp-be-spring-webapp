@@ -318,7 +318,8 @@ public class SupplierDebtInsightService {
             return outstanding.compareTo(BigDecimal.ZERO) > 0 ? outstanding : BigDecimal.ZERO;
         }
         if (noteType == InventoryNoteType.EXPORT) {
-            return totalAmount.negate();
+            BigDecimal outstanding = paidAmount.subtract(totalAmount);
+            return outstanding.compareTo(BigDecimal.ZERO) < 0 ? outstanding : BigDecimal.ZERO;
         }
         return BigDecimal.ZERO;
     }

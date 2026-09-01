@@ -51,6 +51,11 @@ public interface InventoryTransactionRepository extends JpaRepository<InventoryT
             SELECT COALESCE(SUM(tx.quantityChange * COALESCE(tx.inventory.importPrice, 0)), 0)
             FROM InventoryTransaction tx
             WHERE tx.createdAt BETWEEN :start AND :end
+              AND tx.type NOT IN (
+                  com.zone.agri.entity.enums.TransactionType.ORDER_RESERVE,
+                  com.zone.agri.entity.enums.TransactionType.ORDER_RELEASE,
+                  com.zone.agri.entity.enums.TransactionType.CANCEL_RELEASE
+              )
               AND (:branchId IS NULL OR tx.inventory.branch.id = :branchId)
             """)
     java.math.BigDecimal sumNetValueChange(@org.springframework.data.repository.query.Param("start") java.time.LocalDateTime start,
@@ -69,6 +74,33 @@ public interface InventoryTransactionRepository extends JpaRepository<InventoryT
     List<ReferenceCostProjection> sumSaleCostByReferenceCodes(
             @org.springframework.data.repository.query.Param("referenceCodes") java.util.Collection<String> referenceCodes,
             @org.springframework.data.repository.query.Param("branchId") Long branchId);
+
+    @org.springframework.data.jpa.repository.Query("""
+            SELECT COALESCE(SUM(ABS(tx.quantityChange) * COALESCE(tx.inventory.importPrice, 0)), 0)
+            FROM InventoryTransaction tx
+            WHERE tx.createdAt BETWEEN :start AND :end
+              AND (:branchId IS NULL OR tx.inventory.branch.id = :branchId)
+              AND (tx.type = com.zone.agri.entity.enums.TransactionType.DAMAGED 
+                   OR (tx.type = com.zone.agri.entity.enums.TransactionType.ADJUSTMENT AND tx.quantityChange < 0))
+            """)
+    java.math.BigDecimal sumWriteOffExpenses(
+            @org.springframework.data.repository.query.Param("start") java.time.LocalDateTime start,
+            @org.springframework.data.repository.query.Param("end") java.time.LocalDateTime end,
+            @org.springframework.data.repository.query.Param("branchId") Long branchId);
+
+    @org.springframework.data.jpa.repository.Query("""
+            SELECT COALESCE(SUM(tx.quantityChange * COALESCE(tx.inventory.importPrice, 0)), 0)
+            FROM InventoryTransaction tx
+            WHERE tx.createdAt BETWEEN :start AND :end
+              AND (:branchId IS NULL OR tx.inventory.branch.id = :branchId)
+              AND tx.type = com.zone.agri.entity.enums.TransactionType.ADJUSTMENT 
+              AND tx.quantityChange > 0
+            """)
+    java.math.BigDecimal sumInventoryGains(
+            @org.springframework.data.repository.query.Param("start") java.time.LocalDateTime start,
+            @org.springframework.data.repository.query.Param("end") java.time.LocalDateTime end,
+            @org.springframework.data.repository.query.Param("branchId") Long branchId);
+
 
     @org.springframework.data.jpa.repository.Query("""
             SELECT tx FROM InventoryTransaction tx
