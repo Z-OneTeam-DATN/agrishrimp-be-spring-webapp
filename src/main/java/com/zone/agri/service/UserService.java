@@ -1,6 +1,8 @@
 package com.zone.agri.service;
 
+import com.zone.agri.common.AuthUtils;
 import com.zone.agri.common.CloudinaryService;
+import com.zone.agri.common.RoleUtils;
 import com.zone.agri.dto.request.user.ProfileUpdateRequest;
 import com.zone.agri.dto.request.user.UserRequest;
 import com.zone.agri.dto.response.user.UserResponse;
@@ -9,7 +11,9 @@ import com.zone.agri.entity.Role;
 import com.zone.agri.entity.User;
 import com.zone.agri.entity.enums.Gender;
 import com.zone.agri.entity.enums.UserStatus;
+import com.zone.agri.exception.BadRequestException;
 import com.zone.agri.exception.ConflictException;
+import com.zone.agri.exception.Forbidden;
 import com.zone.agri.exception.NotFoundException;
 import com.zone.agri.repository.BranchRepository;
 import com.zone.agri.repository.RoleRepository;
@@ -166,8 +170,8 @@ public class UserService {
         if (userRepository.existsByEmail(request.getEmail())) throw new ConflictException("Email đã tồn tại");
         if (userRepository.existsByPhoneNumber(request.getPhoneNumber())) throw new ConflictException("SĐT đã tồn tại");
 
-        Role role = roleRepository.findById(request.getRoleId()).orElseThrow(() -> new NotFoundException("Vai trò không tồn tại"));
-        Branch branch = branchRepository.findById(request.getBranchId()).orElseThrow(() -> new NotFoundException("Chi nhánh không tồn tại"));
+        Role role = resolveAssignableRole(request.getRoleId());
+        Branch branch = resolveBranch(request.getBranchId(), role);
 
         User user = User.builder()
                 .fullName(request.getFullName())
@@ -212,8 +216,47 @@ public class UserService {
 
     @Transactional
     public void deleteUser(Long id) {
-        if (!userRepository.existsById(id)) throw new NotFoundException("User không tồn tại");
+        User user = userRepository.findById(id).orElseThrow(() -> new NotFoundException("User không tồn tại"));
+        if (isPrivilegedRole(user.getRole()) && !isCurrentUserSuperAdmin()) {
+            throw new Forbidden("Chỉ SUPER_ADMIN được thao tác với tài khoản quản trị/hệ thống");
+        }
         userRepository.deleteById(id);
+    }
+
+    private Role resolveAssignableRole(Long roleId) {
+        if (roleId == null) {
+            throw new BadRequestException("Vai trò không được để trống");
+        }
+
+        Role role = roleRepository.findById(roleId)
+                .orElseThrow(() -> new NotFoundException("Vai trò không tồn tại"));
+
+        if (isPrivilegedRole(role) && !isCurrentUserSuperAdmin()) {
+            throw new Forbidden("Chỉ SUPER_ADMIN được gán vai trò quản trị/hệ thống");
+        }
+
+        return role;
+    }
+
+    private Branch resolveBranch(Long branchId, Role role) {
+        if (branchId == null) {
+            if (role != null && RoleUtils.isAdminLikeRole(role.getSlug())) {
+                return null;
+            }
+            throw new BadRequestException("Chi nhánh không được để trống");
+        }
+
+        return branchRepository.findById(branchId)
+                .orElseThrow(() -> new NotFoundException("Chi nhánh không tồn tại"));
+    }
+
+    private boolean isPrivilegedRole(Role role) {
+        return role != null
+                && (Boolean.TRUE.equals(role.getIsSystem()) || RoleUtils.isAdminLikeRole(role.getSlug()));
+    }
+
+    private boolean isCurrentUserSuperAdmin() {
+        return RoleUtils.hasSuperAdminAuthority(AuthUtils.getAuthorities());
     }
 
     private UserResponse mapUserToResponse(User user) {

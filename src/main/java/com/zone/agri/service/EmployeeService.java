@@ -22,7 +22,6 @@ import com.zone.agri.common.AuthUtils;
 import com.zone.agri.common.RoleUtils;
 import com.zone.agri.dto.request.employee.EmployeeCreateRequest;
 import com.zone.agri.dto.response.employee.EmployeeResponse;
-import com.zone.agri.dto.response.user.UserDetail;
 import com.zone.agri.entity.Branch;
 import com.zone.agri.entity.Role;
 import com.zone.agri.entity.User;
@@ -296,12 +295,7 @@ public class EmployeeService {
             return true;
         }
 
-        UserDetail currentUser = AuthUtils.getUserDetail();
-        String currentRoleSlug = currentUser != null && currentUser.getRole() != null
-                ? currentUser.getRole().getSlug()
-                : null;
-
-        return RoleUtils.isAdminLikeRole(currentRoleSlug);
+        return RoleUtils.hasSuperAdminAuthority(AuthUtils.getAuthorities());
     }
 
     @Transactional

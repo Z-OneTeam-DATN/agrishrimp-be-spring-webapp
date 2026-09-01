@@ -99,6 +99,7 @@ public class SupplierController {
 
     @Operation(summary = "Lịch sử nhập hàng", description = "Lấy danh sách các phiếu nhập hàng từ nhà cung cấp này.")
     @SecurityRequirement(name = "bearerAuth")
+    @RequirePermission({"SUPPLIER_VIEW", "IMPORT_VIEW", "REPORT_FINANCE_VIEW"})
     @GetMapping("/{id}/imports")
     public ResponseEntity<?> getSupplierImports(@PathVariable Long id) {
         return ResponseEntity.ok(supplierService.getImportHistory(id));

@@ -76,7 +76,7 @@ public class ChatController {
     public ResponseEntity<List<ChatMessageResponse>> getMessages(@PathVariable Long id) {
         User user = getCurrentUser();
         chatService.markAsRead(id, user.getId());
-        return ResponseEntity.ok(chatService.getMessages(id));
+        return ResponseEntity.ok(chatService.getMessages(id, user.getId()));
     }
 
     @Operation(summary = "Gửi tin nhắn qua REST (fallback nếu WebSocket không khả dụng)")

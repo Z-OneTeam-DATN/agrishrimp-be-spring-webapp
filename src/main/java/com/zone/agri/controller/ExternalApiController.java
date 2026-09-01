@@ -1,6 +1,7 @@
 package com.zone.agri.controller;
 
 import com.zone.agri.dto.response.supplier.VietQrResponse;
+import com.zone.agri.security.annotation.RequirePermission;
 import com.zone.agri.service.ExternalApiService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -29,6 +30,7 @@ public class ExternalApiController {
             @ApiResponse(responseCode = "200", description = "Tìm thấy thông tin", content = @Content(schema = @Schema(implementation = VietQrResponse.BusinessData.class))),
             @ApiResponse(responseCode = "404", description = "Không tìm thấy MST")
     })
+    @RequirePermission({"SUPPLIER_VIEW", "SUPPLIER_CREATE", "SUPPLIER_UPDATE"})
     @GetMapping("/business/{taxCode}")
     public ResponseEntity<VietQrResponse.BusinessData> getBusinessInfo(
             @Parameter(description = "Mã số thuế doanh nghiệp", example = "0312345678", required = true)
@@ -41,6 +43,7 @@ public class ExternalApiController {
             @ApiResponse(responseCode = "200", description = "Tra cứu thành công", content = @Content(examples = @ExampleObject(value = "NGUYEN VAN A"))),
             @ApiResponse(responseCode = "400", description = "Số tài khoản không hợp lệ")
     })
+    @RequirePermission({"SUPPLIER_CREATE", "SUPPLIER_UPDATE"})
     @PostMapping("/bank-lookup")
     public ResponseEntity<?> lookupBankAccount(
             @io.swagger.v3.oas.annotations.parameters.RequestBody(

@@ -1,5 +1,6 @@
 package com.zone.agri.controller;
 
+import com.zone.agri.security.annotation.RequirePermission;
 import com.zone.agri.service.SettingService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
@@ -13,6 +14,7 @@ public class SettingController {
 
     private final SettingService settingService;
 
+    @RequirePermission("SETTING_VIEW")
     @GetMapping("/profit-margin")
     public ResponseEntity<?> getProfitMargin() {
         return ResponseEntity.ok(Map.of(
@@ -25,6 +27,7 @@ public class SettingController {
         ));
     }
 
+    @RequirePermission("SETTING_UPDATE")
     @PutMapping("/profit-margin")
     public ResponseEntity<?> updateProfitMargin(@RequestBody Map<String, Object> request) {
         String margin = String.valueOf(request.getOrDefault("margin", settingService.getProfitMarginRaw()));

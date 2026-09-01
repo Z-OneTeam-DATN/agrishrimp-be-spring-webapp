@@ -9,8 +9,10 @@ import com.zone.agri.entity.enums.ConversationStatus;
 import com.zone.agri.entity.enums.MessageType;
 import com.zone.agri.entity.enums.NotificationType;
 import com.zone.agri.common.CloudinaryService;
+import com.zone.agri.common.RoleUtils;
 import com.zone.agri.dto.ai.AiChatResponse;
 import com.zone.agri.dto.request.ai.AiDoctorChatRequest;
+import com.zone.agri.exception.Forbidden;
 import com.zone.agri.repository.*;
 import com.zone.agri.service.ai.AiKnowledgeService;
 import lombok.RequiredArgsConstructor;
@@ -26,6 +28,7 @@ import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.stream.Collectors;
 
@@ -33,6 +36,9 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 @Slf4j
 public class ChatService {
+
+    private static final Set<String> CHAT_STAFF_PERMISSIONS =
+            Set.of("CHAT_VIEW", "CHAT_MANAGE", "CUSTOMER_ADVISOR_USE");
 
     private final ConversationRepository conversationRepository;
     private final ChatMessageRepository chatMessageRepository;
@@ -74,8 +80,9 @@ public class ChatService {
     }
 
     @Transactional(readOnly = true)
-    public List<ChatMessageResponse> getMessages(Long conversationId) {
-        return chatMessageRepository.findByConversationId(conversationId)
+    public List<ChatMessageResponse> getMessages(Long conversationId, Long requesterId) {
+        Conversation conv = requireConversationAccess(conversationId, requesterId);
+        return chatMessageRepository.findByConversationId(conv.getId())
                 .stream()
                 .map(this::toMessageResponse)
                 .collect(Collectors.toList());
@@ -87,6 +94,7 @@ public class ChatService {
                 .orElseThrow(() -> new RuntimeException("User not found"));
         Conversation conv = conversationRepository.findById(request.getConversationId())
                 .orElseThrow(() -> new RuntimeException("Conversation not found"));
+        ensureCanAccessConversation(sender, conv);
 
         ChatMessage msg = ChatMessage.builder()
                 .conversation(conv)
@@ -145,6 +153,9 @@ public class ChatService {
     public ChatMessageResponse pinProduct(Long staffId, Long conversationId, PinProductRequest request) {
         User sender = userRepository.findById(staffId)
                 .orElseThrow(() -> new RuntimeException("Staff not found"));
+        if (!hasChatStaffAccess(sender)) {
+            throw new Forbidden("Bạn không có quyền ghim sản phẩm vào hội thoại này");
+        }
         Conversation conv = conversationRepository.findById(conversationId)
                 .orElseThrow(() -> new RuntimeException("Conversation not found"));
         Product product = productRepository.findById(request.getProductId())
@@ -196,6 +207,7 @@ public class ChatService {
                 .orElseThrow(() -> new RuntimeException("User not found"));
         Conversation conv = conversationRepository.findById(conversationId)
                 .orElseThrow(() -> new RuntimeException("Conversation not found"));
+        ensureCanAccessConversation(sender, conv);
 
         String imageUrl = cloudinaryService.upload(file, "chat").secureUrl();
 
@@ -241,6 +253,7 @@ public class ChatService {
 
     @Transactional
     public void markAsRead(Long conversationId, Long readerId) {
+        requireConversationAccess(conversationId, readerId);
         chatMessageRepository.markAsReadByConversationAndNotSender(conversationId, readerId);
         conversationRepository.findById(conversationId).ifPresent(conv -> {
             if (readerId.equals(conv.getCustomer().getId())) {
@@ -310,18 +323,17 @@ public class ChatService {
     }
 
     public void broadcastTyping(Long senderId, Long conversationId) {
-        conversationRepository.findById(conversationId).ifPresent(conv -> {
-            Map<String, Object> event = Map.of("conversationId", conversationId, "senderId", senderId);
-            Long customerId = conv.getCustomer().getId();
-            if (senderId.equals(customerId)) {
-                messagingTemplate.convertAndSend("/topic/shop-typing", event);
-            } else {
-                String customerPrincipalTyping = conv.getCustomer().getEmail() != null
-                        ? conv.getCustomer().getEmail()
-                        : conv.getCustomer().getPhoneNumber();
-                messagingTemplate.convertAndSendToUser(customerPrincipalTyping, "/queue/typing", event);
-            }
-        });
+        Conversation conv = requireConversationAccess(conversationId, senderId);
+        Map<String, Object> event = Map.of("conversationId", conversationId, "senderId", senderId);
+        Long customerId = conv.getCustomer().getId();
+        if (senderId.equals(customerId)) {
+            messagingTemplate.convertAndSend("/topic/shop-typing", event);
+        } else {
+            String customerPrincipalTyping = conv.getCustomer().getEmail() != null
+                    ? conv.getCustomer().getEmail()
+                    : conv.getCustomer().getPhoneNumber();
+            messagingTemplate.convertAndSendToUser(customerPrincipalTyping, "/queue/typing", event);
+        }
     }
 
     @Transactional
@@ -426,6 +438,7 @@ public class ChatService {
             new java.util.concurrent.ConcurrentHashMap<>();
 
     public void updateViewingStatus(Long userId, String username, Long conversationId, String status) {
+        requireConversationAccess(conversationId, userId);
         if ("JOIN".equals(status)) {
             activeViewers.computeIfAbsent(conversationId, k -> new java.util.concurrent.ConcurrentHashMap<>())
                     .put(userId, username);
@@ -455,6 +468,56 @@ public class ChatService {
                 "viewers", viewersList
         );
         messagingTemplate.convertAndSend("/topic/shop-viewers", event);
+    }
+
+    private Conversation requireConversationAccess(Long conversationId, Long requesterId) {
+        User requester = userRepository.findById(requesterId)
+                .orElseThrow(() -> new RuntimeException("User not found"));
+        Conversation conv = conversationRepository.findById(conversationId)
+                .orElseThrow(() -> new RuntimeException("Conversation not found"));
+        ensureCanAccessConversation(requester, conv);
+        return conv;
+    }
+
+    private void ensureCanAccessConversation(User requester, Conversation conv) {
+        if (canAccessConversation(requester, conv)) {
+            return;
+        }
+        log.warn("Blocked chat conversation access: userId={} conversationId={}",
+                requester != null ? requester.getId() : null,
+                conv != null ? conv.getId() : null);
+        throw new Forbidden("Bạn không có quyền truy cập hội thoại này");
+    }
+
+    private boolean canAccessConversation(User requester, Conversation conv) {
+        if (requester == null || requester.getId() == null || conv == null || conv.getCustomer() == null) {
+            return false;
+        }
+
+        if (requester.getId().equals(conv.getCustomer().getId())) {
+            return true;
+        }
+
+        if (conv.getAssignedStaff() != null && requester.getId().equals(conv.getAssignedStaff().getId())) {
+            return true;
+        }
+
+        return hasChatStaffAccess(requester);
+    }
+
+    private boolean hasChatStaffAccess(User user) {
+        if (user == null || user.getRole() == null) {
+            return false;
+        }
+
+        if (RoleUtils.isAdminLikeRole(user.getRole().getSlug())) {
+            return true;
+        }
+
+        return user.getRole().getPermissions() != null
+                && user.getRole().getPermissions().stream()
+                .anyMatch(permission -> permission != null
+                        && CHAT_STAFF_PERMISSIONS.contains(permission.getCode()));
     }
 
     public void removeUserFromAllConversations(String email) {

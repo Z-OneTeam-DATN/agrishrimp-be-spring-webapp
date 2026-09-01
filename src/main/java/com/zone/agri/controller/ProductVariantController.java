@@ -31,6 +31,7 @@ public class ProductVariantController {
     }
 
     @Operation(summary = "Tìm kiếm biến thể sản phẩm (Dùng cho tạo đơn/chuyển kho)")
+    @RequirePermission({"PRODUCT_VIEW", "IMPORT_CREATE", "EXPORT_CREATE", "TRANSFER_CREATE", "INVENTORY_CHECK_CREATE"})
     @GetMapping("/search")
     // [CẬP NHẬT QUAN TRỌNG]: Nhận thêm branchId (không bắt buộc) và đổi kiểu trả về
     public ResponseEntity<List<ProductVariantResponse>> searchVariants(

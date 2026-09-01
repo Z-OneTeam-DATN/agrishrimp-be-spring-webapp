@@ -50,7 +50,7 @@ public class OpenApiConfig {
     public GroupedOpenApi publicApi() {
         return GroupedOpenApi.builder()
                 .group("1. Public APIs")
-                .pathsToMatch("/api/auth/**", "/api/public/**", "/api/external/**")
+                .pathsToMatch("/api/auth/**", "/api/public/**")
                 .build();
     }
 
@@ -66,7 +66,7 @@ public class OpenApiConfig {
     public GroupedOpenApi businessApi() {
         return GroupedOpenApi.builder()
                 .group("3. Business Operations")
-                .pathsToMatch("/api/products/**", "/api/categories/**", "/api/suppliers/**", "/api/customers/**", "/api/attributes/**")
+                .pathsToMatch("/api/products/**", "/api/categories/**", "/api/suppliers/**", "/api/customers/**", "/api/attributes/**", "/api/external/**")
                 .build();
     }
 
