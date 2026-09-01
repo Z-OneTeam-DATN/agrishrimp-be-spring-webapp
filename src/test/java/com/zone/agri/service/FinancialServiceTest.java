@@ -142,6 +142,8 @@ class FinancialServiceTest {
                         costProjection("ORD-LEGACY-1", "600"),
                         costProjection("ORD-SPLIT-1-SUB-21", "200"),
                         costProjection("ORD-SPLIT-1-SUB-22", "150")));
+        when(inventoryTransactionRepository.sumWriteOffExpenses(any(), any(), eq(12L))).thenReturn(BigDecimal.ZERO);
+        when(inventoryTransactionRepository.sumInventoryGains(any(), any(), eq(12L))).thenReturn(BigDecimal.ZERO);
 
         ProfitLossResponse response = financialService.getProfitLossReport(
                 LocalDate.of(2026, 5, 1),
@@ -361,6 +363,8 @@ class FinancialServiceTest {
                 eq(LocalDateTime.of(2026, 5, 31, 23, 59, 59)),
                 eq(5L)))
                 .thenReturn(List.of());
+        when(inventoryTransactionRepository.sumWriteOffExpenses(any(), any(), eq(5L))).thenReturn(BigDecimal.ZERO);
+        when(inventoryTransactionRepository.sumInventoryGains(any(), any(), eq(5L))).thenReturn(BigDecimal.ZERO);
 
         ProfitLossResponse response = financialService.getProfitLossReport(
                 LocalDate.of(2026, 5, 1),
@@ -598,5 +602,54 @@ class FinancialServiceTest {
                 return null;
             }
         };
+    }
+
+    @Test
+    void getProfitLossReport_shouldIncludeWriteOffExpensesAndInventoryGains() {
+        setAuthenticatedUser("ADMIN", 99L);
+
+        when(orderRepository.findLegacyFinancialOrders(any(), any(), eq(12L))).thenReturn(List.of());
+        when(subOrderRepository.findFinancialSubOrders(any(), any(), eq(12L))).thenReturn(List.of());
+        when(inventoryTransactionRepository.sumWriteOffExpenses(any(), any(), eq(12L)))
+                .thenReturn(new BigDecimal("150.00"));
+        when(inventoryTransactionRepository.sumInventoryGains(any(), any(), eq(12L)))
+                .thenReturn(new BigDecimal("50.00"));
+
+        ProfitLossResponse response = financialService.getProfitLossReport(
+                LocalDate.of(2026, 5, 1),
+                LocalDate.of(2026, 5, 31),
+                12L);
+
+        assertThat(response.getOtherExpenses()).isEqualByComparingTo("150.00");
+        assertThat(response.getOtherIncome()).isEqualByComparingTo("50.00");
+        assertThat(response.getNetProfit()).isEqualByComparingTo("-100.00");
+    }
+
+    @Test
+    void getSupplierDebts_shouldReduceDebtCorrectlyWhenReturnNoteHasSupplierRefund() {
+        setAuthenticatedUser("ADMIN", 77L);
+
+        when(supplierRepository.findSupplierDebtLedger(
+                eq("tom"),
+                eq(LocalDateTime.of(2026, 5, 31, 23, 59, 59)),
+                eq(7L),
+                eq(9L)))
+                .thenReturn(List.of(
+                        ledgerProjection(1L, "NCC001", "Tom A", "0901", 101L, InventoryNoteType.IMPORT, "1000", "400"),
+                        ledgerProjection(1L, "NCC001", "Tom A", "0901", 103L, InventoryNoteType.EXPORT, "200", "50"),
+                        ledgerProjection(2L, "NCC002", "Tom B", "0902", 201L, InventoryNoteType.IMPORT, "300", "300")
+                ));
+
+        List<SupplierDebtResponse> response = financialService.getSupplierDebts(
+                "tom",
+                LocalDate.of(2026, 5, 1),
+                LocalDate.of(2026, 5, 31),
+                7L,
+                9L,
+                "not_zero");
+
+        assertThat(response).hasSize(1);
+        assertThat(response.getFirst().getSupplierCode()).isEqualTo("NCC001");
+        assertThat(response.getFirst().getTotalDebt()).isEqualByComparingTo("450");
     }
 }

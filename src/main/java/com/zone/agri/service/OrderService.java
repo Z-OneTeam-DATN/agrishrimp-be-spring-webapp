@@ -550,6 +550,10 @@ public class OrderService {
                 && isPendingPayosPayment(order)) {
             payOSService.cancelPaymentLink(order);
         }
+        if (PaymentStatus.PAID.equals(order.getPaymentStatus())
+                || PaymentStatus.PARTIALLY_PAID.equals(order.getPaymentStatus())) {
+            order.setPaymentStatus(PaymentStatus.REFUND_PENDING);
+        }
         applyCancellationReason(order, cancelReason.reasonCode(), cancelReason.reasonText());
         orderRepository.save(order);
         customerService.evaluateAndHandleCustomerReputation(order.getUser().getId());
@@ -615,6 +619,10 @@ public class OrderService {
             if (PaymentMethod.PAYOS.equals(order.getPaymentMethod())
                     && isPendingPayosPayment(order)) {
                 payOSService.cancelPaymentLink(order);
+            }
+            if (PaymentStatus.PAID.equals(order.getPaymentStatus())
+                    || PaymentStatus.PARTIALLY_PAID.equals(order.getPaymentStatus())) {
+                order.setPaymentStatus(PaymentStatus.REFUND_PENDING);
             }
             ensureCancellationReason(order, OrderCancelReasonCode.ADMIN_CANCELLED, null);
         }

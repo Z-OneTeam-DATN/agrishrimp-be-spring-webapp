@@ -138,9 +138,9 @@ public class FinancialService {
         BigDecimal cogs = sumRecognizedCosts(recognizedReferenceCodes, finalBranchId);
         BigDecimal pointPayment = BigDecimal.ZERO;
         BigDecimal shippingFeePaid = BigDecimal.ZERO;
-        BigDecimal otherIncome = BigDecimal.ZERO;
+        BigDecimal otherIncome = inventoryTransactionRepository.sumInventoryGains(start, end, finalBranchId);
         BigDecimal customerReturnFee = BigDecimal.ZERO;
-        BigDecimal otherExpenses = BigDecimal.ZERO;
+        BigDecimal otherExpenses = inventoryTransactionRepository.sumWriteOffExpenses(start, end, finalBranchId);
 
         BigDecimal netProductRevenue = totals.grossRevenue.subtract(totals.returnedGoods);
         BigDecimal netRevenue = netProductRevenue
@@ -244,7 +244,8 @@ public class FinancialService {
                             outstandingAmount = BigDecimal.ZERO;
                         }
                     } else if (row.getNoteType() == InventoryNoteType.EXPORT) {
-                        outstandingAmount = totalAmount.negate();
+                        BigDecimal outstanding = paidAmount.subtract(totalAmount);
+                        outstandingAmount = outstanding.compareTo(BigDecimal.ZERO) < 0 ? outstanding : BigDecimal.ZERO;
                     }
 
                     return SupplierDebtDetailResponse.builder()
@@ -487,7 +488,8 @@ public class FinancialService {
             return outstanding.compareTo(BigDecimal.ZERO) > 0 ? outstanding : BigDecimal.ZERO;
         }
         if (noteType == InventoryNoteType.EXPORT) {
-            return totalAmount.negate();
+            BigDecimal outstanding = paidAmount.subtract(totalAmount);
+            return outstanding.compareTo(BigDecimal.ZERO) < 0 ? outstanding : BigDecimal.ZERO;
         }
         return BigDecimal.ZERO;
     }
