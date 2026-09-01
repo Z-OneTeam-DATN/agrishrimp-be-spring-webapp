@@ -32,7 +32,18 @@ public class InventoryReportService {
     private final InventoryRepository inventoryRepository;
     private final InventoryTransactionRepository inventoryTransactionRepository;
 
-    private static final Set<TransactionType> PHYSICAL_TRANSACTION_TYPES = EnumSet.of(
+    private static final Set<TransactionType> LEDGER_TRANSACTION_TYPES = EnumSet.of(
+            TransactionType.IMPORT,
+            TransactionType.SALE,
+            TransactionType.TRANSFER_IN,
+            TransactionType.TRANSFER_OUT,
+            TransactionType.TRANSFER_LOSS,
+            TransactionType.ADJUSTMENT,
+            TransactionType.RETURN,
+            TransactionType.CANCEL_RELEASE,
+            TransactionType.DAMAGED);
+
+    private static final Set<TransactionType> STOCK_MOVEMENT_TRANSACTION_TYPES = EnumSet.of(
             TransactionType.IMPORT,
             TransactionType.SALE,
             TransactionType.TRANSFER_IN,
@@ -95,7 +106,7 @@ public class InventoryReportService {
         LocalDateTime end = endDate != null ? endDate.atTime(LocalTime.MAX) : null;
 
         List<InventoryTransaction> rows = inventoryTransactionRepository
-                .findLedger(PHYSICAL_TRANSACTION_TYPES, branchId, start, end);
+                .findLedger(LEDGER_TRANSACTION_TYPES, branchId, start, end);
 
         return rows.stream()
                 .filter(tx -> matchesDirection(tx, direction))
@@ -116,7 +127,12 @@ public class InventoryReportService {
                     || tx.getType() == TransactionType.DAMAGED;
         }
         if ("transfer".equalsIgnoreCase(direction)) {
-            return tx.getType() == TransactionType.TRANSFER_IN || tx.getType() == TransactionType.TRANSFER_OUT;
+            return tx.getType() == TransactionType.TRANSFER_IN
+                    || tx.getType() == TransactionType.TRANSFER_OUT
+                    || tx.getType() == TransactionType.TRANSFER_LOSS;
+        }
+        if ("loss".equalsIgnoreCase(direction)) {
+            return tx.getType() == TransactionType.TRANSFER_LOSS;
         }
         return true;
     }
@@ -124,7 +140,7 @@ public class InventoryReportService {
     private InventoryLedgerEntryResponse mapLedgerEntry(InventoryTransaction tx) {
         int change = tx.getQuantityChange() != null ? tx.getQuantityChange() : 0;
         int after = tx.getNewBalance() != null ? tx.getNewBalance() : 0;
-        int before = after - change;
+        int before = tx.getType() == TransactionType.TRANSFER_LOSS ? after : after - change;
 
         return InventoryLedgerEntryResponse.builder()
                 .id(tx.getId())
@@ -152,6 +168,7 @@ public class InventoryReportService {
             case SALE -> "Bán hàng";
             case TRANSFER_IN -> "Điều chuyển đến";
             case TRANSFER_OUT -> "Điều chuyển đi";
+            case TRANSFER_LOSS -> "Hao hụt vận chuyển";
             case ADJUSTMENT -> "Điều chỉnh";
             case RETURN -> "Hoàn trả";
             case DAMAGED -> "Hàng hỏng";
@@ -167,10 +184,10 @@ public class InventoryReportService {
         LocalDateTime end = endDate.atTime(LocalTime.MAX);
 
         List<InventoryTransactionRepository.MovementProjection> movements = inventoryTransactionRepository
-                .findMovementSummary(PHYSICAL_TRANSACTION_TYPES, branchId, start, end);
+                .findMovementSummary(STOCK_MOVEMENT_TRANSACTION_TYPES, branchId, start, end);
 
         List<InventoryTransactionRepository.MovementProjection> movementsAfterEnd = inventoryTransactionRepository
-                .findMovementAfterDate(PHYSICAL_TRANSACTION_TYPES, branchId, end);
+                .findMovementAfterDate(STOCK_MOVEMENT_TRANSACTION_TYPES, branchId, end);
         List<InventoryRepository.VariantStockProjection> currentStock = inventoryRepository
                 .findCurrentStockByBranch(branchId);
 

@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.when;
 
@@ -579,7 +580,7 @@ class InventoryTransferServiceTest {
         InventoryTransfer transfer = callAs(requesterUser, () -> inventoryTransferService.createTransfer(request));
         when(transferRepo.findByIdWithDetails(transfer.getId())).thenReturn(Optional.of(transfer));
         when(inventoryRepo.findForUpdateFIFO(warehouse.getId(), variant.getId())).thenReturn(List.of(sourceBatch));
-        when(inventoryRepo.findExactBatchWithLock(any(Branch.class), eq(variant), anyString(), any(BigDecimal.class)))
+        when(inventoryRepo.findExactBatchWithLock(any(Branch.class), eq(variant), anyString(), any(BigDecimal.class), nullable(LocalDateTime.class)))
                 .thenReturn(Optional.empty());
 
         assertThat(transfer.getStatus()).isEqualTo(InventoryTransferStatus.PENDING);
@@ -647,7 +648,7 @@ class InventoryTransferServiceTest {
         InventoryTransfer transfer = callAs(requesterUser, () -> inventoryTransferService.createTransfer(request));
         when(transferRepo.findByIdWithDetails(transfer.getId())).thenReturn(Optional.of(transfer));
         when(inventoryRepo.findForUpdateFIFO(sourceBranch.getId(), variant.getId())).thenReturn(List.of(sourceBatch));
-        when(inventoryRepo.findExactBatchWithLock(any(Branch.class), eq(variant), anyString(), any(BigDecimal.class)))
+        when(inventoryRepo.findExactBatchWithLock(any(Branch.class), eq(variant), anyString(), any(BigDecimal.class), nullable(LocalDateTime.class)))
                 .thenReturn(Optional.empty());
 
         assertThat(transfer.getTransferBusinessType()).isEqualTo(TransferBusinessType.INTERNAL_SALE);
@@ -717,6 +718,74 @@ class InventoryTransferServiceTest {
         assertThat(finalResponse.getPaidAmount()).isEqualByComparingTo("360");
         assertThat(finalResponse.getOutstandingAmount()).isEqualByComparingTo("0");
         assertThat(finalResponse.getSettlementStatus()).isEqualTo(TransferSettlementStatus.PAID);
+    }
+
+    @Test
+    void receiveTransfer_recordsDetailedLossAuditWhenReceivedQuantityIsShort() {
+        Inventory sourceBatch = Inventory.builder()
+                .id(702L)
+                .branch(warehouse)
+                .productVariant(variant)
+                .batchNumber("BATCH-LOSS-01")
+                .importPrice(new BigDecimal("100"))
+                .quantity(10)
+                .reservedQuantity(0)
+                .defectiveQuantity(0)
+                .build();
+
+        TransferRequest request = buildRequest(
+                warehouse.getId(),
+                destinationBranch.getId(),
+                TransferBusinessType.STOCK_TRANSFER,
+                10,
+                null);
+
+        when(transferRepo.countTotalTransfers()).thenReturn(25L);
+        when(inventoryRepo.findByProductVariantId(variant.getId())).thenReturn(List.of(sourceBatch));
+
+        InventoryTransfer transfer = callAs(requesterUser, () -> inventoryTransferService.createTransfer(request));
+        when(transferRepo.findByIdWithDetails(transfer.getId())).thenReturn(Optional.of(transfer));
+        when(inventoryRepo.findForUpdateFIFO(warehouse.getId(), variant.getId())).thenReturn(List.of(sourceBatch));
+        when(inventoryRepo.findExactBatchWithLock(any(Branch.class), eq(variant), anyString(), any(BigDecimal.class), nullable(LocalDateTime.class)))
+                .thenReturn(Optional.empty());
+
+        runAs(approverUser, () -> inventoryTransferService.approveTransfer(transfer.getId()));
+        runAs(approverUser, () -> inventoryTransferService.approveAndShip(transfer.getId()));
+        runAs(receiverUser, () -> inventoryTransferService.startInspection(transfer.getId()));
+
+        runAs(receiverUser, () -> inventoryTransferService.receiveTransfer(
+                transfer.getId(),
+                List.of(TransferQCRequest.builder()
+                        .variantId(variant.getId())
+                        .quantityReal(9)
+                        .quantityAccepted(9)
+                        .quantityRejected(0)
+                        .note("Thiếu 1 sản phẩm khi vận chuyển")
+                        .build())));
+
+        assertThat(sourceBatch.getQuantity()).isZero();
+        assertThat(savedInventories)
+                .anyMatch(inv -> inv.getBranch() == destinationBranch
+                        && inv.getProductVariant() == variant
+                        && inv.getQuantity() == 9);
+        assertThat(savedTransactions)
+                .anyMatch(tx -> tx.getType() == TransactionType.TRANSFER_OUT
+                        && tx.getReferenceCode().equals(transfer.getTransferCode())
+                        && tx.getQuantityChange() == -10);
+        assertThat(savedTransactions)
+                .anyMatch(tx -> tx.getType() == TransactionType.TRANSFER_IN
+                        && tx.getReferenceCode().equals(transfer.getTransferCode())
+                        && tx.getQuantityChange() == 9);
+        assertThat(savedTransactions)
+                .anyMatch(tx -> tx.getType() == TransactionType.TRANSFER_LOSS
+                        && tx.getReferenceCode().equals(transfer.getTransferCode())
+                        && tx.getQuantityChange() == -1
+                        && tx.getInventory() == sourceBatch
+                        && tx.getReason().contains("xuất 10")
+                        && tx.getReason().contains("nhận 9")
+                        && tx.getReason().contains("thiếu 1")
+                        && tx.getReason().contains("BATCH-LOSS-01")
+                        && tx.getReason().contains("giá trị 100"));
     }
 
     @Test

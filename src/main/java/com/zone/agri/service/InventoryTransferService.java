@@ -1699,6 +1699,11 @@ public class InventoryTransferService {
                     backorderService.fulfillBackordersOnStockReceive(toBranch.getId(), variantId, qtyAccepted);
                 }
             }
+
+            int lossQty = requestedQty - qtyReal;
+            if (lossQty > 0) {
+                recordTransferLossAudit(transfer, detail, requestedQty, qtyReal, lossQty, itemNote);
+            }
         }
 
         if (transfer.getTransferBusinessType() == TransferBusinessType.INTERNAL_SALE) {
@@ -1915,6 +1920,81 @@ public class InventoryTransferService {
         }
     }
 
+    private void recordTransferLossAudit(InventoryTransfer transfer, InventoryTransferDetail detail,
+            int requestedQty, int qtyReal, int lossQty, String note) {
+        List<InventoryTransaction> sourceTransactions = transactionRepo
+                .findByReferenceCodeAndType(transfer.getTransferCode(), TransactionType.TRANSFER_OUT)
+                .stream()
+                .filter(tx -> tx.getInventory() != null
+                        && tx.getInventory().getProductVariant() != null
+                        && Objects.equals(tx.getInventory().getProductVariant().getId(),
+                                detail.getProductVariant().getId()))
+                .sorted(Comparator
+                        .comparing(InventoryTransaction::getCreatedAt, Comparator.nullsLast(LocalDateTime::compareTo))
+                        .thenComparing(InventoryTransaction::getId, Comparator.nullsLast(Long::compareTo)))
+                .toList();
+
+        int receivedToSkip = qtyReal;
+        int remainingLoss = lossQty;
+
+        for (InventoryTransaction sourceTransaction : sourceTransactions) {
+            if (remainingLoss <= 0) {
+                break;
+            }
+
+            int movedQuantity = Math.abs(Objects.requireNonNullElse(sourceTransaction.getQuantityChange(), 0));
+            Inventory sourceBatch = sourceTransaction.getInventory();
+            if (movedQuantity <= 0 || sourceBatch == null) {
+                continue;
+            }
+
+            if (receivedToSkip >= movedQuantity) {
+                receivedToSkip -= movedQuantity;
+                continue;
+            }
+
+            int lossInBatch = Math.min(remainingLoss, movedQuantity - receivedToSkip);
+            receivedToSkip = 0;
+            if (lossInBatch <= 0) {
+                continue;
+            }
+
+            BigDecimal unitPrice = resolveInboundImportPrice(transfer, detail, sourceBatch);
+            BigDecimal lossValue = unitPrice.multiply(BigDecimal.valueOf(lossInBatch));
+
+            transactionRepo.save(InventoryTransaction.builder()
+                    .type(TransactionType.TRANSFER_LOSS)
+                    .quantityChange(-lossInBatch)
+                    .newBalance(Objects.requireNonNullElse(sourceBatch.getQuantity(), 0)
+                            + Objects.requireNonNullElse(sourceBatch.getDefectiveQuantity(), 0))
+                    .referenceCode(transfer.getTransferCode())
+                    .reason(truncateTransactionReason(String.format(
+                            Locale.ROOT,
+                            "Hao hụt vận chuyển: SKU %s, lô %s, xuất %d, nhận %d, thiếu %d, đơn giá %s, giá trị %s. Lý do: %s",
+                            detail.getProductVariant().getSku(),
+                            Objects.toString(sourceBatch.getBatchNumber(), "N/A"),
+                            requestedQty,
+                            qtyReal,
+                            lossInBatch,
+                            unitPrice.stripTrailingZeros().toPlainString(),
+                            lossValue.stripTrailingZeros().toPlainString(),
+                            Objects.toString(note, "").trim())))
+                    .createdAt(LocalDateTime.now())
+                    .inventory(sourceBatch)
+                    .createdBy(getCurrentUser())
+                    .build());
+
+            remainingLoss -= lossInBatch;
+        }
+    }
+
+    private String truncateTransactionReason(String reason) {
+        if (reason == null || reason.length() <= 255) {
+            return reason;
+        }
+        return reason.substring(0, 252) + "...";
+    }
+
     private void updateSingleDestinationBatch(InventoryTransfer transfer, Branch branch, ProductVariant variant,
             int accepted, int rejected, TransferInboundAllocation allocation) {
         String batchNumber = allocation.batchNumber() != null && !allocation.batchNumber().isBlank()
@@ -1922,7 +2002,7 @@ public class InventoryTransferService {
                 : "TRANSFER-" + transfer.getTransferCode();
         BigDecimal importPrice = allocation.importPrice() != null ? allocation.importPrice() : BigDecimal.ZERO;
 
-        Inventory inv = inventoryRepo.findExactBatchWithLock(branch, variant, batchNumber, importPrice)
+        Inventory inv = inventoryRepo.findExactBatchWithLock(branch, variant, batchNumber, importPrice, allocation.expiryDate())
                 .orElseGet(() -> inventoryRepo.save(Inventory.builder()
                         .branch(branch)
                         .productVariant(variant)
@@ -1936,9 +2016,6 @@ public class InventoryTransferService {
 
         inv.setQuantity(Objects.requireNonNullElse(inv.getQuantity(), 0) + accepted);
         inv.setDefectiveQuantity(Objects.requireNonNullElse(inv.getDefectiveQuantity(), 0) + rejected);
-        if (inv.getExpiryDate() == null && allocation.expiryDate() != null) {
-            inv.setExpiryDate(allocation.expiryDate());
-        }
         inv.setLastReceiptDate(LocalDateTime.now());
         inventoryRepo.save(inv);
 

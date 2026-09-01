@@ -54,7 +54,8 @@ public interface InventoryTransactionRepository extends JpaRepository<InventoryT
               AND tx.type NOT IN (
                   com.zone.agri.entity.enums.TransactionType.ORDER_RESERVE,
                   com.zone.agri.entity.enums.TransactionType.ORDER_RELEASE,
-                  com.zone.agri.entity.enums.TransactionType.CANCEL_RELEASE
+                  com.zone.agri.entity.enums.TransactionType.CANCEL_RELEASE,
+                  com.zone.agri.entity.enums.TransactionType.TRANSFER_LOSS
               )
               AND (:branchId IS NULL OR tx.inventory.branch.id = :branchId)
             """)
@@ -80,7 +81,8 @@ public interface InventoryTransactionRepository extends JpaRepository<InventoryT
             FROM InventoryTransaction tx
             WHERE tx.createdAt BETWEEN :start AND :end
               AND (:branchId IS NULL OR tx.inventory.branch.id = :branchId)
-              AND (tx.type = com.zone.agri.entity.enums.TransactionType.DAMAGED 
+              AND (tx.type = com.zone.agri.entity.enums.TransactionType.DAMAGED
+                   OR tx.type = com.zone.agri.entity.enums.TransactionType.TRANSFER_LOSS
                    OR (tx.type = com.zone.agri.entity.enums.TransactionType.ADJUSTMENT AND tx.quantityChange < 0))
             """)
     java.math.BigDecimal sumWriteOffExpenses(

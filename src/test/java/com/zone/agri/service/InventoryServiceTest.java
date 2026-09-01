@@ -1,15 +1,18 @@
 package com.zone.agri.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -26,6 +29,7 @@ import com.zone.agri.common.WarehouseContext;
 import com.zone.agri.dto.request.inventory.InventoryQCRequest;
 import com.zone.agri.dto.response.inventory.InventoryReceiptResponse;
 import com.zone.agri.entity.Branch;
+import com.zone.agri.entity.Category;
 import com.zone.agri.entity.Inventory;
 import com.zone.agri.entity.InventoryNote;
 import com.zone.agri.entity.InventoryNoteDetail;
@@ -36,6 +40,7 @@ import com.zone.agri.entity.Supplier;
 import com.zone.agri.entity.enums.InventoryNoteStatus;
 import com.zone.agri.entity.enums.InventoryNoteType;
 import com.zone.agri.entity.enums.TransactionType;
+import com.zone.agri.exception.BadRequestException;
 import com.zone.agri.repository.BranchRepository;
 import com.zone.agri.repository.InventoryNoteDetailRepository;
 import com.zone.agri.repository.InventoryNoteRepository;
@@ -90,7 +95,7 @@ class InventoryServiceTest {
 
         assertThat(response.getStatus()).isEqualTo("APPROVED");
         assertThat(note.getStatus()).isEqualTo(InventoryNoteStatus.APPROVED);
-        verify(inventoryRepository, never()).findExactBatchWithLock(any(), any(), any(), any());
+        verify(inventoryRepository, never()).findExactBatchWithLock(any(), any(), any(), any(), any());
         verify(transactionRepository, never()).save(any(InventoryTransaction.class));
     }
 
@@ -128,7 +133,7 @@ class InventoryServiceTest {
                 .build();
 
         when(noteRepository.findById(10L)).thenReturn(Optional.of(note));
-        when(inventoryRepository.findExactBatchWithLock(eq(note.getBranch()), eq(variant), eq("LOT-1"), eq(new BigDecimal("100"))))
+        when(inventoryRepository.findExactBatchWithLock(eq(note.getBranch()), eq(variant), eq("LOT-1"), eq(new BigDecimal("100")), isNull()))
                 .thenReturn(Optional.of(inventory));
         when(inventoryRepository.save(any(Inventory.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(noteRepository.save(any(InventoryNote.class))).thenAnswer(invocation -> invocation.getArgument(0));
@@ -188,7 +193,7 @@ class InventoryServiceTest {
                 .build();
 
         when(noteRepository.findById(10L)).thenReturn(Optional.of(note));
-        when(inventoryRepository.findExactBatchWithLock(eq(note.getBranch()), eq(variant), eq("LOT-1"), eq(new BigDecimal("100"))))
+        when(inventoryRepository.findExactBatchWithLock(eq(note.getBranch()), eq(variant), eq("LOT-1"), eq(new BigDecimal("100")), isNull()))
                 .thenReturn(Optional.of(inventory));
         when(inventoryRepository.save(any(Inventory.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(noteRepository.save(any(InventoryNote.class))).thenAnswer(invocation -> invocation.getArgument(0));
@@ -211,6 +216,81 @@ class InventoryServiceTest {
         assertThat(transaction.getReason()).isEqualTo("Nhap kho hang loi QC (Phieu: PN-10)");
     }
 
+    @Test
+    void completeReceipt_shouldRejectManagedCategoryWithoutExpiryDate() {
+        ProductVariant variant = managedVariant("Thuoc thuy san");
+        InventoryNoteDetail detail = InventoryNoteDetail.builder()
+                .productVariant(variant)
+                .quantity(5)
+                .quantityRequested(5)
+                .price(new BigDecimal("100"))
+                .batchNumber("LOT-MED-1")
+                .build();
+        InventoryNote note = receipt(InventoryNoteStatus.APPROVED, new ArrayList<>(List.of(detail)));
+        detail.setInventoryNote(note);
+
+        InventoryQCRequest request = InventoryQCRequest.builder()
+                .items(List.of(InventoryQCRequest.ItemQCRequest.builder()
+                        .productCode("SKU-MED")
+                        .quantityDelivered(5)
+                        .quantityReal(5)
+                        .quantityRejected(0)
+                        .lotNumber("LOT-MED-1")
+                        .build()))
+                .build();
+
+        when(noteRepository.findById(10L)).thenReturn(Optional.of(note));
+
+        assertThatThrownBy(() -> inventoryService.completeReceipt(10L, request))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessageContaining("hạn sử dụng");
+
+        verify(inventoryRepository, never()).save(any(Inventory.class));
+    }
+
+    @Test
+    void completeReceipt_shouldSeparateSameBatchNumberByExpiryDate() {
+        ProductVariant variant = variant();
+        InventoryNoteDetail detail = InventoryNoteDetail.builder()
+                .productVariant(variant)
+                .quantity(3)
+                .quantityRequested(3)
+                .price(new BigDecimal("100"))
+                .batchNumber("LOT-1")
+                .build();
+        InventoryNote note = receipt(InventoryNoteStatus.APPROVED, new ArrayList<>(List.of(detail)));
+        detail.setInventoryNote(note);
+        LocalDate expiryDate = LocalDate.now().plusMonths(6);
+
+        InventoryQCRequest request = InventoryQCRequest.builder()
+                .items(List.of(InventoryQCRequest.ItemQCRequest.builder()
+                        .productCode("SKU-1")
+                        .quantityDelivered(3)
+                        .quantityReal(3)
+                        .quantityRejected(0)
+                        .lotNumber("LOT-1")
+                        .expiryDate(expiryDate.toString())
+                        .build()))
+                .build();
+
+        when(noteRepository.findById(10L)).thenReturn(Optional.of(note));
+        when(inventoryRepository.findExactBatchWithLock(
+                eq(note.getBranch()),
+                eq(variant),
+                eq("LOT-1"),
+                eq(new BigDecimal("100")),
+                eq(expiryDate.atStartOfDay())))
+                .thenReturn(Optional.empty());
+        when(inventoryRepository.save(any(Inventory.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(noteRepository.save(any(InventoryNote.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        inventoryService.completeReceipt(10L, request);
+
+        ArgumentCaptor<Inventory> inventoryCaptor = ArgumentCaptor.forClass(Inventory.class);
+        verify(inventoryRepository, times(2)).save(inventoryCaptor.capture());
+        assertThat(inventoryCaptor.getAllValues().get(0).getExpiryDate()).isEqualTo(expiryDate.atStartOfDay());
+    }
+
     private InventoryNote receipt(InventoryNoteStatus status, List<InventoryNoteDetail> details) {
         return InventoryNote.builder()
                 .id(10L)
@@ -229,6 +309,18 @@ class InventoryServiceTest {
                 .id(100L)
                 .sku("SKU-1")
                 .product(Product.builder().id(200L).name("San pham 1").build())
+                .build();
+    }
+
+    private ProductVariant managedVariant(String categoryName) {
+        return ProductVariant.builder()
+                .id(101L)
+                .sku("SKU-MED")
+                .product(Product.builder()
+                        .id(201L)
+                        .name("San pham can HSD")
+                        .category(Category.builder().id(301L).name(categoryName).build())
+                        .build())
                 .build();
     }
 }

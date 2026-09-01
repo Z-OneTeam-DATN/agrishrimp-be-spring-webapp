@@ -27,6 +27,7 @@ public class InventoryNoteDetailResponse {
     private BigDecimal price;
     private String batchNumber;
     private String expiryDate;
+    private String originalExpiryDate;
     private String imageUrl;
     private String note; // Lý do trả hàng hoặc ghi chú kiểm kho
 }

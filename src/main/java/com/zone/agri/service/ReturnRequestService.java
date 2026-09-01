@@ -797,7 +797,7 @@ public class ReturnRequestService {
 
         BigDecimal importPrice = resolveAllocationImportPrice(allocation.importPrice(), BigDecimal.ZERO);
         String batchNumber = trimToNull(allocation.batchNumber());
-        Inventory inventory = inventoryRepository.findExactBatchWithLock(branch, variant, batchNumber, importPrice)
+        Inventory inventory = inventoryRepository.findExactBatchWithLock(branch, variant, batchNumber, importPrice, allocation.expiryDate())
                 .orElseGet(() -> inventoryRepository.save(Inventory.builder()
                         .branch(branch)
                         .productVariant(variant)
@@ -813,9 +813,6 @@ public class ReturnRequestService {
         }
         if (defectiveQuantity > 0) {
             inventory.setDefectiveQuantity(Objects.requireNonNullElse(inventory.getDefectiveQuantity(), 0) + defectiveQuantity);
-        }
-        if (inventory.getExpiryDate() == null && allocation.expiryDate() != null) {
-            inventory.setExpiryDate(allocation.expiryDate());
         }
         inventory.setLastReceiptDate(LocalDateTime.now());
         inventory = inventoryRepository.save(inventory);

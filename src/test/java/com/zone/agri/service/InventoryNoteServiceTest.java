@@ -6,6 +6,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
@@ -173,5 +174,67 @@ class InventoryNoteServiceTest {
         InventoryNote returnNote = noteCaptor.getValue();
         assertThat(returnNote.getDetails()).hasSize(1);
         assertThat(returnNote.getDetails().get(0).getQuantityRequested()).isEqualTo(2);
+    }
+
+    @Test
+    void approveCheckAdjustment_shouldUpdateBatchExpiryWhenCheckerCorrectsIt() {
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken("warehouse@test.local", null, List.of()));
+
+        Branch warehouse = Branch.builder()
+                .id(1L)
+                .name("Kho Tong")
+                .branchType("WAREHOUSE")
+                .build();
+        ProductVariant variant = ProductVariant.builder()
+                .id(10L)
+                .sku("SKU-10")
+                .build();
+        LocalDateTime oldExpiry = LocalDateTime.of(2026, 12, 31, 0, 0);
+        LocalDateTime correctedExpiry = LocalDateTime.of(2027, 6, 30, 0, 0);
+        InventoryNoteDetail detail = InventoryNoteDetail.builder()
+                .productVariant(variant)
+                .quantity(5)
+                .quantityReal(5)
+                .quantityRejected(0)
+                .batchNumber("LOT-1")
+                .price(new BigDecimal("100"))
+                .expiryDate(correctedExpiry)
+                .originalExpiryDate(oldExpiry)
+                .build();
+        InventoryNote note = InventoryNote.builder()
+                .id(88L)
+                .code("PKK-88")
+                .type(InventoryNoteType.CHECK)
+                .status(InventoryNoteStatus.APPROVED)
+                .checkWorkflowStatus(com.zone.agri.entity.enums.InventoryCheckWorkflowStatus.PENDING_APPROVAL)
+                .branch(warehouse)
+                .details(List.of(detail))
+                .build();
+        Inventory batch = Inventory.builder()
+                .id(7L)
+                .branch(warehouse)
+                .productVariant(variant)
+                .batchNumber("LOT-1")
+                .quantity(5)
+                .defectiveQuantity(0)
+                .importPrice(new BigDecimal("100"))
+                .expiryDate(oldExpiry)
+                .build();
+
+        when(inventoryNoteRepository.findByIdWithDetails(88L)).thenReturn(Optional.of(note));
+        when(userRepository.findByEmail("warehouse@test.local"))
+                .thenReturn(Optional.of(User.builder().id(9L).fullName("Thu kho").email("warehouse@test.local").build()));
+        when(inventoryRepository.findExactBatchWithLock(warehouse, variant, "LOT-1", new BigDecimal("100"), oldExpiry))
+                .thenReturn(Optional.of(batch));
+        when(inventoryRepository.findExactBatchWithLock(warehouse, variant, "LOT-1", new BigDecimal("100"), correctedExpiry))
+                .thenReturn(Optional.empty());
+        when(inventoryNoteRepository.save(any(InventoryNote.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        inventoryNoteService.approveCheckAdjustment(88L);
+
+        assertThat(batch.getExpiryDate()).isEqualTo(correctedExpiry);
+        assertThat(note.getCheckWorkflowStatus()).isEqualTo(com.zone.agri.entity.enums.InventoryCheckWorkflowStatus.COMPLETED);
+        verify(inventoryRepository).save(batch);
     }
 }

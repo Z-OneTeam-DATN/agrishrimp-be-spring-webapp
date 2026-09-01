@@ -53,8 +53,8 @@ public class OrderWorkflowSchemaPatchConfig implements BeanPostProcessor {
                     "ALTER TABLE orders MODIFY COLUMN status ENUM('PENDING','AWAITING_PAYMENT','AWAITING_REPLENISHMENT','CONFIRMED','PROCESSING','READY_FOR_PICKUP','SHIPPING','RECEIVED','COMPLETED','CANCELLED','RETURNED')");
 
             executeSql(stmt,
-                    "Patch inventory_transactions.type enum adds order reservation workflow types",
-                    "ALTER TABLE inventory_transactions MODIFY COLUMN type ENUM('IMPORT','ORDER_RESERVE','ORDER_RELEASE','SALE','CANCEL_RELEASE','TRANSFER_OUT','TRANSFER_IN','ADJUSTMENT','RETURN','DAMAGED')");
+                    "Patch inventory_transactions.type enum adds transfer loss audit type",
+                    "ALTER TABLE inventory_transactions MODIFY COLUMN type ENUM('IMPORT','ORDER_RESERVE','ORDER_RELEASE','SALE','CANCEL_RELEASE','TRANSFER_OUT','TRANSFER_IN','TRANSFER_LOSS','ADJUSTMENT','RETURN','DAMAGED')");
 
             addColumnIfMissing(conn, stmt,
                     "orders",

@@ -32,6 +32,7 @@ public class CheckNoteRequest {
 
         private String batchNumber;
         private String expiryDate;
+        private String originalExpiryDate;
         private Integer quantityReal;
         private Integer quantityRejected;
         private Integer quantity;
