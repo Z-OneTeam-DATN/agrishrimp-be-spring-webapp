@@ -18,7 +18,7 @@ AgriShrimp Backend is a Spring Boot API for a shrimp farming operations and agri
 | External integrations | Cloudinary, PayOS, GHN, Google Login, Zalo Mini App, TrackAsia, OpenRouteService |
 | API docs | `/swagger-ui/index.html` |
 | Health check | `/actuator/health` |
-| Deployment | Docker Compose, GitHub Actions, GHCR, VPS, Nginx |
+| Deployment | Docker Compose, GitHub Actions, GHCR, VPS, Cloudflare Tunnel |
 
 ## ✨ Technical Highlights
 
@@ -56,7 +56,6 @@ src/main/java/com/zone/agri
 
 infra/
 |-- docker-compose.prod.yml
-|-- nginx/
 `-- scripts/
 ```
 

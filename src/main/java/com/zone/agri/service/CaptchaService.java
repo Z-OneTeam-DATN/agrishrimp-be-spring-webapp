@@ -72,7 +72,7 @@ public class CaptchaService {
         return response.success;
     }
 
-    // 🔥 Lấy IP thật khi deploy sau nginx / load balancer
+    // Lấy IP thật khi deploy sau Cloudflare Tunnel / load balancer.
     private String getClientIp(HttpServletRequest request) {
         String xfHeader = request.getHeader("X-Forwarded-For");
         if (xfHeader != null && !xfHeader.isBlank()) {

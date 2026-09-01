@@ -102,7 +102,7 @@ services:
 
   # ─────────────────────────────────────────────────────
   # BACKEND — Spring Boot 3 / Java 25
-  # Port 8004 — expose ra host, Nginx proxy từ api.agrishrimp.io.vn
+  # Port 8004 — bind localhost; Cloudflare Tunnel forwards api.agrishrimp.io.vn
   # ─────────────────────────────────────────────────────
   api:
     image: ghcr.io/z-oneteam-datn/agrishrimp-be-spring-webapp:latest
@@ -113,7 +113,7 @@ services:
     mem_limit: 768m
     mem_reservation: 384m
     ports:
-      - "127.0.0.1:8004:8004"    # bind localhost only — Nginx sẽ proxy
+      - "127.0.0.1:8004:8004"    # bind localhost only — Cloudflare Tunnel forwards public traffic
     env_file:
       - ./.env                   # file secrets đặt cạnh docker-compose.prod.yml, KHÔNG commit git
     environment:
@@ -124,8 +124,8 @@ services:
       SPRING_DATASOURCE_USERNAME: root
       SPRING_DATASOURCE_PASSWORD: ${SPRING_DATASOURCE_PASSWORD}
       SPRING_DATA_REDIS_HOST: redis
-      IMAGE_SEARCH_URL: ${IMAGE_SEARCH_URL:-http://agrishrimp-ai-visual-search:5001}
-      AI_BASE_URL: ${AI_BASE_URL:-http://agrishrimp-ai-diagnosis:8000}
+      IMAGE_SEARCH_URL: ${IMAGE_SEARCH_URL:-http://ai-visual-search:5001}
+      AI_BASE_URL: ${AI_BASE_URL:-http://ai-diagnosis:8000}
       # Force schema auto-update on startup to avoid validate crash during rollout
       SPRING_JPA_HIBERNATE_DDL_AUTO: update
       # Public URLs
@@ -142,8 +142,6 @@ services:
         condition: service_healthy
       ai-visual-search:
         condition: service_started
-      ai-diagnosis:
-        condition: service_started  # không block nếu AI chậm khởi động
     networks:
       - agrishrimp-net
     healthcheck:
@@ -158,14 +156,14 @@ services:
 
   # ─────────────────────────────────────────────────────
   # FRONTEND — Next.js 15 (Standalone)
-  # Port 3004 — expose ra host, Nginx proxy từ agrishrimp.io.vn
+  # Port 3004 — bind localhost; Cloudflare Tunnel forwards agrishrimp.io.vn
   # ─────────────────────────────────────────────────────
   webapp:
     image: ghcr.io/z-oneteam-datn/agrishrimp-fe-react:latest
     container_name: agrishrimp-webapp
     restart: unless-stopped
     ports:
-      - "127.0.0.1:3004:3004"    # bind localhost only — Nginx sẽ proxy
+      - "127.0.0.1:3004:3004"    # bind localhost only — Cloudflare Tunnel forwards public traffic
     environment:
       NODE_ENV: production
       # NEXT_PUBLIC_* đã bake vào image lúc build — chỉ cần server-side vars
@@ -187,7 +185,7 @@ services:
       start_period: 20s
 
   # ─────────────────────────────────────────────────────
-  # AI DIAGNOSIS — FastAPI + YOLOv8 + Gemini (INTERNAL ONLY)
+  # AI DIAGNOSIS — FastAPI + YOLO11n (INTERNAL ONLY)
   # Port 8000 — không expose ra ngoài, chỉ api gọi nội bộ
   # ─────────────────────────────────────────────────────
   ai-diagnosis:
@@ -207,7 +205,7 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 60s    # YOLOv8 model cần thời gian load lần đầu
+      start_period: 60s    # YOLO11n model cần thời gian load lần đầu
 
 # ─────────────────────────────────────────────────────
 # EXCLUDED SERVICES — do NOT uncomment until ready

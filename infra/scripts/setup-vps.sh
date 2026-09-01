@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # =============================================================
 # setup-vps.sh — Chạy MỘT LẦN khi setup VPS mới
-# Mục đích: cài Docker, tạo thư mục, tạo SSH key, cấu hình Nginx
+# Mục đích: cài Docker, tạo thư mục deploy, tạo SSH key.
+# Production ingress dùng Cloudflare Tunnel chạy ngoài Docker Compose.
 # Chạy với: sudo bash setup-vps.sh
 # =============================================================
 set -euo pipefail
 
 DEPLOY_DIR="/home/bnhien40/agrishrimp"
-NGINX_CONF="/etc/nginx/sites-available/agrishrimp"
 
 echo "======================================"
 echo "  AgriShrimp VPS Setup Script"
@@ -55,21 +55,11 @@ else
   echo "    .env already exists — skipped"
 fi
 
-# ── 5. Cài Nginx ───────────────────────────────────────────────
-if ! command -v nginx &>/dev/null; then
-  echo "[5/7] Installing Nginx..."
-  apt-get update -qq && apt-get install -y nginx certbot python3-certbot-nginx
-else
-  echo "[5/7] Nginx already installed"
-fi
-
-# Copy Nginx config
-if [ -f "$SCRIPT_DIR/../nginx/agrishrimp.conf" ]; then
-  cp "$SCRIPT_DIR/../nginx/agrishrimp.conf" "$NGINX_CONF"
-  ln -sf "$NGINX_CONF" /etc/nginx/sites-enabled/agrishrimp
-  nginx -t && systemctl reload nginx
-  echo "✅ Nginx configured"
-fi
+# ── 5. Ghi chú ingress Production ──────────────────────────────
+echo "[5/7] Production ingress uses Cloudflare Tunnel:"
+echo "      agrishrimp.io.vn -> http://127.0.0.1:3004"
+echo "      api.agrishrimp.io.vn -> http://127.0.0.1:8004"
+echo "      cloudflared is installed/configured outside Docker Compose."
 
 # ── 6. Cấu hình SSH deploy key ─────────────────────────────────
 echo "[6/7] SSH deploy key info:"
@@ -92,6 +82,6 @@ echo ""
 echo "  Checklist trước khi deploy lần đầu:"
 echo "  [ ] Điền .env: $DEPLOY_DIR/.env"
 echo "  [ ] Thêm secrets vào GitHub Actions (xem README)"
-echo "  [ ] Cấu hình SSL: certbot --nginx -d agrishrimp.io.vn -d api.agrishrimp.io.vn"
+echo "  [ ] Cấu hình Cloudflare Tunnel forward tới 127.0.0.1:3004 và 127.0.0.1:8004"
 echo "  [ ] Khởi tạo stack lần đầu: cd $DEPLOY_DIR && docker compose -f docker-compose.prod.yml up -d"
 echo "======================================"
