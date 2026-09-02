@@ -52,11 +52,7 @@ public class InventoryController {
     @RequirePermission("IMPORT_CREATE")
     @PostMapping("/receipts")
     public ResponseEntity<InventoryReceiptResponse> createReceipt(@Valid @RequestBody InventoryReceiptRequest request) {
-        if (hasAuthority("IMPORT_APPROVE")) {
-            request.setImportStatus("IMPORTED");
-        } else {
-            request.setImportStatus("PO");
-        }
+        request.setImportStatus("PO");
         return ResponseEntity.ok(inventoryService.createReceipt(request));
     }
 
@@ -75,7 +71,7 @@ public class InventoryController {
     }
 
     @SecurityRequirement(name = "bearerAuth")
-    @RequirePermission("IMPORT_APPROVE")
+    @RequirePermission({"IMPORT_APPROVE", "IMPORT_UPDATE"})
     @PostMapping("/receipts/{id}/complete")
     public ResponseEntity<InventoryReceiptResponse> completeReceipt(
             @PathVariable Long id,
@@ -204,7 +200,7 @@ public class InventoryController {
     }
 
     @SecurityRequirement(name = "bearerAuth")
-    @RequirePermission("EXPORT_APPROVE")
+    @RequirePermission({"EXPORT_APPROVE", "EXPORT_UPDATE"})
     @PostMapping("/export-commands/{id}/complete")
     public ResponseEntity<?> completeExportCommand(@PathVariable Long id) {
         return ResponseEntity.ok(inventoryNoteService.completeExportCommand(id));

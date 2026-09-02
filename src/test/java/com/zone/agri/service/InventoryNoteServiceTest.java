@@ -1,7 +1,9 @@
 package com.zone.agri.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -11,6 +13,7 @@ import java.util.List;
 import java.util.Optional;
 
 import com.zone.agri.common.WarehouseContext;
+import com.zone.agri.dto.response.inventory.InventoryNoteResponse;
 import com.zone.agri.entity.Branch;
 import com.zone.agri.entity.Inventory;
 import com.zone.agri.entity.InventoryNote;
@@ -123,6 +126,78 @@ class InventoryNoteServiceTest {
         assertThat(transaction.getQuantityChange()).isEqualTo(-3);
         assertThat(transaction.getNewBalance()).isEqualTo(6);
         assertThat(transaction.getReferenceCode()).isEqualTo("LXH-99");
+    }
+
+    @Test
+    void approveExportCommand_shouldOnlyMovePendingExportToApprovedWithoutDeductingStock() {
+        Branch warehouse = Branch.builder()
+                .id(1L)
+                .name("Kho Tong")
+                .branchType("WAREHOUSE")
+                .build();
+        ProductVariant variant = ProductVariant.builder()
+                .id(10L)
+                .sku("SKU-10")
+                .build();
+        InventoryNote note = InventoryNote.builder()
+                .id(99L)
+                .code("LXH-99")
+                .type(InventoryNoteType.EXPORT)
+                .status(InventoryNoteStatus.PENDING)
+                .reason("Loai: DISPOSAL | Ly do: Hang hong can tieu huy")
+                .branch(warehouse)
+                .details(List.of(InventoryNoteDetail.builder()
+                        .productVariant(variant)
+                        .quantityRequested(3)
+                        .batchNumber("LOT-1")
+                        .price(new BigDecimal("100"))
+                        .build()))
+                .build();
+
+        when(inventoryNoteRepository.findByIdWithDetails(99L)).thenReturn(Optional.of(note));
+        when(inventoryNoteRepository.save(any(InventoryNote.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        InventoryNoteResponse response = inventoryNoteService.approveExportCommand(99L);
+
+        assertThat(response.getStatus()).isEqualTo("APPROVED");
+        assertThat(note.getStatus()).isEqualTo(InventoryNoteStatus.APPROVED);
+        verify(inventoryRepository, never()).findExactBatchListByNumber(any(), any(), any());
+        verify(transactionRepository, never()).save(any(InventoryTransaction.class));
+    }
+
+    @Test
+    void completeExportCommand_shouldRequireApprovedStatus() {
+        Branch warehouse = Branch.builder()
+                .id(1L)
+                .name("Kho Tong")
+                .branchType("WAREHOUSE")
+                .build();
+        ProductVariant variant = ProductVariant.builder()
+                .id(10L)
+                .sku("SKU-10")
+                .build();
+        InventoryNote note = InventoryNote.builder()
+                .id(99L)
+                .code("LXH-99")
+                .type(InventoryNoteType.EXPORT)
+                .status(InventoryNoteStatus.PENDING)
+                .reason("Loai: DISPOSAL | Ly do: Hang hong can tieu huy")
+                .branch(warehouse)
+                .details(List.of(InventoryNoteDetail.builder()
+                        .productVariant(variant)
+                        .quantityRequested(3)
+                        .batchNumber("LOT-1")
+                        .price(new BigDecimal("100"))
+                        .build()))
+                .build();
+
+        when(inventoryNoteRepository.findByIdWithDetails(99L)).thenReturn(Optional.of(note));
+
+        assertThatThrownBy(() -> inventoryNoteService.completeExportCommand(99L))
+                .hasMessageContaining("Đã duyệt");
+
+        verify(inventoryRepository, never()).findExactBatchListByNumber(any(), any(), any());
+        verify(transactionRepository, never()).save(any(InventoryTransaction.class));
     }
 
     @Test
