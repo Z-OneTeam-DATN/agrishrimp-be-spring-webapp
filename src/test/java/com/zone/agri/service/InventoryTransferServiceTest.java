@@ -111,7 +111,7 @@ class InventoryTransferServiceTest {
     private Branch warehouse;
     private Branch sourceBranch;
     private Branch destinationBranch;
-    private Branch defectBranch;
+    private Branch secondaryWarehouse;
     private ProductVariant variant;
     private User requesterUser;
     private User sourceUser;
@@ -160,12 +160,12 @@ class InventoryTransferServiceTest {
         destinationBranch.setLat(10.03);
         destinationBranch.setLng(105.78);
 
-        defectBranch = Branch.builder()
-                .branchCode("SYSTEM_DEFECT")
+        secondaryWarehouse = Branch.builder()
+                .branchCode("WH-SECONDARY")
                 .branchType("WAREHOUSE")
-                .name("Kho Rui Ro")
+                .name("Kho Phu")
                 .build();
-        setId(defectBranch, 99L, "id");
+        setId(secondaryWarehouse, 99L, "id");
 
         variant = ProductVariant.builder()
                 .sku("SKU-TEST-01")
@@ -234,7 +234,6 @@ class InventoryTransferServiceTest {
         when(branchRepo.findById(warehouse.getId())).thenReturn(Optional.of(warehouse));
         when(branchRepo.findById(sourceBranch.getId())).thenReturn(Optional.of(sourceBranch));
         when(branchRepo.findById(destinationBranch.getId())).thenReturn(Optional.of(destinationBranch));
-        when(branchRepo.findByBranchCode("SYSTEM_DEFECT")).thenReturn(Optional.of(defectBranch));
         when(branchRepo.findAll()).thenReturn(List.of(warehouse, sourceBranch, destinationBranch));
         when(variantRepo.findBySku(variant.getSku())).thenReturn(Optional.of(variant));
         when(settingService.getProfitMarginRaw()).thenReturn("30");
@@ -694,7 +693,7 @@ class InventoryTransferServiceTest {
                         && inv.getQuantity() == 3
                         && inv.getImportPrice().compareTo(new BigDecimal("120")) == 0);
         assertThat(savedInventories)
-                .anyMatch(inv -> inv.getBranch() == defectBranch
+                .anyMatch(inv -> inv.getBranch() == destinationBranch
                         && inv.getProductVariant() == variant
                         && inv.getDefectiveQuantity() == 2
                         && inv.getImportPrice().compareTo(new BigDecimal("120")) == 0);
@@ -838,12 +837,12 @@ class InventoryTransferServiceTest {
     @Test
     void createTransfer_rejectsManualStockTransferIntoWarehouse() {
         requesterUser.setBranch(warehouse);
-        defectBranch.setStatus(BranchStatus.ACTIVE);
-        when(branchRepo.findById(defectBranch.getId())).thenReturn(Optional.of(defectBranch));
+        secondaryWarehouse.setStatus(BranchStatus.ACTIVE);
+        when(branchRepo.findById(secondaryWarehouse.getId())).thenReturn(Optional.of(secondaryWarehouse));
 
         TransferRequest request = buildRequest(
                 warehouse.getId(),
-                defectBranch.getId(),
+                secondaryWarehouse.getId(),
                 TransferBusinessType.STOCK_TRANSFER,
                 1,
                 null);

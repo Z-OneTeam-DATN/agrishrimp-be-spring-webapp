@@ -61,8 +61,6 @@ import lombok.RequiredArgsConstructor;
 @Service
 @RequiredArgsConstructor
 public class InventoryTransferService {
-    private static final String SYSTEM_DEFECT_BRANCH_CODE = "SYSTEM_DEFECT";
-    private static final String SYSTEM_DEFECT_BRANCH_PHONE = "SYS-DEFECT-01";
     private static final String AUTO_REPLENISHMENT_TRANSFER_TYPE = "ORDER_REPLENISHMENT";
     private static final boolean ENFORCE_SOURCE_STOCK_CHECK_ON_CREATE = false;
     private static final List<InventoryTransferStatus> ACTIVE_REPLENISHMENT_TRANSFER_STATUSES = List.of(
@@ -182,19 +180,6 @@ public class InventoryTransferService {
                         && branch.getName().trim().toLowerCase().contains("kho tổng"))
                 .findFirst()
                 .orElseThrow(() -> new RuntimeException("Không tìm thấy kho tổng để điều chuyển bổ sung"));
-    }
-
-    private Branch resolveSystemDefectBranch() {
-        return branchRepo.findByBranchCode(SYSTEM_DEFECT_BRANCH_CODE)
-                .orElseGet(() -> branchRepo.save(Branch.builder()
-                        .branchCode(SYSTEM_DEFECT_BRANCH_CODE)
-                        .branchType("WAREHOUSE")
-                        .name("Kho lỗi hệ thống")
-                        .phone(SYSTEM_DEFECT_BRANCH_PHONE)
-                        .email("system-defect@agrishrimp.vn")
-                        .addressDetail("Kho ảo dùng để gom hàng lỗi hoặc thiếu phát sinh từ điều chuyển nội bộ")
-                        .status(BranchStatus.ACTIVE)
-                        .build()));
     }
 
     private User getCurrentUser() {
@@ -1798,11 +1783,6 @@ public class InventoryTransferService {
                 throw new BadRequestException(failureMessage);
             }
 
-            if (totalAvailable < qtyNeeded) {
-                throw new RuntimeException(String.format(
-                        "Kho nguồn không đủ tồn kho khả dụng để Reserve cho SKU %s. Cần: %d, Khả dụng: %d",
-                        detail.getProductVariant().getSku(), qtyNeeded, totalAvailable));
-            }
 
             // Reserve theo thứ tự FIFO
             int toReserve = qtyNeeded;
@@ -1851,41 +1831,6 @@ public class InventoryTransferService {
         }
     }
 
-    private void deductSourceStock(InventoryTransfer transfer, Long fromBranchId, Long variantId, int totalToDeduct) {
-        int remaining = totalToDeduct;
-        List<Inventory> sourceBatches = inventoryRepo.findForUpdateFIFO(fromBranchId, variantId);
-
-        for (Inventory sBatch : sourceBatches) {
-            if (remaining <= 0)
-                break;
-            int available = Objects.requireNonNullElse(sBatch.getQuantity(), 0);
-            if (available <= 0)
-                continue;
-
-            int deduct = Math.min(available, remaining);
-            sBatch.setQuantity(available - deduct);
-            inventoryRepo.save(sBatch);
-
-            transactionRepo.save(InventoryTransaction.builder()
-                    .type(TransactionType.TRANSFER_OUT)
-                    .quantityChange(-deduct)
-                    .newBalance(Objects.requireNonNullElse(sBatch.getQuantity(), 0)
-                            + Objects.requireNonNullElse(sBatch.getDefectiveQuantity(), 0))
-                    .referenceCode(transfer.getTransferCode())
-                    .reason("Xuất điều chuyển (Phiếu: " + transfer.getTransferCode() + ")")
-                    .createdAt(LocalDateTime.now())
-                    .inventory(sBatch)
-                    .build());
-
-            remaining -= deduct;
-        }
-    }
-
-    private void addDestinationStock(InventoryTransfer transfer, Branch toBranch, ProductVariant variant, int accepted,
-            int rejected) {
-        throw new UnsupportedOperationException("Use addDestinationStock with transfer detail to preserve batch cost.");
-    }
-
     private void addDestinationStock(InventoryTransfer transfer, InventoryTransferDetail detail, Branch toBranch,
             int accepted, int rejected) {
         int totalReceived = accepted + rejected;
@@ -1894,7 +1839,6 @@ public class InventoryTransferService {
         }
 
         List<TransferInboundAllocation> allocations = resolveInboundAllocations(transfer, detail, totalReceived);
-        Branch defectBranch = rejected > 0 ? resolveSystemDefectBranch() : null;
         int remainingAccepted = accepted;
         int remainingRejected = rejected;
 
@@ -1910,10 +1854,10 @@ public class InventoryTransferService {
                 }
             }
 
-            if (remainingRejected > 0 && availableInAllocation > 0 && defectBranch != null) {
+            if (remainingRejected > 0 && availableInAllocation > 0) {
                 int rejectedQty = Math.min(remainingRejected, availableInAllocation);
                 if (rejectedQty > 0) {
-                    updateSingleDestinationBatch(transfer, defectBranch, detail.getProductVariant(), 0, rejectedQty, allocation);
+                    updateSingleDestinationBatch(transfer, toBranch, detail.getProductVariant(), 0, rejectedQty, allocation);
                     remainingRejected -= rejectedQty;
                 }
             }

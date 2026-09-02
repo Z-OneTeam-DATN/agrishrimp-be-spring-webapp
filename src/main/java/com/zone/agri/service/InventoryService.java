@@ -127,23 +127,15 @@ public class InventoryService {
         updateMetadata(noteEntity, request, destBranch, supplier);
         noteEntity.setPurchaseRequest(linkedPurchaseRequest);
 
-        // Quy trình 2: GR luôn bắt đầu ở PENDING_GR_APPROVAL (= PENDING).
-        // Kể cả Admin tạo cũng phải PENDING để có bước kiểm tra trước khi duyệt.
-        // Bước duyệt chỉ xác nhận chứng từ; tồn kho và công nợ được chốt ở bước QC/complete.
-        boolean autoApprovedOnCreate =
-                "IMPORTED".equalsIgnoreCase(request.getImportStatus()) || hasAuthority("IMPORT_APPROVE");
-        noteEntity.setStatus(autoApprovedOnCreate ? InventoryNoteStatus.APPROVED : InventoryNoteStatus.PENDING);
+        // Phiếu nhập luôn đi theo luồng 3 bước: chờ duyệt -> đã duyệt -> đã nhập kho.
+        // Tồn kho và công nợ chỉ được chốt ở bước completeReceipt sau khi kiểm hàng.
+        noteEntity.setStatus(InventoryNoteStatus.PENDING);
 
         noteEntity = noteRepository.save(noteEntity);
         validateReceiptItemsAgainstPurchaseRequest(linkedPurchaseRequest, request.getItems(), noteEntity.getId());
         processItemsAndStock(noteEntity, request.getItems(), request.getImportType());
 
-        noteEntity = noteRepository.save(noteEntity);
-        if (noteEntity.getStatus() == InventoryNoteStatus.APPROVED && hasStoredQcDecision(noteEntity)) {
-            noteEntity = finalizeReceiptCompletion(noteEntity);
-        }
-
-        return mapToResponse(noteEntity);
+        return mapToResponse(noteRepository.save(noteEntity));
     }
 
     // --- 2. CẬP NHẬT PHIẾU ---
@@ -262,14 +254,6 @@ public class InventoryService {
 
         return mapToResponse(finalizeReceiptCompletion(note));
     }
-    private boolean hasStoredQcDecision(InventoryNote note) {
-        return note.getDetails() != null && note.getDetails().stream().anyMatch(detail ->
-                Objects.requireNonNullElse(detail.getQuantityAccepted(), 0) > 0
-                        || Objects.requireNonNullElse(detail.getQuantityRejected(), 0) > 0
-                        || Objects.requireNonNullElse(detail.getQuantityReal(), 0) > 0
-        );
-    }
-
     private InventoryNote finalizeReceiptCompletion(InventoryNote note) {
         BigDecimal totalAmount = BigDecimal.ZERO;
 

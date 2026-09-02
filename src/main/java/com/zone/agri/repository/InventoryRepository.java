@@ -200,7 +200,7 @@ public interface InventoryRepository extends JpaRepository<Inventory, Long> {
         List<Inventory> findAllByBranchIdAndDefectiveQuantityGreaterThan(@Param("branchId") Long branchId,
                         @Param("threshold") int threshold);
 
-        @Query("SELECT COALESCE(SUM(i.quantity * i.importPrice), 0) FROM Inventory i " +
+        @Query("SELECT COALESCE(SUM((COALESCE(i.quantity, 0) + COALESCE(i.defectiveQuantity, 0)) * COALESCE(i.importPrice, 0)), 0) FROM Inventory i " +
                         "WHERE (:branchId IS NULL OR i.branch.id = :branchId)")
         BigDecimal sumTotalValue(@Param("branchId") Long branchId);
 
@@ -323,10 +323,10 @@ public interface InventoryRepository extends JpaRepository<Inventory, Long> {
                                pv.sku AS sku,
                                p.name AS productName,
                                c.name AS categoryName,
-                               COALESCE(SUM(CASE WHEN (:branchId IS NULL OR i.branch.id = :branchId) THEN i.quantity ELSE 0 END), 0) AS branchQuantity,
-                               COALESCE(SUM(CASE WHEN (:branchId IS NULL OR i.branch.id = :branchId) THEN i.quantity * COALESCE(i.importPrice, 0) ELSE 0 END), 0) AS branchValue,
-                               COALESCE(SUM(i.quantity), 0) AS systemQuantity,
-                               COALESCE(SUM(i.quantity * COALESCE(i.importPrice, 0)), 0) AS systemValue
+                               COALESCE(SUM(CASE WHEN (:branchId IS NULL OR i.branch.id = :branchId) THEN COALESCE(i.quantity, 0) + COALESCE(i.defectiveQuantity, 0) ELSE 0 END), 0) AS branchQuantity,
+                               COALESCE(SUM(CASE WHEN (:branchId IS NULL OR i.branch.id = :branchId) THEN (COALESCE(i.quantity, 0) + COALESCE(i.defectiveQuantity, 0)) * COALESCE(i.importPrice, 0) ELSE 0 END), 0) AS branchValue,
+                               COALESCE(SUM(COALESCE(i.quantity, 0) + COALESCE(i.defectiveQuantity, 0)), 0) AS systemQuantity,
+                               COALESCE(SUM((COALESCE(i.quantity, 0) + COALESCE(i.defectiveQuantity, 0)) * COALESCE(i.importPrice, 0)), 0) AS systemValue
                         FROM Inventory i
                         JOIN i.productVariant pv
                         JOIN pv.product p
@@ -351,8 +351,8 @@ public interface InventoryRepository extends JpaRepository<Inventory, Long> {
                         SELECT pv.id AS variantId,
                                pv.sku AS sku,
                                p.name AS productName,
-                               COALESCE(SUM(i.quantity), 0) AS quantity,
-                               COALESCE(SUM(i.quantity * COALESCE(i.importPrice, 0)), 0) AS value
+                               COALESCE(SUM(COALESCE(i.quantity, 0) + COALESCE(i.defectiveQuantity, 0)), 0) AS quantity,
+                               COALESCE(SUM((COALESCE(i.quantity, 0) + COALESCE(i.defectiveQuantity, 0)) * COALESCE(i.importPrice, 0)), 0) AS value
                         FROM Inventory i
                         JOIN i.productVariant pv
                         JOIN pv.product p

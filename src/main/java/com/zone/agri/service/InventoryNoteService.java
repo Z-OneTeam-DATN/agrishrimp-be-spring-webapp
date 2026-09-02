@@ -114,19 +114,14 @@ public class InventoryNoteService {
         note.setDebtAmount(BigDecimal.ZERO);
         note.setPaymentAmount(BigDecimal.ZERO);
 
-        InventoryNote savedNote = inventoryNoteRepository.save(note);
-
-        if (hasAuthority("EXPORT_APPROVE")) {
-            return approveExportCommand(savedNote.getId());
-        }
-
-        return mapToResponse(savedNote);
+        return mapToResponse(inventoryNoteRepository.save(note));
     }
 
     @Transactional
     public InventoryNoteResponse approveExportCommand(Long id) {
         InventoryNote note = inventoryNoteRepository.findByIdWithDetails(id)
                 .orElseThrow(() -> new NotFoundException("Không tìm thấy lệnh xuất ID: " + id));
+        assertExportReadOrApproveAccess(note);
         if (note.getStatus() != InventoryNoteStatus.PENDING) {
             throw new BadRequestException("Chỉ có thể duyệt lệnh xuất đang chờ xử lý.");
         }
@@ -134,7 +129,7 @@ public class InventoryNoteService {
         note = inventoryNoteRepository.save(note);
 
         assertDefectiveExportNote(note);
-        return completeExportCommand(id);
+        return mapToResponse(note);
     }
 
     @Transactional
@@ -153,8 +148,8 @@ public class InventoryNoteService {
             throw new BadRequestException("Lenh xuat hang loi nay da hoan thanh truoc do.");
         }
 
-        if (note.getStatus() != InventoryNoteStatus.APPROVED && note.getStatus() != InventoryNoteStatus.PENDING) {
-            throw new BadRequestException("Phieu phai o trang thai Da duyet hoac Cho duyet moi co the hoan thanh xuat hang loi.");
+        if (note.getStatus() != InventoryNoteStatus.APPROVED) {
+            throw new BadRequestException("Phiếu phải ở trạng thái Đã duyệt mới có thể hoàn thành xuất hàng lỗi.");
         }
 
         assertDefectiveExportNote(note);

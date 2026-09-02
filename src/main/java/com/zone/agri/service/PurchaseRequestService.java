@@ -549,14 +549,6 @@ public class PurchaseRequestService {
         PurchaseRequest pr = purchaseRequestRepository.findByIdWithDetails(id)
                 .orElseThrow(() -> new NotFoundException("Không tìm thấy phiếu yêu cầu mua ID: " + id));
         warehouseContext.assertAccess(pr.getBranch().getId());
-        if (false && pr.getStatus() != PurchaseRequestStatus.SENT_TO_SUPPLIER &&
-                pr.getStatus() != PurchaseRequestStatus.PARTIALLY_RECEIVED) {
-            throw new BadRequestException("Phiáº¿u yĂªu cáº§u mua pháº£i Ä‘Æ°á»£c gá»­i nhĂ  cung cáº¥p trÆ°á»›c khi táº¡o phiáº¿u nháº­p.");
-        }
-        if (false && pr.getStatus() != PurchaseRequestStatus.SENT_TO_SUPPLIER &&
-                pr.getStatus() != PurchaseRequestStatus.PARTIALLY_RECEIVED) {
-            throw new BadRequestException("Phiáº¿u yĂªu cáº§u mua pháº£i Ä‘Æ°á»£c gá»­i nhĂ  cung cáº¥p trÆ°á»›c khi táº¡o phiáº¿u nháº­p.");
-        }
 
         if (pr.getStatus() != PurchaseRequestStatus.DRAFT &&
                 pr.getStatus() != PurchaseRequestStatus.PENDING_APPROVAL) {
@@ -595,7 +587,7 @@ public class PurchaseRequestService {
 
         for (PurchaseRequestCreateRequest.ItemRequest itemReq : request.getItems()) {
             ProductVariant variant = productVariantRepository.findBySku(itemReq.getProductCode())
-                    .orElseThrow(() -> new NotFoundException("SKU khĂ´ng tá»“n táº¡i: " + itemReq.getProductCode()));
+                    .orElseThrow(() -> new NotFoundException("SKU không tồn tại: " + itemReq.getProductCode()));
             resolveSupplierCatalogPrice(supplier, variant);
         }
 
@@ -657,7 +649,7 @@ public class PurchaseRequestService {
 
         if (pr.getStatus() != PurchaseRequestStatus.DELIVERING &&
                 pr.getStatus() != PurchaseRequestStatus.PARTIALLY_RECEIVED) {
-            throw new BadRequestException("Phiáº¿u yĂªu cáº§u mua pháº£i Ä‘Æ°á»£c gá»­i nhĂ  cung cáº¥p trÆ°á»›c khi táº¡o phiáº¿u nháº­p.");
+            throw new BadRequestException("Phiếu yêu cầu mua phải ở trạng thái Đang giao hoặc Nhận một phần trước khi tạo phiếu nhập.");
         }
 
         if (pr.getStatus() == PurchaseRequestStatus.COMPLETED ||
@@ -721,7 +713,7 @@ public class PurchaseRequestService {
             throw new BadRequestException("Chỉ có thể gửi NCC phiếu đã được duyệt.");
         }
         if (pr.getSupplier() == null || pr.getSupplier().getEmail() == null || pr.getSupplier().getEmail().isBlank()) {
-            throw new BadRequestException("NhĂ  cung cáº¥p chÆ°a cĂ³ email Ä‘á»ƒ gá»­i phiáº¿u yĂªu cáº§u.");
+            throw new BadRequestException("Nhà cung cấp chưa có email để gửi phiếu yêu cầu.");
         }
         emailService.sendPurchaseRequestToSupplier(pr);
         pr.setStatus(PurchaseRequestStatus.SENT_TO_SUPPLIER);
@@ -734,10 +726,10 @@ public class PurchaseRequestService {
         PurchaseRequest pr = findOrThrow(id);
         warehouseContext.assertAccess(pr.getBranch().getId());
         if (pr.getStatus() != PurchaseRequestStatus.SENT_TO_SUPPLIER) {
-            throw new BadRequestException("Chi co the gui lai email khi phieu da gui nha cung cap.");
+            throw new BadRequestException("Chỉ có thể gửi lại email khi phiếu đã gửi nhà cung cấp.");
         }
         if (pr.getSupplier() == null || pr.getSupplier().getEmail() == null || pr.getSupplier().getEmail().isBlank()) {
-            throw new BadRequestException("Nha cung cap chua co email de gui lai phieu yeu cau.");
+            throw new BadRequestException("Nhà cung cấp chưa có email để gửi lại phiếu yêu cầu.");
         }
         emailService.sendPurchaseRequestToSupplier(pr);
         return mapToResponseShallow(pr);
@@ -748,7 +740,7 @@ public class PurchaseRequestService {
         PurchaseRequest pr = findOrThrow(id);
         warehouseContext.assertAccess(pr.getBranch().getId());
         if (pr.getStatus() != PurchaseRequestStatus.SENT_TO_SUPPLIER) {
-            throw new BadRequestException("Chi co the ghi nhan xac nhan khi phieu da gui nha cung cap.");
+            throw new BadRequestException("Chỉ có thể ghi nhận xác nhận khi phiếu đã gửi nhà cung cấp.");
         }
         pr.setStatus(PurchaseRequestStatus.SUPPLIER_CONFIRMED);
         return mapToResponseShallow(purchaseRequestRepository.save(pr));
