@@ -24,6 +24,10 @@ public final class RoleUtils {
         return ADMIN_LIKE_ROLES.contains(normalizeRoleSlug(roleSlug));
     }
 
+    public static boolean isSuperAdminRole(String roleSlug) {
+        return "SUPER_ADMIN".equals(normalizeRoleSlug(roleSlug));
+    }
+
     public static boolean hasAdminLikeAuthority(Set<String> authorities) {
         if (authorities == null || authorities.isEmpty()) {
             return false;

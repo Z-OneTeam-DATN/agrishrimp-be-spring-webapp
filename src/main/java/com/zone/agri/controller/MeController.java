@@ -1,5 +1,6 @@
 package com.zone.agri.controller;
 
+import com.zone.agri.common.RoleUtils;
 import com.zone.agri.dto.response.user.MePermissionsResponse;
 import com.zone.agri.security.CustomUserDetail;
 import io.swagger.v3.oas.annotations.Operation;
@@ -25,21 +26,21 @@ public class MeController {
     public ResponseEntity<MePermissionsResponse> getMyPermissions() {
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
         CustomUserDetail principal = (CustomUserDetail) auth.getPrincipal();
-        String roleAuthority = principal.getUserDetail().getRole() != null
-                ? "ROLE_" + principal.getUserDetail().getRole().getSlug()
+        String roleSlug = principal.getUserDetail().getRole() != null
+                ? principal.getUserDetail().getRole().getSlug()
                 : null;
+        String roleAuthority = roleSlug != null ? "ROLE_" + roleSlug : null;
 
         List<String> permissions = auth.getAuthorities().stream()
                 .map(a -> a.getAuthority())
                 .filter(code -> roleAuthority == null || !roleAuthority.equals(code))
+                .filter(code -> !RoleUtils.isSuperAdminRole(code))
                 .sorted()
                 .toList();
 
         return ResponseEntity.ok(MePermissionsResponse.builder()
                 .userId(principal.getUserDetail().getId())
-                .role(principal.getUserDetail().getRole() != null
-                        ? principal.getUserDetail().getRole().getSlug()
-                        : null)
+                .role(roleSlug)
                 .permissions(permissions)
                 .build());
     }

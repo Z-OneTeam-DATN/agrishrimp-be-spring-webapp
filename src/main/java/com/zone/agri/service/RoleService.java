@@ -92,6 +92,10 @@ public class RoleService {
         Role existingRole = roleRepository.findById(roleId)
                 .orElseThrow(() -> new NotFoundException("Không tìm thấy vai trò với ID: " + roleId));
 
+        if (isCurrentUserRole(roleId)) {
+            throw new Forbidden("Không thể tự chỉnh sửa quyền của vai trò đang gán cho chính bạn");
+        }
+
         if (Boolean.TRUE.equals(existingRole.getIsSystem())) {
             if (!RoleUtils.hasSuperAdminAuthority(AuthUtils.getAuthorities())) {
                 throw new Forbidden("Chỉ SUPER_ADMIN được chỉnh sửa quyền của vai trò hệ thống");
@@ -205,6 +209,14 @@ public class RoleService {
 
     private boolean isSuperAdminRole(Role role) {
         return role != null && SUPER_ADMIN_SLUG.equalsIgnoreCase(role.getSlug());
+    }
+
+    private boolean isCurrentUserRole(Long roleId) {
+        if (roleId == null || AuthUtils.getUserDetail() == null || AuthUtils.getUserDetail().getRole() == null) {
+            return false;
+        }
+
+        return roleId.equals(AuthUtils.getUserDetail().getRole().getId());
     }
 
     private String generateUniqueSlug(String roleName, Long currentRoleId) {

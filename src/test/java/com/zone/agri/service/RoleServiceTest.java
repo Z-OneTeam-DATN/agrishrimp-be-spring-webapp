@@ -8,12 +8,15 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.zone.agri.dto.request.user.RoleRequest;
+import com.zone.agri.dto.response.user.RoleDto;
 import com.zone.agri.dto.response.user.RoleResponse;
+import com.zone.agri.dto.response.user.UserDetail;
 import com.zone.agri.entity.Permission;
 import com.zone.agri.entity.Role;
 import com.zone.agri.exception.Forbidden;
 import com.zone.agri.repository.PermissionRepository;
 import com.zone.agri.repository.RoleRepository;
+import com.zone.agri.security.CustomUserDetail;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
@@ -104,12 +107,57 @@ class RoleServiceTest {
         verify(roleRepository, never()).save(any(Role.class));
     }
 
+    @Test
+    void updateRole_withCurrentUserRole_throwsForbidden() {
+        Role customRole = Role.builder()
+                .id(3L)
+                .slug("MANAGER")
+                .displayName("Quan ly")
+                .description("Mo ta cu")
+                .isSystem(false)
+                .isActive(true)
+                .permissions(new HashSet<>(Set.of(permission("ROLE_VIEW"))))
+                .build();
+
+        authenticateAsUserWithRole(customRole, "ROLE_MANAGER", "ROLE_UPDATE");
+        when(roleRepository.findById(3L)).thenReturn(Optional.of(customRole));
+
+        assertThatThrownBy(() -> roleService.updateRole(3L, roleRequest("Quan ly")))
+                .isInstanceOf(Forbidden.class)
+                .hasMessageContaining("chính bạn");
+
+        verify(roleRepository, never()).save(any(Role.class));
+    }
+
     private void authenticateAs(String authority) {
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken(
                         "tester@agrishrimp.vn",
                         null,
                         List.of(new SimpleGrantedAuthority(authority))));
+    }
+
+    private void authenticateAsUserWithRole(Role role, String... authorities) {
+        UserDetail userDetail = UserDetail.builder()
+                .id(99L)
+                .email("tester@agrishrimp.vn")
+                .role(new RoleDto(role))
+                .build();
+
+        List<SimpleGrantedAuthority> grantedAuthorities = java.util.Arrays.stream(authorities)
+                .map(SimpleGrantedAuthority::new)
+                .toList();
+
+        CustomUserDetail principal = new CustomUserDetail(
+                userDetail.getEmail(),
+                "password",
+                true,
+                true,
+                userDetail,
+                new HashSet<>(grantedAuthorities));
+
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken(principal, null, grantedAuthorities));
     }
 
     private RoleRequest roleRequest(String roleName) {

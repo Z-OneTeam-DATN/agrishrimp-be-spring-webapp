@@ -1,9 +1,12 @@
 package com.zone.agri.security;
 
+import com.zone.agri.common.RoleUtils;
 import com.zone.agri.dto.response.user.RoleDto;
 import com.zone.agri.dto.response.user.UserDetail;
+import com.zone.agri.entity.Permission;
 import com.zone.agri.entity.User;
 import com.zone.agri.entity.enums.UserStatus;
+import com.zone.agri.repository.PermissionRepository;
 import com.zone.agri.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.GrantedAuthority;
@@ -22,6 +25,7 @@ import java.util.Set;
 public class CustomUserDetailsService implements UserDetailsService {
 
     private final UserRepository userRepository;
+    private final PermissionRepository permissionRepository;
 
     @Override
     @Transactional(readOnly = true)
@@ -73,7 +77,12 @@ public class CustomUserDetailsService implements UserDetailsService {
         authorities.add(new SimpleGrantedAuthority("ROLE_" + user.getRole().getSlug()));
 
         // Permission-level authorities: "PRODUCT_CREATE", "IMPORT_APPROVE", ...
-        if (user.getRole().getPermissions() != null) {
+        if (RoleUtils.isSuperAdminRole(user.getRole().getSlug())) {
+            permissionRepository.findAll().stream()
+                    .map(Permission::getCode)
+                    .filter(code -> code != null && !code.isBlank())
+                    .forEach(code -> authorities.add(new SimpleGrantedAuthority(code)));
+        } else if (user.getRole().getPermissions() != null) {
             user.getRole().getPermissions().forEach(permission ->
                     authorities.add(new SimpleGrantedAuthority(permission.getCode()))
             );
