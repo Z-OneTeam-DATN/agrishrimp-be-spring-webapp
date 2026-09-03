@@ -475,7 +475,7 @@ public class ShrimpPriceBlogAutomationService {
         }
 
         String title = blankToDefault(suggestion.getTitle(), fallback.getTitle());
-        if (!normalizeVietnamese(title).contains("gia tom hom nay")) {
+        if (!hasRequiredAccentedTitlePhrase(title)) {
             title = fallback.getTitle();
         }
 
@@ -485,6 +485,10 @@ public class ShrimpPriceBlogAutomationService {
                 .marketSummary(blankToDefault(suggestion.getMarketSummary(), fallback.getMarketSummary()))
                 .seoClosing(blankToDefault(suggestion.getSeoClosing(), fallback.getSeoClosing()))
                 .build();
+    }
+
+    private boolean hasRequiredAccentedTitlePhrase(String title) {
+        return title != null && title.toLowerCase(VI_LOCALE).contains("giá tôm hôm nay");
     }
 
     private ShrimpPriceBlogDraftSuggestion buildFallbackSuggestion(

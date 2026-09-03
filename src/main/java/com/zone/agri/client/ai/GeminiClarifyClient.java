@@ -161,10 +161,11 @@ public class GeminiClarifyClient {
             tỉnh/khu vực, không nhắc các nhóm thủy sản ngoài tôm, không nhắc tên nguồn dữ liệu.
 
             Nhiệm vụ:
-            - Viết tiêu đề tự nhiên, có cụm "giá tôm hôm nay" và có ngày.
+            - Viết tiêu đề tự nhiên bằng tiếng Việt có dấu đầy đủ, có đúng cụm "giá tôm hôm nay" và có ngày.
             - Viết excerpt ngắn, dễ hiểu, dùng cho danh sách bài viết.
             - Viết marketSummary 2-3 câu tóm tắt biên độ giá, các nhóm/size nổi bật.
             - Viết seoClosing 1-2 câu kết bài, khuyến khích người đọc theo dõi cập nhật hằng ngày.
+            - Không bỏ dấu tiếng Việt trong bất kỳ trường văn bản nào.
             - Không dùng markdown, không dùng HTML, không dùng emoji.
             - Không thêm lời khuyên mua bán, không khẳng định dự báo khi dữ liệu không có.
             - Luôn trả lời đúng JSON schema, không thêm giải thích ngoài JSON.
