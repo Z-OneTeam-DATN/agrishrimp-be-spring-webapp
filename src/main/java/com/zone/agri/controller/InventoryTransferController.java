@@ -116,7 +116,7 @@ public class InventoryTransferController {
 
     @Operation(summary = "Xuat kho dieu chuyen")
     @SecurityRequirement(name = "bearerAuth")
-    @RequirePermission("TRANSFER_APPROVE")
+    @RequirePermission({"TRANSFER_APPROVE", "TRANSFER_CREATE"})
     @ApiResponses({
             @ApiResponse(responseCode = "200", description = "Xuat kho thanh cong"),
             @ApiResponse(responseCode = "400", description = "Loi xuat kho")
