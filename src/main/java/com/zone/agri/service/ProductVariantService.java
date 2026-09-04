@@ -2,8 +2,10 @@ package com.zone.agri.service;
 
 import com.zone.agri.dto.response.product.ProductVariantResponse;
 import com.zone.agri.dto.response.inventory.InventorySearchResponse;
+import com.zone.agri.entity.Branch;
 import com.zone.agri.entity.Inventory;
 import com.zone.agri.entity.ProductVariant;
+import com.zone.agri.entity.enums.BranchStatus;
 import com.zone.agri.repository.InventoryRepository;
 import com.zone.agri.repository.ProductVariantRepository;
 import lombok.RequiredArgsConstructor;
@@ -15,6 +17,7 @@ import java.time.LocalDateTime;
 import java.math.BigDecimal;
 import java.util.Comparator;
 import java.util.Collections;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -53,8 +56,19 @@ public class ProductVariantService {
                 .filter(i -> i.getProductVariant() != null)
                 .collect(Collectors.groupingBy(i -> i.getProductVariant().getId()));
 
+        List<Branch> reportBranches = branchId != null
+                ? branchRepo.findById(branchId).map(List::of).orElseGet(List::of)
+                : branchRepo.findByStatus(BranchStatus.ACTIVE);
+
+        List<LowStockReportResponse> result = new ArrayList<>();
+
         // 3. Tính toán tồn kho cho từng biến thể tại chi nhánh yêu cầu
-        return allVariants.stream().map(v -> {
+        for (Branch branch : reportBranches) {
+            if (branch == null || branch.getId() == null) {
+                continue;
+            }
+
+            for (ProductVariant v : allVariants) {
             // Lấy TẤT CẢ các bản ghi kho của biến thể này từ map
             List<Inventory> allInventories = inventoriesByVariantId.getOrDefault(v.getId(), Collections.emptyList());
 
@@ -64,13 +78,10 @@ public class ProductVariantService {
                     .mapToInt(i -> Objects.requireNonNullElse(i.getQuantity(), 0))
                     .sum();
 
-            List<Inventory> inventories = allInventories;
+            List<Inventory> inventories = allInventories.stream()
+                    .filter(inv -> inv.getBranch() != null && inv.getBranch().getId().equals(branch.getId()))
+                    .collect(Collectors.toList());
             // Lọc theo chi nhánh nếu có
-            if (branchId != null) {
-                inventories = allInventories.stream()
-                        .filter(inv -> inv.getBranch() != null && inv.getBranch().getId().equals(branchId))
-                        .collect(Collectors.toList());
-            }
 
             // Tổng tồn kho (nếu inventories rỗng -> totalStock = 0)
             int totalStock = inventories.stream()
@@ -93,23 +104,32 @@ public class ProductVariantService {
                     .max(LocalDateTime::compareTo)
                     .orElse(null);
 
-            return LowStockReportResponse.builder()
+            if (totalStock >= currentThreshold) {
+                continue;
+            }
+
+            result.add(LowStockReportResponse.builder()
                     .variantId(v.getId())
+                    .branchId(branch.getId())
+                    .branchName(branch.getName())
                     .sku(v.getSku())
                     .productName(v.getProduct() != null ? v.getProduct().getName() : "Sản phẩm không xác định")
                     .unit(null)
                     .quantity(totalStock)
                     .minThreshold(currentThreshold)
                     .shortage(Math.max(0, currentThreshold - totalStock))
-                    .isLowStock(totalStock < currentThreshold)
+                    .isLowStock(true)
                     .lastImportDate(lastImport)
                     .mainBranchQuantity(mainBranchQty)
-                    .build();
-        })
-                .filter(Objects::nonNull)
-                .filter(LowStockReportResponse::isLowStock) // Lọc những đứa tồn kho thấp (bao gồm cả 0)
-                .sorted(Comparator.comparing(LowStockReportResponse::getQuantity)) // Hết hàng (0) sẽ lên đầu bảng
-                .collect(Collectors.toList());
+                    .build());
+            }
+        }
+
+        result.sort(Comparator
+                .comparing(LowStockReportResponse::getQuantity)
+                .thenComparing(LowStockReportResponse::getBranchName, Comparator.nullsLast(String::compareToIgnoreCase))
+                .thenComparing(LowStockReportResponse::getProductName, Comparator.nullsLast(String::compareToIgnoreCase)));
+        return result;
     }
 
     // [CẬP NHẬT LÔ HÀNG ĐỘNG]: Nhận thêm branchId và trả về ProductVariantResponse

@@ -13,6 +13,8 @@ import java.time.LocalDateTime;
 @AllArgsConstructor
 public class LowStockReportResponse {
     private Long variantId;
+    private Long branchId;
+    private String branchName;
     private String sku;
     private String productName;
     private String unit;
