@@ -1552,6 +1552,11 @@ public class InventoryTransferService {
             throw new BadRequestException("Chỉ có thể xuất kho phiếu đã được duyệt.");
         }
 
+        User currentUser = getCurrentUser();
+        if (!canApproveTransfersAcrossBranches()) {
+            assertBranchActor(currentUser, transfer.getFromBranch(), "xuat kho");
+        }
+
         Long fromBranchId = transfer.getFromBranch().getId();
 
         for (InventoryTransferDetail detail : transfer.getDetails()) {
@@ -1598,7 +1603,7 @@ public class InventoryTransferService {
             }
         }
 
-        transfer.setShippedBy(getCurrentUser());
+        transfer.setShippedBy(currentUser);
         transfer.setShippedAt(LocalDateTime.now());
         transfer.setStatus(InventoryTransferStatus.SHIPPING);
         transferRepo.save(transfer);

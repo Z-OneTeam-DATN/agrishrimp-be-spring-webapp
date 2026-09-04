@@ -35,6 +35,7 @@ import com.zone.agri.entity.enums.OrderStatus;
 import com.zone.agri.entity.enums.TransactionType;
 import com.zone.agri.entity.enums.TransferBusinessType;
 import com.zone.agri.entity.enums.TransferSettlementStatus;
+import com.zone.agri.exception.Forbidden;
 import com.zone.agri.repository.BranchRepository;
 import com.zone.agri.repository.InventoryRepository;
 import com.zone.agri.repository.InventoryTransactionRepository;
@@ -663,7 +664,10 @@ class InventoryTransferServiceTest {
         assertThat(transfer.getStatus()).isEqualTo(InventoryTransferStatus.APPROVED);
         assertThat(transfer.getApprovedBy()).isEqualTo(approverUser);
 
-        runAs(approverUser, () -> inventoryTransferService.approveAndShip(transfer.getId()));
+        assertThatThrownBy(() -> runAs(receiverUser, () -> inventoryTransferService.approveAndShip(transfer.getId())))
+                .isInstanceOf(Forbidden.class);
+
+        runAs(sourceUser, () -> inventoryTransferService.approveAndShip(transfer.getId()));
         assertThat(transfer.getStatus()).isEqualTo(InventoryTransferStatus.SHIPPING);
         assertThat(sourceBatch.getQuantity()).isZero();
         assertThat(sourceBatch.getReservedQuantity()).isZero();
