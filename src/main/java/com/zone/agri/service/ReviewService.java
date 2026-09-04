@@ -126,8 +126,10 @@ public class ReviewService {
         }
 
         String uName = "Người dùng AgriShrimp";
+        String userAvatar = null;
         if (review.getUser() != null) {
             uName = review.getUser().getFullName() != null ? review.getUser().getFullName() : "Khách hàng";
+            userAvatar = review.getUser().getAvatarUrl();
         }
 
         return ReviewResponse.builder()
@@ -142,6 +144,7 @@ public class ReviewService {
                         .collect(Collectors.toList()) : List.of())
                 .createdAt(review.getCreatedAt())
                 .userName(uName)
+                .userAvatar(userAvatar)
                 .build();
     }
 }

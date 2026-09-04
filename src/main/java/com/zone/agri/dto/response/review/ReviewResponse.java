@@ -16,4 +16,5 @@ public class ReviewResponse {
     private List<String> imageUrls;
     private LocalDateTime createdAt;
     private String userName;
+    private String userAvatar;
 }
