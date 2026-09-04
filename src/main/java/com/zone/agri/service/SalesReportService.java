@@ -6,6 +6,8 @@ import com.zone.agri.dto.response.report.SalesReportSummaryResponse;
 import com.zone.agri.dto.response.user.UserDetail;
 import com.zone.agri.entity.Order;
 import com.zone.agri.entity.OrderItem;
+import com.zone.agri.entity.ReturnRequest;
+import com.zone.agri.entity.ReturnRequestItem;
 import com.zone.agri.entity.SubOrder;
 import com.zone.agri.entity.SubOrderItem;
 import com.zone.agri.entity.User;
@@ -14,6 +16,7 @@ import com.zone.agri.entity.enums.PaymentMethod;
 import com.zone.agri.entity.enums.PaymentStatus;
 import com.zone.agri.repository.BranchRepository;
 import com.zone.agri.repository.OrderRepository;
+import com.zone.agri.repository.ReturnRequestRepository;
 import com.zone.agri.repository.SubOrderRepository;
 import com.zone.agri.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
@@ -49,6 +52,7 @@ public class SalesReportService {
     private final OrderRepository orderRepository;
     private final UserRepository userRepository;
     private final BranchRepository branchRepository;
+    private final ReturnRequestRepository returnRequestRepository;
 
     public SalesReportSummaryResponse getSummary(LocalDate startDate, LocalDate endDate, Long branchId) {
         Long finalBranchId = resolveBranchId(branchId);
@@ -58,9 +62,29 @@ public class SalesReportService {
         List<SubOrder> successfulSubOrders = subOrders.stream()
                 .filter(item -> SUCCESS_STATUSES.contains(item.getStatus()))
                 .toList();
+
+        List<ReturnRequest> refundedRequests = returnRequestRepository.findReportData(startDateTime, endDateTime, finalBranchId);
+
+        Set<Long> returnRequestOrderIds = refundedRequests.stream()
+                .map(r -> r.getOrder() != null ? r.getOrder().getId() : null)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+
         List<SubOrder> returnedSubOrders = subOrders.stream()
-                .filter(item -> item.getStatus() == OrderStatus.RETURNED)
+                .filter(item -> item.getStatus() == OrderStatus.RETURNED && (item.getOrder() == null || !returnRequestOrderIds.contains(item.getOrder().getId())))
                 .toList();
+
+        BigDecimal returnRequestTotalAmount = refundedRequests.stream()
+                .map(ReturnRequest::getTotalRefundAmount)
+                .filter(Objects::nonNull)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+        BigDecimal returnedSubOrdersTotalAmount = returnedSubOrders.stream()
+                .map(this::getSubOrderAmount)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+        BigDecimal totalReturnedAmount = returnRequestTotalAmount.add(returnedSubOrdersTotalAmount);
+        long totalReturnedOrders = refundedRequests.size() + returnedSubOrders.size();
 
         List<SalesReportSummaryResponse.TrendPoint> trend = buildTrend(startDate, endDate, finalBranchId);
         BigDecimal totalRevenue = successfulSubOrders.stream()
@@ -123,10 +147,8 @@ public class SalesReportService {
                                 .toList())
                         .build())
                 .returns(SalesReportSummaryResponse.ReturnSection.builder()
-                        .totalReturnedOrders(returnedSubOrders.size())
-                        .totalReturnedAmount(returnedSubOrders.stream()
-                                .map(this::getSubOrderAmount)
-                                .reduce(BigDecimal.ZERO, BigDecimal::add))
+                        .totalReturnedOrders(totalReturnedOrders)
+                        .totalReturnedAmount(totalReturnedAmount)
                         .build())
                 .payment(SalesReportSummaryResponse.PaymentSection.builder()
                         .paidAmount(paidAmount)
@@ -146,14 +168,15 @@ public class SalesReportService {
         LocalDateTime startDateTime = startDate.atStartOfDay();
         LocalDateTime endDateTime = endDate.atTime(LocalTime.MAX);
         List<SubOrder> subOrders = findAllReportRows(startDateTime, endDateTime, finalBranchId);
+        List<ReturnRequest> refundedRequests = returnRequestRepository.findReportData(startDateTime, endDateTime, finalBranchId);
         List<SalesReportSummaryResponse.TrendPoint> trend = buildTrend(startDate, endDate, finalBranchId);
         Map<Long, String> employeeNames = resolveEmployeeNames(subOrders);
 
         return switch (type) {
             case "revenue_time" -> buildRevenueTimeDetail(trend);
             case "delivery_detail" -> buildDeliveryDetail(subOrders);
-            case "returns_by_order" -> buildReturnByOrderDetail(subOrders);
-            case "returns_by_product" -> buildReturnByProductDetail(subOrders);
+            case "returns_by_order" -> buildReturnByOrderDetail(subOrders, refundedRequests);
+            case "returns_by_product" -> buildReturnByProductDetail(subOrders, refundedRequests);
             case "payment_time" -> buildPaymentTimeDetail(subOrders);
             case "payment_method" -> buildPaymentMethodDetail(subOrders);
             case "payment_branch" -> buildPaymentBranchDetail(subOrders);
@@ -275,9 +298,25 @@ public class SalesReportService {
         );
     }
 
-    private SalesReportDetailResponse buildReturnByOrderDetail(List<SubOrder> subOrders) {
-        List<Map<String, Object>> rows = subOrders.stream()
-                .filter(item -> item.getStatus() == OrderStatus.RETURNED)
+    private SalesReportDetailResponse buildReturnByOrderDetail(List<SubOrder> subOrders, List<ReturnRequest> returnRequests) {
+        List<Map<String, Object>> requestRows = returnRequests.stream()
+                .map(r -> row(
+                        "createdAt", r.getRefundedAt() != null ? r.getRefundedAt() : r.getCreatedAt(),
+                        "orderCode", r.getOrder() != null ? r.getOrder().getCode() : r.getCode(),
+                        "customerName", r.getCustomerName() != null ? r.getCustomerName() : (r.getUser() != null ? r.getUser().getFullName() : "Khách vãng lai"),
+                        "branchName", r.getBranch() != null ? r.getBranch().getName() : "N/A",
+                        "paymentMethod", r.getOrder() != null ? formatPaymentMethod(r.getOrder().getPaymentMethod()) : "N/A",
+                        "returnAmount", r.getTotalRefundAmount() != null ? r.getTotalRefundAmount() : BigDecimal.ZERO
+                ))
+                .toList();
+
+        Set<Long> requestOrderIds = returnRequests.stream()
+                .map(r -> r.getOrder() != null ? r.getOrder().getId() : null)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+
+        List<Map<String, Object>> subOrderRows = subOrders.stream()
+                .filter(item -> item.getStatus() == OrderStatus.RETURNED && (item.getOrder() == null || !requestOrderIds.contains(item.getOrder().getId())))
                 .map(item -> row(
                         "createdAt", item.getCreatedAt(),
                         "orderCode", item.getOrder() != null ? item.getOrder().getCode() : "N/A",
@@ -287,6 +326,10 @@ public class SalesReportService {
                         "returnAmount", getSubOrderAmount(item)
                 ))
                 .toList();
+
+        List<Map<String, Object>> rows = new ArrayList<>();
+        rows.addAll(requestRows);
+        rows.addAll(subOrderRows);
 
         return detail(
                 "returns_by_order",
@@ -307,28 +350,82 @@ public class SalesReportService {
         );
     }
 
-    private SalesReportDetailResponse buildReturnByProductDetail(List<SubOrder> subOrders) {
-        List<Map<String, Object>> rows = subOrders.stream()
-                .filter(item -> item.getStatus() == OrderStatus.RETURNED)
+    private SalesReportDetailResponse buildReturnByProductDetail(List<SubOrder> subOrders, List<ReturnRequest> returnRequests) {
+        class ProductReturnInfo {
+            String productName;
+            String sku;
+            long quantity;
+            BigDecimal returnAmount;
+
+            ProductReturnInfo(String productName, String sku, long quantity, BigDecimal returnAmount) {
+                this.productName = productName;
+                this.sku = sku;
+                this.quantity = quantity;
+                this.returnAmount = returnAmount;
+            }
+        }
+
+        Map<String, ProductReturnInfo> aggregated = new LinkedHashMap<>();
+
+        for (ReturnRequest r : returnRequests) {
+            if (r.getItems() != null) {
+                for (ReturnRequestItem item : r.getItems()) {
+                    String name = item.getProductName() != null ? item.getProductName() : "Sản phẩm";
+                    String sku = item.getSku() != null ? item.getSku() : "N/A";
+                    String key = "N/A".equals(sku) ? name : sku;
+                    long qty = item.getQuantity() != null ? item.getQuantity() : 0;
+                    BigDecimal amount = item.getRefundAmount() != null ? item.getRefundAmount() : BigDecimal.ZERO;
+
+                    aggregated.compute(key, (k, existing) -> {
+                        if (existing == null) {
+                            return new ProductReturnInfo(name, sku, qty, amount);
+                        } else {
+                            existing.quantity += qty;
+                            existing.returnAmount = existing.returnAmount.add(amount);
+                            return existing;
+                        }
+                    });
+                }
+            }
+        }
+
+        Set<Long> requestOrderIds = returnRequests.stream()
+                .map(r -> r.getOrder() != null ? r.getOrder().getId() : null)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+
+        List<SubOrderItem> standaloneReturnedItems = subOrders.stream()
+                .filter(item -> item.getStatus() == OrderStatus.RETURNED && (item.getOrder() == null || !requestOrderIds.contains(item.getOrder().getId())))
                 .flatMap(item -> safeItems(item).stream())
-                .collect(Collectors.groupingBy(
-                        item -> item.getProductVariant().getId(),
-                        LinkedHashMap::new,
-                        Collectors.toList()))
-                .values().stream()
-                .map(items -> {
-                    SubOrderItem first = items.get(0);
-                    long quantity = items.stream().mapToLong(item -> item.getQuantity() == null ? 0 : item.getQuantity()).sum();
-                    BigDecimal amount = items.stream()
-                            .map(item -> safeMultiply(item.getUnitPrice(), item.getQuantity()))
-                            .reduce(BigDecimal.ZERO, BigDecimal::add);
-                    return row(
-                            "productName", first.getProductVariant().getProduct().getName(),
-                            "sku", first.getProductVariant().getSku(),
-                            "quantity", quantity,
-                            "returnAmount", amount
-                    );
-                })
+                .toList();
+
+        for (SubOrderItem item : standaloneReturnedItems) {
+            if (item.getProductVariant() != null) {
+                String name = item.getProductVariant().getProduct() != null ? item.getProductVariant().getProduct().getName() : "Sản phẩm";
+                String sku = item.getProductVariant().getSku() != null ? item.getProductVariant().getSku() : "N/A";
+                String key = "N/A".equals(sku) ? name : sku;
+                long qty = item.getQuantity() != null ? item.getQuantity() : 0;
+                BigDecimal amount = safeMultiply(item.getUnitPrice(), item.getQuantity());
+
+                aggregated.compute(key, (k, existing) -> {
+                    if (existing == null) {
+                        return new ProductReturnInfo(name, sku, qty, amount);
+                    } else {
+                        existing.quantity += qty;
+                        existing.returnAmount = existing.returnAmount.add(amount);
+                        return existing;
+                    }
+                });
+            }
+        }
+
+        List<Map<String, Object>> rows = aggregated.values().stream()
+                .map(info -> row(
+                        "productName", info.productName,
+                        "sku", info.sku,
+                        "quantity", info.quantity,
+                        "returnAmount", info.returnAmount
+                ))
                 .sorted((a, b) -> new BigDecimal(String.valueOf(b.get("returnAmount"))).compareTo(new BigDecimal(String.valueOf(a.get("returnAmount")))))
                 .toList();
 
