@@ -137,7 +137,12 @@ public class VietnamRegionResolver {
 
         return resolve(
                 branch.getProvinceId(),
-                firstNonBlank(branch.getProvinceName(), branch.getFullAddress(), branch.getAddressDetail(), branch.getName()));
+                firstNonBlank(
+                        branch.getProvinceName(),
+                        branch.getFullAddress(),
+                        branch.getMapDisplayName(),
+                        branch.getAddressDetail(),
+                        branch.getName()));
     }
 
     public Optional<VietnamRegion> resolveUserAddressRegion(UserAddress address) {
@@ -198,8 +203,8 @@ public class VietnamRegionResolver {
 
         String normalized = Normalizer.normalize(value, Normalizer.Form.NFD)
                 .replaceAll("\\p{M}+", "")
-                .replace('đ', 'd')
-                .replace('Đ', 'D')
+                .replace('\u0111', 'd')
+                .replace('\u0110', 'D')
                 .toLowerCase(Locale.ROOT)
                 .replaceAll("[^a-z0-9\\s-]", " ")
                 .replaceAll("\\b(thanh pho|tp\\.?|tinh)\\b", " ")

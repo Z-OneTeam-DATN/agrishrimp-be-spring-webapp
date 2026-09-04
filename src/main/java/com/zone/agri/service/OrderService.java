@@ -122,6 +122,7 @@ public class OrderService {
     private static final long PREPARE_TTL_MINUTES = 30;
     private static final long PREPARE_CONFIRM_LOCK_TTL_SECONDS = 120;
     private static final long PAYOS_SESSION_FINALIZE_LOCK_TTL_SECONDS = 120;
+    private static final long CUSTOMER_CANCEL_WINDOW_MINUTES = 5;
     private static final long CUSTOMER_CONFIRM_RECEIVED_WINDOW_HOURS = 72;
     private static final long SHIPPING_RECEIVED_CONFIRM_AFTER_DAYS = 7;
     private static final int PAYOS_RECONCILE_BATCH_SIZE = 30;
@@ -528,8 +529,8 @@ public class OrderService {
         }
 
         if (!canCustomerCancelOrder(order)) {
-            if (isPendingAutoApproval(order)) {
-                throw new BadRequestException("Don hang dang cho tu xac nhan, khong the huy.");
+            if (isCustomerCancelableStatus(order.getStatus())) {
+                throw new BadRequestException("Đơn hàng đã quá thời gian cho phép hủy.");
             }
             throw new BadRequestException("Đơn hàng đã được xác nhận hoặc đang xử lý, không thể hủy");
         }
@@ -1230,11 +1231,19 @@ public class OrderService {
             return false;
         }
 
-        if (order.getStatus() == OrderStatus.PENDING) {
-            return !isPendingAutoApproval(order);
+        if (!isCustomerCancelableStatus(order.getStatus())) {
+            return false;
         }
 
-        return order.getStatus() == OrderStatus.AWAITING_PAYMENT;
+        if (order.getCreatedAt() == null) {
+            return false;
+        }
+
+        return !order.getCreatedAt().isBefore(LocalDateTime.now().minusMinutes(CUSTOMER_CANCEL_WINDOW_MINUTES));
+    }
+
+    private boolean isCustomerCancelableStatus(OrderStatus status) {
+        return status == OrderStatus.PENDING || status == OrderStatus.AWAITING_PAYMENT;
     }
 
     private boolean isPendingAutoApproval(Order order) {
@@ -1736,11 +1745,81 @@ public class OrderService {
                 .compareTo(BigDecimal.valueOf(actualAmount.longValue()).stripTrailingZeros()) == 0;
     }
 
+    private record BranchSubOrderFinancials(BigDecimal discountAmount, BigDecimal finalAmount) {
+    }
+
+    private BranchSubOrderFinancials resolveBranchSubOrderFinancials(SubOrder subOrder) {
+        BigDecimal subtotal = subOrder != null && subOrder.getSubtotal() != null ? subOrder.getSubtotal() : BigDecimal.ZERO;
+        BigDecimal shippingFee = subOrder != null && subOrder.getShippingFee() != null ? subOrder.getShippingFee()
+                : BigDecimal.ZERO;
+        BigDecimal grossAmount = subtotal.add(shippingFee);
+
+        if (subOrder == null || subOrder.getOrder() == null) {
+            return new BranchSubOrderFinancials(BigDecimal.ZERO, grossAmount.max(BigDecimal.ZERO));
+        }
+
+        Order order = subOrder.getOrder();
+        BigDecimal orderDiscountAmount = order.getDiscountAmount() != null ? order.getDiscountAmount() : BigDecimal.ZERO;
+        if (orderDiscountAmount.compareTo(BigDecimal.ZERO) <= 0) {
+            return new BranchSubOrderFinancials(BigDecimal.ZERO, grossAmount.max(BigDecimal.ZERO));
+        }
+
+        List<SubOrder> orderedSubOrders = Optional.ofNullable(order.getSubOrders())
+                .orElseGet(Collections::emptyList)
+                .stream()
+                .filter(Objects::nonNull)
+                .sorted(Comparator.comparing(SubOrder::getId, Comparator.nullsLast(Long::compareTo)))
+                .collect(Collectors.toList());
+
+        if (orderedSubOrders.isEmpty()) {
+            BigDecimal finalAmount = grossAmount.subtract(orderDiscountAmount).max(BigDecimal.ZERO);
+            return new BranchSubOrderFinancials(orderDiscountAmount, finalAmount);
+        }
+
+        BigDecimal allocationBase = orderedSubOrders.stream()
+                .map(SubOrder::getSubtotal)
+                .filter(Objects::nonNull)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+        if (allocationBase.compareTo(BigDecimal.ZERO) <= 0) {
+            return new BranchSubOrderFinancials(BigDecimal.ZERO, grossAmount.max(BigDecimal.ZERO));
+        }
+
+        BigDecimal allocatedDiscount = BigDecimal.ZERO;
+        BigDecimal allocatedSoFar = BigDecimal.ZERO;
+
+        for (int index = 0; index < orderedSubOrders.size(); index++) {
+            SubOrder candidate = orderedSubOrders.get(index);
+            boolean isLastSubOrder = index == orderedSubOrders.size() - 1;
+
+            BigDecimal candidateDiscount = isLastSubOrder
+                    ? orderDiscountAmount.subtract(allocatedSoFar)
+                    : orderDiscountAmount
+                            .multiply(candidate.getSubtotal() != null ? candidate.getSubtotal() : BigDecimal.ZERO)
+                            .divide(allocationBase, 2, RoundingMode.DOWN);
+
+            if (candidateDiscount.compareTo(BigDecimal.ZERO) < 0) {
+                candidateDiscount = BigDecimal.ZERO;
+            }
+
+            allocatedSoFar = allocatedSoFar.add(candidateDiscount);
+
+            if (Objects.equals(candidate.getId(), subOrder.getId())) {
+                allocatedDiscount = candidateDiscount;
+                break;
+            }
+        }
+
+        BigDecimal finalAmount = grossAmount.subtract(allocatedDiscount).max(BigDecimal.ZERO);
+        return new BranchSubOrderFinancials(allocatedDiscount, finalAmount);
+    }
+
     private BranchOrderResponse mapSubOrderToBranchOrderResponse(SubOrder subOrder) {
         Order order = subOrder.getOrder();
         Branch branch = subOrder.getBranch();
         List<ReplenishmentPlanItem> replenishmentDocuments =
                 findActiveReplenishmentDocumentsForSubOrder(subOrder);
+        BranchSubOrderFinancials financials = resolveBranchSubOrderFinancials(subOrder);
 
         List<OrderItemResponse> items = subOrder.getItems() != null
                 ? subOrder.getItems().stream().map(this::mapSubItemToResponse).collect(Collectors.toList())
@@ -1767,6 +1846,8 @@ public class OrderService {
                 .subOrderStatus(subOrder.getStatus() != null ? subOrder.getStatus().name() : "")
                 .subtotal(subOrder.getSubtotal() != null ? subOrder.getSubtotal() : BigDecimal.ZERO)
                 .shippingFee(subOrder.getShippingFee() != null ? subOrder.getShippingFee() : BigDecimal.ZERO)
+                .discountAmount(financials.discountAmount())
+                .finalAmount(financials.finalAmount())
                 .estimatedDays(subOrder.getEstimatedDays())
                 .carrier(subOrder.getCarrier())
                 .branchId(branch != null ? branch.getId() : null)
@@ -1920,6 +2001,7 @@ public class OrderService {
                 .branchAddress(branchAddress)
                 .createdAt(order.getCreatedAt())
                 .statusUpdatedAt(resolveStatusUpdatedAt(order))
+                .canCancel(isUserView ? canCustomerCancelOrder(order) : null)
                 .canConfirmReceived(isUserView ? canCustomerConfirmReceived(order) : null)
                 .hasReturnRequest(isUserView ? Boolean.TRUE.equals(hasReturnRequest) : null)
                 .shippingAddress(order.getShippingAddress())

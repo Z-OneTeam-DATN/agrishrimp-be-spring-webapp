@@ -320,7 +320,7 @@ public class BranchSearchService {
             return Integer.MAX_VALUE;
         }
 
-        String branchWardCode = normalizeWardCode(branch.getWardCode());
+        String branchWardCode = normalizeBranchWardCode(branch);
         if (wardCode != null && wardCode.equals(branchWardCode)) {
             return 0;
         }
@@ -340,5 +340,18 @@ public class BranchSearchService {
 
         String normalized = wardCode.trim();
         return normalized.isEmpty() ? null : normalized;
+    }
+
+    private String normalizeBranchWardCode(Branch branch) {
+        if (branch == null) {
+            return null;
+        }
+
+        String branchWardCode = normalizeWardCode(branch.getWardCode());
+        if (branchWardCode != null) {
+            return branchWardCode;
+        }
+
+        return branch.getWardId() != null ? normalizeWardCode(String.valueOf(branch.getWardId())) : null;
     }
 }

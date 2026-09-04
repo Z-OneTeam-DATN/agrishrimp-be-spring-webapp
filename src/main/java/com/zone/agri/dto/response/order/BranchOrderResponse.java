@@ -46,6 +46,8 @@ public class BranchOrderResponse {
     private String subOrderStatus;
     private BigDecimal subtotal;
     private BigDecimal shippingFee;
+    private BigDecimal discountAmount;
+    private BigDecimal finalAmount;
     private String estimatedDays;
     private String carrier;
     private Long branchId;
