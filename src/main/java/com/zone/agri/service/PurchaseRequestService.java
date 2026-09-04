@@ -172,7 +172,7 @@ public class PurchaseRequestService {
     private void assertPurchaseRequestCreatorCanUseBranch(Branch branch) {
         validatePurchaseRequestBranch(branch);
 
-        if (RoleUtils.hasSuperAdminAuthority(AuthUtils.getAuthorities())) {
+        if (RoleUtils.hasAdminLikeAuthority(AuthUtils.getAuthorities())) {
             return;
         }
 

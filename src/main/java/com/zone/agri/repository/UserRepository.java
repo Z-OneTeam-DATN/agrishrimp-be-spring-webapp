@@ -144,7 +144,7 @@ public interface UserRepository extends JpaRepository<User, Long> {
         List<Map<String, Object>> findByBranchIdAndRole(@Param("branchId") Long branchId, @Param("slug") String slug);
 
         // 🟢 Notification recipient resolution: users holding a given permission, scoped to a branch
-        // (or system-wide when branchId is null — same convention as WarehouseContext.isSuperAdmin()).
+        // (or system-wide when branchId is null — same convention as admin-like accounts).
         @Query("SELECT DISTINCT u FROM User u JOIN u.role r JOIN r.permissions p WHERE " +
                         "p.code = :permissionCode AND u.status = com.zone.agri.entity.enums.UserStatus.ACTIVE AND " +
                         "((:branchId IS NULL AND u.branch IS NULL) OR (:branchId IS NOT NULL AND u.branch.id = :branchId))")

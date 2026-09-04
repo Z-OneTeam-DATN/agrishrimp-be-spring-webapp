@@ -645,6 +645,16 @@ public class SchemaUpdateConfig implements BeanPostProcessor {
         executeSql(stmt,
                 "Backfill users.auth_provider to LOCAL",
                 "UPDATE users SET auth_provider = 'LOCAL' WHERE auth_provider IS NULL OR TRIM(auth_provider) = ''");
+
+        executeSql(stmt,
+                "Normalize ADMIN/SUPER_ADMIN users as system-wide accounts",
+                """
+                        UPDATE users u
+                        JOIN roles r ON r.id = u.role_id
+                        SET u.branch_id = NULL
+                        WHERE r.slug IN ('ADMIN', 'SUPER_ADMIN')
+                          AND u.branch_id IS NOT NULL
+                        """);
     }
 
     private void patchCustomers(Connection conn, Statement stmt) {

@@ -138,7 +138,7 @@ public class EmployeeController {
         @PutMapping("/{id}")
         @SecurityRequirement(name = "bearerAuth")
         @RequirePermission("STAFF_UPDATE")
-        @Operation(summary = "Cập nhật nhân viên", description = "Chỉnh sửa thông tin nhân viên. Không thể sửa nhân viên có vai trò hệ thống.", responses = {
+        @Operation(summary = "Cập nhật nhân viên", description = "Chỉnh sửa thông tin nhân viên. Chỉ Super Admin được sửa tài khoản quản trị hệ thống.", responses = {
                         @ApiResponse(responseCode = "200", description = "Cập nhật thành công"),
                         @ApiResponse(responseCode = "400", description = "Dữ liệu không hợp lệ"),
                         @ApiResponse(responseCode = "404", description = "Không tìm thấy nhân viên"),

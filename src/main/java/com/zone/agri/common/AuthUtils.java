@@ -60,9 +60,9 @@ public class AuthUtils {
       throw new AccessDeniedException("Người dùng không có quyền truy cập.");
     }
 
-    boolean isSuperAdmin = currentUser.getRole() != null
-        && "SUPER_ADMIN".equalsIgnoreCase(currentUser.getRole().getSlug());
-    if (isSuperAdmin) {
+    boolean isAdminLike = currentUser.getRole() != null
+        && RoleUtils.isAdminLikeRole(currentUser.getRole().getSlug());
+    if (isAdminLike) {
       return requestedBranchId;
     }
 
@@ -84,9 +84,9 @@ public class AuthUtils {
       throw new AccessDeniedException("Người dùng không có quyền truy cập.");
     }
 
-    boolean isSuperAdmin = currentUser.getRole() != null
-        && "SUPER_ADMIN".equalsIgnoreCase(currentUser.getRole().getSlug());
-    if (isSuperAdmin) {
+    boolean isAdminLike = currentUser.getRole() != null
+        && RoleUtils.isAdminLikeRole(currentUser.getRole().getSlug());
+    if (isAdminLike) {
       return requestedBranchId;
     }
 

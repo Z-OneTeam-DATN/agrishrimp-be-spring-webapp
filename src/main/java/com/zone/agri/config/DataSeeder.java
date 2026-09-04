@@ -1121,6 +1121,7 @@ public class DataSeeder implements CommandLineRunner {
         bootstrapUser.setPasswordHash(passwordEncoder.encode(password));
         bootstrapUser.setStatus(UserStatus.ACTIVE);
         bootstrapUser.setRole(superAdminRole);
+        bootstrapUser.setBranch(null);
         bootstrapUser.setProvider(AuthProvider.LOCAL);
         if (bootstrapUser.getGender() == null) {
             bootstrapUser.setGender(Gender.MALE);
@@ -1159,6 +1160,9 @@ public class DataSeeder implements CommandLineRunner {
 
         String previousEmail = user.getEmail();
         user.setEmail(normalizedEmail);
+        if ("ADMIN".equals(roleSlug) || "SUPER_ADMIN".equals(roleSlug)) {
+            user.setBranch(null);
+        }
         User savedUser = userRepository.save(user);
         log.info("System user email synchronized: role={}, userId={}, {} -> {}",
                 roleSlug,

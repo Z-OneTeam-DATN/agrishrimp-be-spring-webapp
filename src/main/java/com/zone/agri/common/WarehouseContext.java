@@ -55,7 +55,7 @@ public class WarehouseContext {
             throw new SignInRequiredException("Vui lòng đăng nhập");
         }
 
-        if (isSuperAdmin()) {
+        if (isSystemWideAdmin()) {
             return null;
         }
 
@@ -72,7 +72,7 @@ public class WarehouseContext {
      * Nếu user đang bị scope theo một chi nhánh thì không được truy cập kho khác.
      */
     public void assertAccess(Long targetWarehouseId) {
-        if (isSuperAdmin()) {
+        if (isSystemWideAdmin()) {
             return;
         }
 
@@ -82,7 +82,7 @@ public class WarehouseContext {
         }
     }
 
-    public boolean isSuperAdmin() {
-        return RoleUtils.hasSuperAdminAuthority(AuthUtils.getAuthorities());
+    public boolean isSystemWideAdmin() {
+        return RoleUtils.hasAdminLikeAuthority(AuthUtils.getAuthorities());
     }
 }

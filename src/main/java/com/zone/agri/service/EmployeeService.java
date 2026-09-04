@@ -224,8 +224,9 @@ public class EmployeeService {
         User existingEmployee = userRepository.findById(employeeId)
                 .orElseThrow(() -> new NotFoundException("Không tìm thấy nhân viên với ID: " + employeeId));
 
-        if (existingEmployee.getRole() != null && Boolean.TRUE.equals(existingEmployee.getRole().getIsSystem())) {
-            throw new Forbidden("Không thể sửa nhân viên có vai trò hệ thống");
+        if (isProtectedAdminAccount(existingEmployee)
+                && !RoleUtils.hasSuperAdminAuthority(AuthUtils.getAuthorities())) {
+            throw new Forbidden("Chỉ Super Admin mới được sửa tài khoản quản trị hệ thống");
         }
 
         validateUniqueFields(
@@ -272,12 +273,18 @@ public class EmployeeService {
                 .anyMatch(permission -> BRANCHLESS_WORKSPACE_PERMISSION_CODES.contains(permission.getCode()));
     }
 
+    private boolean isBranchlessRole(Role role) {
+        return RoleUtils.isAdminLikeRole(role == null ? null : role.getSlug())
+                || isBranchlessWorkspaceRole(role);
+    }
+
     private Branch resolveBranch(Long branchId, Role role) {
-        if (branchId == null) {
-            if (!isBranchlessWorkspaceRole(role)) {
-                throw new BadRequestException("Chi nhánh làm việc không được để trống");
-            }
+        if (isBranchlessRole(role)) {
             return null;
+        }
+
+        if (branchId == null) {
+            throw new BadRequestException("Chi nhánh làm việc không được để trống");
         }
         return branchRepository.findById(branchId)
                 .orElseThrow(() -> new NotFoundException("Không tìm thấy chi nhánh"));
@@ -296,6 +303,12 @@ public class EmployeeService {
         }
 
         return RoleUtils.hasSuperAdminAuthority(AuthUtils.getAuthorities());
+    }
+
+    private boolean isProtectedAdminAccount(User user) {
+        return user != null
+                && user.getRole() != null
+                && RoleUtils.isAdminLikeRole(user.getRole().getSlug());
     }
 
     @Transactional
@@ -335,7 +348,7 @@ public class EmployeeService {
     private EmployeeResponse mapToResponse(User user, boolean hasGeneratedData) {
         // Tự động sinh mã nhân viên dựa vào ID (Ví dụ: NV-0012)
         String employeeCode = String.format("NV-%04d", user.getId());
-        boolean isSystemAccount = user.getRole() != null && Boolean.TRUE.equals(user.getRole().getIsSystem());
+        boolean isSystemAccount = isProtectedAdminAccount(user);
 
         return EmployeeResponse.builder()
                 .id(user.getId())
@@ -371,11 +384,7 @@ public class EmployeeService {
      * de khong lo hien nham nut xoa cho 1 nhan vien thuc ra khong xoa duoc.
      */
     private boolean hasGeneratedDataSafe(Long employeeId) {
-        try {
-            return !findBlockingReferences(employeeId).isEmpty();
-        } catch (Exception ex) {
-            return true;
-        }
+        return !findBlockingReferences(employeeId, false).isEmpty();
     }
 
     /**
@@ -428,14 +437,18 @@ public class EmployeeService {
         User employee = userRepository.findById(employeeId)
                 .orElseThrow(() -> new NotFoundException("Không tìm thấy nhân viên với ID: " + employeeId));
 
-        if (employee.getRole() != null && Boolean.TRUE.equals(employee.getRole().getIsSystem())) {
-            throw new Forbidden("Không thể thao tác với nhân viên có vai trò hệ thống");
+        if (isProtectedAdminAccount(employee)) {
+            throw new Forbidden("Không thể thao tác khóa/xóa với tài khoản quản trị hệ thống");
         }
 
         return employee;
     }
 
     private Map<String, Long> findBlockingReferences(Long employeeId) {
+        return findBlockingReferences(employeeId, true);
+    }
+
+    private Map<String, Long> findBlockingReferences(Long employeeId, boolean throwOnFailure) {
         try {
             String schemaName = jdbcTemplate.queryForObject("SELECT DATABASE()", String.class);
             if (schemaName == null || schemaName.isBlank()) {
@@ -464,6 +477,9 @@ public class EmployeeService {
 
             return referencesByTable;
         } catch (Exception ex) {
+            if (!throwOnFailure) {
+                return Map.of("unknown", 1L);
+            }
             log.error("Khong the kiem tra phat sinh du lieu cho nhan vien {}", employeeId, ex);
             throw new BadRequestException(
                     "Không thể xác minh dữ liệu phát sinh của nhân viên này. Vui lòng thử lại sau hoặc dùng tạm khóa.");
