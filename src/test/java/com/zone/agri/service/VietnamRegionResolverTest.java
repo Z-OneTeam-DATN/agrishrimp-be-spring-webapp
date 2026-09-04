@@ -22,8 +22,9 @@ class VietnamRegionResolverTest {
     }
 
     @Test
-    void resolve_assignsSouthToHoChiMinhCaMauAndBaRiaVungTau() {
+    void resolve_assignsSouthToHoChiMinhCanThoCaMauAndBaRiaVungTau() {
         assertThat(resolver.resolve(79, "TP Ho Chi Minh")).contains(VietnamRegion.SOUTH);
+        assertThat(resolver.resolve(92, "Can Tho")).contains(VietnamRegion.SOUTH);
         assertThat(resolver.resolve(89, "An Giang")).contains(VietnamRegion.SOUTH);
         assertThat(resolver.resolve(96, "Ca Mau")).contains(VietnamRegion.SOUTH);
         assertThat(resolver.resolve(77, "Ba Ria - Vung Tau")).contains(VietnamRegion.SOUTH);

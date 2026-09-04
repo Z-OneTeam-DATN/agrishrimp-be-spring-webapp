@@ -46,6 +46,8 @@ public class BranchService {
     private final UserRepository userRepository;
     private final InventoryRepository inventoryRepository;
     private final GeocodingService geocodingService;
+    private final GhnMasterDataService ghnMasterDataService;
+    private final BranchAddressCanonicalizer branchAddressCanonicalizer;
 
     @Transactional(readOnly = true)
     public List<BranchDTO> getAll() {
@@ -95,6 +97,7 @@ public class BranchService {
 
     @Transactional
     public BranchDTO create(BranchDTO dto) {
+        branchAddressCanonicalizer.canonicalize(dto);
         validateShippingAddress(dto);
 
         if (branchRepository.existsByBranchCode(dto.getBranchCode())) {
@@ -122,6 +125,7 @@ public class BranchService {
 
     @Transactional
     public BranchDTO update(Long id, BranchDTO dto) {
+        branchAddressCanonicalizer.canonicalize(dto);
         validateShippingAddress(dto);
 
         Branch branch = branchRepository.findById(id)
@@ -169,6 +173,9 @@ public class BranchService {
         if (provinceId == null) {
             throw new BadRequestException("Chi nhanh bat buoc phai co tinh/thanh pho");
         }
+        if (districtId == null) {
+            throw new BadRequestException("Chi nhanh bat buoc phai co quan/huyen");
+        }
         if (wardCode == null || wardCode.isBlank()) {
             throw new BadRequestException("Chi nhanh bat buoc phai co phuong/xa");
         }
@@ -185,8 +192,15 @@ public class BranchService {
                         || (Math.abs(lat) < 0.000001 && Math.abs(lng) < 0.000001))) {
             throw new BadRequestException("Toa do chi nhanh khong hop le");
         }
-        if (districtId == null && lat == null) {
-            throw new BadRequestException("Chi nhanh theo dia chi sap nhap bat buoc phai co toa do ban do");
+        try {
+            if (!ghnMasterDataService.isDistrictInProvince(provinceId, districtId)) {
+                throw new BadRequestException("Quan/huyen khong thuoc Tinh/Thanh da chon");
+            }
+            if (!ghnMasterDataService.isWardInDistrict(districtId, wardCode)) {
+                throw new BadRequestException("Phuong/xa khong thuoc Quan/Huyen da chon");
+            }
+        } catch (IllegalStateException ex) {
+            throw new BadRequestException("Khong the xac thuc du lieu dia chi luc nay");
         }
     }
 
@@ -336,17 +350,23 @@ public class BranchService {
     private void geocodeBranchSilently(Branch branch, BranchDTO dto) {
         try {
             String detail = branch.getAddressDetail();
-            String ward = dto.getWardName();
-            String province = dto.getProvinceName();
+            String fullAddress = firstNonBlank(dto.getFullAddress(), dto.getMapDisplayName());
 
-            List<String> parts = new ArrayList<>();
-            if (detail != null && !detail.isBlank()) parts.add(detail);
-            if (ward != null && !ward.isBlank()) parts.add(ward);
-            if (province != null && !province.isBlank()) parts.add(province);
+            if (fullAddress == null) {
+                String ward = dto.getWardName();
+                String district = dto.getDistrictName();
+                String province = dto.getProvinceName();
 
-            String fullAddress = String.join(", ", parts);
+                List<String> parts = new ArrayList<>();
+                if (detail != null && !detail.isBlank()) parts.add(detail);
+                if (ward != null && !ward.isBlank()) parts.add(ward);
+                if (district != null && !district.isBlank()) parts.add(district);
+                if (province != null && !province.isBlank()) parts.add(province);
+                parts.add("Viet Nam");
+                fullAddress = String.join(", ", parts);
+            }
 
-            if (!fullAddress.isBlank()) {
+            if (fullAddress != null && !fullAddress.isBlank()) {
                 CoordinateDto coord = geocodingService.geocode(fullAddress);
                 branch.setLat(coord.getLat());
                 branch.setLng(coord.getLng());
@@ -354,6 +374,15 @@ public class BranchService {
         } catch (Exception e) {
             log.warn("Geocoding failed for branch '{}', sẽ không có tọa độ: {}", branch.getName(), e.getMessage());
         }
+    }
+
+    private String firstNonBlank(String... values) {
+        for (String value : values) {
+            if (value != null && !value.isBlank()) {
+                return value;
+            }
+        }
+        return null;
     }
 
     private BranchDTO mapToDTO(Branch entity) {

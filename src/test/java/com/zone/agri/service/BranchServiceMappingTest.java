@@ -16,6 +16,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
 class BranchServiceMappingTest {
@@ -31,6 +32,12 @@ class BranchServiceMappingTest {
 
     @Mock
     private GeocodingService geocodingService;
+
+    @Mock
+    private GhnMasterDataService ghnMasterDataService;
+
+    @Mock
+    private BranchAddressCanonicalizer branchAddressCanonicalizer;
 
     @InjectMocks
     private BranchService branchService;
@@ -90,34 +97,41 @@ class BranchServiceMappingTest {
     }
 
     @Test
-    void validateShippingAddress_acceptsMergedAddressWithMapCoordinates() {
+    void validateShippingAddress_acceptsCanonicalGhnAddress() {
         BranchDTO dto = new BranchDTO();
         dto.setProvinceId(92);
-        dto.setWardId(31144);
-        dto.setWardCode("31144");
-        dto.setWardName("Phuong An Binh");
+        dto.setDistrictId(1572);
+        dto.setWardId(10105);
+        dto.setWardCode("550105");
+        dto.setWardName("Phuong An Khanh");
         dto.setLat(10.0297D);
         dto.setLng(105.7706D);
+
+        when(ghnMasterDataService.isDistrictInProvince(92, 1572)).thenReturn(true);
+        when(ghnMasterDataService.isWardInDistrict(1572, "550105")).thenReturn(true);
 
         assertThatCode(() -> ReflectionTestUtils.invokeMethod(branchService, "validateShippingAddress", dto))
                 .doesNotThrowAnyException();
     }
 
     @Test
-    void validateShippingAddress_rejectsMergedAddressWithoutMapCoordinates() {
+    void validateShippingAddress_rejectsBranchWithoutDistrict() {
         BranchDTO dto = new BranchDTO();
         dto.setProvinceId(92);
-        dto.setWardCode("31144");
+        dto.setWardCode("550105");
+        dto.setLat(10.0297D);
+        dto.setLng(105.7706D);
 
         assertThatThrownBy(() -> ReflectionTestUtils.invokeMethod(branchService, "validateShippingAddress", dto))
                 .isInstanceOf(BadRequestException.class)
-                .hasMessageContaining("toa do ban do");
+                .hasMessageContaining("quan/huyen");
     }
 
     @Test
     void validateShippingAddress_rejectsBranchWithoutProvinceOrWard() {
         BranchDTO dtoWithoutProvince = new BranchDTO();
-        dtoWithoutProvince.setWardCode("31144");
+        dtoWithoutProvince.setDistrictId(1572);
+        dtoWithoutProvince.setWardCode("550105");
         dtoWithoutProvince.setLat(10.0297D);
         dtoWithoutProvince.setLng(105.7706D);
 
@@ -127,6 +141,7 @@ class BranchServiceMappingTest {
 
         BranchDTO dtoWithoutWard = new BranchDTO();
         dtoWithoutWard.setProvinceId(92);
+        dtoWithoutWard.setDistrictId(1572);
         dtoWithoutWard.setLat(10.0297D);
         dtoWithoutWard.setLng(105.7706D);
 
