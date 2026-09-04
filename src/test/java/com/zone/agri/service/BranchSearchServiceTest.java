@@ -126,6 +126,43 @@ class BranchSearchServiceTest {
                 .containsExactly(2L, 4L, 5L, 9L);
     }
 
+    @Test
+    void findBranchesForDelivery_matchesWardUsingLegacyWardIdWhenWardCodeMissing() {
+        Branch sameWardViaLegacyWardId = branch(
+                2L,
+                "Legacy Ward Branch",
+                "STORE",
+                89,
+                900,
+                null,
+                null,
+                null);
+        sameWardViaLegacyWardId.setWardId(550113);
+
+        Branch sameDistrict = branch(
+                3L,
+                "Same District",
+                "STORE",
+                89,
+                900,
+                null,
+                null,
+                null);
+
+        when(branchRepository.findByStatus(BranchStatus.ACTIVE))
+                .thenReturn(List.of(sameDistrict, sameWardViaLegacyWardId));
+
+        List<BranchWithRealDistance> result = branchSearchService.findBranchesForDelivery(
+                89,
+                900,
+                "550113",
+                null,
+                null);
+
+        assertThat(result).extracting(candidate -> candidate.branch().getId())
+                .containsExactly(2L, 3L);
+    }
+
     private Branch branch(
             Long id,
             String name,

@@ -24,6 +24,7 @@ class VietnamRegionResolverTest {
     @Test
     void resolve_assignsSouthToHoChiMinhCaMauAndBaRiaVungTau() {
         assertThat(resolver.resolve(79, "TP Ho Chi Minh")).contains(VietnamRegion.SOUTH);
+        assertThat(resolver.resolve(89, "An Giang")).contains(VietnamRegion.SOUTH);
         assertThat(resolver.resolve(96, "Ca Mau")).contains(VietnamRegion.SOUTH);
         assertThat(resolver.resolve(77, "Ba Ria - Vung Tau")).contains(VietnamRegion.SOUTH);
     }
@@ -32,5 +33,14 @@ class VietnamRegionResolverTest {
     void resolve_fallsBackToProvinceNameInFullAddress() {
         assertThat(resolver.resolve((Integer) null, "123 Nguyen Van Cu, Phuong 5, TP. Ca Mau"))
                 .contains(VietnamRegion.SOUTH);
+    }
+
+    @Test
+    void resolveBranchRegion_fallsBackToMapDisplayName() {
+        com.zone.agri.entity.Branch branch = com.zone.agri.entity.Branch.builder()
+                .mapDisplayName("Kho tong Can Tho, Quan Ninh Kieu, TP Can Tho")
+                .build();
+
+        assertThat(resolver.resolveBranchRegion(branch)).contains(VietnamRegion.SOUTH);
     }
 }
