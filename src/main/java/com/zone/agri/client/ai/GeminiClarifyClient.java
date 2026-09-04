@@ -21,6 +21,7 @@ import org.springframework.web.client.RestTemplate;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.zone.agri.dto.ai.AiClarifyLlmResult;
 import com.zone.agri.dto.ai.AiClarifyTurn;
 import com.zone.agri.dto.ai.AiImageNarrativeResult;
@@ -173,6 +174,9 @@ public class GeminiClarifyClient {
 
     @Value("${gemini.base-url:https://generativelanguage.googleapis.com}")
     private String baseUrl;
+
+    @Value("${gemini.provider:gemini}")
+    private String provider;
 
     @Value("${gemini.generate-content-path:/v1beta/models}")
     private String generateContentPath;
@@ -384,6 +388,10 @@ public class GeminiClarifyClient {
     }
 
     private JsonNode callGenerateContent(Map<String, Object> requestBody, String logPrefix) {
+        if (isOpenAiCompatibleProvider()) {
+            return callOpenAiCompatibleChat(requestBody, logPrefix);
+        }
+
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
         headers.setAccept(List.of(MediaType.APPLICATION_JSON));
@@ -397,7 +405,7 @@ public class GeminiClarifyClient {
                     JsonNode.class);
             return response.getBody();
         } catch (HttpStatusCodeException ex) {
-            log.warn("[{}] Gemini tra loi HTTP {}: {}", logPrefix, ex.getStatusCode(), ex.getResponseBodyAsString());
+            log.warn("[{}] LLM tra loi HTTP {}: {}", logPrefix, ex.getStatusCode(), ex.getResponseBodyAsString());
             int statusCode = ex.getStatusCode().value();
             if (statusCode == 401 || statusCode == 403) {
                 throw new BadRequestException("Hệ thống chưa sẵn sàng để hỏi thêm. Vui lòng thử lại sau.");
@@ -407,12 +415,194 @@ public class GeminiClarifyClient {
             }
             throw new BadRequestException("Chưa hỏi thêm được lúc này. Vui lòng thử lại.");
         } catch (ResourceAccessException ex) {
-            log.error("[{}] Khong ket noi duoc Gemini", logPrefix, ex);
+            log.error("[{}] Khong ket noi duoc LLM", logPrefix, ex);
             throw new BadRequestException("Hệ thống đang bận. Vui lòng thử lại sau ít phút.");
         } catch (RestClientException ex) {
-            log.error("[{}] Loi goi Gemini", logPrefix, ex);
+            log.error("[{}] Loi goi LLM", logPrefix, ex);
             throw new BadRequestException("Chưa hỏi thêm được lúc này. Vui lòng thử lại.");
         }
+    }
+
+    private JsonNode callOpenAiCompatibleChat(Map<String, Object> requestBody, String logPrefix) {
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        headers.setAccept(List.of(MediaType.APPLICATION_JSON));
+        headers.setBearerAuth(apiKey);
+        headers.set("User-Agent", "AgriShrimp-AI-Doctor/1.0");
+        headers.set("x-opencode-session", "agrishrimp-ai-doctor");
+
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("model", model);
+        body.put("messages", buildOpenAiMessages(requestBody));
+
+        Map<?, ?> generationConfig = requestBody.get("generationConfig") instanceof Map<?, ?> map ? map : Map.of();
+        Object temperature = generationConfig.get("temperature");
+        if (temperature != null) {
+            body.put("temperature", temperature);
+        }
+        if ("application/json".equals(generationConfig.get("responseMimeType"))) {
+            body.put("response_format", Map.of("type", "json_object"));
+        }
+
+        try {
+            ResponseEntity<JsonNode> response = restTemplate.exchange(
+                    joinUrl(baseUrl, generateContentPath),
+                    HttpMethod.POST,
+                    new HttpEntity<>(body, headers),
+                    JsonNode.class);
+            String text = extractOpenAiResponseText(response.getBody());
+            ObjectNode root = objectMapper.createObjectNode();
+            root.putArray("candidates")
+                    .addObject()
+                    .putObject("content")
+                    .putArray("parts")
+                    .addObject()
+                    .put("text", text);
+            return root;
+        } catch (HttpStatusCodeException ex) {
+            log.warn("[{}] OpenAI-compatible LLM tra loi HTTP {}: {}",
+                    logPrefix, ex.getStatusCode(), ex.getResponseBodyAsString());
+            int statusCode = ex.getStatusCode().value();
+            if (statusCode == 401 || statusCode == 403) {
+                throw new BadRequestException("Hệ thống chưa sẵn sàng để hỏi thêm. Vui lòng thử lại sau.");
+            }
+            if (statusCode == 429 || statusCode == 503) {
+                throw new BadRequestException("Hệ thống đang bận. Vui lòng thử lại sau ít phút.");
+            }
+            throw new BadRequestException("Chưa hỏi thêm được lúc này. Vui lòng thử lại.");
+        } catch (ResourceAccessException ex) {
+            log.error("[{}] Khong ket noi duoc OpenAI-compatible LLM", logPrefix, ex);
+            throw new BadRequestException("Hệ thống đang bận. Vui lòng thử lại sau ít phút.");
+        } catch (RestClientException ex) {
+            log.error("[{}] Loi goi OpenAI-compatible LLM", logPrefix, ex);
+            throw new BadRequestException("Chưa hỏi thêm được lúc này. Vui lòng thử lại.");
+        }
+    }
+
+    private boolean isOpenAiCompatibleProvider() {
+        return provider != null
+                && ("openai-compatible".equalsIgnoreCase(provider.trim())
+                || "opencode-go".equalsIgnoreCase(provider.trim()));
+    }
+
+    private List<Map<String, Object>> buildOpenAiMessages(Map<String, Object> requestBody) {
+        List<Map<String, Object>> messages = new ArrayList<>();
+        String systemText = extractSystemInstructionText(requestBody);
+        Map<?, ?> generationConfig = requestBody.get("generationConfig") instanceof Map<?, ?> map ? map : Map.of();
+        if ("application/json".equals(generationConfig.get("responseMimeType"))) {
+            systemText = systemText + "\n\n" + buildJsonResponseInstruction(generationConfig.get("responseSchema"));
+        }
+        if (!systemText.isBlank()) {
+            messages.add(Map.of("role", "system", "content", systemText));
+        }
+
+        Object contentsObject = requestBody.get("contents");
+        if (!(contentsObject instanceof List<?> contents)) {
+            return messages;
+        }
+        for (Object contentObject : contents) {
+            if (!(contentObject instanceof Map<?, ?> content)) {
+                continue;
+            }
+            String role = "model".equals(content.get("role")) ? "assistant" : "user";
+            Object openAiContent = buildOpenAiContent(content.get("parts"));
+            if (openAiContent != null) {
+                messages.add(Map.of("role", role, "content", openAiContent));
+            }
+        }
+        return messages;
+    }
+
+    private String extractSystemInstructionText(Map<String, Object> requestBody) {
+        Object systemInstructionObject = requestBody.get("systemInstruction");
+        if (!(systemInstructionObject instanceof Map<?, ?> systemInstruction)) {
+            return "";
+        }
+        return extractTextFromParts(systemInstruction.get("parts"));
+    }
+
+    private Object buildOpenAiContent(Object partsObject) {
+        if (!(partsObject instanceof List<?> parts)) {
+            return null;
+        }
+
+        boolean hasImage = parts.stream()
+                .filter(Map.class::isInstance)
+                .map(Map.class::cast)
+                .anyMatch(part -> part.containsKey("inlineData"));
+        if (!hasImage) {
+            String text = extractTextFromParts(partsObject);
+            return text.isBlank() ? null : text;
+        }
+
+        List<Map<String, Object>> content = new ArrayList<>();
+        for (Object partObject : parts) {
+            if (!(partObject instanceof Map<?, ?> part)) {
+                continue;
+            }
+            Object text = part.get("text");
+            if (text instanceof String value && !value.isBlank()) {
+                content.add(Map.of("type", "text", "text", value));
+                continue;
+            }
+            Object inlineDataObject = part.get("inlineData");
+            if (inlineDataObject instanceof Map<?, ?> inlineData) {
+                String mimeType = inlineData.get("mimeType") instanceof String value && !value.isBlank()
+                        ? value
+                        : "image/jpeg";
+                String data = inlineData.get("data") instanceof String value ? value : "";
+                if (!data.isBlank()) {
+                    content.add(Map.of(
+                            "type", "image_url",
+                            "image_url", Map.of("url", "data:" + mimeType + ";base64," + data)));
+                }
+            }
+        }
+        return content.isEmpty() ? null : content;
+    }
+
+    private String extractTextFromParts(Object partsObject) {
+        if (!(partsObject instanceof List<?> parts)) {
+            return "";
+        }
+        return parts.stream()
+                .filter(Map.class::isInstance)
+                .map(Map.class::cast)
+                .map(part -> part.get("text"))
+                .filter(String.class::isInstance)
+                .map(String.class::cast)
+                .filter(text -> !text.isBlank())
+                .reduce((left, right) -> left + "\n\n" + right)
+                .orElse("");
+    }
+
+    private String buildJsonResponseInstruction(Object schemaObject) {
+        if (!(schemaObject instanceof Map<?, ?> schema)) {
+            return "Chỉ trả về JSON hợp lệ, không markdown, không giải thích ngoài JSON.";
+        }
+        Object propertiesObject = schema.get("properties");
+        if (!(propertiesObject instanceof Map<?, ?> properties)) {
+            return "Chỉ trả về JSON hợp lệ, không markdown, không giải thích ngoài JSON.";
+        }
+        StringBuilder builder = new StringBuilder("Chỉ trả về JSON hợp lệ, không markdown, không giải thích ngoài JSON. Schema bắt buộc:");
+        for (Map.Entry<?, ?> entry : properties.entrySet()) {
+            builder.append("\n- ").append(entry.getKey());
+            if (entry.getValue() instanceof Map<?, ?> property && property.get("enum") instanceof List<?> enumValues) {
+                builder.append(" chỉ được là một trong: ").append(enumValues);
+            }
+        }
+        return builder.toString();
+    }
+
+    private String extractOpenAiResponseText(JsonNode payload) {
+        if (payload == null || payload.isNull()) {
+            return "";
+        }
+        JsonNode contentNode = payload.path("choices").path(0).path("message").path("content");
+        if (contentNode.isTextual()) {
+            return contentNode.asText();
+        }
+        return "";
     }
 
     private List<Map<String, Object>> buildClarifyContents(

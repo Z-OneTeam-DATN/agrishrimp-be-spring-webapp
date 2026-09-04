@@ -946,9 +946,16 @@ public class AiKnowledgeService {
                 .findFirstBySessionIdAndStatusOrderByIdDesc(sessionId, AiClarifySessionStatus.ACTIVE);
         if (activeSession.isPresent() && chatSessionOwnerMatches(activeSession.get(), userId)) {
             AiChatClarifySession session = activeSession.get();
-            return readChatCandidateCodes(session).isEmpty()
-                    ? continueFreeConsult(session, request.getMessage(), imageBase64, imageMimeType)
-                    : continueChatClarify(session, request.getMessage(), imageBase64, imageMimeType, createReviewCaseWhenUnmatched);
+            if (readChatCandidateCodes(session).isEmpty()) {
+                AiChatResponse knowledgeResponse = tryAnswerFreeConsultFromApprovedKnowledge(
+                        session, request, normalizedMessage, imageBase64, imageMimeType, previewDiseaseCode,
+                        createReviewCaseWhenUnmatched);
+                if (knowledgeResponse != null) {
+                    return knowledgeResponse;
+                }
+                return continueFreeConsult(session, request.getMessage(), imageBase64, imageMimeType);
+            }
+            return continueChatClarify(session, request.getMessage(), imageBase64, imageMimeType, createReviewCaseWhenUnmatched);
         }
         if (activeSession.isPresent()) {
             // sessionId là chuỗi phía client tự sinh và lưu localStorage — trên thiết bị dùng
@@ -984,6 +991,45 @@ public class AiKnowledgeService {
         // van la luoi an toan cuoi cung giong hanh vi cu, khong lam mat guardrail.
         return bootstrapFreeConsult(sessionId, userId, sourceChannel, request.getMessage(),
                 imageBase64, imageMimeType, createReviewCaseWhenUnmatched);
+    }
+
+    private AiChatResponse tryAnswerFreeConsultFromApprovedKnowledge(
+            AiChatClarifySession session,
+            AiDoctorChatRequest request,
+            String normalizedMessage,
+            String imageBase64,
+            String imageMimeType,
+            String previewDiseaseCode,
+            boolean createReviewCaseWhenUnmatched) {
+        ApprovedKnowledgeSnapshot snapshot = getSnapshotForPreview(previewDiseaseCode);
+        MatchOutcome outcome = resolveBestMatch(
+                normalizedMessage,
+                request.getDiagnosisContext() != null ? request.getDiagnosisContext().getDiseaseCode() : null,
+                request.getDiagnosisContext() != null ? request.getDiagnosisContext().getDiseaseName() : null,
+                snapshot);
+
+        if (outcome.matched()) {
+            session.setStatus(AiClarifySessionStatus.DECIDED);
+            if (outcome.matchType() == AiKnowledgeMatchType.DISEASE_KNOWLEDGE) {
+                session.setDecidedDiseaseCode(outcome.knowledgeCode());
+            }
+            chatClarifySessionRepository.save(session);
+
+            persistChatLog(session.getUserId(), session.getSessionId(), session.getSourceChannel(), request.getMessage(),
+                    outcome.answerHtml(), true, outcome.matchType(), outcome.knowledgeCode(), outcome.score());
+
+            return buildChatResponse(outcome.answerHtml(), session.getSessionId(), getSuggestedActionLabels());
+        }
+
+        if (outcome.clarifyCandidates() != null && !outcome.clarifyCandidates().isEmpty()) {
+            session.setStatus(AiClarifySessionStatus.ESCALATED);
+            chatClarifySessionRepository.save(session);
+            return bootstrapChatClarify(session.getSessionId(), session.getUserId(), session.getSourceChannel(),
+                    request.getMessage(), outcome.clarifyCandidates(), imageBase64, imageMimeType,
+                    createReviewCaseWhenUnmatched);
+        }
+
+        return null;
     }
 
     // =========================================================
@@ -1052,11 +1098,11 @@ public class AiKnowledgeService {
         try {
             llmResult = geminiClarifyClient.clarify(candidates, readChatTurns(session), imageBase64, imageMimeType);
         } catch (Exception ex) {
-            log.warn("[AiChatClarify] sessionId={} Gemini call fail, escalate: {}", session.getSessionId(), ex.getMessage());
+            log.warn("[AiChatClarify] sessionId={} LLM call fail, escalate: {}", session.getSessionId(), ex.getMessage());
             return escalateChatClarify(session, latestFarmerText, createReviewCaseWhenUnmatched);
         }
         if (llmResult == null) {
-            log.warn("[AiChatClarify] sessionId={} Gemini tra ve null, escalate", session.getSessionId());
+            log.warn("[AiChatClarify] sessionId={} LLM tra ve null, escalate", session.getSessionId());
             return escalateChatClarify(session, latestFarmerText, createReviewCaseWhenUnmatched);
         }
 
@@ -1065,7 +1111,7 @@ public class AiKnowledgeService {
         if ("DECISION".equalsIgnoreCase(responseType)) {
             Optional<PreparedDisease> decided = validateChatDecision(session, llmResult.getDiseaseCode());
             if (decided.isEmpty()) {
-                log.warn("[AiChatClarify] sessionId={} Gemini decision khong hop le (diseaseCode={}), escalate",
+                log.warn("[AiChatClarify] sessionId={} LLM decision khong hop le (diseaseCode={}), escalate",
                         session.getSessionId(), llmResult.getDiseaseCode());
                 return escalateChatClarify(session, latestFarmerText, createReviewCaseWhenUnmatched);
             }
@@ -1079,7 +1125,7 @@ public class AiKnowledgeService {
             // cau hoi truoc (loi model / bi dan vao vong lap "vet") thi khong tiep tuc hoi them —
             // escalate ngay thay vi de nong dan bi hoi lap lai toi khi cham tran max-turns.
             if (isRepeatOfLastAssistantQuestion(session, question)) {
-                log.warn("[AiChatClarify] sessionId={} Gemini hoi lap lai cau truoc, khong tien trien, escalate",
+                log.warn("[AiChatClarify] sessionId={} LLM hoi lap lai cau truoc, khong tien trien, escalate",
                         session.getSessionId());
                 return escalateChatClarify(session, latestFarmerText, createReviewCaseWhenUnmatched);
             }
@@ -1102,7 +1148,7 @@ public class AiKnowledgeService {
             return buildChatResponse(formatPlainTextAsHtml(question), session.getSessionId(), Collections.emptyList());
         }
 
-        log.warn("[AiChatClarify] sessionId={} Gemini tra ve output khong hop le: responseType={}",
+        log.warn("[AiChatClarify] sessionId={} LLM tra ve output khong hop le: responseType={}",
                 session.getSessionId(), responseType);
         return escalateChatClarify(session, latestFarmerText, createReviewCaseWhenUnmatched);
     }
@@ -1226,7 +1272,7 @@ public class AiKnowledgeService {
         try {
             geminiText = geminiClarifyClient.freeConsult(readChatTurns(session), imageBase64, imageMimeType);
         } catch (Exception ex) {
-            log.warn("[AiFreeConsult] sessionId={} Gemini call fail, dung fallback tinh: {}",
+            log.warn("[AiFreeConsult] sessionId={} LLM call fail, dung fallback tinh: {}",
                     session.getSessionId(), ex.getMessage());
             persistChatLog(session.getUserId(), session.getSessionId(), session.getSourceChannel(),
                     latestFarmerText, config.getFallbackMessage(), false, null, null, 0D);
@@ -2164,7 +2210,7 @@ public class AiKnowledgeService {
                     List.of(AiClarifyTurn.builder().role(AiClarifyTurn.ROLE_FARMER).text(farmerContext).build()),
                     null, null);
         } catch (Exception ex) {
-            log.warn("[AiUnrecognized] Gemini goi y that bai, dung fallback tinh: {}", ex.getMessage());
+            log.warn("[AiUnrecognized] LLM goi y that bai, dung fallback tinh: {}", ex.getMessage());
             geminiText = null;
         }
 
@@ -2213,7 +2259,7 @@ public class AiKnowledgeService {
             String geminiImageDescription,
             boolean allowReviewCase) {
         if (looksLikeShrimpObservation(geminiImageDescription)) {
-            log.info("[AiNonShrimpFallback] YOLO NON_SHRIMP nhung Gemini thay dau hieu tom, chuyen sang tu van mo");
+            log.info("[AiNonShrimpFallback] YOLO NON_SHRIMP nhung LLM thay dau hieu tom, chuyen sang tu van mo");
             return buildUnrecognizedDiagnosisResponse(
                     predictResponse,
                     null,
