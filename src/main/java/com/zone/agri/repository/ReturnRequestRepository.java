@@ -117,4 +117,21 @@ public interface ReturnRequestRepository extends JpaRepository<ReturnRequest, Lo
             @Param("endDateTime") LocalDateTime endDateTime,
             @Param("branchId") Long branchId
     );
+
+    @Query("""
+            SELECT COUNT(DISTINCT r)
+            FROM ReturnRequest r
+            LEFT JOIN r.branch b
+            WHERE r.status = com.zone.agri.entity.enums.ReturnRequestStatus.REFUNDED
+              AND (:branchId IS NULL OR b.id = :branchId)
+              AND (
+                  (r.refundedAt IS NOT NULL AND r.refundedAt >= :startDateTime AND r.refundedAt <= :endDateTime)
+                  OR (r.refundedAt IS NULL AND r.createdAt >= :startDateTime AND r.createdAt <= :endDateTime)
+              )
+            """)
+    long countRefundedRequests(
+            @Param("startDateTime") LocalDateTime startDateTime,
+            @Param("endDateTime") LocalDateTime endDateTime,
+            @Param("branchId") Long branchId
+    );
 }

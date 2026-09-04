@@ -39,6 +39,7 @@ public class DashboardService {
     private final InventoryNoteRepository inventoryNoteRepository;
     private final InventoryTransactionRepository inventoryTransactionRepository;
     private final VisitService visitService;
+    private final ReturnRequestRepository returnRequestRepository;
 
     @Value("${dashboard.low-stock-threshold:10}")
     private int lowStockThreshold;
@@ -205,13 +206,16 @@ public class DashboardService {
     }
 
     private OrderQualityCounts collectOrderQuality(LocalDateTime start, LocalDateTime end, Long branchId) {
-        return new OrderQualityCounts(
-                orderRepository.countDeliveredOrders(start, end, branchId)
-                        + subOrderRepository.countDeliveredByBranchId(start, end, branchId),
-                orderRepository.countReturnedOrders(start, end, branchId)
-                        + subOrderRepository.countReturnedByBranchId(start, end, branchId),
-                orderRepository.countCancelledOrders(start, end, branchId)
-                        + subOrderRepository.countCancelledByBranchId(start, end, branchId));
+        long delivered = orderRepository.countDeliveredOrders(start, end, branchId)
+                + subOrderRepository.countDeliveredByBranchId(start, end, branchId);
+        long returnedSubOrders = orderRepository.countReturnedOrders(start, end, branchId)
+                + subOrderRepository.countReturnedByBranchId(start, end, branchId);
+        long refundedRequests = returnRequestRepository.countRefundedRequests(start, end, branchId);
+        long returned = returnedSubOrders + refundedRequests;
+        long cancelled = orderRepository.countCancelledOrders(start, end, branchId)
+                + subOrderRepository.countCancelledByBranchId(start, end, branchId);
+
+        return new OrderQualityCounts(delivered, returned, cancelled);
     }
 
     private long countTotalOrders(Long branchId) {
